@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!-- Test config XML file for the plugin engine -->
+<adios-config>
+    <io name="writer">
+        <engine type="Plugin">
+            <parameter key="PluginName" value="LSMIOPlugin" />
+            <parameter key="PluginLibrary" value="liblsmio" />
+            <parameter key="FileNamee" value="liblsmio" />
+        </engine>
+    </io>
+</adios-config>

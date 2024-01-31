@@ -1,0 +1,15 @@
+include(CMakeFindDependencyMacro)
+#
+include(${CMAKE_CURRENT_LIST_DIR}/lsmio-base-targets.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/lsmio-store-targets.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/lsmio-posix-targets.cmake)
+#
+find_dependency(Threads)
+find_dependency(fmt)
+find_dependency(glog)
+find_dependency(Boost COMPONENTS program_options)
+find_dependency(Boost COMPONENTS filesystem)
+find_dependency(MPI)
+find_dependency(ADIOS2)
+find_dependency(leveldb)
+find_dependency(RocksDB)
