@@ -15,8 +15,8 @@ do
   egrep -H '^write|^read' "$file" | tail -2 \
     | sed "s/:/  /" \
     | sed "s|$IOR_DIR_OBASE/||" \
-    | sed "s|/202.-..-..||" \
-    | sed "s|-202.-..-..-node...-0.txt.2||" \
+    | sed "s|/20..-..-..||" \
+    | sed "s|-20..-..-..-node...-0.txt.2||" \
     | perl -e 's/^(.|..)\/out-[a-z]+-(\d+)-(\d+[MK])/$1  $2  $3/' -p \
     | perl -e 's/ +/,/g' -p \
     >> "$REPORT_FILE"
