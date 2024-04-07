@@ -16,7 +16,7 @@ unknown_hpc_environment() {
 }
 
 ### HPC ENV
-if [ -e /etc/issue.gw4 ] && grep -wq isambard /etc/issue.gw4; then
+if [ `hostname | grep -w xcil00` ]; then
   HPC_ENV="isambard"
 elif [ `hostname | grep -w viking` ]; then
   HPC_ENV="viking"
