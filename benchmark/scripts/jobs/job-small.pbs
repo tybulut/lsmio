@@ -1,0 +1,10 @@
+#!/bin/sh -x
+#PBS -q arm
+#PBS -m abe
+#PBS -N LSMIO-SM
+#PBS -l walltime=24:00:00
+#PBS -o logs/pbs-lsmio-sm.log
+#PBS -e logs/pbs-lsmio-sm.err
+
+. $BM_DIRNAME/jobs/sbatch.in.sh
+
