@@ -1,3 +1,4 @@
+#
 
 . $BM_DIRNAME/include/vars.in.sh
 . $BM_DIRNAME/include/dirs-vars.in.sh
@@ -36,7 +37,7 @@ do
     if [ "$HPC_MANAGER" = "slurm" ]; then
       srun ${JOB_BIN} $rf $bs --export=ALL
     elif [ "$HPC_MANAGER" = "pbs" ]; then
-      aprun ${JOB_BIN} $rf $bs
+      aprun -B ${JOB_BIN} $rf $bs
     else
       unknown_hpc_environment
     fi

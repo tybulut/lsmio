@@ -28,7 +28,9 @@ batch_run() {
   else
     qsub \
       -V \
-      -l select=$concurrency:ncpus=$pernode:mem=8gb \
+      -M "$SB_EMAIL" \
+      -l select=$concurrency:ncpus=$pernode:mpiprocs=$pernode:mem=8GB \
+      -l place=scatter:excl \
       ${job_script}.pbs
   fi
 }

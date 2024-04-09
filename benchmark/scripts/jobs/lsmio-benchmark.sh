@@ -12,6 +12,8 @@ BM_SETUP="ADIOS-M"
 #BM_SETUP="MANAGER"
 
 . $BM_DIRNAME/include/vars.in.sh
+. $BM_DIRNAME/jobs/all-vars.in.sh
+
 . $BM_DIRNAME/include/dirs-vars.in.sh
 . $BM_DIRNAME/include/dirs-setup.in.sh
 . $BM_DIRNAME/include/dirs-config.in.sh

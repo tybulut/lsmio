@@ -5,12 +5,14 @@ BM_SETUP="LSMIO"
 #BM_SETUP="FS"
 
 . $BM_DIRNAME/include/vars.in.sh
+. $BM_DIRNAME/jobs/all-vars.in.sh
+
 . $BM_DIRNAME/include/dirs-vars.in.sh
 . $BM_DIRNAME/include/dirs-setup.in.sh
 . $BM_DIRNAME/include/dirs-config.in.sh
 
-. $BM_DIRNAME/jobs/ior-vars.in.sh
-. $BM_DIRNAME/jobs/ior-setup.in.sh
+. $BM_DIRNAME/jobs/lmp-vars.in.sh
+. $BM_DIRNAME/jobs/lmp-setup.in.sh
 
 . $BM_DIRNAME/include/load-modules.in.sh > $DIRS_LOG/load-modules-$BM_NODENAME-$DS-$(( ctr+=1 )).log 2>&1
 
