@@ -10,5 +10,5 @@
 #SBATCH --output=logs/sbatch-lsmio-%j.log
 #SBATCH --error=logs/sbatch-lsmio-%j.err
 
-. $BM_DIRNAME/jobs/sbatch.in.sh
+. $BM_DIRNAME/jobs/batch.in.sh
 

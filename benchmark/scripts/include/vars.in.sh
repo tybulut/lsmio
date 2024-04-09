@@ -16,12 +16,15 @@ unknown_hpc_environment() {
 }
 
 ### HPC ENV
-if [ `hostname | grep -w xcil00` ]; then
+if [ `hostname | egrep '^xci|^nid'` ]; then
   HPC_ENV="isambard"
+  HPC_MANAGER="pbs"
 elif [ `hostname | grep -w viking` ]; then
   HPC_ENV="viking"
+  HPC_MANAGER="slurm"
 elif [ `hostname | grep -w viking2` ]; then
   HPC_ENV="viking2"
+  HPC_MANAGER="slurm"
 else
   unknown_hpc_environment
 fi
@@ -50,6 +53,3 @@ fi
 #
 export BM_PATH=$LUSTRE_PATH/users/$USER/benchmark
 
-### SLURM
-#export BM_SLURM_UID=${SLURM_JOB_NUM_NODES}-${SLURMD_NODENAME}-${SLURM_LOCALID}
-export BM_SLURM_UID=${SLURMD_NODENAME}-${SLURM_LOCALID}

@@ -1,5 +1,6 @@
 #!/bin/sh -x
 
+# No spaces allowed in BM_SETUP
 BM_SETUP="ADIOS-M"
 #BM_SETUP="ROCKSDB-M"
 #BM_SETUP="PLUGIN-M"
@@ -11,6 +12,8 @@ BM_SETUP="ADIOS-M"
 #BM_SETUP="MANAGER"
 
 . $BM_DIRNAME/include/vars.in.sh
+. $BM_DIRNAME/jobs/all-vars.in.sh
+
 . $BM_DIRNAME/include/dirs-vars.in.sh
 . $BM_DIRNAME/include/dirs-setup.in.sh
 . $BM_DIRNAME/include/dirs-config.in.sh
@@ -18,7 +21,7 @@ BM_SETUP="ADIOS-M"
 . $BM_DIRNAME/jobs/lsmio-vars.in.sh
 . $BM_DIRNAME/jobs/lsmio-setup.in.sh
 
-. $BM_DIRNAME/include/load-modules.in.sh > $DIRS_LOG/load-modules-$SLURMD_NODENAME-$DS-$(( ctr+=1 )).log 2>&1
+. $BM_DIRNAME/include/load-modules.in.sh > $DIRS_LOG/load-modules-$BM_NODENAME-$DS-$(( ctr+=1 )).log 2>&1
 
 rf="$1"
 bs="$2"
@@ -34,49 +37,45 @@ else
   sg="16384"
 fi
 
+INFIX=`echo "$BM_SETUP" | tr '[:upper:]' '[:lower:]'`
+OUT_FILE="$DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_UNIQUE_UID}-${INFIX}.db"
+LOG_FILE="$LSM_DIR_OUTPUT/out-${INFIX}-$rf-$bs-${DS}-${BM_UNIQUE_UID}.txt"
+
 if [ "$BM_SETUP" = "ROCKSDB" ]; then
-  $SB_BIN/bm_rocksdb -i 10 \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-rocks.db \
+  $SB_BIN/bm_rocksdb -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-rocksdb-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "ROCKSDB-M" ]; then
-  $SB_BIN/bm_rocksdb -i 10 \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-rocks.db -m \
+  $SB_BIN/bm_rocksdb -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-rocksdb-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "LEVELDB" ]; then
-  $SB_BIN/bm_leveldb -v -i 10 \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-level.db \
+  $SB_BIN/bm_leveldb -v -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-rocksdb-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "MANAGER" ]; then
-  $SB_BIN/bm_manager -v -i 10 \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-manager.db \
+  $SB_BIN/bm_manager -v -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-rocksdb-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "ADIOS" ]; then
-  $SB_BIN/bm_adios -i 10 \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-adios.bp \
+  $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-adios-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "ADIOS-M" ]; then
-  $SB_BIN/bm_adios -i 10 \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-adios.bp -m \
+  $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-adios-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "PLUGIN" ]; then
-  $SB_BIN/bm_adios -i 10 \
+  $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
     --lsmio-plugin \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-plugin.db \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-plugin-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "PLUGIN-M" ]; then
-  $SB_BIN/bm_adios -i 10 \
+  $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
     --lsmio-plugin \
-    -o $DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_SLURM_UID}-plugin.db -m \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LSM_DIR_OUTPUT/out-plugin-$rf-$bs-${DS}-${BM_SLURM_UID}.txt.$(( ctr+=1 ))
+    2>&1 | tee $LOG_FILE
 else
-  env | grep SLURM > $LSM_DIR_OUTPUT/env-${DS}-${BM_SLURM_UID}.txt
+  env | egrep 'SLURM|PBS' > $LOG_FILE
 fi
 

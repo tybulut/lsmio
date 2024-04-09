@@ -1,3 +1,4 @@
+#
 
 . $BM_DIRNAME/include/vars.in.sh
 . $BM_DIRNAME/include/dirs-vars.in.sh
@@ -23,7 +24,6 @@ else
   exit
 fi
 
-
 for rf in 16 4
 do
   for bs in 8M 1M 64K
@@ -34,7 +34,14 @@ do
       cp -r lmp-reaxff $DIRS_BM_BASE/c$rf/b$bs/
     fi
 
-    srun ${JOB_BIN} $rf $bs --export=ALL
+    if [ "$HPC_MANAGER" = "slurm" ]; then
+      srun ${JOB_BIN} $rf $bs --export=ALL
+    elif [ "$HPC_MANAGER" = "pbs" ]; then
+      aprun -B ${JOB_BIN} $rf $bs
+    else
+      unknown_hpc_environment
+    fi
+
     sleep 3
 
   done

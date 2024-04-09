@@ -69,6 +69,8 @@ purge_modules() {
   module purge
 }
 
+
+echo "Loading modules for: $HPC_ENV"
 purge_modules
 
 if [ "$HPC_ENV" = "isambard" ]; then
