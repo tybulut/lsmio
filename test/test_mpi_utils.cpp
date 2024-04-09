@@ -142,12 +142,6 @@ void PrintTo(const MPIWorld& worldSize, std::ostream* os) {
 int main(int argc, char **argv) {
   lsmio::initLSMIODebug(argv[0]);
 
-  int provided;
-  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-
-  int numProcesses;
-  MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
-
   bool gtestListTests = false;
   for(int i=0; i < argc; i++) {
     if (! strcmp(argv[i], "--gtest_list_tests")) {
@@ -157,7 +151,18 @@ int main(int argc, char **argv) {
   }
 
   int errorCode;
-  if (gtestListTests || numProcesses == 4) {
+  if (gtestListTests) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+  }
+
+  int provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+
+  int numProcesses;
+  MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
+
+  if (numProcesses == 4) {
     ::testing::InitGoogleTest(&argc, argv);
     errorCode = RUN_ALL_TESTS();
   }
