@@ -16,14 +16,15 @@ batch_run() {
   job_script="$3"
 
   nodes=`echo "$concurrency / $pernode" | bc`
+  export BM_NUM_TASKS=$concurrency
 
   if [ "$QSUBMIT" = "sbatch" ]; then
     sbatch \
+      --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
       --account="$SB_ACCOUNT" \
       --mail-user="$SB_EMAIL" \
-      --export=ALL \
       ${job_script}.sbatch
   else
     qsub \

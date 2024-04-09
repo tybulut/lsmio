@@ -6,5 +6,5 @@
 #PBS -o logs/pbs-lsmio-lg.log
 #PBS -e logs/pbs-lsmio-lg.err
 
-. $BM_DIRNAME/jobs/sbatch.in.sh
+. $BM_DIRNAME/jobs/batch.in.sh
 
