@@ -28,13 +28,13 @@ bs="$2"
 
 if [ "$bs" = "64K" ]; then
   bsb="65536"
-  sg="16384"
+  sg="65536"
 elif [ "$bs" = "1M" ]; then
   bsb="1048576"
-  sg="16384"
+  sg="4096"
 else
   bsb="8388608"
-  sg="16384"
+  sg="1024"
 fi
 
 INFIX=`echo "$BM_SETUP" | tr '[:upper:]' '[:lower:]'`
