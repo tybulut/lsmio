@@ -27,11 +27,13 @@ batch_run() {
       --mail-user="$SB_EMAIL" \
       ${job_script}.sbatch
   else
+    export BM_NUM_TASKS=$concurrency
+    export BM_NUM_CORES=$pernode
+
+    cd $BM_DIRNAME
     qsub \
-      -V \
-      -M "$SB_EMAIL" \
-      -l select=$concurrency:ncpus=$pernode:mpiprocs=$pernode:mem=8GB \
-      -l place=scatter:excl \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES \
+      -l select=$concurrency:mem=8GB \
       ${job_script}.pbs
   fi
 }

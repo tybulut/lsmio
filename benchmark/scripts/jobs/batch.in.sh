@@ -37,7 +37,7 @@ do
     if [ "$HPC_MANAGER" = "slurm" ]; then
       srun ${JOB_BIN} $rf $bs --export=ALL
     elif [ "$HPC_MANAGER" = "pbs" ]; then
-      aprun -B ${JOB_BIN} $rf $bs
+      aprun -n $BM_NUM_TASKS -N $BM_NUM_CORES ${JOB_BIN} $rf $bs
     else
       unknown_hpc_environment
     fi
