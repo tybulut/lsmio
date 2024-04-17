@@ -17,6 +17,10 @@ set (mpi_processes 4)
 find_program (mpi_cmd mpirun)
 
 if(NOT mpi_cmd)
+  find_program (mpi_cmd aprun)
+endif()
+
+if(NOT mpi_cmd)
   message(FATAL_ERROR "MPI command not found!")
 else()
   message(STATUS "Test module: MPI command found=${mpi_cmd}")
