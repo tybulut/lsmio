@@ -12,7 +12,7 @@ BM_SETUP="ADIOS-M"
 #BM_SETUP="MANAGER"
 
 . $BM_DIRNAME/include/vars.in.sh
-. $BM_DIRNAME/jobs/all-vars.in.sh
+. $BM_DIRNAME/jobs/job-all.in.sh
 
 . $BM_DIRNAME/include/dirs-vars.in.sh
 . $BM_DIRNAME/include/dirs-setup.in.sh
@@ -76,6 +76,6 @@ elif [ "$BM_SETUP" = "PLUGIN-M" ]; then
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
 else
-  env | egrep 'SLURM|PBS' > $LOG_FILE
+  env | egrep 'SLURM|PBS|CRAY|AP' > $LOG_FILE
 fi
 

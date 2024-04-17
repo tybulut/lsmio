@@ -8,7 +8,7 @@ BM_SETUP="BASE"
 #BM_SETUP="FSYNC"
 
 . $BM_DIRNAME/include/vars.in.sh
-. $BM_DIRNAME/jobs/all-vars.in.sh
+. $BM_DIRNAME/jobs/job-all.in.sh
 
 . $BM_DIRNAME/include/dirs-vars.in.sh
 . $BM_DIRNAME/include/dirs-setup.in.sh
