@@ -14,7 +14,24 @@ include(GoogleTest)
 
 # MPI settings
 set (mpi_processes 4)
-set (test_parameters -tag-output -np ${mpi_processes})
+find_program (mpi_cmd mpirun)
+
+if(NOT mpi_cmd)
+  find_program (mpi_cmd aprun)
+endif()
+
+if(NOT mpi_cmd)
+  message(FATAL_ERROR "MPI command not found!")
+else()
+  message(STATUS "Test module: MPI command found=${mpi_cmd}")
+
+  if(mpi_cmd MATCHES "aprun")
+    set (test_parameters -n ${mpi_processes})
+  else()
+    set (test_parameters -tag-output -np ${mpi_processes})
+  endif()
+endif()
+
 
 # Disable RTTI
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
@@ -54,7 +71,7 @@ target_link_libraries(test_mpi
 )
 gtest_discover_tests(
   test_mpi
-  CMD_WRAPPER mpirun ${test_parameters}
+  CMD_WRAPPER ${mpi_cmd} ${test_parameters}
 )
 
 # GTest: Adios and Plugin
@@ -78,7 +95,7 @@ target_link_libraries(test_mpi_adios
 )
 gtest_discover_tests(
   test_mpi_adios
-  CMD_WRAPPER mpirun ${test_parameters}
+  CMD_WRAPPER ${mpi_cmd} ${test_parameters}
 )
 set_tests_properties(${all_tests} PROPERTIES
   ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib

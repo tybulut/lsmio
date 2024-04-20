@@ -13,7 +13,7 @@ rm -rf build \
 cmake .. \
   -DBUILD_SHARED_LIBS=On \
   -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr \
-  -DCMAKE_INSTALL_LIBDIR=lib \
+  -DCMAKE_INSTALL_LIBDIR=lib
 
 make -j8
 
