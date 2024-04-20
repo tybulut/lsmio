@@ -84,8 +84,21 @@ TEST_P(MPITests, PassTokenSync) {
   int send_token = 1337;
   int recv_token;
 
+
+  if (worldSize == MPIWorld::Self || numProcesses == 1) {
+    MPI_Request req;
+    MPI_Status status;
+
+    MPI_Irecv(&recv_token, 1, MPI_INT, (processRank - 1) % numProcesses, 0, comm, &req);
+    MPI_Send(&send_token, 1, MPI_INT, (processRank + 1) % numProcesses, 0, comm);
+
+    MPI_Wait(&req, &status);
+    EXPECT_EQ(send_token, recv_token);
+    return;
+  }
+
   if (processRank != 0) {
-    MPI_Recv(&recv_token, 1, MPI_INT, processRank - 1, 0, comm, MPI_STATUS_IGNORE);
+    MPI_Recv(&recv_token, 1, MPI_INT, (processRank - 1) % numProcesses, 0, comm, MPI_STATUS_IGNORE);
     LOG(INFO) << "test_pass_token:"
             << " rank: " << processRank
             << " received : " << recv_token
@@ -94,7 +107,7 @@ TEST_P(MPITests, PassTokenSync) {
 
   MPI_Send(&send_token, 1, MPI_INT, (processRank + 1) % numProcesses, 0, comm);
   if (processRank == 0) {
-    MPI_Recv(&recv_token, 1, MPI_INT, numProcesses - 1, 0, comm, MPI_STATUS_IGNORE);
+    MPI_Recv(&recv_token, 1, MPI_INT, (numProcesses - 1) % numProcesses, 0, comm, MPI_STATUS_IGNORE);
     LOG(INFO) << "test_pass_token:"
             << " rank: " << processRank
             << " received : " << recv_token
