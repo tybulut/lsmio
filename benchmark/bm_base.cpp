@@ -31,6 +31,7 @@
 #include <iostream>
 #include <algorithm>
 #include <array>
+#include <signal.h>
 
 #include <fmt/format.h>
 #include <boost/program_options.hpp>
@@ -231,6 +232,7 @@ std::string genOptionsToString() {
             << "\n useLSMIOPlugin: " << gConfigBM.useLSMIOPlugin
             << "\n loopAll: " << gConfigBM.loopAll
             << "\n verbose: " << gConfigBM.verbose
+            << "\n debug: " << gConfigBM.debug
             << "\n mpi-barrier: " << gConfigBM.useMPIBarrier
             << "\n collective-IO: " << gConfigBM.enableCollectiveIO
             << "\n mpi-io-world: " << (lsmio::gConfigLSMIO.mpiAggType != lsmio::MPIAggType::Shared ? "world" : "host-group")
@@ -267,6 +269,7 @@ int BMBase::beginMain(int argc, char **argv) {
     ("output-file,o", bpo::value<std::string>(&gConfigBM.fileName), "output file (required)")
     ("output-dir,d", bpo::value<std::string>(&gConfigBM.dirName), "output directory (optional)")
     ("verbose,v", "verbose mode (default: not-verbose)")
+    ("debug,g", "debug mode (default: no)")
     //
     ("mpi-barrier,m", "use mpi-barrier to start and stop the benchmark")
     ("collective-io,c", "use collective-io while benchmarking")
@@ -315,6 +318,7 @@ int BMBase::beginMain(int argc, char **argv) {
     gConfigBM.useLSMIOPlugin = vm.count("lsmio-plugin");
     gConfigBM.loopAll = vm.count("loop-all");
     gConfigBM.verbose = vm.count("verbose");
+    gConfigBM.debug = vm.count("debug");
     gConfigBM.useMPIBarrier = vm.count("mpi-barrier");
     gConfigBM.enableCollectiveIO = vm.count("collective-io");
 
@@ -344,6 +348,10 @@ int BMBase::beginMain(int argc, char **argv) {
   }
   else {
     lsmio::initLSMIORelease(argv[0]);
+  }
+
+  if (gConfigBM.debug) {
+    signal(SIGSEGV, lsmio::handlerSIGSEGV);
   }
 
   if (gConfigBM.useMPIBarrier

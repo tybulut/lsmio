@@ -58,6 +58,8 @@ load_modules_isambard() {
   module load cray-mpich-abi/7.7.17
   module load cray-hdf5-parallel/1.12.0.4
   module load cray-fftw/3.3.8.10
+  #  Additions
+  module load gdb4hpc/4.10.6
 }
 
 

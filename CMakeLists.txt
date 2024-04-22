@@ -31,9 +31,10 @@ set(LSMIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 link_directories(${DEV_PACKAGE_DIR}/lib)
 link_directories(${DEV_PACKAGE_DIR}/lib64)
 
+# Compiler options
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-# -fPIC
-#set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+#set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON) # -rdynamic
+#set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
 
 include(CTest)
 
