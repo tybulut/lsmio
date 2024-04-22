@@ -92,6 +92,7 @@ class BMConfig {
     bool useLSMIOPlugin = false;
     bool loopAll = false;
     bool verbose = false;
+    bool debug = false;
 
     bool useMPIBarrier = false;
     bool enableCollectiveIO = false;

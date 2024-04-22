@@ -161,6 +161,12 @@ class LSMIOHelper {
 };
 
 /**
+ * Prints stack trace after a segmentation fault
+ * @param signal the signal that is caught
+ */
+void handlerSIGSEGV(int signal);
+
+/**
  * Convert an MPIAggType value to its string representation.
  * @param v MPIAggType value.
  * @return String representation of v.

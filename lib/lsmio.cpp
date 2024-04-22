@@ -29,6 +29,14 @@
  */
 
 
+#include <iostream>
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+/*
+#include <stdlib.h>
+*/
+
 #include <lsmio/lsmio.hpp>
 
 
@@ -104,6 +112,21 @@ void LSMIOHelper::setFlag(const std::string key, const bool value) {
       _LSMIOconfigMap.erase(key);
     }
   }
+}
+
+
+void handlerSIGSEGV(int signal) {
+  const int TRACE_SIZE = 24;
+  void *array[TRACE_SIZE];
+  size_t size;
+
+  size = backtrace(array, TRACE_SIZE);
+
+  fprintf(stderr, "LSMIO caught signal: SIGSEGV.\n");
+  backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+  // SIGSEGV handler must exit
+  exit(EXIT_FAILURE);
 }
 
 

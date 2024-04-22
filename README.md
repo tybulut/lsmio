@@ -86,19 +86,33 @@ In the same directory the dependencies starting with 9 are optional.
 
 Run build sript:
 ```
-./build.sh
+./build.sh <debug|release> [<test|install>]
 ```
 
-These instructions will get your copy of the project up and running on your local
-machine in $HOME/src prefix directory for development and testing purposes.
+This will create a build in one of the directories below depending on your choice:
+```
+./build/debug
+./build/release
+```
 
 
 ### Testing
 
-Run the unit tests:
+After building, to Run the unit tests from the debug build:
 ```
-cd build
+cd build/debug
 ctest -j8 ..  # to run 8 tests in parallel
+```
+
+After building, to run the unit tests from the release build:
+```
+cd build/release
+ctest -j8 ..  # to run 8 tests in parallel
+```
+
+Alternatively you can build and test together
+```
+./build.sh <debug|release> test
 ```
 
 Recommended mount options for testing on a local HDD:
@@ -109,11 +123,17 @@ mount -o noatime,nodiratime /dev/sda2 /media/400GB
 ## Deployment
 
 Build script makes assumptions on where to install. 
+```
+./build.sh <debug|release> install
+```
 
+If you want to remove the previous files and then install a release version of it
 ```
-cd build
-make install
+./build.sh clean install
 ```
+
+These instructions will get your copy of the project up and ready to use on your local
+machine in $HOME/src prefix directory for development and testing purposes.
 
 ### Benchmarks
 
