@@ -3,8 +3,8 @@
 #PBS -m abe
 #PBS -N LSMIO-LG
 #PBS -l walltime=24:00:00
-#PBS -o logs/pbs-lsmio-lg.log
-#PBS -e logs/pbs-lsmio-lg.err
+#PBS -o logs/
+#PBS -e logs/
 
 . $BM_DIRNAME/jobs/batch.in.sh
 
