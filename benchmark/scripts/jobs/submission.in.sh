@@ -33,7 +33,7 @@ batch_run() {
     cd $BM_DIRNAME
     qsub \
       -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES \
-      -l select=$concurrency:mem=8GB \
+      -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi
 }

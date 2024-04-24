@@ -5,8 +5,8 @@
 #PBS -l pvmem=8G
 #PBS -N LSMIO-SM
 #PBS -l walltime=24:00:00
-#PBS -o logs/pbs-lsmio-sm.log
-#PBS -e logs/pbs-lsmio-sm.err
+#PBS -o logs/
+#PBS -e logs/
 
 . $BM_DIRNAME/jobs/batch.in.sh
 

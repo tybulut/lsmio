@@ -2,11 +2,11 @@
 
 # No spaces allowed in BM_SETUP
 BM_SETUP="ADIOS-M"
-#BM_SETUP="ROCKSDB-M"
 #BM_SETUP="PLUGIN-M"
+#BM_SETUP="ROCKSDB-M"
 #BM_SETUP="ADIOS"
-#BM_SETUP="ROCKSDB"
 #BM_SETUP="PLUGIN"
+#BM_SETUP="ROCKSDB"
 #BM_SETUP="LEVELDB"
 #BM_SETUP="ENV"
 #BM_SETUP="MANAGER"
@@ -41,27 +41,23 @@ INFIX=`echo "$BM_SETUP" | tr '[:upper:]' '[:lower:]'`
 OUT_FILE="$DIRS_BM_BASE/c$rf/b$bs/lsmio-${BM_UNIQUE_UID}-${INFIX}.db"
 LOG_FILE="$LSM_DIR_OUTPUT/out-${INFIX}-$rf-$bs-${DS}-${BM_UNIQUE_UID}.txt"
 
-if [ "$BM_SETUP" = "ROCKSDB" ]; then
-  $SB_BIN/bm_rocksdb -i 10 -o $OUT_FILE \
+if [ "$BM_SETUP" = "ADIOS-M" ]; then
+  $SB_BIN/bm_adios -m -g \
+    -i 10 -o $OUT_FILE \
+    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
+    2>&1 | tee $LOG_FILE
+elif [ "$BM_SETUP" = "PLUGIN-M" ]; then
+  $SB_BIN/bm_adios -m -g \
+    --lsmio-plugin \
+    -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "ROCKSDB-M" ]; then
-  $SB_BIN/bm_rocksdb -i 10 -o $OUT_FILE \
-    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LOG_FILE
-elif [ "$BM_SETUP" = "LEVELDB" ]; then
-  $SB_BIN/bm_leveldb -v -i 10 -o $OUT_FILE \
-    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LOG_FILE
-elif [ "$BM_SETUP" = "MANAGER" ]; then
-  $SB_BIN/bm_manager -v -i 10 -o $OUT_FILE \
+  $SB_BIN/bm_rocksdb -m -g \
+    -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "ADIOS" ]; then
-  $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
-    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
-    2>&1 | tee $LOG_FILE
-elif [ "$BM_SETUP" = "ADIOS-M" ]; then
   $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
@@ -70,9 +66,16 @@ elif [ "$BM_SETUP" = "PLUGIN" ]; then
     --lsmio-plugin \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
-elif [ "$BM_SETUP" = "PLUGIN-M" ]; then
-  $SB_BIN/bm_adios -i 10 -o $OUT_FILE \
-    --lsmio-plugin \
+elif [ "$BM_SETUP" = "ROCKSDB" ]; then
+  $SB_BIN/bm_rocksdb -i 10 -o $OUT_FILE \
+    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
+    2>&1 | tee $LOG_FILE
+elif [ "$BM_SETUP" = "LEVELDB" ]; then
+  $SB_BIN/bm_leveldb -i 10 -o $OUT_FILE \
+    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
+    2>&1 | tee $LOG_FILE
+elif [ "$BM_SETUP" = "MANAGER" ]; then
+  $SB_BIN/bm_manager -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
 else
