@@ -78,11 +78,6 @@ class DemoMain(BaseMain):
 class LatexMain(BaseMain):
 
   """
-41: write
-IOR 4/64K + 4/1M
-LSMIO 4/64K + 4/1M
-IOR 16/64K + 16/1M
-LSMIO 16/64K + 16/1M
 
 42: write
 HDF5 4/64K + 4/1M
@@ -115,12 +110,12 @@ LSMIO 4/64K
 PLUGIN 4/64K
 
 Read/64K, Write/64K, Write/1M
-  ior/hdf5
-  ior/ior-c
-  adios/ior
-  adios/lsmio
-  lsmio/ior
-  lsmio/hdf5
+ior/hdf5
+ior/ior-c
+adios/ior
+adios/lsmio
+lsmio/ior
+lsmio/hdf5
 
   """
 
@@ -129,12 +124,19 @@ Read/64K, Write/64K, Write/1M
     fileName = title + '-' + operation + '-' + str(numStripes) + '-' + stripeSize + '.png'
     return fileName
 
-  def runVikingPaper(self):
+  """
+  41: write
+  IOR 4/64K + 4/1M
+  LSMIO 4/64K + 4/1M
+  IOR 16/64K + 16/1M
+  LSMIO 16/64K + 16/1M
+  """
+  def runVikingPaper41(self):
     dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.txt']
     dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
     iorRun = data.IorData(dataFile)
 
-    fn = self.genPNGpath('ior', False, 4, '64K')
+    fn = '41-comparison-write-base.png'
     md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
@@ -142,13 +144,17 @@ Read/64K, Write/64K, Write/1M
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '1M')
     pdb = plot.PlotData('ior-base-4-1M', xSeries, ySeries)
 
-    p = plot.MultiPlot(md, pda, pdb)
+    (xSeries, ySeries) = iorRun.timeSeries(False, 16, '64K')
+    pdc = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
+    (xSeries, ySeries) = iorRun.timeSeries(False, 16, '1M')
+    pdd = plot.PlotData('ior-base-4-1M', xSeries, ySeries)
+
+    p = plot.MultiPlot(md, pda, pdb, pdc, pdd)
     p.plot(fn)
     log.Console.error('Image generated: ' + fn + '.')
 
 
-
   def run(self):
-    return self.runVikingPaper()
+    return self.runVikingPaper41()
 
 
