@@ -36,28 +36,31 @@ elif 'viking' in HOSTNAME:
 
   LUSTRE_HDD_PATH = '/mnt/lustre'
   LUSTRE_SSD_PATH = '/mnt/bb/tmp'
+elif 'hp15' in HOSTNAME:
+  HPC_ENV = 'DEV'
+  HPC_MANAGER = 'DEV'
+
+  LUSTRE_HDD_PATH = os.path.join(HOME, 'scratch')
+  LUSTRE_SSD_PATH = os.path.join(HOME, 'scratch')
 else:
   print(UNKNOWN_HPC_ENVIRONMENT)
   exit(1)
-fi
 
 # Benchmark Environment
 DS = datetime.today().strftime('%Y-%m-%d')
-PROJECT_DIR = os.path.join([ HOME ] + _REL_PROJECT_DIR)
-BIN_DIR = os.path.join([ HOME ] + _REL_BIN_DIR)
-LIB_DIR = os.path.join([ HOME ] + _REL_LIB_DIR)
+PROJECT_DIR = os.path.join(HOME, *_REL_PROJECT_DIR)
+BIN_DIR = os.path.join(HOME, *_REL_BIN_DIR)
+LIB_DIR = os.path.join(HOME, *_REL_LIB_DIR)
 
 if False:
   LUSTRE_PATH = LUSTRE_SSD_PATH
 else:
   LUSTRE_PATH = LUSTRE_HDD_PATH
-fi
 
-BM_DIR = os.path.join([ LUSTRE_PATH ] + ['users', USER, 'benchmark'])
+BM_DIR = os.path.join(LUSTRE_PATH, 'users', USER, 'benchmark')
 
-if __init__:
-  os.environ['PATH'] += ':' + BIN_DIR
-  os.environ['LD_LIBRARY_PATH'] += ':' + LIB_DIR
-  os.environ['ADIOS2_PLUGIN_PATH'] = LIB_DIR
+os.environ['PATH'] += ':' + BIN_DIR
+os.environ['LD_LIBRARY_PATH'] += ':' + LIB_DIR
+os.environ['ADIOS2_PLUGIN_PATH'] = LIB_DIR
 
 
