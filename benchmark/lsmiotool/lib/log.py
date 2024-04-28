@@ -55,7 +55,7 @@ class Log(object):
     if not self.output:
       self.output = LogOutput(PROGRAM)
     return self.output
-    
+
 
   @classmethod
   def _message(cls, f_level, f_msg):

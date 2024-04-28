@@ -17,7 +17,7 @@ class TestMain(BaseMain):
   def run(self):
     from lsmiotool import test
     test.run_and_report()
- 
+
 
 class ShellMain(BaseMain):
 
