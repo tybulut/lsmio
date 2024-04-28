@@ -33,3 +33,11 @@ class NotImplemented(BaseMain):
     sys.exit(1)
 
 
+class LatexMain(BaseMain):
+
+  def run(self):
+    log.Console.error('Not Implemented')
+    sys.exit(1)
+
+
+

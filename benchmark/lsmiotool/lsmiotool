@@ -12,13 +12,15 @@ LSMIOTOOL_HELP = '''How to run
 -----------------------------------------------------------------------
 ./lsmiotool [options] <cmd> <cmd-arguments>
 
-cmds:
-  run <ior|lsmio|lmp> <local|bake|small|large>
-  parse <ior|lsmio|lmp> <local|bake|small|large>
+common cmds:
   load-modules  load needed HPC modules
+  parse <ior|lsmio|lmp> <local|bake|small|large>
+  run <ior|lsmio|lmp> <local|bake|small|large>
+
+other cmds:
+  latex <ior|lsmio|lmp> <local|bake|small|large>
   shell         provide interactive access to the python tool
   test          run unit and functional tests
-
 
 options:
   --debug     enable debug mode and run
@@ -56,11 +58,13 @@ if __name__ == '__main__':
   if not args:
     log.Console.error('Empty command.')
     sys.exit(1)
-  elif args[0] == 'run':
+  elif args[0] == 'latex':
+    class_main = main.LatexMain
+  elif args[0] == 'load-modules':
     class_main = main.NotImplemented
   elif args[0] == 'parse':
     class_main = main.NotImplemented
-  elif args[0] == 'load-modules':
+  elif args[0] == 'run':
     class_main = main.NotImplemented
   elif args[0] == 'shell':
     class_main = main.ShellMain
