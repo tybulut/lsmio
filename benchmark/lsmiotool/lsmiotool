@@ -31,8 +31,6 @@ options:
 
 if __name__ == '__main__':
   debug = False
-  shell = False
-  test = False
   log.Log.setLevel(log.LOG_LEVEL.DEBUG) # Tentative default log level
   try:
     opts, args = getopt.getopt(sys.argv[1:], 'dhstv',
