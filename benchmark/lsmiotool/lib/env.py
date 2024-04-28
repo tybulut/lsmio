@@ -11,6 +11,41 @@ USER = os.environ['USER']
 HOME = os.environ['HOME']
 LD_LIBRARY_PATH = os.environ['HOME']
 
+# Data Environment
+_LSMIO_DATA_DIR = ['src', 'lsmio-data']
+
+_VIKING_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'ior-small-hdd']
+_VIKING_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'lsmio-small-hdd']
+VIKING_IOR_DIR = os.path.join(HOME, *_VIKING_IOR_DIR)
+VIKING_IOR_DATA = {
+  'base': 'ior-base',
+  'collective': 'ior-collective',
+  'hdf5': 'ior-hdf5',
+  'hdf5-collective': 'ior-hdf5-c'
+}
+VIKING_LSMIO_DIR = os.path.join(HOME, *_VIKING_LSMIO_DIR)
+VIKING_LSMIO_DATA = {
+  'adios': 'lsmio-adios-m-yes',
+  'plugin': 'lsmio-plugin-m-yes',
+  'lsmio': 'lsmio-rocksdb-m-yes'
+}
+
+_ISAMBARD_XCI_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'ior-small-hdd']
+_ISAMBARD_XCI_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'lsmio-small-hdd']
+ISAMBARD_XCI_IOR_DIR = os.path.join(HOME, *_ISAMBARD_XCI_IOR_DIR)
+ISAMBARD_XCI_IOR_DATA = {
+  'base': 'ior-base',
+  'collective': 'ior-collective',
+  'hdf5': 'ior-hdf5',
+  'hdf5-collective': 'ior-hdf5-c'
+}
+ISAMBARD_XCI_LSMIO_DIR = os.path.join(HOME, *_ISAMBARD_XCI_LSMIO_DIR)
+ISAMBARD_XCI_LSMIO_DATA = {
+  'adios': 'lsmio-adios-m',
+  'plugin': 'lsmio-plugin-m',
+  'lsmio': 'lsmio-rocksdb-m'
+}
+
 # Determine HPC cluster
 UNKNOWN_HPC_ENVIRONMENT = \
 '''############################################

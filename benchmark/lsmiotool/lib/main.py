@@ -2,6 +2,7 @@ import os, sys, signal, importlib
 
 from lsmiotool import settings
 from lsmiotool.lib import env, log, debuggable, plot
+from lsmiotool.lib import plot, data
 
 # Catch CTRL-C
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -33,10 +34,9 @@ class NotImplemented(BaseMain):
     sys.exit(1)
 
 
-class LatexMain(BaseMain):
+class DemoMain(BaseMain):
 
   def demoRunDummy(self):
-    from lsmiotool.lib import plot
     fn = 'demo.png'
     md = plot.PlotMetaData("Sports Watch Data", "Average Pulse", "Calorie Burnage")
     pd = plot.PlotData(
@@ -47,9 +47,7 @@ class LatexMain(BaseMain):
     p.plot(fn)
     log.Console.error('Image generated: ' + fn + '.')
 
-
   def demoRunSingle(self):
-    from lsmiotool.lib import plot, data
     iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
     fn = 'ior-write-4-64k.png'
@@ -60,7 +58,6 @@ class LatexMain(BaseMain):
     log.Console.error('Image generated: ' + fn + '.')
 
   def demoRunMulti(self):
-    from lsmiotool.lib import plot, data
     iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
     fn = 'ior-write-64k.png'
     md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
@@ -76,3 +73,82 @@ class LatexMain(BaseMain):
 
   def run(self):
     return self.demoRunMulti()
+
+
+class LatexMain(BaseMain):
+
+  """
+41: write
+IOR 4/64K + 4/1M
+LSMIO 4/64K + 4/1M
+IOR 16/64K + 16/1M
+LSMIO 16/64K + 16/1M
+
+42: write
+HDF5 4/64K + 4/1M
+ADIOS 4/64K + 4/1M
+LSMIO 4/64K + 4/1M
+
+43: write
+ADIOS 4/64K + 4/1M
+LSMIO 4/64K + 4/1M
+PLUGIN 4/64K + 4/1M
+
+44: write
+ADIOS 4/64K + 16/64K
+LSMIO 4/64K + 16/64K
+PLUGIN 4/64K + 16/64K
+
+45: write
+IOR 4/64K
+IOR-C 4/64K
+HDF5 4/64K
+HDF5-C 4/64K
+LSMIO 4/64K
+
+46: read
+IOR 4/64K
+IOR-C 4/64K
+HDF5 4/64K
+ADIOS 4/64K
+LSMIO 4/64K
+PLUGIN 4/64K
+
+Read/64K, Write/64K, Write/1M
+  ior/hdf5
+  ior/ior-c
+  adios/ior
+  adios/lsmio
+  lsmio/ior
+  lsmio/hdf5
+
+  """
+
+  def genPNGpath(self, title: str, isRead: bool, numStripes: int, stripeSize: str):
+    operation = 'read' if isRead == True else 'write'
+    fileName = title + '-' + operation + '-' + str(numStripes) + '-' + stripeSize + '.png'
+    return fileName
+
+  def runVikingPaper(self):
+    dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.txt']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    iorRun = data.IorData(dataFile)
+
+    fn = self.genPNGpath('ior', False, 4, '64K')
+    md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
+
+    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
+    pda = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
+    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '1M')
+    pdb = plot.PlotData('ior-base-4-1M', xSeries, ySeries)
+
+    p = plot.MultiPlot(md, pda, pdb)
+    p.plot(fn)
+    log.Console.error('Image generated: ' + fn + '.')
+
+
+
+  def run(self):
+    return self.runVikingPaper()
+
+
