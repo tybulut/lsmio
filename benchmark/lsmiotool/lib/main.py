@@ -35,9 +35,9 @@ class NotImplemented(BaseMain):
 
 class LatexMain(BaseMain):
 
-  def run(self):
+  def demoRun(self):
     from lsmiotool.lib import plot
-    fn = 'plant.png'
+    fn = 'demo.png'
     md = plot.PlotMetaData("Sports Watch Data", "Average Pulse", "Calorie Burnage")
     pd = plot.PlotData(
             [80, 85, 90, 95, 100, 105, 110, 115, 120, 125],
@@ -48,4 +48,14 @@ class LatexMain(BaseMain):
     log.Console.error('Image generated: ' + fn + '.')
 
 
+  def run(self):
+    from lsmiotool.lib import plot, data
+    iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
+    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
+    fn = 'ior-write-4-64k.png'
+    md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
+    pd = plot.PlotData(xSeries, ySeries)
+    p = plot.Plot(md, pd)
+    p.plot(fn)
+    log.Console.error('Image generated: ' + fn + '.')
 
