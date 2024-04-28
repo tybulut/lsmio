@@ -6,58 +6,74 @@ import os, sys, getopt, site
 srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.append(srv_path)
 
-from lsmiotool.lib import log, env
+from lsmiotool.lib import log, env, main
 
-LSMIOTOOL_HELP = """How to run
+LSMIOTOOL_HELP = '''How to run
 -----------------------------------------------------------------------
-./lsmiotool [options]
+./lsmiotool [options] <cmd> <cmd-arguments>
 
---debug     enable debug mode and run
---help      print this help screen
---test      run unit and functional tests
---version   print version and exit
-"""
+cmds:
+  run <ior|lsmio|lmp> <local|bake|small|large>
+  parse <ior|lsmio|lmp> <local|bake|small|large>
+  load-modules  load needed HPC modules
+  shell         provide interactive access to the python tool
+  test          run unit and functional tests
+
+
+options:
+  --debug     enable debug mode and run
+  --help      print this help screen
+  --ssd     use SSD storage instead
+  --version   print version and exit
+'''
 
 if __name__ == '__main__':
-	debug = False
-	shell = False
-	test = False
-	log.Log.setLevel(log.LOG_LEVEL.DEBUG) # Tentative default log level
-	try:
-		opts, args = getopt.getopt(sys.argv[1:], 'duhstvw',
-						["debug", "help", "shell", "test", "version"])
-		for opt, arg in opts:
-			if opt in "--help":
-				log.Console.dump(LSMIOTOOL_HELP)
-				sys.exit()
-			elif opt in "--version":
-				log.Console.info("version: " + config.VERSION)
-				sys.exit()
-			elif opt in "--debug":
-				debug = True
-				log.Log.setLevel(log.LOG_LEVEL.DEBUG)
-			elif opt in "--shell":
-				shell = True
-			elif opt in "--test":
-				test = True
-				log.Log.setLevel(log.LOG_LEVEL.DEBUG)
-			else:
-				log.Console.error("unknown option: " + opt)
-				sys.exit()
-	except getopt.GetoptError as err:
-		log.Console.error(err)
-		sys.exit()
+  debug = False
+  shell = False
+  test = False
+  log.Log.setLevel(log.LOG_LEVEL.DEBUG) # Tentative default log level
+  try:
+    opts, args = getopt.getopt(sys.argv[1:], 'dhstv',
+            ['debug', 'help', 'ssd', 'test', 'version'])
+    for opt, arg in opts:
+      if opt in '--help':
+        log.Console.dump(LSMIOTOOL_HELP)
+        sys.exit(1)
+      elif opt in '--version':
+        log.Console.info('version: ' + config.VERSION)
+        sys.exit(1)
+      elif opt in '--debug':
+        debug = True
+        log.Log.setLevel(log.LOG_LEVEL.DEBUG)
+      else:
+        log.Console.error('Unknown option: ' + opt)
+        sys.exit(1)
+  except getopt.GetoptError as err:
+    log.Console.error(err)
+    sys.exit(1)
 
-	args = []
-	kwargs = {}
-	if shell:
-		class_main = main.ShellMain
-	elif test:
-		class_main = main.TestMain
-	else:
-		class_main = main.HTTPDMain
 
-	inst_main = class_main(*args, **kwargs)
-	inst_main.run()
+  if not args:
+    log.Console.error('Empty command.')
+    sys.exit(1)
+  elif args[0] == 'run':
+    class_main = main.NotImplemented
+  elif args[0] == 'parse':
+    class_main = main.NotImplemented
+  elif args[0] == 'load-modules':
+    class_main = main.NotImplemented
+  elif args[0] == 'shell':
+    class_main = main.ShellMain
+  elif args[0] == 'test':
+    class_main = main.TestMain
+  else:
+    log.Console.error('Unknown command: ' + str(args))
+    sys.exit(1)
 
+  m_args = []
+  m_kwargs = {}
+
+  inst_main = class_main(*m_args, **m_kwargs)
+  inst_main = class_main(*m_args, **m_kwargs)
+  inst_main.run()
 
