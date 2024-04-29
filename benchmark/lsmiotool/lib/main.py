@@ -1,4 +1,5 @@
 import os, sys, signal, importlib
+import numpy as np
 
 from lsmiotool import settings
 from lsmiotool.lib import env, log, debuggable, plot
@@ -383,15 +384,119 @@ class LatexMain(BaseMain):
 
 
   """
-  Read/64K, Write/64K, Write/1M
-  ior/hdf5
-  ior/ior-c
-  adios/ior
+  Write/64K, Write/1M
+  adios/plugin
   adios/lsmio
+  lsmio/plugin
+  """
+  def runVikingPaper91(self):
+    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    adiosRun = data.LsmioData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    lsmioRun = data.LsmioData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    pluginRun = data.LsmioData(dataFile)
+
+    fn = '91-comparison-adios-plugin-lsmio.png'
+    md = plot.PlotMetaData("Write: ADIOS vs. PLUGIN vs. LSMIO", "# of Nodes", "Max BW in MB")
+
+    (AxSeries, AySeries) = adiosRun.timeSeries(False, 4, '64K')
+    (PxSeries, PySeries) = pluginRun.timeSeries(False, 4, '64K')
+    (LxSeries, LySeries) = lsmioRun.timeSeries(False, 4, '64K')
+    pda = plot.PlotData('plugin-adios-4-64K',
+                        AxSeries, np.array(PySeries) / np.array(AySeries))
+    pdb = plot.PlotData('lsmio-adios-4-64K',
+                        AxSeries, np.array(LySeries) / np.array(AySeries))
+    pdc = plot.PlotData('lsmio-plugin-4-64K',
+                        AxSeries, np.array(LySeries) / np.array(PySeries))
+
+    (AxSeries, AySeries) = adiosRun.timeSeries(False, 16, '1M')
+    (PxSeries, PySeries) = pluginRun.timeSeries(False, 16, '1M')
+    (LxSeries, LySeries) = lsmioRun.timeSeries(False, 16, '1M')
+    pdd = plot.PlotData('plugin-adios-16-1M',
+                        AxSeries, np.array(PySeries) / np.array(AySeries))
+    pde = plot.PlotData('lsmio-adios-16-1M',
+                        AxSeries, np.array(LySeries) / np.array(AySeries))
+    pdf = plot.PlotData('lsmio-plugin-16-1M',
+                        AxSeries, np.array(LySeries) / np.array(PySeries))
+
+    p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
+    p.plot(fn)
+    log.Console.error('Image generated: ' + fn + '.')
+
+
+  """
+  Read/64K, Reae/1M
+  adios/plugin
+  adios/lsmio
+  lsmio/plugin
+  """
+  def runVikingPaper92(self):
+    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    adiosRun = data.LsmioData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    lsmioRun = data.LsmioData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    pluginRun = data.LsmioData(dataFile)
+
+    fn = '92-comparison-adios-plugin-lsmio.png'
+    md = plot.PlotMetaData("Read: ADIOS vs. PLUGIN vs. LSMIO", "# of Nodes", "Max BW in MB")
+
+    (AxSeries, AySeries) = adiosRun.timeSeries(True, 4, '64K')
+    (PxSeries, PySeries) = pluginRun.timeSeries(True, 4, '64K')
+    (LxSeries, LySeries) = lsmioRun.timeSeries(True, 4, '64K')
+    pda = plot.PlotData('plugin-adios-4-64K',
+                        AxSeries, np.array(PySeries) / np.array(AySeries))
+    pdb = plot.PlotData('lsmio-adios-4-64K',
+                        AxSeries, np.array(LySeries) / np.array(AySeries))
+    pdc = plot.PlotData('lsmio-plugin-4-64K',
+                        AxSeries, np.array(LySeries) / np.array(PySeries))
+
+    (AxSeries, AySeries) = adiosRun.timeSeries(True, 16, '1M')
+    (PxSeries, PySeries) = pluginRun.timeSeries(True, 16, '1M')
+    (LxSeries, LySeries) = lsmioRun.timeSeries(True, 16, '1M')
+    pdd = plot.PlotData('plugin-adios-16-1M',
+                        AxSeries, np.array(PySeries) / np.array(AySeries))
+    pde = plot.PlotData('lsmio-adios-16-1M',
+                        AxSeries, np.array(LySeries) / np.array(AySeries))
+    pdf = plot.PlotData('lsmio-plugin-16-1M',
+                        AxSeries, np.array(LySeries) / np.array(PySeries))
+
+    p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
+    p.plot(fn)
+    log.Console.error('Image generated: ' + fn + '.')
+
+
+  """
+  Read/64K, Write/64K, Write/1M
   lsmio/ior
   lsmio/hdf5
+  ior/hdf5
   """
-  def runVikingPaper99(self):
+  def runVikingPaper93(self):
+    pass
+
+  """
+  Read/64K, Write/64K, Write/1M
+  ior/ior-c
+  """
+  def runVikingPaper95(self):
     pass
 
   def run(self):
@@ -401,6 +506,7 @@ class LatexMain(BaseMain):
     self.runVikingPaper44()
     self.runVikingPaper45()
     self.runVikingPaper46()
-    self.runVikingPaper99()
+    self.runVikingPaper91()
+    self.runVikingPaper92()
 
 
