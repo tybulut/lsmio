@@ -138,7 +138,7 @@ class LatexMain(BaseMain):
     dataFileList = [env.VIKING_IOR_DATA['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
-    iorRun = data.IorData(dataFile)
+    hdf5Run = data.IorData(dataFile)
 
     dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
     dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
@@ -151,12 +151,12 @@ class LatexMain(BaseMain):
     lsmioRun = data.LsmioData(dataFile)
 
     fn = '42-comparison-write-lsmio.png'
-    md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
+    md = plot.PlotMetaData("HDF5 vs. ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
-    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
-    pda = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
-    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '1M')
-    pdb = plot.PlotData('ior-base-4-1M', xSeries, ySeries)
+    (xSeries, ySeries) = hdf5Run.timeSeries(False, 4, '64K')
+    pda = plot.PlotData('ior-hdf5-4-64K', xSeries, ySeries)
+    (xSeries, ySeries) = hdf5Run.timeSeries(False, 4, '1M')
+    pdb = plot.PlotData('ior-hdf5-4-1M', xSeries, ySeries)
 
     (xSeries, ySeries) = adiosRun.timeSeries(False, 4, '64K')
     pdc = plot.PlotData('adios-4-64K', xSeries, ySeries)
@@ -195,7 +195,7 @@ class LatexMain(BaseMain):
     pluginRun = data.LsmioData(dataFile)
 
     fn = '43-comparison-write-plugin-4.png'
-    md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
+    md = plot.PlotMetaData("ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = adiosRun.timeSeries(False, 4, '64K')
     pda = plot.PlotData('adios-4-64K', xSeries, ySeries)
@@ -239,7 +239,7 @@ class LatexMain(BaseMain):
     pluginRun = data.LsmioData(dataFile)
 
     fn = '44-comparison-write-plugin-16.png'
-    md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
+    md = plot.PlotMetaData("ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = adiosRun.timeSeries(False, 4, '64K')
     pda = plot.PlotData('adios-4-64K', xSeries, ySeries)
@@ -268,6 +268,54 @@ class LatexMain(BaseMain):
   HDF5-C 4/64K
   LSMIO 4/64K
   """
+  def runVikingPaper45(self):
+    dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
+    iorRun = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_IOR_DATA['collective'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
+    collectiveRun = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_IOR_DATA['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
+    hdf5Run = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_IOR_DATA['hdf5-collective'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading HDF5-collective CSV file: ' + dataFile + '.')
+    hdf5cRun = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    lsmioRun = data.LsmioData(dataFile)
+
+    fn = '45-comparison-collective.png'
+    md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
+
+    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
+    pda = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = collectiveRun.timeSeries(False, 4, '64K')
+    pdb = plot.PlotData('ior-collective-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = hdf5Run.timeSeries(False, 4, '64K')
+    pdc = plot.PlotData('ior-hdf5-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = hdf5cRun.timeSeries(False, 4, '64K')
+    pdd = plot.PlotData('ior-hdf5-c-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = lsmioRun.timeSeries(False, 4, '64K')
+    pde = plot.PlotData('lsmio-4-64K', xSeries, ySeries)
+
+    p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde)
+    p.plot(fn)
+    log.Console.error('Image generated: ' + fn + '.')
+
   """
   46: read
   IOR 4/64K
@@ -293,5 +341,6 @@ class LatexMain(BaseMain):
     self.runVikingPaper42()
     self.runVikingPaper43()
     self.runVikingPaper44()
+    self.runVikingPaper45()
 
 
