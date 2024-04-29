@@ -80,8 +80,10 @@ class LatexMain(BaseMain):
 
   def __init__(self):
     super(LatexMain, self).__init__()
-    self.hpc_dir = env.VIKING_IOR_DIR
-    self.hpc_data = env.VIKING_IOR_DATA
+    self.ior_dir = env.VIKING_IOR_DIR
+    self.ior_data = env.VIKING_IOR_DATA
+    self.lsmio_dir = env.VIKING_LSMIO_DIR
+    self.lsmio_data = env.VIKING_LSMIO_DATA
 
 
   def genPNGpath(self, title: str, isRead: bool, numStripes: int, stripeSize: str):
@@ -98,13 +100,13 @@ class LatexMain(BaseMain):
   LSMIO 16/64K + 16/1M
   """
   def runVikingPaper41(self):
-    dataFileList = [self.hpc_data['base'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['base'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
@@ -142,18 +144,18 @@ class LatexMain(BaseMain):
   LSMIO 4/64K + 4/1M
   """
   def runVikingPaper42(self):
-    dataFileList = [self.hpc_data['hdf5'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
@@ -186,18 +188,18 @@ class LatexMain(BaseMain):
   PLUGIN 4/64K + 4/1M
   """
   def runVikingPaper43(self):
-    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
@@ -230,18 +232,18 @@ class LatexMain(BaseMain):
   PLUGIN 4/64K + 16/64K
   """
   def runVikingPaper44(self):
-    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
@@ -276,28 +278,28 @@ class LatexMain(BaseMain):
   LSMIO 4/64K
   """
   def runVikingPaper45(self):
-    dataFileList = [self.hpc_data['base'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['base'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
-    dataFileList = [self.hpc_data['collective'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['collective'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
     collectiveRun = data.IorData(dataFile)
 
-    dataFileList = [self.hpc_data['hdf5'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
-    dataFileList = [self.hpc_data['hdf5-collective'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['hdf5-collective'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading HDF5-collective CSV file: ' + dataFile + '.')
     hdf5cRun = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
@@ -333,33 +335,33 @@ class LatexMain(BaseMain):
   PLUGIN 4/64K
   """
   def runVikingPaper46(self):
-    dataFileList = [self.hpc_data['base'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['base'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
-    dataFileList = [self.hpc_data['collective'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['collective'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
     collectiveRun = data.IorData(dataFile)
 
-    dataFileList = [self.hpc_data['hdf5'], 'ior-report.csv']
-    dataFile = os.path.join(self.hpc_dir, *dataFileList)
+    dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
@@ -396,18 +398,18 @@ class LatexMain(BaseMain):
   lsmio/plugin
   """
   def runVikingPaper91(self):
-    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
@@ -446,18 +448,18 @@ class LatexMain(BaseMain):
   lsmio/plugin
   """
   def runVikingPaper92(self):
-    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
-    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
