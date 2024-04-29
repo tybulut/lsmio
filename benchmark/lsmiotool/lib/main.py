@@ -325,6 +325,63 @@ class LatexMain(BaseMain):
   LSMIO 4/64K
   PLUGIN 4/64K
   """
+  def runVikingPaper46(self):
+    dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
+    iorRun = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_IOR_DATA['collective'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
+    collectiveRun = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_IOR_DATA['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
+    hdf5Run = data.IorData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['adios'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    adiosRun = data.LsmioData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    lsmioRun = data.LsmioData(dataFile)
+
+    dataFileList = [env.VIKING_LSMIO_DATA['plugin'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    pluginRun = data.LsmioData(dataFile)
+
+    fn = '46-comparison-read-base.png'
+    md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
+
+    (xSeries, ySeries) = iorRun.timeSeries(True, 4, '64K')
+    pda = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = collectiveRun.timeSeries(True, 4, '64K')
+    pdb = plot.PlotData('ior-collective-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = hdf5Run.timeSeries(True, 4, '64K')
+    pdc = plot.PlotData('ior-hdf5-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = adiosRun.timeSeries(True, 4, '64K')
+    pdd = plot.PlotData('adios-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = lsmioRun.timeSeries(True, 4, '64K')
+    pde = plot.PlotData('lsmio-4-64K', xSeries, ySeries)
+
+    (xSeries, ySeries) = pluginRun.timeSeries(True, 4, '64K')
+    pdf = plot.PlotData('plugin-4-64K', xSeries, ySeries)
+
+    p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
+    p.plot(fn)
+    log.Console.error('Image generated: ' + fn + '.')
+
+
   """
   Read/64K, Write/64K, Write/1M
   ior/hdf5
@@ -334,7 +391,8 @@ class LatexMain(BaseMain):
   lsmio/ior
   lsmio/hdf5
   """
-
+  def runVikingPaper99(self):
+    pass
 
   def run(self):
     self.runVikingPaper41()
@@ -342,5 +400,7 @@ class LatexMain(BaseMain):
     self.runVikingPaper43()
     self.runVikingPaper44()
     self.runVikingPaper45()
+    self.runVikingPaper46()
+    self.runVikingPaper99()
 
 
