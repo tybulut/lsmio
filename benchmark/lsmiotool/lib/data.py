@@ -25,10 +25,13 @@ class IorData(object):
         if numNodes not in self.csvData[operation][numStripes][stripeSize]:
           self.csvData[operation][numStripes][stripeSize][numNodes] = {}
         partData = {
-          'maxMB': float(row[4]),
-          'minMB': float(row[5]),
-          'meanMB': float(row[6]),
+          'maxMB': float(0.00),
+          'minMB': float(0.00),
+          'meanMB': float(0.00),
         }
+        if row[4]: partData['maxMB'] = float(row[4])
+        if row[5]: partData['minMB'] = float(row[5])
+        if row[6]: partData['meanMB'] = float(row[6])
         self.csvData[operation][numStripes][stripeSize][numNodes] = partData
 
   def timeSeries(self, isRead: bool, numStripes: int, stripeSize: str):
