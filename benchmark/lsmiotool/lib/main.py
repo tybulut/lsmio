@@ -78,6 +78,12 @@ class DemoMain(BaseMain):
 
 class LatexMain(BaseMain):
 
+  def __init__(self):
+    super(LatexMain, self).__init__()
+    self.hpc_dir = env.VIKING_IOR_DIR
+    self.hpc_data = env.VIKING_IOR_DATA
+
+
   def genPNGpath(self, title: str, isRead: bool, numStripes: int, stripeSize: str):
     operation = 'read' if isRead == True else 'write'
     fileName = title + '-' + operation + '-' + str(numStripes) + '-' + stripeSize + '.png'
@@ -92,8 +98,8 @@ class LatexMain(BaseMain):
   LSMIO 16/64K + 16/1M
   """
   def runVikingPaper41(self):
-    dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['base'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
@@ -136,8 +142,8 @@ class LatexMain(BaseMain):
   LSMIO 4/64K + 4/1M
   """
   def runVikingPaper42(self):
-    dataFileList = [env.VIKING_IOR_DATA['hdf5'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
@@ -270,23 +276,23 @@ class LatexMain(BaseMain):
   LSMIO 4/64K
   """
   def runVikingPaper45(self):
-    dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['base'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_IOR_DATA['collective'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['collective'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
     collectiveRun = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_IOR_DATA['hdf5'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_IOR_DATA['hdf5-collective'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['hdf5-collective'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading HDF5-collective CSV file: ' + dataFile + '.')
     hdf5cRun = data.IorData(dataFile)
 
@@ -327,18 +333,18 @@ class LatexMain(BaseMain):
   PLUGIN 4/64K
   """
   def runVikingPaper46(self):
-    dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['base'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_IOR_DATA['collective'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['collective'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
     collectiveRun = data.IorData(dataFile)
 
-    dataFileList = [env.VIKING_IOR_DATA['hdf5'], 'ior-report.csv']
-    dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    dataFileList = [self.hpc_data['hdf5'], 'ior-report.csv']
+    dataFile = os.path.join(self.hpc_dir, *dataFileList)
     log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
