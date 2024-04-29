@@ -134,22 +134,38 @@ lsmio/hdf5
   def runVikingPaper41(self):
     dataFileList = [env.VIKING_IOR_DATA['base'], 'ior-report.txt']
     dataFile = os.path.join(env.VIKING_IOR_DIR, *dataFileList)
+    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
+    dataFileList = [env.VIKING_LSMIO_DATA['lsmio'], 'lsm-report.csv']
+    dataFile = os.path.join(env.VIKING_LSMIO_DIR, *dataFileList)
+    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    lsmioRun = data.LsmioData(dataFile)
+
     fn = '41-comparison-write-base.png'
-    md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
+    md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
     pda = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '1M')
     pdb = plot.PlotData('ior-base-4-1M', xSeries, ySeries)
 
-    (xSeries, ySeries) = iorRun.timeSeries(False, 16, '64K')
-    pdc = plot.PlotData('ior-base-4-64K', xSeries, ySeries)
-    (xSeries, ySeries) = iorRun.timeSeries(False, 16, '1M')
-    pdd = plot.PlotData('ior-base-4-1M', xSeries, ySeries)
+    (xSeries, ySeries) = lsmioRun.timeSeries(False, 4, '64K')
+    pdc = plot.PlotData('lsmio-4-64K', xSeries, ySeries)
+    (xSeries, ySeries) = lsmioRun.timeSeries(False, 4, '1M')
+    pdd = plot.PlotData('lsmio-4-1M', xSeries, ySeries)
 
-    p = plot.MultiPlot(md, pda, pdb, pdc, pdd)
+    (xSeries, ySeries) = iorRun.timeSeries(False, 16, '64K')
+    pde = plot.PlotData('ior-base-16-64K', xSeries, ySeries)
+    (xSeries, ySeries) = iorRun.timeSeries(False, 16, '1M')
+    pdf = plot.PlotData('ior-base-16-1M', xSeries, ySeries)
+
+    (xSeries, ySeries) = lsmioRun.timeSeries(False, 16, '64K')
+    pdg = plot.PlotData('lsmio-16-64K', xSeries, ySeries)
+    (xSeries, ySeries) = lsmioRun.timeSeries(False, 16, '1M')
+    pdh = plot.PlotData('lsmio-16-1M', xSeries, ySeries)
+
+    p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf, pdg, pdh)
     p.plot(fn)
     log.Console.error('Image generated: ' + fn + '.')
 
