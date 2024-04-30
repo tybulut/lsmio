@@ -29,6 +29,8 @@ VIKING_LSMIO_DATA = {
   'plugin': 'lsmio-plugin-m-yes',
   'lsmio': 'lsmio-rocksdb-m-yes'
 }
+_VIKING_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'plots']
+VIKING_PLOTS_DIR = os.path.join(HOME, *_VIKING_PLOTS_DIR)
 
 _ISAMBARD_XCI_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'ior-small-hdd']
 _ISAMBARD_XCI_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'lsmio-small-hdd']
@@ -45,6 +47,8 @@ ISAMBARD_XCI_LSMIO_DATA = {
   'plugin': 'lsmio-plugin-m',
   'lsmio': 'lsmio-rocksdb-m'
 }
+_ISAMBARD_XCI_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'plots']
+ISAMBARD_XCI_PLOTS_DIR = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
 
 # Determine HPC cluster
 UNKNOWN_HPC_ENVIRONMENT = \

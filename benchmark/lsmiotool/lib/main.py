@@ -80,17 +80,30 @@ class LatexMain(BaseMain):
 
   def __init__(self):
     super(LatexMain, self).__init__()
+    self._resultsFromViking()
+    #self._resultsFromIsambard()
+
+  def _resultsFromViking(self):
     self.ior_dir = env.VIKING_IOR_DIR
     self.ior_data = env.VIKING_IOR_DATA
     self.lsmio_dir = env.VIKING_LSMIO_DIR
     self.lsmio_data = env.VIKING_LSMIO_DATA
+    self.plots_dir = env.VIKING_PLOTS_DIR
 
+  def _resultsFromIsambard(self):
+    self.ior_dir = env.ISAMBARD_XCI_IOR_DIR
+    self.ior_data = env.ISAMBARD_XCI_IOR_DATA
+    self.lsmio_dir = env.ISAMBARD_XCI_LSMIO_DIR
+    self.lsmio_data = env.ISAMBARD_XCI_LSMIO_DATA
+    self.plots_dir = env.ISAMBARD_XCI_PLOTS_DIR
 
-  def genPNGpath(self, title: str, isRead: bool, numStripes: int, stripeSize: str):
+  def _genPNGName(self, title: str, isRead: bool, numStripes: int, stripeSize: str) -> str:
     operation = 'read' if isRead == True else 'write'
     fileName = title + '-' + operation + '-' + str(numStripes) + '-' + stripeSize + '.png'
     return fileName
 
+  def _genPNGPath(self, fileName: str) -> str:
+    return os.path.join(self.plots_dir, fileName)
 
   """
   41: write
@@ -110,7 +123,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    fn = '41-comparison-write-base.png'
+    fn = self._genPNGPath('41-comparison-write-base.png')
     md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
@@ -159,7 +172,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    fn = '42-comparison-write-lsmio.png'
+    fn = self._genPNGPath('42-comparison-write-lsmio.png')
     md = plot.PlotMetaData("HDF5 vs. ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = hdf5Run.timeSeries(False, 4, '64K')
@@ -203,7 +216,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
-    fn = '43-comparison-write-plugin-4.png'
+    fn = self._genPNGPath('43-comparison-write-plugin-4.png')
     md = plot.PlotMetaData("ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = adiosRun.timeSeries(False, 4, '64K')
@@ -247,7 +260,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
-    fn = '44-comparison-write-plugin-16.png'
+    fn = self._genPNGPath('44-comparison-write-plugin-16.png')
     md = plot.PlotMetaData("ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = adiosRun.timeSeries(False, 4, '64K')
@@ -303,7 +316,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
-    fn = '45-comparison-collective.png'
+    fn = self._genPNGPath('45-comparison-collective.png')
     md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
@@ -365,7 +378,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
-    fn = '46-comparison-read-base.png'
+    fn = self._genPNGPath('46-comparison-read-base.png')
     md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (xSeries, ySeries) = iorRun.timeSeries(True, 4, '64K')
@@ -413,7 +426,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
-    fn = '91-comparison-adios-plugin-lsmio.png'
+    fn = self._genPNGPath('91-comparison-adios-plugin-lsmio.png')
     md = plot.PlotMetaData("Write: ADIOS vs. PLUGIN vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (AxSeries, AySeries) = adiosRun.timeSeries(False, 4, '64K')
@@ -463,7 +476,7 @@ class LatexMain(BaseMain):
     log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
-    fn = '92-comparison-adios-plugin-lsmio.png'
+    fn = self._genPNGPath('92-comparison-adios-plugin-lsmio.png')
     md = plot.PlotMetaData("Read: ADIOS vs. PLUGIN vs. LSMIO", "# of Nodes", "Max BW in MB")
 
     (AxSeries, AySeries) = adiosRun.timeSeries(True, 4, '64K')
