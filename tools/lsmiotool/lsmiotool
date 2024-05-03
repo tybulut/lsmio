@@ -48,13 +48,13 @@ common cmds:
 
 other cmds:
   latex <ior|lsmio|lmp> <local|bake|small|large>
-  shell         provide interactive access to the python tool
-  test          run unit and functional tests
+  shell       provide interactive access to the python tool
+  test        run lsmiotool unit and functional tests
 
 options:
   --debug     enable debug mode and run
   --help      print this help screen
-  --ssd     use SSD storage instead
+  --ssd       use SSD storage instead
   --version   print version and exit
 '''
 
