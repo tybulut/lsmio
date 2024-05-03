@@ -6,7 +6,7 @@ cd $HOME/src/packages/21-adios2
 git clone https://github.com/ornladios/ADIOS2.git
 
 cd ADIOS2
-git checkout release_210
+git checkout release_29
 cd ..
 
 rm -rf ADIOS2-BUILD
