@@ -62,6 +62,24 @@ VIKING_LSMIO_DATA = {
 _VIKING_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'plots']
 VIKING_PLOTS_DIR = os.path.join(HOME, *_VIKING_PLOTS_DIR)
 
+_VIKING2_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'ior-small-hdd']
+_VIKING2_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'lsmio-small-hdd']
+VIKING2_IOR_DIR = os.path.join(HOME, *_VIKING2_IOR_DIR)
+VIKING2_IOR_DATA = {
+  'base': 'ior-base',
+  'collective': 'ior-collective',
+  'hdf5': 'ior-hdf5',
+  'hdf5-collective': 'ior-hdf5-c'
+}
+VIKING2_LSMIO_DIR = os.path.join(HOME, *_VIKING2_LSMIO_DIR)
+VIKING2_LSMIO_DATA = {
+  'adios': 'lsmio-adios-m-yes',
+  'plugin': 'lsmio-plugin-m-yes',
+  'lsmio': 'lsmio-rocksdb-m-yes'
+}
+_VIKING2_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'plots']
+VIKING2_PLOTS_DIR = os.path.join(HOME, *_VIKING2_PLOTS_DIR)
+
 _ISAMBARD_XCI_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'ior-small-hdd']
 _ISAMBARD_XCI_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'lsmio-small-hdd']
 ISAMBARD_XCI_IOR_DIR = os.path.join(HOME, *_ISAMBARD_XCI_IOR_DIR)
