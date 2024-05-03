@@ -2,7 +2,7 @@
 #PBS -q arm
 #PBS -m abe
 #PBS -N LSMIO-LG
-#PBS -l walltime=24:00:00
+#PBS -l walltime=6:00:00
 #PBS -o logs/
 #PBS -e logs/
 

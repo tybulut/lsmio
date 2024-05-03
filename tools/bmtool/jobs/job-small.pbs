@@ -4,7 +4,7 @@
 #PBS -l pmem=8G
 #PBS -l pvmem=8G
 #PBS -N LSMIO-SM
-#PBS -l walltime=24:00:00
+#PBS -l walltime=6:00:00
 #PBS -o logs/
 #PBS -e logs/
 
