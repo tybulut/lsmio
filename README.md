@@ -68,7 +68,7 @@ Rocky Linux release 8
 
 ### Modules:
 ```
-./benchmark/scripts/bm.sh load-modules
+./tools/bmtool/bmtool load-modules
 ```
 
 ### Other dependencies:
@@ -145,28 +145,28 @@ export SB_ACCOUNT="your account ID for HPC credentails"
 
 Benchmark script usage:
 ```
-cd benchmark/scripts
-./bm.sh  run <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
-./bm.sh  parse <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
-./bm.sh  load-modules
+cd tools/bmtool
+./bmtool  run <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
+./bmtool  parse <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
+./bmtool  load-modules
 ```
 
 Run the IOR benchmarks for upto 48 parallel jobs:
 ```
-cd benchmark/scripts
-./bm.sh run ior small
+cd tools/bmtool
+./bmtool run ior small
 ```
 
 Run the LSMIO benchmarks for upto 48 parallel jobs:
 ```
-cd benchmark/scripts
-./bm.sh run lsmio small
+cd tools/bmtool
+./bmtool run lsmio small
 ```
 
 Parse the IOR benchmarks results for the latest run
 ```
-cd benchmark/scripts
-./bm.sh parse ior small
+cd tools/bmtool
+./bmtool parse ior small
 ```
 
 To clean the benchmark folder between runs and after parsing:
