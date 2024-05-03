@@ -73,9 +73,9 @@ VIKING2_IOR_DATA = {
 }
 VIKING2_LSMIO_DIR = os.path.join(HOME, *_VIKING2_LSMIO_DIR)
 VIKING2_LSMIO_DATA = {
-  'adios': 'lsmio-adios-m-yes',
-  'plugin': 'lsmio-plugin-m-yes',
-  'lsmio': 'lsmio-rocksdb-m-yes'
+  'adios': 'lsmio-adios-m',
+  'plugin': 'lsmio-plugin-m',
+  'lsmio': 'lsmio-rocksdb-m'
 }
 _VIKING2_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'plots']
 VIKING2_PLOTS_DIR = os.path.join(HOME, *_VIKING2_PLOTS_DIR)
