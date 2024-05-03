@@ -111,6 +111,7 @@ class LatexMain(BaseMain):
   def __init__(self):
     super(LatexMain, self).__init__()
     self._resultsFromViking()
+    #self._resultsFromViking2()
     #self._resultsFromIsambard()
 
   def _resultsFromViking(self):
@@ -119,6 +120,13 @@ class LatexMain(BaseMain):
     self.lsmio_dir = env.VIKING_LSMIO_DIR
     self.lsmio_data = env.VIKING_LSMIO_DATA
     self.plots_dir = env.VIKING_PLOTS_DIR
+
+  def _resultsFromViking2(self):
+    self.ior_dir = env.VIKING2_IOR_DIR
+    self.ior_data = env.VIKING2_IOR_DATA
+    self.lsmio_dir = env.VIKING2_LSMIO_DIR
+    self.lsmio_data = env.VIKING2_LSMIO_DATA
+    self.plots_dir = env.VIKING2_PLOTS_DIR
 
   def _resultsFromIsambard(self):
     self.ior_dir = env.ISAMBARD_XCI_IOR_DIR
