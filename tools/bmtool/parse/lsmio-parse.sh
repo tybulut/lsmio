@@ -14,13 +14,14 @@ generate_aggregates() {
   for n in $NODES
   do
     #out-rocksdb-16-1M-2023-04-05-node074-0.txt
+    #out-rocksdb-16-1M-2023-04-05-node074-0.txt.2
     for rf in 4 16
     do
       for bs in 64K 1M 8M
       do
         AGG_FILE=${LSM_DIR_OBASE}/$n/agg-$rf-$bs-report.csv
 
-        for file in ${LSM_DIR_OBASE}/$n/*/out-*-$rf-$bs-*.txt
+        for file in ${LSM_DIR_OBASE}/$n/*/out-*-$rf-$bs-*.txt*
         do
           echo "$file"
           HEADER=`grep '^access,' $file | head -1`
@@ -29,8 +30,8 @@ generate_aggregates() {
           break
         done
 
-        OUT_WRITES=`grep '^write,' ${LSM_DIR_OBASE}/$n/*/out-*-$rf-$bs-*.txt | awk -F, -v OFS=, 'BEGIN {it = 0;}  {sumMX += $2; sumMN += $3; sumME += $4; sumMB += $5; sumIO += $6; if ($7>0+it) it=$7;} END {print "write", sumMX, sumMN, sumME, sumMB, sumIO, it;}'`
-        OUT_READS=`grep '^read,' ${LSM_DIR_OBASE}/$n/*/out-*-$rf-$bs-*.txt | awk -F, -v OFS=, 'BEGIN {it = 0;}  {sumMX += $2; sumMN += $3; sumME += $4; sumMB += $5; sumIO += $6; if ($7>0+it) it=$7;} END {print "read", sumMX, sumMN, sumME, sumMB, sumIO, it;}'`
+        OUT_WRITES=`grep '^write,' ${LSM_DIR_OBASE}/$n/*/out-*-$rf-$bs-*.txt* | awk -F, -v OFS=, 'BEGIN {it = 0;}  {sumMX += $2; sumMN += $3; sumME += $4; sumMB += $5; sumIO += $6; if ($7>0+it) it=$7;} END {print "write", sumMX, sumMN, sumME, sumMB, sumIO, it;}'`
+        OUT_READS=`grep '^read,' ${LSM_DIR_OBASE}/$n/*/out-*-$rf-$bs-*.txt* | awk -F, -v OFS=, 'BEGIN {it = 0;}  {sumMX += $2; sumMN += $3; sumME += $4; sumMB += $5; sumIO += $6; if ($7>0+it) it=$7;} END {print "read", sumMX, sumMN, sumME, sumMB, sumIO, it;}'`
 
         cp /dev/null "$AGG_FILE"
         echo "$HEADER" >> "$AGG_FILE"
