@@ -89,24 +89,17 @@ Run build sript:
 ./build.sh <debug|release> [<test|install>]
 ```
 
-This will create a build in one of the directories below depending on your choice:
+This will create a build in the directory below:
 ```
-./build/debug
-./build/release
+./build
 ```
 
 
 ### Testing
 
-After building, to Run the unit tests from the debug build:
+After building, to run the unit tests:
 ```
-cd build/debug
-ctest -j8 ..  # to run 8 tests in parallel
-```
-
-After building, to run the unit tests from the release build:
-```
-cd build/release
+cd build
 ctest -j8 ..  # to run 8 tests in parallel
 ```
 

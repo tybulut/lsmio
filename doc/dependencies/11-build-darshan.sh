@@ -1,6 +1,6 @@
 #!/bin/sh -x
 
-. ~/src/lsmio/benchmark/scripts/include/vars.in.sh
+. ~/src/lsmio/tools/bmtool/include/vars.in.sh
 
 mkdir -p $HOME/src/packages/11-darshan
 cd $HOME/src/packages/11-darshan

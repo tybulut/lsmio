@@ -1,7 +1,6 @@
 #!/bin/sh -x
 #SBATCH --mail-type=END,FAIL
 #SBATCH --job-name=LSMIO-LG
-#SBATCH --time=6:00:00
 #SBATCH --mem=8gb
 #SBATCH --ntasks-per-node=4
 #SBATCH --ntasks-per-socket=2
