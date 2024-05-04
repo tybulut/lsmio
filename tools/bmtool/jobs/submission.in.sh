@@ -16,6 +16,7 @@ batch_run() {
   job_script="$3"
 
   nodes=`echo "$concurrency / $pernode" | bc`
+  wallhour=`echo "3 + ($nodes / 4)" | bc`
   export BM_NUM_TASKS=$concurrency
 
   if [ "$QSUBMIT" = "sbatch" ]; then
@@ -23,6 +24,7 @@ batch_run() {
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
+      --time=$wallhour:00:00 \
       --account="$SB_ACCOUNT" \
       --mail-user="$SB_EMAIL" \
       ${job_script}.sbatch
