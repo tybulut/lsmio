@@ -40,7 +40,7 @@ signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 class BaseMain(debuggable.DebuggableObject):
 
-  def __init__(self):
+  def __init__(self, *args, **kwargs):
     super(BaseMain, self).__init__()
 
 
@@ -76,7 +76,7 @@ class DemoMain(BaseMain):
          )
     p = plot.Plot(md, pd)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   def demoRunSingle(self):
     iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
@@ -86,7 +86,7 @@ class DemoMain(BaseMain):
     pd = plot.PlotData('ior-base-4-64k', xSeries, ySeries)
     p = plot.Plot(md, pd)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   def demoRunMulti(self):
     iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
@@ -100,7 +100,7 @@ class DemoMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   def run(self):
     return self.demoRunMulti()
@@ -108,11 +108,15 @@ class DemoMain(BaseMain):
 
 class LatexMain(BaseMain):
 
-  def __init__(self):
+  def __init__(self, *args, **kwargs):
     super(LatexMain, self).__init__()
-    self._resultsFromViking()
-    #self._resultsFromViking2()
-    #self._resultsFromIsambard()
+    self.hpc = args[0]
+    if self.hpc == "viking2":
+      self._resultsFromViking2()
+    elif self.hpc == "isambard":
+      self._resultsFromIsambard()
+    else: # "viking":
+      self._resultsFromViking()
 
   def _resultsFromViking(self):
     self.ior_dir = env.VIKING_IOR_DIR
@@ -150,15 +154,15 @@ class LatexMain(BaseMain):
   IOR 16/64K + 16/1M
   LSMIO 16/64K + 16/1M
   """
-  def runVikingPaper41(self):
+  def runStepPaper41(self):
     dataFileList = [self.ior_data['base'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('41-comparison-write-base.pdf')
@@ -186,7 +190,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf, pdg, pdh)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   """
   42: write
@@ -194,20 +198,20 @@ class LatexMain(BaseMain):
   ADIOS 4/64K + 4/1M
   LSMIO 4/64K + 4/1M
   """
-  def runVikingPaper42(self):
+  def runStepPaper42(self):
     dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('42-comparison-write-lsmio.pdf')
@@ -230,7 +234,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   """
   43: write
@@ -238,20 +242,20 @@ class LatexMain(BaseMain):
   LSMIO 4/64K + 4/1M
   PLUGIN 4/64K + 4/1M
   """
-  def runVikingPaper43(self):
+  def runStepPaper43(self):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('43-comparison-write-plugin-4.pdf')
@@ -274,7 +278,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   """
   44: write
@@ -282,20 +286,20 @@ class LatexMain(BaseMain):
   LSMIO 4/64K + 16/64K
   PLUGIN 4/64K + 16/64K
   """
-  def runVikingPaper44(self):
+  def runStepPaper44(self):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('44-comparison-write-plugin-16.pdf')
@@ -318,7 +322,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   """
   45: write
@@ -328,30 +332,30 @@ class LatexMain(BaseMain):
   HDF5-C 4/64K
   LSMIO 4/64K
   """
-  def runVikingPaper45(self):
+  def runStepPaper45(self):
     dataFileList = [self.ior_data['base'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
     dataFileList = [self.ior_data['collective'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading IOR-collective CSV file: ' + dataFile + '.')
     collectiveRun = data.IorData(dataFile)
 
     dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading HDF5 CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
     dataFileList = [self.ior_data['hdf5-collective'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading HDF5-collective CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading HDF5-collective CSV file: ' + dataFile + '.')
     hdf5cRun = data.IorData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('45-comparison-collective.pdf')
@@ -374,7 +378,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
   """
   46: read
@@ -385,35 +389,35 @@ class LatexMain(BaseMain):
   LSMIO 4/64K
   PLUGIN 4/64K
   """
-  def runVikingPaper46(self):
+  def runStepPaper46(self):
     dataFileList = [self.ior_data['base'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading IOR CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
     iorRun = data.IorData(dataFile)
 
     dataFileList = [self.ior_data['collective'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading IOR-collective CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading IOR-collective CSV file: ' + dataFile + '.')
     collectiveRun = data.IorData(dataFile)
 
     dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
-    log.Console.error('Reading HDF5 CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading HDF5 CSV file: ' + dataFile + '.')
     hdf5Run = data.IorData(dataFile)
 
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('46-comparison-read-base.pdf')
@@ -439,7 +443,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
 
   """
@@ -448,20 +452,20 @@ class LatexMain(BaseMain):
   adios/lsmio
   lsmio/plugin
   """
-  def runVikingPaper91(self):
+  def runStepPaper91(self):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('91-comparison-adios-plugin-lsmio.pdf')
@@ -489,7 +493,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
 
   """
@@ -498,20 +502,20 @@ class LatexMain(BaseMain):
   adios/lsmio
   lsmio/plugin
   """
-  def runVikingPaper92(self):
+  def runStepPaper92(self):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading ADIOS CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
     adiosRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading LSMIO CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
     lsmioRun = data.LsmioData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
-    log.Console.error('Reading PLUGIN CSV file: ' + dataFile + '.')
+    log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
     pluginRun = data.LsmioData(dataFile)
 
     fn = self._genPNGPath('92-comparison-adios-plugin-lsmio.pdf')
@@ -539,7 +543,7 @@ class LatexMain(BaseMain):
 
     p = plot.MultiPlot(md, pda, pdb, pdc, pdd, pde, pdf)
     p.plot(fn)
-    log.Console.error('Image generated: ' + fn + '.')
+    log.Console.debug('Image generated: ' + fn + '.')
 
 
   """
@@ -548,24 +552,25 @@ class LatexMain(BaseMain):
   lsmio/hdf5
   ior/hdf5
   """
-  def runVikingPaper93(self):
+  def runStepPaper93(self):
     pass
 
   """
   Read/64K, Write/64K, Write/1M
   ior/ior-c
   """
-  def runVikingPaper95(self):
+  def runStepPaper95(self):
     pass
 
   def run(self):
-    self.runVikingPaper41()
-    self.runVikingPaper42()
-    self.runVikingPaper43()
-    self.runVikingPaper44()
-    self.runVikingPaper45()
-    self.runVikingPaper46()
-    self.runVikingPaper91()
-    self.runVikingPaper92()
+    print('Generating images for the environment: ' + self.hpc + '.')
+    self.runStepPaper41()
+    self.runStepPaper42()
+    self.runStepPaper43()
+    self.runStepPaper44()
+    self.runStepPaper45()
+    self.runStepPaper46()
+    self.runStepPaper91()
+    self.runStepPaper92()
 
 

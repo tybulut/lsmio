@@ -47,7 +47,7 @@ common cmds:
   run <ior|lsmio|lmp> <local|bake|small|large>
 
 other cmds:
-  latex <ior|lsmio|lmp> <local|bake|small|large>
+  latex <viking|viking2|isambard>
   shell       provide interactive access to the python tool
   test        run lsmiotool unit and functional tests
 
@@ -81,11 +81,17 @@ if __name__ == '__main__':
     log.Console.error(err)
     sys.exit(1)
 
+  m_args = []
+  m_kwargs = {}
 
   if not args:
     log.Console.error('Empty command.')
     sys.exit(1)
   elif args[0] == 'latex':
+    m_args = args[1:]
+    if not m_args:
+      log.Console.error('Latex: Needs argument such as viking, viking2, ...')
+      sys.exit(1)
     class_main = main.LatexMain
   elif args[0] == 'load-modules':
     class_main = main.NotImplemented
@@ -101,8 +107,6 @@ if __name__ == '__main__':
     log.Console.error('Unknown command: ' + str(args))
     sys.exit(1)
 
-  m_args = []
-  m_kwargs = {}
 
   inst_main = class_main(*m_args, **m_kwargs)
   inst_main = class_main(*m_args, **m_kwargs)
