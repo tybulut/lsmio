@@ -16,7 +16,7 @@ batch_run() {
   job_script="$3"
 
   nodes=`echo "$concurrency / $pernode" | bc`
-  wallhour=`echo "3 + ($nodes / 4)" | bc`
+  wallhour=`echo "2 + ($nodes / 3)" | bc`
   export BM_NUM_TASKS=$concurrency
 
   if [ "$QSUBMIT" = "sbatch" ]; then
