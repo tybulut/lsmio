@@ -24,6 +24,7 @@ batch_run() {
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
+      --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
       --time=$wallhour:00:00 \
       --account="$SB_ACCOUNT" \
       --mail-user="$SB_EMAIL" \
@@ -44,7 +45,11 @@ wait_for_completion() {
   set +x
   while [ 1 ];
   do
-    $QMANAGER -u $USER
+    if [ "$QMANAGER" = "squeue" ]; then
+      $QMANAGER -u $USER --format="%.15i %.9P %.20j %.8u %.8T %.10M %.9l %.6D %R"
+    else
+      $QMANAGER -u $USER
+    fi
 
     JOB_RUNNING=`$QMANAGER -u $USER | grep -v JOBID`
     if [ -z "$JOB_RUNNING" ]; then
