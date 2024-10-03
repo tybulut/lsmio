@@ -17,7 +17,7 @@ if (NOT ADIOS2_FOUND)
     set(ADIOS2_BUILD_EXAMPLES OFF CACHE BOOL "Turn off Examples")
     set(BUILD_TESTING         OFF CACHE BOOL "Turn off Testing")
 
-  # Include ADIOS2
+    # Include ADIOS2
     FetchContent_Declare(
       ADIOS2
       GIT_REPOSITORY https://github.com/ornladios/ADIOS2.git
@@ -26,8 +26,9 @@ if (NOT ADIOS2_FOUND)
     )
 
     FetchContent_MakeAvailable(ADIOS2)
-    add_library(adios2::core ALIAS adios2_core)
-    add_library(adios2::core_mpi ALIAS adios2_core_mpi)
   endblock()
+
+  add_library(adios2::core ALIAS adios2_core)
+  add_library(adios2::core_mpi ALIAS adios2_core_mpi)
 endif()
 
