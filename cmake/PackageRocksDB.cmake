@@ -31,7 +31,7 @@ if (NOT rocksdb_FOUND)
       GIT_SUBMODULES ""
     )
 
-    FetchContent_MakeAvailable(rocksdb snappy)
+    FetchContent_MakeAvailable(rocksdb)
   endblock()
 
   add_library(rocksdb::rocksdb ALIAS rocksdb)
