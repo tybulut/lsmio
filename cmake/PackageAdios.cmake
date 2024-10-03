@@ -22,7 +22,6 @@ if (NOT ADIOS2_FOUND)
       ADIOS2
       GIT_REPOSITORY https://github.com/ornladios/ADIOS2.git
       GIT_TAG        v2.9.2
-      FIND_PACKAGE_ARGS  GLOBAL
     )
 
     FetchContent_MakeAvailable(ADIOS2)
