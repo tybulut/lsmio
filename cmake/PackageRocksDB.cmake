@@ -2,6 +2,7 @@
 find_package(rocksdb 8.11.4 QUIET)
 if (NOT rocksdb_FOUND)
   include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
 
   # rocksdb
   block()
@@ -29,12 +30,6 @@ if (NOT rocksdb_FOUND)
       GIT_TAG v8.11.4
       GIT_SUBMODULES ""
     )
-
-    # Static lib
-    #FetchContent_GetProperties(rocksdb)
-    #set_target_properties(rocksdb
-    #  PROPERTIES POSITION_INDEPENDENT_CODE ON
-    ##)
 
     FetchContent_MakeAvailable(rocksdb snappy)
   endblock()

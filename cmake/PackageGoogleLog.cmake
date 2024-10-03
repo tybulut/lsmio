@@ -2,6 +2,7 @@
 find_package(glog 0.7 QUIET)
 if (NOT glog_FOUND)
   include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
 
   FetchContent_Declare(
     glog

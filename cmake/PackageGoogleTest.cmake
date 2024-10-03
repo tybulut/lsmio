@@ -3,6 +3,7 @@ include(FetchContent)
 # NOT TARGET gtest
 if (NOT gtest_FOUND)
   include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
 
   block()
     set(INSTALL_GTEST OFF CACHE BOOL "Install")

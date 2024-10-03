@@ -2,6 +2,7 @@
 find_package(cli11 2.4 QUIET)
 if (NOT cli11_FOUND)
   include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
 
   # LevelDB Dependency: Snappy
   option(CLI11_BUILD_TESTS "Build tests" OFF)

@@ -6,6 +6,7 @@ find_package(Threads REQUIRED GLOBAL)
 find_package(ADIOS2 QUIET GLOBAL)
 if (NOT ADIOS2_FOUND)
   include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
 
   block()
     # Features

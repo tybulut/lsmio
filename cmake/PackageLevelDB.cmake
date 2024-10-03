@@ -2,6 +2,7 @@
 find_package(leveldb 1.23 QUIET)
 if (NOT leveldb_FOUND)
   include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
 
   # LevelDB Dependency: Snappy
   option(SNAPPY_BUILD_TESTS "Build tests" OFF)
