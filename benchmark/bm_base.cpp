@@ -32,9 +32,11 @@
 #include <algorithm>
 #include <array>
 #include <signal.h>
+#include <stdexcept>
 
 #include <fmt/format.h>
 #include <boost/program_options.hpp>
+#include <CLI/CLI.hpp>
 
 #include <lsmio/lsmio.hpp>
 
@@ -260,87 +262,92 @@ std::string genOptionsToString() {
 
 
 int BMBase::beginMain(int argc, char **argv) {
+  CLI::App app{"LSMIO Benchmark"};
   try {
-    bpo::options_description desc("Program options");
+    app.add_option("-o,--output-file", gConfigBM.fileName,
+            "output file")
+            ->required();
+    app.add_option("-d,--output-dir", gConfigBM.dirName,
+            "output directory");
+    app.add_option("-v,--verbose", gConfigBM.verbose,
+            "verbose mode (default: not-verbose)");
+    app.add_option("-g,--debug", gConfigBM.debug,
+            "debug mode (default: no)");
+    app.add_option("-m,--mpi-barrier", gConfigBM.useMPIBarrier,
+            "use mpi-barrier to start and stop the benchmark");
+    app.add_option("-c,--collective-io", gConfigBM.enableCollectiveIO,
+            "use collective-io while benchmarking");
+    bool flag_mpi_io_world = false;
+    app.add_option("-w,--mpi-io-world", flag_mpi_io_world,
+            "use MPI world in collective-io (default: host level grouping)");
 
-    desc.add_options()
-    ("help,h", "print this help screen")
-    //
-    ("output-file,o", bpo::value<std::string>(&gConfigBM.fileName), "output file (required)")
-    ("output-dir,d", bpo::value<std::string>(&gConfigBM.dirName), "output directory (optional)")
-    ("verbose,v", "verbose mode (default: not-verbose)")
-    ("debug,g", "debug mode (default: no)")
-    //
-    ("mpi-barrier,m", "use mpi-barrier to start and stop the benchmark")
-    ("collective-io,c", "use collective-io while benchmarking")
-    ("mpi-io-world,w", "use MPI world in collective-io (default: host level grouping)")
-    //
-    ("iterations,i", bpo::value<int>(&gConfigBM.iterations), "terations (default: 1)")
-    ("loop-all,l", "loop all options (default: only specified run)")
-    ("sync,e", "use sync API (default: false)")
-    ("key-count,k", bpo::value<int>(&gConfigBM.keyCount), "number of keys (default: 1024)")
-    ("value-size,z", bpo::value<int>(&gConfigBM.valueSize), "size of the value for a key (default: 64K)")
-    ("segment-count,s", bpo::value<int>(&gConfigBM.segmentCount), "segment count (default: 1024)")
-    //
-    ("lsmio-plugin", "use lsmio plugin for adios benchmark (default: no plugin)")
-    ("lsmio-bfilter", "use bloom filter (default: no bloom filter)")
-    ("lsmio-wal", "use write-ahead log (default: no WAL)")
-    ("lsmio-mmap", "use MMAP read/write (default: no MMAP)")
-    ("lsmio-compress", "enable compression (default: no)")
-    ("lsmio-bs", bpo::value<int>(&lsmio::gConfigLSMIO.blockSize), "block size (default: 64K)")
-    ("lsmio-ts", bpo::value<int>(&lsmio::gConfigLSMIO.transferSize), "transfer size (default: 64K)")
-    //
-    ("ldb-always-flush", "[leveldb] disable batching and makes read available immediately after write (default: no)")
-    ("ldb-batch-size", bpo::value<int>(&lsmio::gConfigLSMIO.asyncBatchSize), "[leveldb] deferred batch size (default: 512)")
-    ("ldb-batch-bytes", bpo::value<int>(&lsmio::gConfigLSMIO.asyncBatchBytes), "[leveldb] deferred batch size (default: 32M)")
-    //
-    ("lsmio-cache", bpo::value<int>(&lsmio::gConfigLSMIO.cacheSize), "LRU cache size (default: 0)")
-    ("lsmio-wbuffer", bpo::value<int>(&lsmio::gConfigLSMIO.writeBufferSize), "write buffer size (default: 32M)")
-    ("lsmio-fsize", bpo::value<int>(&lsmio::gConfigLSMIO.writeFileSize), "first-level file size (default: 32M)")
-    ;
+    app.add_option("-i,--iterations", gConfigBM.iterations,
+            "terations (default: 1)");
+    app.add_option("-l,--loop-all", gConfigBM.loopAll,
+            "loop all options (default: only specified run)");
+    app.add_option("-e,--sync", lsmio::gConfigLSMIO.useSync,
+            "use sync API (default: false)");
+    app.add_option("-k,--key-count", gConfigBM.keyCount,
+            "number of keys (default: 1024)");
+    app.add_option("-z,--value-size", gConfigBM.valueSize,
+            "size of the value for a key (default: 64K)");
+    app.add_option("-s,--segment-count", gConfigBM.segmentCount,
+            "segment count (default: 1024)");
 
-    bpo::variables_map vm;
-    bpo::store(parse_command_line(argc, argv, desc), vm);
-    bpo::notify(vm);
+    app.add_option("--lsmio-plugin", gConfigBM.useLSMIOPlugin,
+            "use lsmio plugin for adios benchmark (default: no plugin)");
+    app.add_option("--lsmio-bfilter", lsmio::gConfigLSMIO.useBloomFilter,
+            "use bloom filter (default: no bloom filter)");
+    app.add_option("--lsmio-wal", lsmio::gConfigLSMIO.enableWAL,
+            "use write-ahead log (default: no WAL)");
+    app.add_option("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
+            "use MMAP read/write (default: no MMAP)");
+    app.add_option("--lsmio-compress", lsmio::gConfigLSMIO.compression,
+            "enable compression (default: no)");
+    app.add_option("--lsmio-bs", lsmio::gConfigLSMIO.blockSize,
+            "block size (default: 64K)");
+    app.add_option("--lsmio-ts", lsmio::gConfigLSMIO.transferSize,
+            "transfer size (default: 64K)");
 
-    if (vm.count("help")) {
-      std::cerr << desc << std::endl;
-      exit(0);
-    }
+    app.add_option("--ldb-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
+            "[leveldb] disable batching and makes read available immediately after write (default: no)");
+    app.add_option("--ldb-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
+            "[leveldb] deferred batch size (default: 512)");
+    app.add_option("--ldb-batch-bytes", lsmio::gConfigLSMIO.asyncBatchBytes,
+            "[leveldb] deferred batch size (default: 32M)");
 
-    lsmio::gConfigLSMIO.useSync = vm.count("sync");
-    lsmio::gConfigLSMIO.alwaysFlush = vm.count("ldb-always-flush");
-    lsmio::gConfigLSMIO.useBloomFilter = vm.count("lsmio-bfilter");
-    lsmio::gConfigLSMIO.enableWAL = vm.count("lsmio-wal");
-    lsmio::gConfigLSMIO.enableMMAP = vm.count("lsmio-mmap");
-    lsmio::gConfigLSMIO.compression = vm.count("lsmio-compress");
-    lsmio::gConfigLSMIO.mpiAggType = vm.count("mpi-io-world") ? lsmio::MPIAggType::Entire : lsmio::MPIAggType::Shared;
-    gConfigBM.useLSMIOPlugin = vm.count("lsmio-plugin");
-    gConfigBM.loopAll = vm.count("loop-all");
-    gConfigBM.verbose = vm.count("verbose");
-    gConfigBM.debug = vm.count("debug");
-    gConfigBM.useMPIBarrier = vm.count("mpi-barrier");
-    gConfigBM.enableCollectiveIO = vm.count("collective-io");
+    app.add_option("--lsmio-cache", lsmio::gConfigLSMIO.cacheSize,
+            "LRU cache size (default: 0)");
+    app.add_option("--lsmio-wbuffer", lsmio::gConfigLSMIO.writeBufferSize,
+            "write buffer size (default: 32M)");
+    app.add_option("--lsmio-fsize", lsmio::gConfigLSMIO.writeFileSize,
+            "first-level file size (default: 32M)");
+
+    app.parse(argc, argv);
+
+    lsmio::gConfigLSMIO.mpiAggType = flag_mpi_io_world ? lsmio::MPIAggType::Entire : lsmio::MPIAggType::Shared;
 
     if (gConfigBM.fileName.empty()) {
-      std::cerr << "ERROR: Output file is required."
-                << std::endl << std::endl << desc << std::endl;
-      exit(1);
+      throw std::runtime_error("ERROR: Output file is required.");
     }
     if (gConfigBM.valueSize < 8) {
-      std::cerr << "ERROR: Value-size has to be >= 8."
-                << std::endl << std::endl << desc << std::endl;
-      exit(1);
+      throw std::runtime_error("ERROR: Value-size has to be >= 8.");
     }
     if (lsmio::gConfigLSMIO.transferSize < lsmio::gConfigLSMIO.blockSize) {
-      std::cerr << "ERROR: Transfer-size has to be >= block-size."
-                << std::endl << std::endl << desc << std::endl;
-      exit(1);
+      throw std::runtime_error("ERROR: Transfer-size has to be >= block-size.");
     }
   }
-  catch (std::exception &e) {
-    std::cerr << e.what() << std::endl;
+  catch(const CLI::CallForHelp &e) {
+    exit(app.exit(e));
+  }
+  catch (std::runtime_error &e) {
+    std::cerr << "ERROR: " << e.what() << std::endl;
+    std::cerr << app.help() << std::flush;
     exit(1);
+  }
+  catch (...) {
+    std::cerr << "ERROR: Uknown" << std::endl;
+    exit(2);
   }
 
   if (gConfigBM.verbose) {

@@ -36,10 +36,9 @@
 #include <rocksdb/slice.h>
 #include <rocksdb/utilities/options_type.h>
 
-#include <boost/filesystem.hpp>
-
-#include <iostream>
 #include <atomic>
+#include <filesystem>
+#include <iostream>
 
 #include <lsmio/manager/store/store_rdb.hpp>
 
@@ -231,7 +230,7 @@ bool LSMIOStoreRDB::dbCleanup() {
     throw std::invalid_argument("ERROR: LSMIOStoreRDB:::overWrite: Failed to remove database.");
   }
 
-  boost::filesystem::remove_all(_dbPath);
+  std::filesystem::remove_all(_dbPath);
 
   return s.ok();
 }

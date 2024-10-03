@@ -6,11 +6,11 @@ message(STATUS "Lib module: LSMIO_INCLUDE_DIR=${LSMIO_INCLUDE_DIR}")
 find_package(MPI REQUIRED)
 include_directories(${MPI_INCLUDE_DIR})
 find_package(Threads REQUIRED)
-find_package(glog REQUIRED)
-find_package(leveldb REQUIRED)
-#find_package(rocksdb REQUIRED)
-find_package(ADIOS2 REQUIRED)
-find_package(Boost COMPONENTS filesystem REQUIRED)
+# continues
+include(PackageAdios)
+include(PackageGoogleLog)
+include(PackageLevelDB)
+include(PackageRocksDB)
 
 # Headers
 set(LIB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -81,7 +81,7 @@ add_library(lsmio::store ALIAS lsmio_store)
 target_include_directories(lsmio_store PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_store PUBLIC
   fmt glog::glog
-  leveldb rocksdb Boost::filesystem
+  leveldb rocksdb
   MPI::MPI_CXX Threads::Threads
   adios2::cxx11_mpi adios2::core_mpi
 )
@@ -93,7 +93,7 @@ add_library(lsmio::adios ALIAS lsmio_adios)
 target_include_directories(lsmio_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_adios PUBLIC
   fmt glog::glog
-  leveldb rocksdb Boost::filesystem
+  leveldb rocksdb
   MPI::MPI_CXX Threads::Threads
   adios2::cxx11_mpi adios2::core_mpi
 )
@@ -105,7 +105,7 @@ add_library(lsmio::posix ALIAS lsmio_posix)
 target_include_directories(lsmio_posix PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_posix PUBLIC
   fmt glog::glog
-  leveldb rocksdb Boost::filesystem
+  leveldb rocksdb
   MPI::MPI_CXX Threads::Threads
   adios2::cxx11_mpi adios2::core_mpi
 )

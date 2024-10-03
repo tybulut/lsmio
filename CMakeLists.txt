@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)
+
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(STATUS "Main: 64-bit compiler detected")
 else(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -18,24 +20,15 @@ if (N GREATER_EQUAL 2)
   message(STATUS "Main: Recommended minimum CMAKE_BUILD_PARALLEL_LEVEL: ${M}")
 endif()
 
-set(DEV_PACKAGE_DIR "$ENV{HOME}/src/usr")
-list(PREPEND CMAKE_PREFIX_PATH "${DEV_PACKAGE_DIR}")
-list(PREPEND CMAKE_INCLUDE_PATH "${DEV_PACKAGE_DIR}/include")
-list(PREPEND CMAKE_LIBRARY_PATH "${DEV_PACKAGE_DIR}/lib")
-list(PREPEND CMAKE_LIBRARY_PATH "${DEV_PACKAGE_DIR}/lib64")
-list(PREPEND CMAKE_MODULE_PATH "${DEV_PACKAGE_DIR}/lib")
-list(PREPEND CMAKE_MODULE_PATH "${DEV_PACKAGE_DIR}/lib64")
-
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(LSMIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-
-link_directories(${DEV_PACKAGE_DIR}/lib)
-link_directories(${DEV_PACKAGE_DIR}/lib64)
 
 # Compiler options
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 #set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON) # -rdynamic
 #set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
 
+# Include dependencies
 include(CTest)
 
 # Custom package directory

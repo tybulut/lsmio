@@ -35,8 +35,6 @@
 #include <map>
 #include <thread>  // NOLINT [build/c++11]
 
-#include <boost/circular_buffer.hpp>
-
 #include <lsmio/manager/client/client.hpp>
 
 

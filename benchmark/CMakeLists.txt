@@ -4,10 +4,12 @@ message(STATUS "Benchmark module: CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR}")
 
 # Find packages
 find_package(MPI REQUIRED)
-find_package(ADIOS2 REQUIRED)
-find_package(glog REQUIRED)
-find_package(fmt REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
+# continues
+include(PackageAdios)
+include(PackageCLI11)
+include(PackageFMT)
+include(PackageGoogleLog)
 
 set(BASE_SOURCE_FILES
   bm_base.cpp

@@ -10,7 +10,7 @@ fi
 rm -rf build \
 && mkdir -p build
 
-if [ "$1" = "debug" ]; then
+if [ "$2" = "debug" ]; then
   cmake -B build \
     -DCMAKE_BUILD_TYPE=DEBUG \
     -DBUILD_SHARED_LIBS=On \
@@ -25,16 +25,16 @@ else
 fi
 pushd build
 
-if [ "$2" = "test" ]; then
+if [ "$1" = "test" ]; then
   make -j8 \
   && ctest -j8 \
   && popd
   #ctest .. -j8 --rerun-failed --output-on-failure
-elif [ "$2" = "install" ]; then
+elif [ "$1" = "install" ]; then
   make -j8 \
   && make install \
   && popd
-else
+elif [ "$1" = "make" ]; then
   make -j8 \
   && popd
 fi

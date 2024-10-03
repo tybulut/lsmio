@@ -28,9 +28,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <filesystem>
 #include <iostream>
-
-#include <boost/filesystem.hpp>
 
 #include <lsmio/manager/manager.hpp>
 #include <lsmio/manager/client/client_mpi.hpp>
@@ -107,13 +106,13 @@ void LSMIOManager::_init() {
   }
 
   if (_isShared && _isSharedSplit) {
-    boost::filesystem::path pathDBDir(_dbDir);
+    std::filesystem::path pathDBDir(_dbDir);
     pathDBDir /= AGGREGATION_DIR_INFIX;
     pathDBDir /= std::to_string(_worldRank);
 
     _dbDir = pathDBDir.string();
     if (_aggRank == AGGREGATION_RANK) {
-      boost::filesystem::create_directories(_dbDir);
+      std::filesystem::create_directories(_dbDir);
     }
   }
   _dbPath = (_dbDir.empty()) ? _dbName : _dbDir + "/" + _dbName;

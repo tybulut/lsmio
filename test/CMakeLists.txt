@@ -5,12 +5,10 @@ message(STATUS "Test module: Checking CMAKE_BUILD_PARALLEL_LEVEL: ${CMAKE_BUILD_
 
 # Find packages
 find_package(MPI REQUIRED)
-find_package(ADIOS2 REQUIRED)
-find_package(glog REQUIRED)
-find_package(GTest REQUIRED)
-
-list(INSERT CMAKE_MODULE_PATH 0 "${PROJECT_SOURCE_DIR}/cmake/upstream")
-include(GoogleTest)
+# continues
+include(PackageAdios)
+include(PackageGoogleLog)
+include(PackageGoogleTest)
 
 # MPI settings
 set (mpi_processes 4)
