@@ -26,9 +26,9 @@ if (NOT ADIOS2_FOUND)
     )
 
     FetchContent_MakeAvailable(ADIOS2)
-  endblock()
 
-  add_library(adios2::core ALIAS adios2_core)
-  add_library(adios2::core_mpi ALIAS adios2_core_mpi)
+    add_library(adios2::core ALIAS adios2_core)
+    add_library(adios2::core_mpi ALIAS adios2_core_mpi)
+  endblock()
 endif()
 

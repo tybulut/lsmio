@@ -32,8 +32,8 @@ if (NOT rocksdb_FOUND)
     )
 
     FetchContent_MakeAvailable(rocksdb)
-  endblock()
 
-  add_library(rocksdb::rocksdb ALIAS rocksdb)
+    add_library(rocksdb::rocksdb ALIAS rocksdb)
+  endblock()
 endif()
 

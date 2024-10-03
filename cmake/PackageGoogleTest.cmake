@@ -15,10 +15,10 @@ if (NOT gtest_FOUND)
 
     FetchContent_MakeAvailable(gtest)
     include_directories(${googletest_SOURCE_DIR}/googletest/include)
-  endblock()
 
-  add_library(GTest::GTest ALIAS gtest)
-  add_library(GTest::Main ALIAS gtest_main)
+    add_library(GTest::GTest ALIAS gtest)
+    add_library(GTest::Main ALIAS gtest_main)
+  endblock()
 endif()
 
 list(INSERT CMAKE_MODULE_PATH 0 "${PROJECT_SOURCE_DIR}/cmake/upstream")
