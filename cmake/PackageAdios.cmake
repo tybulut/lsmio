@@ -14,9 +14,9 @@ if (NOT ADIOS2_FOUND)
     set(ADIOS2_USE_Fortran    OFF CACHE BOOL "Turn off Fortran")
     set(ADIOS2_USE_ZeroMQ     OFF CACHE BOOL "Turn off ZeroMQ")
     # Testing and Examples
-    set(ADIOS2_BUILD_TESTING  OFF CACHE BOOL "Turn off Testing")
+    set(BUILD_TESTING         OFF CACHE INTERNAL "Turn off Testing")
     set(ADIOS2_BUILD_EXAMPLES OFF CACHE BOOL "Turn off Examples")
-    set(BUILD_TESTING         OFF CACHE BOOL "Turn off Testing")
+    set(ADIOS2_BUILD_EXAMPLES_EXPERIMENTAL  OFF CACHE BOOL "Turn off Testing")
 
     # Include ADIOS2
     FetchContent_Declare(
