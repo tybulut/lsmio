@@ -7,6 +7,7 @@ if (NOT rocksdb_FOUND)
   # rocksdb
   block()
     set(FAIL_ON_WARNINGS NO CACHE BOOL "fail on warnings")
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "-fPIC")
     # Features
     set(JNI NO CACHE BOOL "with jni")
     set(USE_RTTI YES CACHE BOOL "with RTTI")
