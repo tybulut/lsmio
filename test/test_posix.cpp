@@ -119,3 +119,9 @@ TEST(lsmioPosix, StreamMulti) {
   EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
 }
 
+int main(int argc, char **argv) {
+  lsmio::initLSMIODebug(argv[0]);
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+
