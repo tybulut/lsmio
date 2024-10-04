@@ -30,6 +30,8 @@ else()
   endif()
 endif()
 
+# Disable RTTI
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
 include(CMakeParseArguments)
 
@@ -56,8 +58,23 @@ function(add_lsmio_store_test x)
   gtest_add_tests(TARGET ${x})
 endfunction()
 
-# Disable RTTI
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+function(add_lsmio_mpi_test x)
+  message("Adding LSMIO MPI testing for ${x}.cpp")
+  add_executable(${x}
+    "${x}.cpp"
+    test_mpi_utils.cpp
+  )
+  target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
+  target_link_libraries(${x}
+    PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+    PRIVATE lsmio_base
+    PRIVATE lsmio::store
+  )
+  gtest_discover_tests(
+    ${x}
+    CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+  )
+endfunction()
 
 # GTest: Benchmark
 add_lsmio_base_test(test_benchmark)
@@ -69,21 +86,8 @@ add_lsmio_store_test(test_manager)
 add_lsmio_store_test(test_posix)
 
 # GTest: MPI: Base and Manager
-add_executable(test_mpi
-  test_mpi_base.cpp
-  test_mpi_manager.cpp
-  test_mpi_utils.cpp
-)
-target_include_directories(test_mpi PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(test_mpi
-  PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
-  PRIVATE lsmio_base
-  PRIVATE lsmio_store
-)
-gtest_discover_tests(
-  test_mpi
-  CMD_WRAPPER ${mpi_cmd} ${test_parameters}
-)
+add_lsmio_mpi_test(test_mpi_base)
+add_lsmio_mpi_test(test_mpi_manager)
 
 # GTest: Adios and Plugin
 add_executable(test_adios test_adios.cpp test_plugin.cpp)
