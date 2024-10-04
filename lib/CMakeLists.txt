@@ -57,7 +57,6 @@ set(LIB_ADIOS_CPP_FILES
   ${LIB_SOURCE_DIR}/adios-plugin/lsmio_plugin.cpp
 )
 set(LIB_POSIX_CPP_FILES
-  ${LIB_STORE_CPP_FILES}
   ${LIB_SOURCE_DIR}/posix/posix.cpp
 )
 set(LIB_BASE_SOURCE_FILES ${LIB_BASE_HPP_FILES} ${LIB_BASE_CPP_FILES})
@@ -106,6 +105,7 @@ target_include_directories(lsmio_posix PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_posix PUBLIC
   fmt glog::glog
   leveldb rocksdb
+  lsmio_store
   MPI::MPI_CXX Threads::Threads
   adios2::cxx11_mpi adios2::core_mpi
 )
