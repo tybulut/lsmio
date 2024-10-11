@@ -35,14 +35,11 @@
 #include <stdexcept>
 
 #include <fmt/format.h>
-#include <boost/program_options.hpp>
 #include <CLI/CLI.hpp>
 
 #include <lsmio/lsmio.hpp>
 
 #include "bm_base.hpp"
-
-namespace bpo = boost::program_options;
 
 BMConfig gConfigBM;
 
