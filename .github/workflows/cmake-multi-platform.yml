@@ -31,6 +31,9 @@ jobs:
             c_compiler: gcc
             cpp_compiler: g++
 
+    env:
+      MAKEFLAGS: "-j $(nproc)"
+
     steps:
     - uses: actions/checkout@v3
 
