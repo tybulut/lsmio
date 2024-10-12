@@ -12,14 +12,12 @@ if [ "$2" = "debug" ]; then
   cmake -B build \
     -DCMAKE_BUILD_TYPE=DEBUG \
     -DBUILD_SHARED_LIBS=On \
-    -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr
 else
   cmake -B build \
     -DCMAKE_BUILD_TYPE=RELEASE \
     -DBUILD_SHARED_LIBS=On \
-    -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr
 fi
 pushd build
 

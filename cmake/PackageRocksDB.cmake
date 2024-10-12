@@ -1,8 +1,12 @@
 # LevelDB
-find_package(rocksdb 8.9 QUIET)
-if (NOT rocksdb_FOUND)
+find_package(RocksDB 7.8 QUIET)
+if (NOT RocksDB_FOUND)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
+
+  #include(CMakePrintHelpers)
+  #cmake_print_variables(RocksDB_FOUND)
+  #cmake_print_variables(CMAKE_MODULE_PATH)
 
   # rocksdb
   block()

@@ -38,7 +38,7 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install dependencies
-      run: sudo apt-get install -y openmpi-bin libopenmpi-dev libgflags-dev libadios2-mpi-c++11-dev libcli11-dev libfmt-dev libgoogle-glog-dev libgtest-dev  libleveldb-dev librocksdb-dev libfmt-dev libadios2-mpi-c++11-dev
+      run: sudo apt-get install -y openmpi-bin libopenmpi-dev libgflags-dev libadios2-mpi-c++11-dev libcli11-dev libfmt-dev libgoogle-glog-dev libgtest-dev  libleveldb-dev librocksdb-dev
 
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.

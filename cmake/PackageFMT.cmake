@@ -1,5 +1,5 @@
 # Google-Log
-find_package(fmt 10.2.1 QUIET)
+find_package(fmt 9 QUIET)
 if (NOT fmt_FOUND)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
