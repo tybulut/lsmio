@@ -1,5 +1,9 @@
 # LevelDB
-find_package(RocksDB 7.8 QUIET)
+find_package(RocksDB 8 QUIET)
+if (NOT RocksDB_FOUND)
+  find_package(RocksDB 7 QUIET)
+endif()
+
 if (NOT RocksDB_FOUND)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
