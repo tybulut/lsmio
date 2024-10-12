@@ -32,7 +32,7 @@ jobs:
             cpp_compiler: g++
 
     env:
-      MAKEFLAGS: "-j"
+      MAKEFLAGS: "-j2"
 
     steps:
     - uses: actions/checkout@v3
