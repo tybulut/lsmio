@@ -1,5 +1,5 @@
 # Google-Log
-find_package(glog 0.7 QUIET)
+find_package(glog 0.6 QUIET)
 if (NOT glog_FOUND)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)

@@ -1,5 +1,5 @@
 # CLI11
-find_package(cli11 2.4 QUIET)
+find_package(CLI11 2.4 QUIET)
 if (NOT cli11_FOUND)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
