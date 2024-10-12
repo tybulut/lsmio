@@ -96,9 +96,9 @@ target_link_libraries(test_adios
   PUBLIC GTest::GTest GTest::Main adios2::cxx11 adios2::core
   PRIVATE lsmio_base
 )
-gtest_add_tests(TARGET test_adios)
-set_tests_properties(${all_tests} PROPERTIES
-  ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+gtest_discover_tests(
+  test_adios
+  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
 
 # GTest: MPI: Adios and Plugin
@@ -111,8 +111,5 @@ target_link_libraries(test_mpi_adios
 gtest_discover_tests(
   test_mpi_adios
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
-set_tests_properties(${all_tests} PROPERTIES
-  ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
-)
-
