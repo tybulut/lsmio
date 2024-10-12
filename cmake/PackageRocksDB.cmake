@@ -28,8 +28,9 @@ if (NOT rocksdb_FOUND)
     FetchContent_Declare(
       rocksdb
       GIT_REPOSITORY https://github.com/facebook/rocksdb.git
-      GIT_TAG v8.11.4
+      GIT_TAG        v8.11.4
       GIT_SUBMODULES ""
+      GIT_PROGRESS   TRUE
     )
 
     FetchContent_MakeAvailable(rocksdb)

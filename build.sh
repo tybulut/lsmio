@@ -4,11 +4,9 @@ export BS_SCRIPT=`realpath $0`
 export BS_DIRNAME=`dirname $BS_SCRIPT`
 
 if [ "$1" = "clean" ]; then
-  $BS_DIRNAME/clean.sh
+  rm -rf build \
+  && mkdir -p build
 fi
-
-rm -rf build \
-&& mkdir -p build
 
 if [ "$2" = "debug" ]; then
   cmake -B build \

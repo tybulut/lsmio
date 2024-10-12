@@ -10,8 +10,9 @@ if (NOT leveldb_FOUND)
   FetchContent_Declare(
     snappy
     GIT_REPOSITORY https://github.com/google/snappy.git
-    GIT_TAG 1.2.1
+    GIT_TAG        1.2.1
     GIT_SUBMODULES ""
+    GIT_PROGRESS   TRUE
   )
 
   # leveldb
@@ -20,8 +21,9 @@ if (NOT leveldb_FOUND)
   FetchContent_Declare(
     leveldb
     GIT_REPOSITORY https://github.com/google/leveldb.git
-    GIT_TAG 1.23
+    GIT_TAG        1.23
     GIT_SUBMODULES ""
+    GIT_PROGRESS   TRUE
   )
 
   FetchContent_MakeAvailable(leveldb snappy)

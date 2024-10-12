@@ -23,6 +23,7 @@ if (NOT ADIOS2_FOUND)
       ADIOS2
       GIT_REPOSITORY https://github.com/ornladios/ADIOS2.git
       GIT_TAG        v2.9.2
+      GIT_PROGRESS   TRUE
     )
 
     FetchContent_MakeAvailable(ADIOS2)

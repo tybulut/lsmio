@@ -162,12 +162,12 @@ int main(int argc, char **argv) {
   int numProcesses;
   MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
 
-  if (numProcesses == 4) {
+  if (numProcesses > 1) {
     ::testing::InitGoogleTest(&argc, argv);
     errorCode = RUN_ALL_TESTS();
   }
   else {
-    LOG(ERROR) << "lsmioTestMPI: The MPI process size should be 4." << std::endl;
+    LOG(ERROR) << "lsmioTestMPI: The MPI process size should be > 1." << std::endl;
     std::copy(argv+1, argv+argc, std::ostream_iterator<const char*>(LOG(ERROR), "\n"));
     errorCode = 1;
   }

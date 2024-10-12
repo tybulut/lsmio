@@ -11,7 +11,7 @@ include(PackageGoogleLog)
 include(PackageGoogleTest)
 
 # MPI settings
-set (mpi_processes 4)
+set (mpi_processes 2)
 find_program (mpi_cmd mpirun)
 
 if(NOT mpi_cmd)
