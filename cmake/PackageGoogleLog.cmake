@@ -1,6 +1,6 @@
 # Google-Log
 find_package(glog 0.6 QUIET)
-if (NOT glog_FOUND)
+if (NOT glog_FOUND AND NOT TARGET glog)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 

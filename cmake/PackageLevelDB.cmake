@@ -1,6 +1,6 @@
 # LevelDB
 find_package(leveldb 1.23 QUIET)
-if (NOT leveldb_FOUND)
+if (NOT leveldb_FOUND AND NOT TARGET leveldb)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 

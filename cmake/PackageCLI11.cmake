@@ -1,7 +1,7 @@
 # CLI11
 list(APPEND CMAKE_MODULE_PATH "/usr/share/cmake")
 find_package(CLI11 2 QUIET)
-if (NOT CLI11_FOUND)
+if (NOT CLI11_FOUND AND NOT TARGET CLI11)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
