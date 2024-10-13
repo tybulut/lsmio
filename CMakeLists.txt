@@ -28,6 +28,9 @@ option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 #set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON) # -rdynamic
 #set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
 
+# Other options
+option(LSMIO_BUILD_BENCHMARKS "Build LSMIO benchmarks" ON)
+
 # Include dependencies
 include(CTest)
 
@@ -39,7 +42,11 @@ add_subdirectory(include)
 
 # Sub directories
 add_subdirectory(lib)
-add_subdirectory(benchmark)
+
+# enable benchmark functionality
+if(LSMIO_BUILD_BENCHMARKS)
+  add_subdirectory(benchmark)
+endif()
 
 # enable testing functionality
 if(BUILD_TESTING)
