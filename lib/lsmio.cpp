@@ -60,7 +60,7 @@ static std::map<std::string, bool> _LSMIOconfigMap;
 
 void initLSMIORelease(char *name) {
   google::InitGoogleLogging(name);
-  FLAGS_logtostderr = google::ERROR;
+  FLAGS_logtostderr = true;
   FLAGS_minloglevel = google::ERROR;
 }
 
@@ -68,7 +68,7 @@ void initLSMIORelease(char *name) {
 void initLSMIODebug(char *name) {
   defaultLogDebug = true;
   google::InitGoogleLogging(name);
-  FLAGS_logtostderr = google::WARNING;
+  FLAGS_logtostderr = true;
   FLAGS_minloglevel = google::INFO;
 }
 
@@ -85,10 +85,10 @@ void decreaseLSMIOLogging() {
 
 void defaultLSMIOLogging() {
   if (defaultLogDebug) {
-    FLAGS_logtostderr = google::WARNING;
+    FLAGS_logtostderr = true;
     FLAGS_minloglevel = google::INFO;
   } else {
-    FLAGS_logtostderr = google::ERROR;
+    FLAGS_logtostderr = true;
     FLAGS_minloglevel = google::ERROR;
   }
 }

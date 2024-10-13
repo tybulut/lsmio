@@ -5,15 +5,13 @@ message(STATUS "Test module: Checking CMAKE_BUILD_PARALLEL_LEVEL: ${CMAKE_BUILD_
 
 # Find packages
 find_package(MPI REQUIRED)
-find_package(ADIOS2 REQUIRED)
-find_package(glog REQUIRED)
-find_package(GTest REQUIRED)
-
-list(INSERT CMAKE_MODULE_PATH 0 "${PROJECT_SOURCE_DIR}/cmake/upstream")
-include(GoogleTest)
+# continues
+include(PackageAdios)
+include(PackageGoogleLog)
+include(PackageGoogleTest)
 
 # MPI settings
-set (mpi_processes 4)
+set (mpi_processes 2)
 find_program (mpi_cmd mpirun)
 
 if(NOT mpi_cmd)
@@ -32,47 +30,64 @@ else()
   endif()
 endif()
 
-
 # Disable RTTI
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
+include(CMakeParseArguments)
+
+function(add_lsmio_base_test x)
+  message("Adding LSMIO base testing for ${x}.cpp")
+  add_executable(${x} "${x}.cpp")
+  target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
+  target_link_libraries(${x}
+    PUBLIC GTest::GTest GTest::Main
+    PRIVATE lsmio::base
+  )
+  gtest_add_tests(TARGET ${x})
+endfunction()
+
+function(add_lsmio_store_test x)
+  message("Adding LSMIO store testing for ${x}.cpp")
+  add_executable(${x} "${x}.cpp")
+  target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
+  target_link_libraries(${x}
+    PUBLIC GTest::GTest GTest::Main
+    PRIVATE lsmio::store
+    PRIVATE lsmio::posix
+  )
+  gtest_add_tests(TARGET ${x})
+endfunction()
+
+function(add_lsmio_mpi_test x)
+  message("Adding LSMIO MPI testing for ${x}.cpp")
+  add_executable(${x}
+    "${x}.cpp"
+    test_mpi_utils.cpp
+  )
+  target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
+  target_link_libraries(${x}
+    PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+    PRIVATE lsmio_base
+    PRIVATE lsmio::store
+  )
+  gtest_discover_tests(
+    ${x}
+    CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+  )
+endfunction()
+
 # GTest: Benchmark
-add_executable(test_benchmark test_benchmark.cpp)
-target_include_directories(test_benchmark PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(test_benchmark PUBLIC GTest::GTest GTest::Main PRIVATE lsmio::base)
-gtest_add_tests(TARGET test_benchmark)
+add_lsmio_base_test(test_benchmark)
 
 # GTest: Manager, LevelDB and RocksDB
-add_executable(test_manager
-  test_leveldb.cpp
-  test_rocksdb.cpp
-  test_manager.cpp
-  test_posix.cpp
-)
-target_include_directories(test_manager PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(test_manager
-  PUBLIC GTest::GTest GTest::Main
-  PRIVATE lsmio::store
-  PRIVATE lsmio::posix
-)
-gtest_add_tests(TARGET test_manager)
+add_lsmio_store_test(test_leveldb)
+add_lsmio_store_test(test_rocksdb)
+add_lsmio_store_test(test_manager)
+add_lsmio_store_test(test_posix)
 
 # GTest: MPI: Base and Manager
-add_executable(test_mpi
-  test_mpi_base.cpp
-  test_mpi_manager.cpp
-  test_mpi_utils.cpp
-)
-target_include_directories(test_mpi PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(test_mpi
-  PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
-  PRIVATE lsmio_base
-  PRIVATE lsmio_store
-)
-gtest_discover_tests(
-  test_mpi
-  CMD_WRAPPER ${mpi_cmd} ${test_parameters}
-)
+add_lsmio_mpi_test(test_mpi_base)
+add_lsmio_mpi_test(test_mpi_manager)
 
 # GTest: Adios and Plugin
 add_executable(test_adios test_adios.cpp test_plugin.cpp)
@@ -81,9 +96,9 @@ target_link_libraries(test_adios
   PUBLIC GTest::GTest GTest::Main adios2::cxx11 adios2::core
   PRIVATE lsmio_base
 )
-gtest_add_tests(TARGET test_adios)
-set_tests_properties(${all_tests} PROPERTIES
-  ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+gtest_discover_tests(
+  test_adios
+  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
 
 # GTest: MPI: Adios and Plugin
@@ -96,8 +111,5 @@ target_link_libraries(test_mpi_adios
 gtest_discover_tests(
   test_mpi_adios
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
-set_tests_properties(${all_tests} PROPERTIES
-  ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
-)
-

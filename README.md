@@ -48,15 +48,10 @@ screen vim wget curl rdate rsync
 ```
 
 ### Other Dependencies:
-Some versions are out-of-date on the current stable Debian. Hence
-it is better for some of them to be installed fresh.
+Darshan should be installed manually if it is not available already on the
+system. The remaining dependencies are managed by CMake.
 ```
-By default all the packages should be installed with the prefix: $HOME/src
-- doc/dependencies/02-gtest
 - doc/dependencies/11-darshan
-- doc/dependencies/21-adios2
-- doc/dependencies/22-leveldb
-- doc/dependencies/23-rocksdb 
 ```
 
 ## Prerequisites: HPC

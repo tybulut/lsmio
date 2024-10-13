@@ -31,10 +31,9 @@
 #include <leveldb/cache.h>
 #include <leveldb/write_batch.h>
 
-#include "boost/filesystem.hpp"
-
-#include <iostream>
 #include <atomic>
+#include <filesystem>
+#include <iostream>
 
 #include <lsmio/manager/store/store_ldb.hpp>
 
@@ -226,7 +225,7 @@ bool LSMIOStoreLDB::dbCleanup() {
     throw std::invalid_argument("ERROR: LSMIOStoreLDB:::overWrite: Failed to remove database.");
   }
 
-  boost::filesystem::remove_all(_dbPath);
+  std::filesystem::remove_all(_dbPath);
 
   return s.ok();
 }

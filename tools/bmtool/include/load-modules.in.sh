@@ -9,7 +9,6 @@ load_modules_viking() {
   module load lib/zlib/1.2.12-GCCcore-11.3.0
   module load lib/lz4/1.9.3-GCCcore-11.3.0
   module load lib/libunwind/1.6.2-GCCcore-11.3.0
-  module load devel/Boost/1.79.0-GCC-11.3.0
   module load lib/OpenJPEG/2.5.0-GCCcore-11.3.0
   module load numlib/FFTW/3.3.10-GCC-11.3.0
 }
@@ -22,7 +21,6 @@ load_modules_viking2() {
   module load zlib/1.2.13-GCCcore-12.3.0
   module load lz4/1.9.4-GCCcore-12.3.0
   module load libunwind/1.6.2-GCCcore-12.3.0
-  module load Boost/1.82.0-GCC-12.3.0
   module load OpenJPEG/2.5.0-GCCcore-12.3.0
   module load FFTW/3.3.10-GCC-12.3.0
 }
