@@ -4,7 +4,7 @@ if (NOT RocksDB_FOUND)
   find_package(RocksDB 7 QUIET)
 endif()
 
-if (NOT RocksDB_FOUND)
+if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 

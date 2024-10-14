@@ -1,6 +1,6 @@
 # Google-Log
 find_package(fmt 9 QUIET)
-if (NOT fmt_FOUND)
+if (NOT fmt_FOUND AND NOT TARGET fmt)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 

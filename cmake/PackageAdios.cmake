@@ -4,7 +4,7 @@ find_package(Threads REQUIRED GLOBAL)
 
 # ADIOS2
 find_package(ADIOS2 QUIET GLOBAL)
-if (NOT ADIOS2_FOUND)
+if (NOT ADIOS2_FOUND AND NOT TARGET ADIOS2)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 

@@ -1,7 +1,7 @@
 # Google-Test
 find_package(GTest 1.12 QUIET)
 # NOT TARGET gtest
-if (NOT GTest_FOUND)
+if (NOT GTest_FOUND AND NOT TARGET GTest)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
