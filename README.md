@@ -19,27 +19,26 @@ What packages to install and how to install them.
 
 ### OS:
 ```
-DEBIAN-x86-64-12.4
+DEBIAN-x86-64/stable
 ```
 
 ### Packages:
 ```
 build-essential
 cmake autoconf automake gdb git
-cpplint libgoogle-glog-dev
-libgtest-dev googletest-tools googletest
-libgmock-dev google-mock
-libbz2-dev libpython3-dev libfmt-dev
-libboost-program-options-dev libboost-filesystem-dev
-libopenmpi-dev libmpich-dev mpi-default-dev libomp-dev 
-openmpi-bin openmpi-common openmpi-doc mpi-default-dev
-libhdf5-dev libhdf5-mpi-dev libhdf5-mpich-dev libhdf5-openmpi-dev
+cpplint libbz2-dev libpython3-dev
 libkyotocabinet-dev kyotocabinet-utils
 libsnappy-dev sqlite3 libsqlite3-dev
 texlive-latex-base texlive-font-utils
 texlive-latex-base  texlive-latex-extra texlive-science
 libchart-gnuplot-perl libpng-dev
 libpod-parser-perl libpod-latex-perl
+libhdf5-dev libhdf5-mpi-dev libhdf5-mpich-dev libhdf5-openmpi-dev
+openmpi-bin libopenmpi-dev
+libgtest-dev googletest-tools googletest
+libgoogle-glog-dev libfmt-dev
+libgflags-dev libleveldb-dev librocksdb-dev
+libadios2-mpi-c++11-dev libcli11-dev
 ```
 
 ### Optional Packages:
@@ -196,6 +195,7 @@ A simple example is follows:
 ## Resources
 
 External resources for this project:
+- [Developers Guide](Developers.md)
 - Bug tracker: https://github.com/tybulut/lsmio/issues
 - CI server: TBA
 
