@@ -1,0 +1,96 @@
+name: Create Release
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      matrix:
+        os: ubuntu-latest
+        build_type: Release
+        c_compiler: gcc
+        cpp_compiler: g++
+
+    env:
+      MAKEFLAGS: "-j"
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: >
+        sudo apt-get install -y \
+          openmpi-bin libopenmpi-dev libgoogle-glog-dev libgtest-dev \
+          libgflags-dev libleveldb-dev librocksdb-dev \
+          libadios2-mpi-c++11-dev libcli11-dev libfmt-dev
+
+    - name: Set reusable strings
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+        echo "parallel-build="$(nproc) >> "$GITHUB_OUTPUT"
+        echo "project_version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        echo "MAKEFLAGS=-j$(nproc)" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+    - name: Build
+      run: >
+        cmake --build ${{ steps.strings.outputs.build-output-dir }} \
+          --parallel ${{ steps.strings.outputs.parallel-build }} \
+          --config ${{ matrix.build_type }}
+
+    - name: DEB file
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      run: cpack
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body_path: Release.latest.md
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      id: upload-release-asset 
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ steps.strings.outputs.build-output-dir }}/pkg/liblsmio_${{ steps.strings.outputs.project_version }}_amd64.deb
+        asset_name: liblsmio_${{ steps.strings.outputs.project_version }}_amd64.deb
+        asset_content_type: application/octet-stream
+
+    - name: Upload Release Asset
+      id: upload-release-asset 
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ steps.strings.outputs.build-output-dir }}/pkg/liblsmio-dev_${{ steps.strings.outputs.project_version }}_amd64.deb
+        asset_name: liblsmio-dev_${{ steps.strings.outputs.project_version }}_amd64.deb
+        asset_content_type: application/octet-stream
+

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(lsmio VERSION 0.1.0)
+project(lsmio VERSION 0.1.6)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,9 +31,6 @@ option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 # Other options
 option(LSMIO_BUILD_BENCHMARKS "Build LSMIO benchmarks" ON)
 
-# Include dependencies
-include(CTest)
-
 # Custom package directory
 set(CUSTOM_PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -48,8 +45,14 @@ if(LSMIO_BUILD_BENCHMARKS)
   add_subdirectory(benchmark)
 endif()
 
+# Last step
+include(DebianPkg)
+
 # enable testing functionality
 if(BUILD_TESTING)
+  # Include dependencies
+  include(CTest)
+
   enable_testing()
   add_subdirectory(test)
 endif()
