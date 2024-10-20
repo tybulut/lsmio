@@ -5,10 +5,13 @@ on:
     # Sequence of patterns matched against refs/tags
     tags:
       - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
     strategy:
       fail-fast: false
@@ -71,12 +74,12 @@ jobs:
       with:
         tag_name: ${{ github.ref }}
         release_name: Release ${{ github.ref }}
-        body_path: Release.latest.md
+        body_path: ${{ github.workspace }}/Release.latest.md
         draft: false
         prerelease: false
 
-    - name: Upload Release Asset
-      id: upload-release-asset 
+    - name: Upload Release Asset Lib
+      id: upload-release-asset-01
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,8 +89,8 @@ jobs:
         asset_name: liblsmio_${{ steps.strings.outputs.project_version }}_amd64.deb
         asset_content_type: application/octet-stream
 
-    - name: Upload Release Asset
-      id: upload-release-asset 
+    - name: Upload Release Asset Lib-Dev
+      id: upload-release-asset-02
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
