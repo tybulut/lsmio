@@ -4,22 +4,22 @@
 
 ## Getting Started
 
-Setup your environment as explained in the [README](README.md) file. Also install the optional packages.
+Set up your environment as explained in the [README](README.md) file. Also install the optional packages.
 
 ## Workflows
 
 Below are the workflow that are setup:
 
 ```
-1. .github/workflows/01-cmake-depend-all.yml
-2. .github/workflows/02-cmake-build-all.yml
-3. .github/workflows/03-cmake-pkg-deb.yml
-4. .github/workflows/09-github-release.yml
+.github/workflows/01-cmake-depend-all.yml
+.github/workflows/02-cmake-build-all.yml
+.github/workflows/03-cmake-pkg-deb.yml
+.github/workflows/09-github-release.yml
 ```
 
 ## Branching
 
-For each modification, each developer needs to create their own repo:
+For each modification, each developer needs to create their own branch using the below naming convention:
 ```
 <developer-id>/<custom name>
 ```
@@ -53,7 +53,7 @@ git pull origin
 
 git checkout <your branch name>
 git pull origin
-git merge main
+git merge main # You can choose to rebase
 ```
 
 ## PR Process
@@ -63,14 +63,14 @@ Create a PR for your branch online at:
 https://github.com/tybulut/lsmio/pulls
 ```
 
-It is preferred that each PR is squashed and merged, but you can also keep your branch tidy by squashing last N commits:
+Each PR is expeted to be squashed before getting merged, but you can also keep your branch tidy by squashing last N commits:
 ```
 git log # count last N commits to merge
 git reset --soft HEAD~<N>
 git commit -a -m "<your message>"
 ```
 
-If something goes south when squashing messages in your local branch, you can revert it by:
+If something goes south when squashing commits in your local branch, you can revert it before committing by:
 ```
 git reset 'HEAD@{1}'
 ```
@@ -107,8 +107,8 @@ git push origin --tags
 
 If something goes south with tagging, you can remove the tag by:
 ```
-git push --delete origin v0.1.6
-git tag --delete v0.1.6
+git push --delete origin v<VERSION>
+git tag --delete v<VERSION>
 ```
 
 ## Github Tool Setup
