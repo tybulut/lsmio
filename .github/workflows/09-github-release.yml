@@ -13,11 +13,15 @@ jobs:
     strategy:
       fail-fast: false
 
+      # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
       matrix:
-        os: ubuntu-latest
-        build_type: Release
-        c_compiler: gcc
-        cpp_compiler: g++
+        os: [ubuntu-latest]
+        build_type: [Release]
+        c_compiler: [gcc]
+        include:
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
 
     env:
       MAKEFLAGS: "-j"
@@ -52,8 +56,8 @@ jobs:
     - name: Build
       run: >
         cmake --build ${{ steps.strings.outputs.build-output-dir }} \
-          --parallel ${{ steps.strings.outputs.parallel-build }} \
-          --config ${{ matrix.build_type }}
+          --config ${{ matrix.build_type }} \
+          --parallel ${{ steps.strings.outputs.parallel-build }}
 
     - name: DEB file
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
