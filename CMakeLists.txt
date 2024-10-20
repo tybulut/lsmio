@@ -27,9 +27,11 @@ set(LSMIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 #set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON) # -rdynamic
 #set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
-
 # Other options
 option(LSMIO_BUILD_BENCHMARKS "Build LSMIO benchmarks" ON)
+option(LSMIO_BUILD_TESTS "Build the testing tree." ON)
+
+# Other options
 
 # Custom package directory
 set(CUSTOM_PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -49,7 +51,7 @@ endif()
 include(DebianPkg)
 
 # enable testing functionality
-if(BUILD_TESTING)
+if(LSMIO_BUILD_TESTS)
   # Include dependencies
   include(CTest)
 
