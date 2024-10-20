@@ -195,7 +195,7 @@ A simple example is follows:
 ## Resources
 
 External resources for this project:
-- Developers Guide[Developers.md]
+- [Developers Guide]{Developers.md}
 - Bug tracker: https://github.com/tybulut/lsmio/issues
 - CI server: TBA
 

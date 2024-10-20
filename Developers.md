@@ -4,7 +4,7 @@
 
 ## Getting Started
 
-Setup your environment as explained in the README[README.md] file. Also install the optional packages.
+Setup your environment as explained in the [README]{README.md} file. Also install the optional packages.
 
 ## Workflows
 
