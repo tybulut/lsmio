@@ -114,74 +114,82 @@ target_compile_definitions(lsmio_posix PRIVATE LSMIO_VERSION=0.1.0)
 # Install: BASE
 install(TARGETS lsmio_base
   EXPORT lsmio-base-targets
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
+  COMPONENT ${PROJECT_NAME}
   INCLUDES DESTINATION include
 )
-install(FILES ${INC_BASE_HPP_FILES} DESTINATION include/lsmio)
-#install(DIRECTORY include/lsmio DESTINATION include)
+install(FILES
+  ${INC_BASE_HPP_FILES}
+  DESTINATION include/lsmio
+  COMPONENT ${PROJECT_NAME}_dev
+)
 
 # Install: STORE
 install(TARGETS lsmio_store
   EXPORT lsmio-store-targets
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
+  COMPONENT ${PROJECT_NAME}
   INCLUDES DESTINATION include
 )
 #install(FILES ${INC_STORE_HPP_FILES} DESTINATION include/lsmio/manager)
-install(DIRECTORY ${LSMIO_INCLUDE_DIR}/lsmio/manager
-        DESTINATION include/lsmio
-        FILES_MATCHING PATTERN "*.hpp"
+install(DIRECTORY
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager
+  DESTINATION include/lsmio
+  COMPONENT ${PROJECT_NAME}_dev
+  FILES_MATCHING PATTERN "*.hpp"
 )
 
 # Install: ADIOS
 install(TARGETS lsmio_adios
   DESTINATION lib
+  COMPONENT ${PROJECT_NAME}
 )
 
 # Install: POSIX
 install(TARGETS lsmio_posix
   EXPORT lsmio-posix-targets
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
+  COMPONENT ${PROJECT_NAME}
   INCLUDES DESTINATION include
 )
-#install(FILES ${INC_POSIX_HPP_FILES} DESTINATION include/lsmio/posix)
-install(DIRECTORY ${LSMIO_INCLUDE_DIR}/lsmio/posix
-        DESTINATION include/lsmio
-        FILES_MATCHING PATTERN "*.hpp"
+install(FILES
+  ${INC_POSIX_HPP_FILES}
+  DESTINATION include/lsmio/posix
+  COMPONENT ${PROJECT_NAME}_dev
 )
 
 # CMake: BASE
 install(EXPORT lsmio-base-targets
-    FILE lsmio-base-targets.cmake
+  FILE lsmio-base-targets.cmake
 #    NAMESPACE lsmio::
-    DESTINATION lib/cmake/lsmio
+  DESTINATION lib/cmake/lsmio
+  COMPONENT ${PROJECT_NAME}_dev
 )
 
 # CMake: STORE
 install(EXPORT lsmio-store-targets
-    FILE lsmio-store-targets.cmake
+  FILE lsmio-store-targets.cmake
 #    NAMESPACE lsmio::
-    DESTINATION lib/cmake/lsmio
+  DESTINATION lib/cmake/lsmio
+  COMPONENT ${PROJECT_NAME}_dev
 )
 
 # CMake: POSIX
 install(EXPORT lsmio-posix-targets
-    FILE lsmio-posix-targets.cmake
+  FILE lsmio-posix-targets.cmake
 #    NAMESPACE lsmio::
-    DESTINATION lib/cmake/lsmio
+  DESTINATION lib/cmake/lsmio
+  COMPONENT ${PROJECT_NAME}_dev
 )
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
-    "lsmio-config-version.cmake"
-    VERSION ${lsmio_VERSION}
-    COMPATIBILITY AnyNewerVersion)
+  "lsmio-config-version.cmake"
+  VERSION ${lsmio_VERSION}
+  COMPATIBILITY AnyNewerVersion
+)
 
-install(FILES "${LSMIO_SOURCE_DIR}/cmake/lsmio-config.cmake" "${CMAKE_CURRENT_BINARY_DIR}/lsmio-config-version.cmake"
-    DESTINATION lib/cmake/lsmio)
+install(FILES
+  "${LSMIO_SOURCE_DIR}/cmake/lsmio-config.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/lsmio-config-version.cmake"
+  DESTINATION lib/cmake/lsmio
+  COMPONENT ${PROJECT_NAME}_dev
+)
 

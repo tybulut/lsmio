@@ -1,4 +1,4 @@
-name: CMake Depend All
+name: CMake Package Debian
 
 on:
   push:
@@ -27,7 +27,8 @@ jobs:
       MAKEFLAGS: "-j"
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
     - name: Install dependencies
       run: >
@@ -57,8 +58,6 @@ jobs:
           --config ${{ matrix.build_type }} \
           --parallel ${{ steps.strings.outputs.parallel-build }}
 
-    - name: Test
+    - name: DEB file
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: >
-        ctest --build-config ${{ matrix.build_type }} --output-on-failure \
-          --parallel ${{ steps.strings.outputs.parallel-build }}
+      run: cpack
