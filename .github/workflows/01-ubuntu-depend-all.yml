@@ -1,4 +1,4 @@
-name: CMake Depend All
+name: CMake Depend All - Ubuntu
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 
 jobs:
   build:
+    name: Build on Ubuntu
     runs-on: ubuntu-24.04
 
     strategy:
@@ -27,16 +28,19 @@ jobs:
       MAKEFLAGS: "-j"
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout project
+      uses: actions/checkout@v3
 
-    - name: Install dependencies
+    - name: Install dependencies - DPKG
       run: >
         sudo apt-get install -y \
-          openmpi-bin libopenmpi-dev libgoogle-glog-dev libgtest-dev \
-          libgflags-dev libleveldb-dev librocksdb-dev \
-          libadios2-mpi-c++11-dev libcli11-dev libfmt-dev
+          openmpi-bin libopenmpi-dev \
+          libgoogle-glog-dev libgtest-dev libgflags-dev \
+          libcli11-dev libfmt-dev \
+          libleveldb-dev librocksdb-dev \
+          libadios2-mpi-c++11-dev
 
-    - name: Set reusable strings
+    - name: Set reusable strings - Ubuntu
       id: strings
       shell: bash
       run: |
@@ -44,21 +48,20 @@ jobs:
         echo "parallel-build="$(nproc) >> "$GITHUB_OUTPUT"
         echo "MAKEFLAGS=-j$(nproc)" >> $GITHUB_ENV
 
-    - name: Configure CMake
+    - name: Configure CMake - Ubuntu
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-    - name: Build
+    - name: Build - Ubuntu
       run: >
         cmake --build ${{ steps.strings.outputs.build-output-dir }} \
           --config ${{ matrix.build_type }} \
           --parallel ${{ steps.strings.outputs.parallel-build }}
 
-    - name: Test
+    - name: Test - Ubuntu
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: >
-        ctest --build-config ${{ matrix.build_type }} --output-on-failure \
-          --parallel ${{ steps.strings.outputs.parallel-build }}
+      run: |
+        ctest --build-config ${{ matrix.build_type }}

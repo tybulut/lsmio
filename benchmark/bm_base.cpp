@@ -31,6 +31,7 @@
 #include <iostream>
 #include <algorithm>
 #include <array>
+#include <random>
 #include <signal.h>
 #include <stdexcept>
 
@@ -151,7 +152,10 @@ int BMBase::benchIteration(int iteration, bool opt) {
 
   pRandomKeyIndex = new int[gConfigBM.keyCount];
   for(int i=0; i< gConfigBM.keyCount; i++) pRandomKeyIndex[i] = i;
-  std::random_shuffle(&pRandomKeyIndex[0], &pRandomKeyIndex[gConfigBM.keyCount]);
+
+  std::random_device rd;
+  std::mt19937 g(rd());
+  std::shuffle(&pRandomKeyIndex[0], &pRandomKeyIndex[gConfigBM.keyCount], g);
 
   double bytes = (double) gConfigBM.keyCount * gConfigBM.valueSize;
   if (useMPI) bytes *= mpiSize;

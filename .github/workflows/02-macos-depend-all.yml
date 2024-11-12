@@ -1,0 +1,57 @@
+name: CMake Depend All - MacOS
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build on MacOS
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        build_type: [Release]
+
+    steps:
+    - name: Checkout project
+      uses: actions/checkout@v4
+
+    - name: Install dependencies - HomeBrew
+      run: >
+        brew install cmake openmpi \
+            glog googletest gflags \
+            cli11 fmt \
+            leveldb rocksdb \
+            adios2
+
+    - name: Set reusable strings - MacOS
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+        export nproc=`sysctl -n hw.physicalcpu`
+        echo "parallel-build="${nproc} >> "$GITHUB_OUTPUT"
+        echo "MAKEFLAGS=-j${nproc}" >> $GITHUB_ENV
+
+    - name: Configure CMake - MacOS
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }} \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+    - name: Build CMake project - MacOS
+      run: |
+        export LDFLAGS="-L/opt/homebrew/lib"
+        export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/lib"
+        cmake --build ${{ steps.strings.outputs.build-output-dir }} \
+          --config ${{ matrix.build_type }} \
+          --parallel ${{ steps.strings.outputs.parallel-build }}
+
+    - name: Test - MacOS
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      run: >
+        ctest --build-config ${{ matrix.build_type }}

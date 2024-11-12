@@ -25,8 +25,10 @@ set(LSMIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Compiler options
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-#set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON) # -rdynamic
-#set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
+# To enable: -rdynamic
+#set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON)
+# To enable: -fPIC
+#set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Other options
 option(LSMIO_BUILD_BENCHMARKS "Build LSMIO benchmarks" ON)
 option(LSMIO_BUILD_TESTS "Build the testing tree." ON)

@@ -16,6 +16,7 @@ if (NOT CLI11_FOUND AND NOT TARGET CLI11)
 
   FetchContent_MakeAvailable(cli11)
   include_directories(${cli11_SOURCE_DIR}/include)
+  add_library(CLI11::CLI11 ALIAS rocksdb)
 endif()
 
 

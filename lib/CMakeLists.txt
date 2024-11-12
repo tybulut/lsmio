@@ -69,8 +69,8 @@ add_library(lsmio_base ${LIB_BASE_SOURCE_FILES})
 #set_property(TARGET lsmio PROPERTY POSITION_INDEPENDENT_CODE ON)
 add_library(lsmio::base ALIAS lsmio_base)
 target_include_directories(lsmio_base PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(lsmio_base PUBLIC
-  fmt glog::glog
+target_link_libraries(lsmio_base
+  PUBLIC fmt::fmt glog::glog
 )
 target_compile_definitions(lsmio_base PRIVATE LSMIO_VERSION=0.1.0)
 
@@ -78,11 +78,11 @@ target_compile_definitions(lsmio_base PRIVATE LSMIO_VERSION=0.1.0)
 add_library(lsmio_store ${LIB_STORE_SOURCE_FILES})
 add_library(lsmio::store ALIAS lsmio_store)
 target_include_directories(lsmio_store PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(lsmio_store PUBLIC
-  fmt glog::glog
-  leveldb rocksdb
-  MPI::MPI_CXX Threads::Threads
-  adios2::cxx11_mpi adios2::core_mpi
+target_link_libraries(lsmio_store
+  PUBLIC fmt::fmt glog::glog
+    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
+    MPI::MPI_CXX Threads::Threads
+    adios2::cxx11_mpi adios2::core_mpi
 )
 target_compile_definitions(lsmio_store PRIVATE LSMIO_VERSION=0.1.0)
 
@@ -90,11 +90,11 @@ target_compile_definitions(lsmio_store PRIVATE LSMIO_VERSION=0.1.0)
 add_library(lsmio_adios ${LIB_ADIOS_SOURCE_FILES})
 add_library(lsmio::adios ALIAS lsmio_adios)
 target_include_directories(lsmio_adios PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(lsmio_adios PUBLIC
-  fmt glog::glog
-  leveldb rocksdb
-  MPI::MPI_CXX Threads::Threads
-  adios2::cxx11_mpi adios2::core_mpi
+target_link_libraries(lsmio_adios
+  PUBLIC fmt::fmt glog::glog
+    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
+    MPI::MPI_CXX Threads::Threads
+    adios2::cxx11_mpi adios2::core_mpi
 )
 target_compile_definitions(lsmio_adios PRIVATE LSMIO_VERSION=0.1.0)
 
@@ -102,12 +102,12 @@ target_compile_definitions(lsmio_adios PRIVATE LSMIO_VERSION=0.1.0)
 add_library(lsmio_posix ${LIB_POSIX_SOURCE_FILES})
 add_library(lsmio::posix ALIAS lsmio_posix)
 target_include_directories(lsmio_posix PRIVATE ${LSMIO_INCLUDE_DIR})
-target_link_libraries(lsmio_posix PUBLIC
-  fmt glog::glog
-  leveldb rocksdb
-  lsmio_store
-  MPI::MPI_CXX Threads::Threads
-  adios2::cxx11_mpi adios2::core_mpi
+target_link_libraries(lsmio_posix
+  PUBLIC fmt::fmt glog::glog
+    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
+    lsmio_store
+    MPI::MPI_CXX Threads::Threads
+    adios2::cxx11_mpi adios2::core_mpi
 )
 target_compile_definitions(lsmio_posix PRIVATE LSMIO_VERSION=0.1.0)
 

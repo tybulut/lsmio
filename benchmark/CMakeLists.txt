@@ -26,7 +26,8 @@ add_executable(bm_leveldb ${BASE_SOURCE_FILES} bm_leveldb.cpp)
 target_include_directories(bm_leveldb PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_leveldb
   PRIVATE lsmio::store
-  PUBLIC fmt MPI::MPI_CXX)
+  PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
+)
 install(TARGETS bm_leveldb
   DESTINATION bin
   COMPONENT ${PROJECT_NAME}
@@ -37,7 +38,8 @@ add_executable(bm_rocksdb ${BASE_SOURCE_FILES} bm_rocksdb.cpp)
 target_include_directories(bm_rocksdb PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_rocksdb
   PRIVATE lsmio::store
-  PUBLIC fmt MPI::MPI_CXX)
+  PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
+)
 install(TARGETS bm_rocksdb
   DESTINATION bin
   COMPONENT ${PROJECT_NAME}
@@ -48,7 +50,8 @@ add_executable(bm_manager ${BASE_SOURCE_FILES} bm_manager.cpp)
 target_include_directories(bm_manager PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_manager
   PRIVATE lsmio::store
-  PUBLIC fmt MPI::MPI_CXX)
+  PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
+)
 install(TARGETS bm_manager
   DESTINATION bin
   COMPONENT ${PROJECT_NAME}
@@ -59,7 +62,9 @@ add_executable(bm_adios ${BASE_SOURCE_FILES} bm_adios.cpp)
 target_include_directories(bm_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_adios
   PRIVATE lsmio_base
-  PUBLIC glog::glog adios2::cxx11 adios2::cxx11_mpi fmt MPI::MPI_CXX
+  PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
+    adios2::cxx11 adios2::cxx11_mpi
+    glog::glog
 )
 install(TARGETS bm_adios
   DESTINATION bin

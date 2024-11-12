@@ -208,7 +208,7 @@ void LSMIOClient::_cancelWaitForCommand() {
 
 void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
   unsigned int loopCounter = 0;
-  int eolRanks[_size] = {};
+  std::vector<int> eolRanks(_size, 0);
 
   LOG(INFO) << "LSMIOClient::_waitForCommand: Starting..." << std::endl;
 
