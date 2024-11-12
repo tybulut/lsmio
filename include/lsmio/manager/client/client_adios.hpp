@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -37,11 +37,9 @@
 
 #include "client.hpp"
 
-
 namespace lsmio {
 
 class LSMIOClientAdios : public LSMIOClient {
-
   private:
     adios2::helper::Comm *_comm;
 
@@ -50,14 +48,13 @@ class LSMIOClientAdios : public LSMIOClient {
     char **_recvToBuffer(int *bufSizes);
 
   public:
-		LSMIOClientAdios(adios2::helper::Comm *comm);
+    LSMIOClientAdios(adios2::helper::Comm *comm);
 
-    bool sendCommand(int rank, const std::string& command,
-                     const std::string& key, const std::string& value);
-    bool recvCommand(int rank, std::string *command,
-                      std::string *key, std::string *value);
+    bool sendCommand(int rank, const std::string &command, const std::string &key,
+                     const std::string &value);
+    bool recvCommand(int rank, std::string *command, std::string *key, std::string *value);
 };
 
-}
+}  // namespace lsmio
 
 #endif

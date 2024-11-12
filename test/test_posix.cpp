@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -28,100 +28,98 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <iostream>
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <lsmio/posix/posix.hpp>
 
 const std::string TEST_DIR_PSX = "";
 
 TEST(lsmioPosix, Stream) {
-  std::string value;
+    std::string value;
 
-  const char *file1 = "serdar";
-  const char *file2 = "bulut";
-  std::string value1 = "alpino";
-  std::string value2 = "teomos";
+    const char *file1 = "serdar";
+    const char *file2 = "bulut";
+    std::string value1 = "alpino";
+    std::string value2 = "teomos";
 
-  std::string dbName = "test-psx-store-stream.db";
-  std::string dbPath = TEST_DIR_PSX.empty() ? dbName : TEST_DIR_PSX + "/" + dbName;
+    std::string dbName = "test-psx-store-stream.db";
+    std::string dbPath = TEST_DIR_PSX.empty() ? dbName : TEST_DIR_PSX + "/" + dbName;
 
-  EXPECT_TRUE(lsmio::LSMIOStream::initialize(dbName, TEST_DIR_PSX));
-  LOG(INFO) << "Created a test database called: " << dbName << std::endl;
+    EXPECT_TRUE(lsmio::LSMIOStream::initialize(dbName, TEST_DIR_PSX));
+    LOG(INFO) << "Created a test database called: " << dbName << std::endl;
 
-  lsmio::LSMIOStream ls1;
-  ls1.open(file1);
-  ls1.write(value1.c_str(), value1.size());
+    lsmio::LSMIOStream ls1;
+    ls1.open(file1);
+    ls1.write(value1.c_str(), value1.size());
 
-  lsmio::LSMIOStream ls2(file2);
-  ls2.write(value2.c_str(), value2.size());
+    lsmio::LSMIOStream ls2(file2);
+    ls2.write(value2.c_str(), value2.size());
 
-  EXPECT_TRUE(lsmio::LSMIOStream::writeBarrier());
+    EXPECT_TRUE(lsmio::LSMIOStream::writeBarrier());
 
-  char rVal1[value1.size()];
-  char rVal2[value2.size()];
+    char rVal1[value1.size()];
+    char rVal2[value2.size()];
 
-  ls1.seekp(0);
-  ls1.read(rVal1, value1.size());
-  value.assign(rVal1, value1.size());
+    ls1.seekp(0);
+    ls1.read(rVal1, value1.size());
+    value.assign(rVal1, value1.size());
 
-  LOG(INFO) << "Test value for file1: " << value << std::endl;
-  EXPECT_EQ(value, value1);
+    LOG(INFO) << "Test value for file1: " << value << std::endl;
+    EXPECT_EQ(value, value1);
 
-  ls2.seekp(0);
-  ls2.read(rVal2, value2.size());
-  value.assign(rVal2, value2.size());
+    ls2.seekp(0);
+    ls2.read(rVal2, value2.size());
+    value.assign(rVal2, value2.size());
 
-  LOG(INFO) << "Test value for file2: " << value << std::endl;
-  EXPECT_EQ(value, value2);
+    LOG(INFO) << "Test value for file2: " << value << std::endl;
+    EXPECT_EQ(value, value2);
 
-  EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
+    EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
 }
 
-
 TEST(lsmioPosix, StreamMulti) {
-  bool success = true;
-  std::string value;
+    bool success = true;
+    std::string value;
 
-  const char *file1 = "serdarM";
-  std::string value1 = "alpinoM";
-  std::string value2 = "teomosM";
+    const char *file1 = "serdarM";
+    std::string value1 = "alpinoM";
+    std::string value2 = "teomosM";
 
-  std::string dbName = "test-psx-store-multi.db";
-  std::string dbPath = TEST_DIR_PSX.empty() ? dbName : TEST_DIR_PSX + "/" + dbName;
+    std::string dbName = "test-psx-store-multi.db";
+    std::string dbPath = TEST_DIR_PSX.empty() ? dbName : TEST_DIR_PSX + "/" + dbName;
 
-  EXPECT_TRUE(lsmio::LSMIOStream::initialize(dbName, TEST_DIR_PSX));
-  LOG(INFO) << "Created a test database called: " << dbName << std::endl;
+    EXPECT_TRUE(lsmio::LSMIOStream::initialize(dbName, TEST_DIR_PSX));
+    LOG(INFO) << "Created a test database called: " << dbName << std::endl;
 
-  lsmio::LSMIOStream ls1;
-  ls1.open(file1);
-  ls1.write(value1.c_str(), value1.size());
-  ls1.write(value2);
+    lsmio::LSMIOStream ls1;
+    ls1.open(file1);
+    ls1.write(value1.c_str(), value1.size());
+    ls1.write(value2);
 
-  EXPECT_TRUE(lsmio::LSMIOStream::writeBarrier());
+    EXPECT_TRUE(lsmio::LSMIOStream::writeBarrier());
 
-  char rVal1[value1.size()];
-  char rVal2[value2.size()];
+    char rVal1[value1.size()];
+    char rVal2[value2.size()];
 
-  ls1.seekp(0);
-  ls1.read(rVal1, value1.size());
-  value.assign(rVal1, value1.size());
+    ls1.seekp(0);
+    ls1.read(rVal1, value1.size());
+    value.assign(rVal1, value1.size());
 
-  LOG(INFO) << "Test value for file1: " << value << std::endl;
-  EXPECT_EQ(value, value1);
+    LOG(INFO) << "Test value for file1: " << value << std::endl;
+    EXPECT_EQ(value, value1);
 
-  ls1.read(rVal2, value2.size());
-  value.assign(rVal2, value2.size());
+    ls1.read(rVal2, value2.size());
+    value.assign(rVal2, value2.size());
 
-  LOG(INFO) << "Test value for file1: " << value << std::endl;
-  EXPECT_EQ(value, value2);
+    LOG(INFO) << "Test value for file1: " << value << std::endl;
+    EXPECT_EQ(value, value2);
 
-  EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
+    EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
 }
 
 int main(int argc, char **argv) {
-  lsmio::initLSMIODebug(argv[0]);
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+    lsmio::initLSMIODebug(argv[0]);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
-

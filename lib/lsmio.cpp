@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -28,17 +28,16 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include <iostream>
-#include <signal.h>
-#include <execinfo.h>
-#include <unistd.h>
 /*
 #include <stdlib.h>
 */
 
 #include <lsmio/lsmio.hpp>
-
 
 namespace lsmio {
 
@@ -57,128 +56,120 @@ bool defaultLogDebug = false;
 /// Internal configuration map for LSMIO flags.
 static std::map<std::string, bool> _LSMIOconfigMap;
 
-
 void initLSMIORelease(char *name) {
-  google::InitGoogleLogging(name);
-  FLAGS_logtostderr = true;
-  FLAGS_minloglevel = google::ERROR;
-}
-
-
-void initLSMIODebug(char *name) {
-  defaultLogDebug = true;
-  google::InitGoogleLogging(name);
-  FLAGS_logtostderr = true;
-  FLAGS_minloglevel = google::INFO;
-}
-
-
-void increaseLSMIOLogging() {
-  FLAGS_minloglevel = google::INFO;
-}
-
-
-void decreaseLSMIOLogging() {
-  FLAGS_minloglevel = google::WARNING;
-}
-
-
-void defaultLSMIOLogging() {
-  if (defaultLogDebug) {
-    FLAGS_logtostderr = true;
-    FLAGS_minloglevel = google::INFO;
-  } else {
+    google::InitGoogleLogging(name);
     FLAGS_logtostderr = true;
     FLAGS_minloglevel = google::ERROR;
-  }
 }
 
+void initLSMIODebug(char *name) {
+    defaultLogDebug = true;
+    google::InitGoogleLogging(name);
+    FLAGS_logtostderr = true;
+    FLAGS_minloglevel = google::INFO;
+}
+
+void increaseLSMIOLogging() { FLAGS_minloglevel = google::INFO; }
+
+void decreaseLSMIOLogging() { FLAGS_minloglevel = google::WARNING; }
+
+void defaultLSMIOLogging() {
+    if (defaultLogDebug) {
+        FLAGS_logtostderr = true;
+        FLAGS_minloglevel = google::INFO;
+    } else {
+        FLAGS_logtostderr = true;
+        FLAGS_minloglevel = google::ERROR;
+    }
+}
 
 bool LSMIOHelper::getFlag(const std::string key) {
-  auto it = _LSMIOconfigMap.find(key);
-  if (it == _LSMIOconfigMap.end()) {
-    return false;
-  }
-  return true;
+    auto it = _LSMIOconfigMap.find(key);
+    if (it == _LSMIOconfigMap.end()) {
+        return false;
+    }
+    return true;
 }
-
 
 void LSMIOHelper::setFlag(const std::string key, const bool value) {
-  if (value) {
-    _LSMIOconfigMap[key] = true;
-  } else {
-    auto it = _LSMIOconfigMap.find(key);
-    if (it != _LSMIOconfigMap.end()) {
-      _LSMIOconfigMap.erase(key);
+    if (value) {
+        _LSMIOconfigMap[key] = true;
+    } else {
+        auto it = _LSMIOconfigMap.find(key);
+        if (it != _LSMIOconfigMap.end()) {
+            _LSMIOconfigMap.erase(key);
+        }
     }
-  }
 }
-
 
 void handlerSIGSEGV(int signal) {
-  const int TRACE_SIZE = 24;
-  void *array[TRACE_SIZE];
-  size_t size;
+    const int TRACE_SIZE = 24;
+    void *array[TRACE_SIZE];
+    size_t size;
 
-  size = backtrace(array, TRACE_SIZE);
+    size = backtrace(array, TRACE_SIZE);
 
-  fprintf(stderr, "LSMIO caught signal: SIGSEGV.\n");
-  backtrace_symbols_fd(array, size, STDERR_FILENO);
+    fprintf(stderr, "LSMIO caught signal: SIGSEGV.\n");
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
 
-  // SIGSEGV handler must exit
-  exit(EXIT_FAILURE);
+    // SIGSEGV handler must exit
+    exit(EXIT_FAILURE);
 }
-
 
 std::string to_string(const MPIAggType v) {
-  std::string sVal;
+    std::string sVal;
 
-  switch (v) {
-    case MPIAggType::Shared: sVal = "mpiShared"; break;
-    case MPIAggType::Entire: sVal =  "mpiEntire"; break;
-    case MPIAggType::EntireSerial: sVal = "mpiEntireSerial"; break;
-    case MPIAggType::Split: sVal = "mpiSplit"; break;
-  }
+    switch (v) {
+        case MPIAggType::Shared:
+            sVal = "mpiShared";
+            break;
+        case MPIAggType::Entire:
+            sVal = "mpiEntire";
+            break;
+        case MPIAggType::EntireSerial:
+            sVal = "mpiEntireSerial";
+            break;
+        case MPIAggType::Split:
+            sVal = "mpiSplit";
+            break;
+    }
 
-  return sVal;
+    return sVal;
 }
-
 
 std::string to_string(const StorageType v) {
-  std::string sVal;
+    std::string sVal;
 
-  switch (v) {
-    case StorageType::LevelDB: sVal = "LevelDB"; break;
-    case StorageType::RocksDB: sVal = "RocksDB"; break;
-  }
+    switch (v) {
+        case StorageType::LevelDB:
+            sVal = "LevelDB";
+            break;
+        case StorageType::RocksDB:
+            sVal = "RocksDB";
+            break;
+    }
 
-  return sVal;
+    return sVal;
 }
-
 
 }  // namespace lsmio
 
 std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v) {
-  os << lsmio::to_string(v);
-  return os;
+    os << lsmio::to_string(v);
+    return os;
 }
-
 
 std::ostream &operator<<(std::ostream &os, lsmio::StorageType v) {
-  os << lsmio::to_string(v);
-  return os;
+    os << lsmio::to_string(v);
+    return os;
 }
 
-
-
-std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType& v) {
-  os << lsmio::to_string(v);
-  return os;
+std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType &v) {
+    os << lsmio::to_string(v);
+    return os;
 }
 
-
-std::ostream &operator<<(std::ostream &os, const lsmio::StorageType& v) {
-  os << lsmio::to_string(v);
-  return os;
+std::ostream &operator<<(std::ostream &os, const lsmio::StorageType &v) {
+    os << lsmio::to_string(v);
+    return os;
 }
-

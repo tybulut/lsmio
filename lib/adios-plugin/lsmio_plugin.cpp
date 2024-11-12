@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -28,194 +28,187 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <adios2/helper/adiosType.h>
-#include <adios2/helper/adiosSystem.h>
-
 #include "lsmio_plugin.hpp"
-#include "lsmio_plugin.tcc"
 
+#include <adios2/helper/adiosSystem.h>
+#include <adios2/helper/adiosType.h>
+
+#include "lsmio_plugin.tcc"
 
 using namespace adios2;
 
 namespace lsmio {
 
-LsmioPlugin::LsmioPlugin(core::IO &io, const std::string &name,
-                         const Mode mode, helper::Comm comm)
-                         : plugin::PluginEngineInterface(io, name, mode, comm.Duplicate()) {
-  _dbName = name;
-  Init();
+LsmioPlugin::LsmioPlugin(core::IO &io, const std::string &name, const Mode mode, helper::Comm comm)
+    : plugin::PluginEngineInterface(io, name, mode, comm.Duplicate()) {
+    _dbName = name;
+    Init();
 }
 
 LsmioPlugin::~LsmioPlugin() {
-  LOG(INFO) << "LsmioPlugin::~LsmioPlugin(): " << std::endl;
-  if (_lm) delete _lm;
-  LOG(INFO) << "LsmioPlugin::~LsmioPlugin(): completed." << std::endl;
+    LOG(INFO) << "LsmioPlugin::~LsmioPlugin(): " << std::endl;
+    if (_lm) delete _lm;
+    LOG(INFO) << "LsmioPlugin::~LsmioPlugin(): completed." << std::endl;
 }
 
 Dims convertStrToDims(const std::string &str) {
-  Dims dims;
+    Dims dims;
 
-  if (str.size() > 2) {
-    auto vals = str.substr(1, str.size() - 2);
-    std::stringstream ss(vals);
-    while (ss.good()) {
-      std::string substr;
-      std::getline(ss, substr, ',');
-      dims.push_back(std::stoi(substr));
+    if (str.size() > 2) {
+        auto vals = str.substr(1, str.size() - 2);
+        std::stringstream ss(vals);
+        while (ss.good()) {
+            std::string substr;
+            std::getline(ss, substr, ',');
+            dims.push_back(std::stoi(substr));
+        }
     }
-  }
 
-  return dims;
+    return dims;
 }
 
 void LsmioPlugin::Init() {
-  std::string dirName = "", fileName = "";
-  std::string aggregationType = "";
-  std::string aggregatorRatio = "";
-  dirName = helper::GetParameter("DirName", m_IO.m_Parameters, false, "Init()");
-  fileName = helper::GetParameter("FileName", m_IO.m_Parameters, true, "Init()");
-  helper::GetParameter(m_IO.m_Parameters, "AggregationType", aggregationType);
-  helper::GetParameter(m_IO.m_Parameters, "AggregatorRatio", aggregatorRatio);
-  LOG(INFO) << "LsmioPlugin::Init: _dbName: " << _dbName
-            << " MPI: " << (m_Comm.IsMPI() ? "YES" : "NO")
-            << " rank: " << m_Comm.Rank()
-            << " size: " << m_Comm.Size()
-            << " aggregationType: " << aggregationType
-            << " aggregatorRatio: " << aggregatorRatio
-            << " dirName: " << dirName
-            << " FileName: " << fileName << std::endl;
+    std::string dirName = "", fileName = "";
+    std::string aggregationType = "";
+    std::string aggregatorRatio = "";
+    dirName = helper::GetParameter("DirName", m_IO.m_Parameters, false, "Init()");
+    fileName = helper::GetParameter("FileName", m_IO.m_Parameters, true, "Init()");
+    helper::GetParameter(m_IO.m_Parameters, "AggregationType", aggregationType);
+    helper::GetParameter(m_IO.m_Parameters, "AggregatorRatio", aggregatorRatio);
+    LOG(INFO) << "LsmioPlugin::Init: _dbName: " << _dbName
+              << " MPI: " << (m_Comm.IsMPI() ? "YES" : "NO") << " rank: " << m_Comm.Rank()
+              << " size: " << m_Comm.Size() << " aggregationType: " << aggregationType
+              << " aggregatorRatio: " << aggregatorRatio << " dirName: " << dirName
+              << " FileName: " << fileName << std::endl;
 
-  if (fileName.empty()) {
-    throw std::invalid_argument("ERROR: LsmioPlugin: no FileName parameter provided.");
-  }
-
-  bool overWrite = false;
-  if (m_OpenMode == adios2::Mode::Write
-      || m_OpenMode == adios2::Mode::Append) {
-    LOG(INFO) << "LsmioPlugin::Init: Opening for writing..." << std::endl;
-
-    if (m_OpenMode == adios2::Mode::Write) {
-      overWrite = true;
+    if (fileName.empty()) {
+        throw std::invalid_argument("ERROR: LsmioPlugin: no FileName parameter provided.");
     }
-  }
 
-  if (m_Comm.IsMPI()) {
-    if (aggregationType.empty() || aggregationType == "twolevelshm") {
-      gConfigLSMIO.mpiAggType = MPIAggType::Shared;
-    } else if (aggregationType == "everyonewritesserial") {
-      gConfigLSMIO.mpiAggType = MPIAggType::EntireSerial;
-    } else if (aggregationType == "everyonewrites" || aggregationType == "auto") {
-      if (aggregatorRatio == "2")
-        gConfigLSMIO.mpiAggType = MPIAggType::Split;
-      else
-        gConfigLSMIO.mpiAggType = MPIAggType::Entire;
+    bool overWrite = false;
+    if (m_OpenMode == adios2::Mode::Write || m_OpenMode == adios2::Mode::Append) {
+        LOG(INFO) << "LsmioPlugin::Init: Opening for writing..." << std::endl;
+
+        if (m_OpenMode == adios2::Mode::Write) {
+            overWrite = true;
+        }
+    }
+
+    if (m_Comm.IsMPI()) {
+        if (aggregationType.empty() || aggregationType == "twolevelshm") {
+            gConfigLSMIO.mpiAggType = MPIAggType::Shared;
+        } else if (aggregationType == "everyonewritesserial") {
+            gConfigLSMIO.mpiAggType = MPIAggType::EntireSerial;
+        } else if (aggregationType == "everyonewrites" || aggregationType == "auto") {
+            if (aggregatorRatio == "2")
+                gConfigLSMIO.mpiAggType = MPIAggType::Split;
+            else
+                gConfigLSMIO.mpiAggType = MPIAggType::Entire;
+        } else {
+            throw std::invalid_argument(
+                "ERROR: LsmioPlugin: Invalid AggregationType parameter provided: " +
+                aggregationType);
+        }
+
+        _lm = new LSMIOManager(fileName, dirName, overWrite, &m_Comm);
     } else {
-      throw std::invalid_argument("ERROR: LsmioPlugin: Invalid AggregationType parameter provided: " + aggregationType);
+        _lm = new LSMIOManager(fileName, dirName, overWrite);
     }
 
-    _lm = new LSMIOManager(fileName, dirName, overWrite, &m_Comm);
-  } else {
-    _lm = new LSMIOManager(fileName, dirName, overWrite);
-  }
+    if (m_OpenMode == adios2::Mode::Read) {
+        LOG(INFO) << "LsmioPlugin::Init: Opened for reading..." << std::endl;
+        std::string value;
+        bool success = _lm->get(_variableStoreKey, &value);
 
-  if (m_OpenMode == adios2::Mode::Read) {
-    LOG(INFO) << "LsmioPlugin::Init: Opened for reading..." << std::endl;
-    std::string value;
-    bool success = _lm->get(_variableStoreKey, &value);
+        LOG(INFO) << "LsmioPlugin::Init: variableStoreKey: [" << value << "]" << std::endl;
+        std::stringstream sStream(value);
 
-    LOG(INFO) << "LsmioPlugin::Init: variableStoreKey: [" << value << "]" << std::endl;
-    std::stringstream sStream(value);
+        while (sStream.good()) {
+            std::string name, typeStr, shapeStr, startStr, countStr;
+            std::getline(sStream, name, ';');
+            std::getline(sStream, typeStr, ';');
+            std::getline(sStream, shapeStr, ';');
+            std::getline(sStream, startStr, ';');
+            std::getline(sStream, countStr);
 
-    while (sStream.good()) {
-      std::string name, typeStr, shapeStr, startStr, countStr;
-      std::getline(sStream, name, ';');
-      std::getline(sStream, typeStr, ';');
-      std::getline(sStream, shapeStr, ';');
-      std::getline(sStream, startStr, ';');
-      std::getline(sStream, countStr);
+            auto shape = convertStrToDims(shapeStr);
+            auto start = convertStrToDims(startStr);
+            auto count = convertStrToDims(countStr);
 
-      auto shape = convertStrToDims(shapeStr);
-      auto start = convertStrToDims(startStr);
-      auto count = convertStrToDims(countStr);
-
-      const DataType type = helper::GetDataTypeFromString(typeStr);
-      if (type == DataType::Struct)
-      {
-        // not supported
-      }
-#define declare_template_instantiation(T)                                      \
-      else if (type == helper::GetDataType<T>())                                 \
-      {                                                                          \
-        AddVariable<T>(name, shape, start, count);                             \
-      }
-ADIOS2_FOREACH_STDTYPE_1ARG(declare_template_instantiation)
+            const DataType type = helper::GetDataTypeFromString(typeStr);
+            if (type == DataType::Struct) {
+                // not supported
+            }
+#define declare_template_instantiation(T)          \
+    else if (type == helper::GetDataType<T>()) {   \
+        AddVariable<T>(name, shape, start, count); \
+    }
+            ADIOS2_FOREACH_STDTYPE_1ARG(declare_template_instantiation)
 #undef declare_template_instantiation
 
-      LOG(INFO) << "LsmioPlugin::Init: variableStoreKey: " << name << std::endl;
+            LOG(INFO) << "LsmioPlugin::Init: variableStoreKey: " << name << std::endl;
+        }
     }
-  }
 
-  LOG(INFO) << "LsmioPlugin::Init: completed..." << std::endl;
+    LOG(INFO) << "LsmioPlugin::Init: completed..." << std::endl;
 }
 
 StepStatus LsmioPlugin::BeginStep(StepMode mode, const float timeoutSeconds) {
-  LOG(INFO) << "LsmioPlugin::BeginStep(): " << std::endl;
-  return StepStatus::OK;
+    LOG(INFO) << "LsmioPlugin::BeginStep(): " << std::endl;
+    return StepStatus::OK;
 }
 
-void LsmioPlugin::PerformGets() {
-  LOG(INFO) << "LsmioPlugin::PerformGets(): " << std::endl;
-}
+void LsmioPlugin::PerformGets() { LOG(INFO) << "LsmioPlugin::PerformGets(): " << std::endl; }
 
 size_t LsmioPlugin::CurrentStep() const {
-  LOG(INFO) << "LsmioPlugin::CurrentStep(): " << std::endl;
-  return _currentStep;
+    LOG(INFO) << "LsmioPlugin::CurrentStep(): " << std::endl;
+    return _currentStep;
 }
 
 void LsmioPlugin::EndStep() {
-  LOG(INFO) << "LsmioPlugin::EndStep(): " << std::endl;
+    LOG(INFO) << "LsmioPlugin::EndStep(): " << std::endl;
 
-  if (m_OpenMode == adios2::Mode::Write || m_OpenMode == adios2::Mode::Append) {
-    PerformPuts();
-  }
+    if (m_OpenMode == adios2::Mode::Write || m_OpenMode == adios2::Mode::Append) {
+        PerformPuts();
+    }
 
-  _currentStep++;
+    _currentStep++;
 }
 
 void LsmioPlugin::DoClose(const int transportIndex) {
-  LOG(INFO) << "LsmioPlugin::DoClose(): " << std::endl;
-  PerformPuts();
+    LOG(INFO) << "LsmioPlugin::DoClose(): " << std::endl;
+    PerformPuts();
 }
 
-#define declare(T)                                                           \
-void LsmioPlugin::DoGetSync(core::Variable<T> &variable, T *values) {        \
-  LOG(INFO) << "LsmioPlugin::DoGetSync(): " << std::endl;                    \
-  ReadVariable(variable, values);                                            \
-}                                                                            \
-                                                                             \
-void LsmioPlugin::DoGetDeferred(core::Variable<T> &variable, T *values) {    \
-  LOG(INFO) << "LsmioPlugin::DoGetDeferred(): " << std::endl;                \
-  ReadVariable(variable, values);                                            \
-}                                                                            \
-                                                                             \
-void LsmioPlugin::DoPutSync(core::Variable<T> &variable, const T *values) {  \
-  LOG(INFO) << "LsmioPlugin::DoPutSync(): " << std::endl;                    \
-  WriteVariable(variable, values, adios2::Mode::Sync);                                              \
-}                                                                            \
-                                                                             \
-void LsmioPlugin::DoPutDeferred(core::Variable<T> &variable, const T *values) { \
-  LOG(INFO) << "LsmioPlugin::DoPutDeferred(): " << std::endl;                \
-  WriteVariable(variable, values, adios2::Mode::Deferred);                                              \
-}
+#define declare(T)                                                                  \
+    void LsmioPlugin::DoGetSync(core::Variable<T> &variable, T *values) {           \
+        LOG(INFO) << "LsmioPlugin::DoGetSync(): " << std::endl;                     \
+        ReadVariable(variable, values);                                             \
+    }                                                                               \
+                                                                                    \
+    void LsmioPlugin::DoGetDeferred(core::Variable<T> &variable, T *values) {       \
+        LOG(INFO) << "LsmioPlugin::DoGetDeferred(): " << std::endl;                 \
+        ReadVariable(variable, values);                                             \
+    }                                                                               \
+                                                                                    \
+    void LsmioPlugin::DoPutSync(core::Variable<T> &variable, const T *values) {     \
+        LOG(INFO) << "LsmioPlugin::DoPutSync(): " << std::endl;                     \
+        WriteVariable(variable, values, adios2::Mode::Sync);                        \
+    }                                                                               \
+                                                                                    \
+    void LsmioPlugin::DoPutDeferred(core::Variable<T> &variable, const T *values) { \
+        LOG(INFO) << "LsmioPlugin::DoPutDeferred(): " << std::endl;                 \
+        WriteVariable(variable, values, adios2::Mode::Deferred);                    \
+    }
 
 ADIOS2_FOREACH_STDTYPE_1ARG(declare)
 #undef declare
 
 void LsmioPlugin::PerformPuts() {
-  LOG(INFO) << "LsmioPlugin::PerformPuts(): " << std::endl;
-  // WriteVarsFromIO(adios2::Mode::Sync);
-  WriteVarsFromIO(adios2::Mode::Deferred);
-  _lm->writeBarrier();
+    LOG(INFO) << "LsmioPlugin::PerformPuts(): " << std::endl;
+    // WriteVarsFromIO(adios2::Mode::Sync);
+    WriteVarsFromIO(adios2::Mode::Deferred);
+    _lm->writeBarrier();
 }
 
 /*
@@ -225,49 +218,44 @@ void LsmioPlugin::Flush(const int transportIndex) {
 */
 
 void LsmioPlugin::WriteVarsFromIO(const Mode launch) {
-  bool isSync = (launch == Mode::Sync) ? true : false;
-  std::string keyTypes;
+    bool isSync = (launch == Mode::Sync) ? true : false;
+    std::string keyTypes;
 
-  LOG(INFO) << "LsmioPlugin::WriteVarsFromIO(): Begin..." << std::endl;
-  const core::VarMap &variables = m_IO.GetVariables();
-  for (const auto &vpair : variables) {
-    const std::string &varName = vpair.first;
-    LOG(INFO) << "LsmioPlugin::WriteVarsFromIO(): " << varName << std::endl;
+    LOG(INFO) << "LsmioPlugin::WriteVarsFromIO(): Begin..." << std::endl;
+    const core::VarMap &variables = m_IO.GetVariables();
+    for (const auto &vpair : variables) {
+        const std::string &varName = vpair.first;
+        LOG(INFO) << "LsmioPlugin::WriteVarsFromIO(): " << varName << std::endl;
 
-    const DataType varType = vpair.second->m_Type;
-#define declare_template_instantiation(T)                                    \
-    if (varType == helper::GetDataType<T>()) {                               \
-      core::Variable<T> *v = m_IO.InquireVariable<T>(varName);               \
-      if (!v) {                                                              \
-         return;                                                             \
-      }                                                                      \
-      keyTypes += WriteVariableInfo(*v);                                    \
+        const DataType varType = vpair.second->m_Type;
+#define declare_template_instantiation(T)                        \
+    if (varType == helper::GetDataType<T>()) {                   \
+        core::Variable<T> *v = m_IO.InquireVariable<T>(varName); \
+        if (!v) {                                                \
+            return;                                              \
+        }                                                        \
+        keyTypes += WriteVariableInfo(*v);                       \
     }
 
-ADIOS2_FOREACH_STDTYPE_1ARG(declare_template_instantiation)
+        ADIOS2_FOREACH_STDTYPE_1ARG(declare_template_instantiation)
 #undef declare_template_instantiation
-  }
+    }
 
-  bool success = _lm->append(_variableStoreKey, keyTypes, isSync);
+    bool success = _lm->append(_variableStoreKey, keyTypes, isSync);
 }
-
 
 }  // namespace lsmio
 
 extern "C" {
 
-lsmio::LsmioPlugin *EngineCreate(adios2::core::IO &io,
-                                 const std::string &name,
-                                 const adios2::Mode mode,
-                                 adios2::helper::Comm comm) {
-  LOG(INFO) << "LsmioPlugin: EngineCreate: " << std::endl;
-  return new lsmio::LsmioPlugin(io, name, mode, comm.Duplicate());
+lsmio::LsmioPlugin *EngineCreate(adios2::core::IO &io, const std::string &name,
+                                 const adios2::Mode mode, adios2::helper::Comm comm) {
+    LOG(INFO) << "LsmioPlugin: EngineCreate: " << std::endl;
+    return new lsmio::LsmioPlugin(io, name, mode, comm.Duplicate());
 }
 
 void EngineDestroy(lsmio::LsmioPlugin *obj) {
-  LOG(INFO) << "LsmioPlugin::EngineDestroy: " << std::endl;
-  delete obj;
+    LOG(INFO) << "LsmioPlugin::EngineDestroy: " << std::endl;
+    delete obj;
 }
-
 }
-

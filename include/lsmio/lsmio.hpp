@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -36,9 +36,9 @@
 #endif
 
 #include <glog/logging.h>
+
 #include <map>
 #include <string>
-
 
 // TODO(sbulut): RDMA
 // TODO(sbulut): High number of variables
@@ -69,66 +69,58 @@ void defaultLSMIOLogging();
 /**
  * Enum representing the types of MPI aggregation.
  */
-enum class MPIAggType {
-  Shared,
-  Entire,
-  EntireSerial,
-  Split
-};
+enum class MPIAggType { Shared, Entire, EntireSerial, Split };
 
 /**
  * Enum representing the storage types supported by LSMIO.
  */
-enum class StorageType {
-  LevelDB,
-  RocksDB
-};
+enum class StorageType { LevelDB, RocksDB };
 
 /**
  * Configuration class for LSMIO settings.
  */
 class LSMIOConfig {
- public:
-   /// @brief Default storage type.
-   StorageType storageType = StorageType::RocksDB;
-   /// @brief Default MPI aggregation type.
-   MPIAggType mpiAggType = MPIAggType::Shared;
+  public:
+    /// @brief Default storage type.
+    StorageType storageType = StorageType::RocksDB;
+    /// @brief Default MPI aggregation type.
+    MPIAggType mpiAggType = MPIAggType::Shared;
 
-   // General settings
-   /// @brief Flag to use Bloom Filter.
-   bool useBloomFilter = false;
-   /// @brief Flag for synchronous operations.
-   bool useSync = false;
-   /// @brief Flag to enable memory-mapped files.
-   bool enableMMAP = false;
-   /// @brief Flag to enable data compression.
-   bool compression = false;
+    // General settings
+    /// @brief Flag to use Bloom Filter.
+    bool useBloomFilter = false;
+    /// @brief Flag for synchronous operations.
+    bool useSync = false;
+    /// @brief Flag to enable memory-mapped files.
+    bool enableMMAP = false;
+    /// @brief Flag to enable data compression.
+    bool compression = false;
 
-   /// @brief Default block size.
-   int blockSize = 512 * 1024;
-   /// @brief Default transfer size.
-   int transferSize = 512 * 1024;
+    /// @brief Default block size.
+    int blockSize = 512 * 1024;
+    /// @brief Default transfer size.
+    int transferSize = 512 * 1024;
 
-   // RocksDB specific settings
-   /// @brief Flag to enable write-ahead logging.
-   bool enableWAL = false;
-   /// @brief Number of write buffers.
-   int writeBufferNumber = 1;
+    // RocksDB specific settings
+    /// @brief Flag to enable write-ahead logging.
+    bool enableWAL = false;
+    /// @brief Number of write buffers.
+    int writeBufferNumber = 1;
 
-   // LevelDB specific settings
-   /// @brief Flag for batch flushing.
-   bool alwaysFlush = false; // BATCH
-   /// @brief Size of asynchronous batches.
-   int asyncBatchSize = 512;
-   /// @brief Number of bytes in asynchronous batches.
-   int asyncBatchBytes = 32 * 1024 * 1024;
+    // LevelDB specific settings
+    /// @brief Flag for batch flushing.
+    bool alwaysFlush = false;  // BATCH
+    /// @brief Size of asynchronous batches.
+    int asyncBatchSize = 512;
+    /// @brief Number of bytes in asynchronous batches.
+    int asyncBatchBytes = 32 * 1024 * 1024;
 
-   /// @brief Default cache size.
-   int cacheSize = 0;
-   /// @brief Default write buffer size.
-   int writeBufferSize = 32 * 1024 * 1024;
-   /// @brief Default write file size.
-  int writeFileSize = 32 * 1024 * 1024;
+    /// @brief Default cache size.
+    int cacheSize = 0;
+    /// @brief Default write buffer size.
+    int writeBufferSize = 32 * 1024 * 1024;
+    /// @brief Default write file size.
+    int writeFileSize = 32 * 1024 * 1024;
 };
 
 /// Global configuration instance for LSMIO.
@@ -139,25 +131,25 @@ extern LSMIOConfig gConfigLSMIO;
  * Provides utility functions for managing flags.
  */
 class LSMIOHelper {
- public:
-   /// @brief Flag for dual write mode.
-   static const std::string FLAG_DUAL;
-   /// @brief Flag for fallback write mode.
-   static const std::string FLAG_FALLBACK;
+  public:
+    /// @brief Flag for dual write mode.
+    static const std::string FLAG_DUAL;
+    /// @brief Flag for fallback write mode.
+    static const std::string FLAG_FALLBACK;
 
-  /**
-   * Retrieve the value of a given flag.
-   * @param key Flag key.
-   * @return true if the flag is set, false otherwise.
-   */
-  static bool getFlag(const std::string key);
+    /**
+     * Retrieve the value of a given flag.
+     * @param key Flag key.
+     * @return true if the flag is set, false otherwise.
+     */
+    static bool getFlag(const std::string key);
 
-  /**
-   * Set the value of a given flag.
-   * @param key Flag key.
-   * @param value Value to set the flag to.
-   */
-  static void setFlag(const std::string key, const bool value);
+    /**
+     * Set the value of a given flag.
+     * @param key Flag key.
+     * @param value Value to set the flag to.
+     */
+    static void setFlag(const std::string key, const bool value);
 };
 
 /**
@@ -189,10 +181,9 @@ std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v);
 std::ostream &operator<<(std::ostream &os, lsmio::StorageType v);
 
 /// Stream overload for MPIAggType (const reference).
-std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType& v);
+std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType &v);
 
 /// Stream overload for StorageType (const reference).
-std::ostream &operator<<(std::ostream &os, const lsmio::StorageType& v);
+std::ostream &operator<<(std::ostream &os, const lsmio::StorageType &v);
 
 #endif  // _LSMIO_LSMIO_H
-

@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -42,8 +42,8 @@ namespace lsmio {
 /**
  * @class LSMIOClientMPI
  * @brief MPI implementation of the LSM IO client.
- * 
- * This class provides an implementation of the LSMIOClient for 
+ *
+ * This class provides an implementation of the LSMIOClient for
  * parallel operations using the Message Passing Interface (MPI).
  */
 class LSMIOClientMPI : public LSMIOClient {
@@ -79,8 +79,8 @@ class LSMIOClientMPI : public LSMIOClient {
      * @param value The value associated with the command.
      * @return True if the command was sent successfully, false otherwise.
      */
-    bool sendCommand(int rank, const std::string& command,
-                     const std::string& key, const std::string& value) override;
+    bool sendCommand(int rank, const std::string &command, const std::string &key,
+                     const std::string &value) override;
 
     /**
      * @brief Receives a command from a specific MPI rank.
@@ -90,8 +90,7 @@ class LSMIOClientMPI : public LSMIOClient {
      * @param value Pointer to the received value string.
      * @return True if the command was received successfully, false otherwise.
      */
-    bool recvCommand(int rank, std::string *command,
-                      std::string *key, std::string *value) override;
+    bool recvCommand(int rank, std::string *command, std::string *key, std::string *value) override;
 };
 
 }  // namespace lsmio

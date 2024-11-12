@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -28,90 +28,85 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <iostream>
-#include <stdexcept>
-#include <vector>
-
 #include <adios2.h>
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <lsmio/lsmio.hpp>
-
+#include <stdexcept>
+#include <vector>
 
 void testPluginWriter(adios2::ADIOS &adios, const std::string &testKey,
-                                      const std::string &testValue) {
-  adios2::IO io = adios.DeclareIO("test-plugin-writer");
-  io.SetEngine("Plugin");
-  adios2::Params params;
-  params["PluginName"] = "LSMIOPlugin";
-  params["PluginLibrary"] = "liblsmio_adios";
-  params["FileName"] = "test-plugin.db";
-  //params["verbose"] = "5";
-  io.SetParameters(params);
+                      const std::string &testValue) {
+    adios2::IO io = adios.DeclareIO("test-plugin-writer");
+    io.SetEngine("Plugin");
+    adios2::Params params;
+    params["PluginName"] = "LSMIOPlugin";
+    params["PluginLibrary"] = "liblsmio_adios";
+    params["FileName"] = "test-plugin.db";
+    // params["verbose"] = "5";
+    io.SetParameters(params);
 
-  adios2::Variable<std::string> varKey;
-  adios2::Engine writer = io.Open("test-plugin.bp", adios2::Mode::Write);
+    adios2::Variable<std::string> varKey;
+    adios2::Engine writer = io.Open("test-plugin.bp", adios2::Mode::Write);
 
-  for(int i=0; i < 10; i++) {
-    std::string testKeyA = testKey + ":" + std::to_string(i);
-    varKey = io.InquireVariable<std::string>(testKeyA);
-    if (! varKey) {
-      varKey = io.DefineVariable<std::string>(testKeyA);
+    for (int i = 0; i < 10; i++) {
+        std::string testKeyA = testKey + ":" + std::to_string(i);
+        varKey = io.InquireVariable<std::string>(testKeyA);
+        if (!varKey) {
+            varKey = io.DefineVariable<std::string>(testKeyA);
+        }
+
+        // writer.Put(varKey, testValue); // Sync: send value
+        writer.Put(varKey, &testValue);  // Deferred: send &value
     }
 
-    //writer.Put(varKey, testValue); // Sync: send value
-    writer.Put(varKey, &testValue); // Deferred: send &value
-  }
+    writer.PerformPuts();
+    LOG(INFO) << "Wrote: " << testKey << "[0-1000]: " << testValue << std::endl;
 
-  writer.PerformPuts();
-  LOG(INFO) << "Wrote: " << testKey << "[0-1000]: " << testValue << std::endl;
-
-  writer.Close();
+    writer.Close();
 }
 
 void testPluginReader(adios2::ADIOS &adios, const std::string &testKey,
-                                            std::vector<std::string> messages) {
-  adios2::IO io = adios.DeclareIO("test-plugin-reader");
-  io.SetEngine("Plugin");
-  adios2::Params params;
-  params["PluginName"] = "LSMIOPlugin";
-  params["PluginLibrary"] = "liblsmio_adios";
-  params["FileName"] = "test-plugin.db";
-  io.SetParameters(params);
+                      std::vector<std::string> messages) {
+    adios2::IO io = adios.DeclareIO("test-plugin-reader");
+    io.SetEngine("Plugin");
+    adios2::Params params;
+    params["PluginName"] = "LSMIOPlugin";
+    params["PluginLibrary"] = "liblsmio_adios";
+    params["FileName"] = "test-plugin.db";
+    io.SetParameters(params);
 
-  adios2::Variable<std::string> varKey;
-  adios2::Engine reader = io.Open("test-plugin.db", adios2::Mode::Read);
+    adios2::Variable<std::string> varKey;
+    adios2::Engine reader = io.Open("test-plugin.db", adios2::Mode::Read);
 
-  std::string message;
-  for(int i=0; i < 10; i++) {
-    std::string testKeyA = testKey + ":" + std::to_string(i);
-    varKey = io.InquireVariable<std::string>(testKeyA);
-    reader.Get(varKey, message);
-    messages.push_back(message);
-  }
+    std::string message;
+    for (int i = 0; i < 10; i++) {
+        std::string testKeyA = testKey + ":" + std::to_string(i);
+        varKey = io.InquireVariable<std::string>(testKeyA);
+        reader.Get(varKey, message);
+        messages.push_back(message);
+    }
 
-  LOG(INFO) << "Read: " << message << std::endl;
-  reader.Close();
+    LOG(INFO) << "Read: " << message << std::endl;
+    reader.Close();
 }
-
 
 TEST(ADIOS, Plugin) {
-  const std::string testKey = "Greeting";
-  const std::string testValue = "Test Plugin Greeting";
-  std::vector<std::string> messages;
+    const std::string testKey = "Greeting";
+    const std::string testValue = "Test Plugin Greeting";
+    std::vector<std::string> messages;
 
-  try {
-    adios2::ADIOS adios;
+    try {
+        adios2::ADIOS adios;
 
-    testPluginWriter(adios, testKey, testValue);
-    testPluginReader(adios, testKey, messages);
-  }
-  catch (const std::exception& e) {
-    FAIL() << "Adios throws an exception: " << e.what() << ".";
-  }
+        testPluginWriter(adios, testKey, testValue);
+        testPluginReader(adios, testKey, messages);
+    } catch (const std::exception &e) {
+        FAIL() << "Adios throws an exception: " << e.what() << ".";
+    }
 
-  for(int i=0; i < messages.size(); i++) {
-    EXPECT_EQ(testValue, messages[i]);
-  }
+    for (int i = 0; i < messages.size(); i++) {
+        EXPECT_EQ(testValue, messages[i]);
+    }
 }
-

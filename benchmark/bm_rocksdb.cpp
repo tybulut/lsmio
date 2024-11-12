@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -29,84 +29,77 @@
  */
 
 #include <iostream>
-
 #include <lsmio/manager/store/store_rdb.hpp>
 
 #include "bm_base.hpp"
-
 
 class BMRocksdb : public BMBase {
   protected:
     lsmio::LSMIOStoreRDB *_lc = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) {
-      return _lc->get(key, value);
-    }
+    virtual bool doRead(const std::string key, std::string *value) { return _lc->get(key, value); }
 
     virtual bool doWrite(const std::string key, const std::string value) {
-      return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
+        return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
     }
 
     virtual int writePrepare(bool opt) {
-      _lc = new lsmio::LSMIOStoreRDB(genDBPath(
-                lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), true);
-      return 0;
+        _lc = new lsmio::LSMIOStoreRDB(
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), true);
+        return 0;
     }
 
     virtual bool doWriteFinalize() {
-      _lc->writeBarrier();
-      return true;
+        _lc->writeBarrier();
+        return true;
     }
 
-    virtual int readPrepare(bool opt) {
-      return 0;
-    }
+    virtual int readPrepare(bool opt) { return 0; }
 
     virtual int readCleanup() {
-      delete _lc;
-      _lc = nullptr;
-      return 0;
+        delete _lc;
+        _lc = nullptr;
+        return 0;
     }
 };
 
-
-
 int main(int argc, char **argv) {
-  int exitCode = 0;
-  bool alwaysFlush[2] = { false, true };
-  bool bloomFilters[2] = { false, true };
-  
-  exitCode += BMBase::beginMain(argc, argv);
+    int exitCode = 0;
+    bool alwaysFlush[2] = {false, true};
+    bool bloomFilters[2] = {false, true};
 
-  BMRocksdb bm;
+    exitCode += BMBase::beginMain(argc, argv);
 
-  for(int j=0; j < 2; j++) {
-    for(int k=0; k < 2; k++) {
-      if (gConfigBM.loopAll) {
-        lsmio::gConfigLSMIO.alwaysFlush = alwaysFlush[j];
-        lsmio::gConfigLSMIO.useBloomFilter = bloomFilters[k];
-      }
+    BMRocksdb bm;
 
-      std::string bmPrefix = std::string("RocksDB Flush: ")
-                           + (lsmio::gConfigLSMIO.alwaysFlush ? "true " : "false")
-                           + " BLF: " + (lsmio::gConfigLSMIO.useBloomFilter ? "true " : "false");
-      LOG(INFO) << "Testing: " << bmPrefix << std::endl;
+    for (int j = 0; j < 2; j++) {
+        for (int k = 0; k < 2; k++) {
+            if (gConfigBM.loopAll) {
+                lsmio::gConfigLSMIO.alwaysFlush = alwaysFlush[j];
+                lsmio::gConfigLSMIO.useBloomFilter = bloomFilters[k];
+            }
 
-      exitCode += bm.benchSuite(bmPrefix);
+            std::string bmPrefix =
+                std::string("RocksDB Flush: ") +
+                (lsmio::gConfigLSMIO.alwaysFlush ? "true " : "false") +
+                " BLF: " + (lsmio::gConfigLSMIO.useBloomFilter ? "true " : "false");
+            LOG(INFO) << "Testing: " << bmPrefix << std::endl;
 
-      if (! gConfigBM.loopAll) break;
+            exitCode += bm.benchSuite(bmPrefix);
+
+            if (!gConfigBM.loopAll) break;
+        }
+
+        if (!gConfigBM.loopAll) break;
     }
 
-    if (! gConfigBM.loopAll) break;
-  }
+    bm.writeBenchmarkResults();
 
-  bm.writeBenchmarkResults();
+    exitCode += BMBase::endMain();
 
-  exitCode += BMBase::endMain();
+    if (exitCode) {
+        LOG(WARNING) << "BMRocksdb exitCode: " << exitCode << std::endl;
+    }
 
-  if (exitCode) {
-    LOG(WARNING) << "BMRocksdb exitCode: " << exitCode << std::endl;
-  }
-
-  return exitCode;
+    return exitCode;
 }

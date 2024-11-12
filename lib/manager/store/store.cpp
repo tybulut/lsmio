@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -29,75 +29,70 @@
  */
 
 #include <iostream>
-
 #include <lsmio/manager/store/store_rdb.hpp>
-
 
 namespace lsmio {
 
 std::string getMutationType(MutationType mType) {
-  std::string sVal;
+    std::string sVal;
 
-  switch (mType) {
-    case MutationType::Put: sVal = "Put"; break;
-    case MutationType::Append: sVal =  "Append"; break;
-    case MutationType::Del: sVal = "Del"; break;
-  }
+    switch (mType) {
+        case MutationType::Put:
+            sVal = "Put";
+            break;
+        case MutationType::Append:
+            sVal = "Append";
+            break;
+        case MutationType::Del:
+            sVal = "Del";
+            break;
+    }
 
-  return sVal;
+    return sVal;
 }
-
 
 LSMIOStore::LSMIOStore(const std::string& dbPath, const bool overWrite) {
-  _dbPath = dbPath;
-  _maxBatchSize = gConfigLSMIO.asyncBatchSize;
-  _maxBatchBytes = gConfigLSMIO.asyncBatchBytes;
+    _dbPath = dbPath;
+    _maxBatchSize = gConfigLSMIO.asyncBatchSize;
+    _maxBatchBytes = gConfigLSMIO.asyncBatchBytes;
 }
 
-
-LSMIOStore::~LSMIOStore() {
-}
-
+LSMIOStore::~LSMIOStore() {}
 
 bool LSMIOStore::put(const std::string key, const std::string value, bool flush) {
-  rocksdb::Status s;
-  bool retValue;
+    rocksdb::Status s;
+    bool retValue;
 
-  LOG(INFO) << "LSMIOStore::put: key: " << key
-    << " flush: " << flush
-    << " size: " << value.size() << std::endl;
+    LOG(INFO) << "LSMIOStore::put: key: " << key << " flush: " << flush << " size: " << value.size()
+              << std::endl;
 
-  return _batchMutation(MutationType::Put, key, value, flush);
+    return _batchMutation(MutationType::Put, key, value, flush);
 }
-
 
 bool LSMIOStore::append(const std::string key, const std::string value, bool flush) {
-  rocksdb::Status s;
-  bool retValue;
+    rocksdb::Status s;
+    bool retValue;
 
-  LOG(INFO) << "LSMIOStore::append: key: " << key << " flush: " << flush << std::endl;
+    LOG(INFO) << "LSMIOStore::append: key: " << key << " flush: " << flush << std::endl;
 
-  return _batchMutation(MutationType::Append, key, value, flush);
+    return _batchMutation(MutationType::Append, key, value, flush);
 }
-
 
 bool LSMIOStore::del(const std::string key, bool flush) {
-  rocksdb::Status s;
-  bool retValue;
+    rocksdb::Status s;
+    bool retValue;
 
-  LOG(INFO) << "LSMIOStore::del: key: " << key << " flush: " << flush << std::endl;
+    LOG(INFO) << "LSMIOStore::del: key: " << key << " flush: " << flush << std::endl;
 
-  return _batchMutation(MutationType::Del, key, "", flush);
+    return _batchMutation(MutationType::Del, key, "", flush);
 }
-
 
 bool LSMIOStore::writeBarrier() {
-  bool status;
+    bool status;
 
-  LOG(INFO) << "LSMIOStore::writeBarrier: " << std::endl;
-  status = stopBatch();
-  return true;
+    LOG(INFO) << "LSMIOStore::writeBarrier: " << std::endl;
+    status = stopBatch();
+    return true;
 }
-
 
 }  // namespace lsmio

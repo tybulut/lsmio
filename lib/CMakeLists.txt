@@ -64,44 +64,46 @@ set(LIB_STORE_SOURCE_FILES ${LIB_STORE_HPP_FILES} ${LIB_STORE_CPP_FILES})
 set(LIB_ADIOS_SOURCE_FILES ${LIB_ADIOS_HPP_FILES} ${LIB_ADIOS_CPP_FILES})
 set(LIB_POSIX_SOURCE_FILES ${LIB_POSIX_HPP_FILES} ${LIB_POSIX_CPP_FILES})
 
+macro(lsmio_add_props MY_TARGET)
+  #set_property(TARGET ${MY_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(${MY_TARGET} PRIVATE ${LSMIO_INCLUDE_DIR})
+  target_compile_definitions(${MY_TARGET} PRIVATE LSMIO_VERSION="${PROJECT_VERSION}")
+endmacro()
+
+
 # Add library and binary: BASE
 add_library(lsmio_base ${LIB_BASE_SOURCE_FILES})
-#set_property(TARGET lsmio PROPERTY POSITION_INDEPENDENT_CODE ON)
 add_library(lsmio::base ALIAS lsmio_base)
-target_include_directories(lsmio_base PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_base
   PUBLIC fmt::fmt glog::glog
 )
-target_compile_definitions(lsmio_base PRIVATE LSMIO_VERSION=0.1.0)
+lsmio_add_props(lsmio_base)
 
 # Add library and binary: STORE
 add_library(lsmio_store ${LIB_STORE_SOURCE_FILES})
 add_library(lsmio::store ALIAS lsmio_store)
-target_include_directories(lsmio_store PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_store
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx11_mpi adios2::core_mpi
 )
-target_compile_definitions(lsmio_store PRIVATE LSMIO_VERSION=0.1.0)
+lsmio_add_props(lsmio_store)
 
 # Add library and binary: ADIOS
 add_library(lsmio_adios ${LIB_ADIOS_SOURCE_FILES})
 add_library(lsmio::adios ALIAS lsmio_adios)
-target_include_directories(lsmio_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_adios
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx11_mpi adios2::core_mpi
 )
-target_compile_definitions(lsmio_adios PRIVATE LSMIO_VERSION=0.1.0)
+lsmio_add_props(lsmio_adios)
 
 # Add library and binary: POSIX
 add_library(lsmio_posix ${LIB_POSIX_SOURCE_FILES})
 add_library(lsmio::posix ALIAS lsmio_posix)
-target_include_directories(lsmio_posix PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(lsmio_posix
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
@@ -109,7 +111,7 @@ target_link_libraries(lsmio_posix
     MPI::MPI_CXX Threads::Threads
     adios2::cxx11_mpi adios2::core_mpi
 )
-target_compile_definitions(lsmio_posix PRIVATE LSMIO_VERSION=0.1.0)
+lsmio_add_props(lsmio_posix)
 
 # Install: BASE
 install(TARGETS lsmio_base

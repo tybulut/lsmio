@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -39,26 +39,23 @@
 #include <adios2/helper/adiosString.h>
 
 #include <fstream>
-#include <memory>
-#include <string>
-
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/manager.hpp>
-
+#include <memory>
+#include <string>
 
 using namespace adios2;
 
 namespace lsmio {
 
 class LsmioPlugin : public adios2::plugin::PluginEngineInterface {
- public:
-    LsmioPlugin(core::IO &io, const std::string &name,
-                const adios2::Mode openMode, helper::Comm comm);
+  public:
+    LsmioPlugin(core::IO &io, const std::string &name, const adios2::Mode openMode,
+                helper::Comm comm);
     virtual ~LsmioPlugin();
 
     /** Indicates beginning of a step **/
-    StepStatus BeginStep(StepMode mode,
-                         const float timeoutSeconds = -1.0) override;
+    StepStatus BeginStep(StepMode mode, const float timeoutSeconds = -1.0) override;
 
     /** Indicates end of a step **/
     void EndStep() override;
@@ -77,21 +74,21 @@ class LsmioPlugin : public adios2::plugin::PluginEngineInterface {
     void Flush(const int transportIndex = -1) override;
     */
 
- protected:
+  protected:
     void Init() override;
 
-#define declare(T)                                                             \
-    void DoGetSync(core::Variable<T> &variable, T *values) override;           \
-    void DoGetDeferred(core::Variable<T> &variable, T *values) override;       \
-    void DoPutSync(core::Variable<T> &variable, const T *values) override;     \
+#define declare(T)                                                         \
+    void DoGetSync(core::Variable<T> &variable, T *values) override;       \
+    void DoGetDeferred(core::Variable<T> &variable, T *values) override;   \
+    void DoPutSync(core::Variable<T> &variable, const T *values) override; \
     void DoPutDeferred(core::Variable<T> &variable, const T *values) override;
 
-ADIOS2_FOREACH_STDTYPE_1ARG(declare)
+    ADIOS2_FOREACH_STDTYPE_1ARG(declare)
 #undef declare
 
     void DoClose(const int transportIndex = -1) override;
 
- private:
+  private:
     const std::string _variableStoreKey = "__var_info_internal";
 
     std::string _dbName;
@@ -99,8 +96,7 @@ ADIOS2_FOREACH_STDTYPE_1ARG(declare)
     size_t _currentStep = 0;
 
     template <typename T>
-    void AddVariable(const std::string &name, Dims shape, Dims start,
-                     Dims count);
+    void AddVariable(const std::string &name, Dims shape, Dims start, Dims count);
 
     template <class T>
     void ReadVariable(core::Variable<T> &variable, T *values);
@@ -118,13 +114,10 @@ ADIOS2_FOREACH_STDTYPE_1ARG(declare)
 
 extern "C" {
 
-lsmio::LsmioPlugin *EngineCreate(adios2::core::IO &io,
-                                 const std::string &name,
-                                 const adios2::Mode mode,
-                                 adios2::helper::Comm comm);
+lsmio::LsmioPlugin *EngineCreate(adios2::core::IO &io, const std::string &name,
+                                 const adios2::Mode mode, adios2::helper::Comm comm);
 
 void EngineDestroy(lsmio::LsmioPlugin *obj);
-
 }
 
 #endif
