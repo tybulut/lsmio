@@ -1,10 +1,9 @@
-# LevelDB
-find_package(leveldb 1.23 QUIET)
-if (NOT leveldb_FOUND AND NOT TARGET leveldb)
+# LevelDB Dependency: Snappy
+find_package(Snappy 1.1 QUIET)
+if (NOT Snappy_FOUND AND NOT TARGET snappy)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
-  # LevelDB Dependency: Snappy
   option(SNAPPY_BUILD_TESTS "Build tests" OFF)
   option(SNAPPY_BUILD_BENCHMARKS "Build benchmarks" OFF)
   FetchContent_Declare(
@@ -14,6 +13,17 @@ if (NOT leveldb_FOUND AND NOT TARGET leveldb)
     GIT_SUBMODULES ""
     GIT_PROGRESS   TRUE
   )
+
+  FetchContent_MakeAvailable(snappy)
+  add_library(Snappy::snappy ALIAS snappy)
+endif()
+
+# LevelDB
+find_package(leveldb 1.23 QUIET)
+if (NOT leveldb_FOUND AND NOT TARGET leveldb)
+  include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
+
 
   # leveldb
   option(LEVELDB_BUILD_TESTS "Build tests" OFF)
@@ -26,6 +36,7 @@ if (NOT leveldb_FOUND AND NOT TARGET leveldb)
     GIT_PROGRESS   TRUE
   )
 
-  FetchContent_MakeAvailable(leveldb snappy)
+  FetchContent_MakeAvailable(leveldb)
+  add_library(leveldb::leveldb ALIAS leveldb)
 endif()
 

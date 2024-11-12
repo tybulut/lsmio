@@ -188,7 +188,7 @@ TEST_P(adiosMPITests, ReadWrite) {
 }
 
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
   lsmioTest,
   adiosMPITests,
   ::testing::Values(

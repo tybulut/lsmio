@@ -12,5 +12,6 @@ if (NOT fmt_FOUND AND NOT TARGET fmt)
   )
 
   FetchContent_MakeAvailable(fmt)
+  add_library(fmt::fmt ALIAS fmt)
 endif()
 

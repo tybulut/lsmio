@@ -211,10 +211,10 @@ TEST_P(MPITests, AggregateBuffer) {
               << " WRONGLY received : " << str_received
               << " from: " << recv_i;
 
-    delete bufReceived[recv_i];
+    delete[] bufReceived[recv_i];
   }
 
-  delete bufReceived;
+  delete[] bufReceived;
 }
 
 
@@ -278,10 +278,10 @@ TEST_P(MPITests, ProbeSize) {
               << " WRONGLY received : " << str_received
               << " from: " << recv_i;
 
-    delete bufReceived[recv_i];
+    delete[] bufReceived[recv_i];
   }
 
-  delete bufReceived;
+  delete[] bufReceived;
 }
 
 
@@ -344,14 +344,14 @@ TEST_P(MPITests, AggregateString) {
               << " WRONGLY received : " << str_received
               << " from: " << recv_i;
 
-    delete bufReceived[recv_i];
+    delete[] bufReceived[recv_i];
   }
 
-  delete bufReceived;
+  delete[] bufReceived;
 }
 
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
   lsmioTest,
   MPITests,
   ::testing::Values(

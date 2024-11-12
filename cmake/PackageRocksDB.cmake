@@ -1,5 +1,8 @@
 # LevelDB
-find_package(RocksDB 8 QUIET)
+find_package(RocksDB 9 QUIET)
+if (NOT RocksDB_FOUND)
+  find_package(RocksDB 8 QUIET)
+endif()
 if (NOT RocksDB_FOUND)
   find_package(RocksDB 7 QUIET)
 endif()
@@ -43,7 +46,7 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
     FetchContent_MakeAvailable(rocksdb)
 
-    add_library(rocksdb::rocksdb ALIAS rocksdb)
+    add_library(RocksDB::rocksdb-shared ALIAS rocksdb)
   endblock()
 endif()
 
