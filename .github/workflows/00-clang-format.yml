@@ -1,0 +1,24 @@
+name: Clang-Format-18
+on: workflow_dispatch
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install dependencies - DPKG
+        run: >
+          sudo apt-get install -y \
+            openmpi-bin libopenmpi-dev \
+            libgoogle-glog-dev libgtest-dev libgflags-dev \
+            libcli11-dev libfmt-dev \
+            libleveldb-dev librocksdb-dev \
+            libadios2-mpi-c++11-dev
+  
+      - name: Run clang-format-18 style check
+        uses: jidicula/clang-format-action@v4.13.0
+        with:
+          clang-format-version: '18'

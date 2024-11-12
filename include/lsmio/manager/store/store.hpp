@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -31,27 +31,18 @@
 #ifndef _LSMIO_STORE_HPP_
 #define _LSMIO_STORE_HPP_
 
-#include <string>
 #include <atomic>
-#include <mutex>
-
 #include <lsmio/lsmio.hpp>
-
+#include <mutex>
+#include <string>
 
 namespace lsmio {
 
-enum class MutationType {
-  Put,
-  Append,
-  Del
-};
-
+enum class MutationType { Put, Append, Del };
 
 std::string getMutationType(MutationType mType);
 
-
 class LSMIOStore {
-
   protected:
     std::string _dbPath;
     int _maxBatchSize;
@@ -67,7 +58,8 @@ class LSMIOStore {
     virtual bool startBatch() = 0;
     virtual bool stopBatch() = 0;
 
-    virtual bool _batchMutation(MutationType mType, const std::string key, const std::string value, bool flush) = 0;
+    virtual bool _batchMutation(MutationType mType, const std::string key, const std::string value,
+                                bool flush) = 0;
 
     /// cleanup the ENTIRE store
     /// @return bool success
@@ -79,7 +71,7 @@ class LSMIOStore {
 
     /// get value given a key
     /// @return bool success
-    virtual bool get(const std::string key, std::string *value) = 0;
+    virtual bool get(const std::string key, std::string* value) = 0;
 
     /// put value given a key
     /// @return bool success
@@ -99,6 +91,6 @@ class LSMIOStore {
     virtual bool writeBarrier() = 0;
 };
 
-}
+}  // namespace lsmio
 
 #endif

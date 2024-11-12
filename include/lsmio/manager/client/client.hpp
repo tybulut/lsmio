@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -33,10 +33,9 @@
 
 #include <atomic>
 #include <future>  // NOLINT [build/c++11]
+#include <lsmio/lsmio.hpp>
 #include <string>
 #include <thread>  // NOLINT [build/c++11]
-
-#include <lsmio/lsmio.hpp>
 
 namespace lsmio {
 
@@ -92,7 +91,8 @@ class LSMIOManager;
  * This callback function type represents the method signature for
  * handling responses or events within the LSMIO client.
  */
-using LSMIOClientCallback = void(LSMIOManager::*)(int, const std::string&, const std::string&, std::string *, std::string);
+using LSMIOClientCallback = void (LSMIOManager::*)(int, const std::string &, const std::string &,
+                                                   std::string *, std::string);
 
 /**
  * @class LSMIOClient
@@ -130,8 +130,8 @@ class LSMIOClient {
      * @param key The key to serialize.
      * @param value The value to serialize.
      */
-    void serializeCmd(std::string *buf, const std::string& command,
-                      const std::string& key, const std::string& value);
+    void serializeCmd(std::string *buf, const std::string &command, const std::string &key,
+                      const std::string &value);
 
     /**
      * @brief Deserializes the provided buffer into command, key, and value.
@@ -141,8 +141,8 @@ class LSMIOClient {
      * @param key Output parameter for the deserialized key.
      * @param value Output parameter for the deserialized value.
      */
-    void deSerializeCmd(const char *buf, const int& len, std::string *command,
-                        std::string *key, std::string *value);
+    void deSerializeCmd(const char *buf, const int &len, std::string *command, std::string *key,
+                        std::string *value);
 
     /**
      * @brief Waits for a command to arrive and processes it using the provided callback function.
@@ -178,8 +178,8 @@ class LSMIOClient {
      * @param lm The LSMIO manager instance.
      * @param threadBarrier A promise object used for thread synchronization.
      */
-    static void helperThread(LSMIOClient *ctx, LSMIOClientCallback func,
-                             LSMIOManager *lm, std::promise<void> threadBarrier);
+    static void helperThread(LSMIOClient *ctx, LSMIOClientCallback func, LSMIOManager *lm,
+                             std::promise<void> threadBarrier);
 
     /// @brief Checks if the client supports multi-threading.
     bool checkThreadSupport();
@@ -216,8 +216,8 @@ class LSMIOClient {
      * @param value The value associated with the command.
      * @return True if the command was sent successfully, false otherwise.
      */
-    virtual bool sendCommand(int rank, const std::string& command,
-                             const std::string& key, const std::string& value) = 0;
+    virtual bool sendCommand(int rank, const std::string &command, const std::string &key,
+                             const std::string &value) = 0;
 
     /**
      * @brief Receives a command from a specific rank.
@@ -227,8 +227,8 @@ class LSMIOClient {
      * @param value The value associated with the command.
      * @return True if the command was received successfully, false otherwise.
      */
-    virtual bool recvCommand(int rank, std::string *command,
-                             std::string *key, std::string *value) = 0;
+    virtual bool recvCommand(int rank, std::string *command, std::string *key,
+                             std::string *value) = 0;
 };
 
 }  // namespace lsmio

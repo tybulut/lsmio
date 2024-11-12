@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -31,11 +31,10 @@
 #ifndef _BM_BASE_HPP_
 #define _BM_BASE_HPP_
 
-#include <iostream>
 #include <mpi.h>
 
+#include <iostream>
 #include <lsmio/benchmark.hpp>
-
 
 class BMBase {
   protected:
@@ -83,7 +82,6 @@ class BMBase {
     static int endMain();
 };
 
-
 class BMConfig {
   public:
     std::string fileName;
@@ -97,13 +95,12 @@ class BMConfig {
     bool useMPIBarrier = false;
     bool enableCollectiveIO = false;
 
-    int iterations = 1; // TODO
-    int segmentCount = 1024; // TODO
+    int iterations = 1;       // TODO
+    int segmentCount = 1024;  // TODO
 
     int keyCount = 4096;
     int valueSize = 65535;
 };
-
 
 std::string genOptionsToString();
 

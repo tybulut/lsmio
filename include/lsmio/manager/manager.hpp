@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -28,21 +28,19 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #ifndef _LSMIO_MANAGER_HPP_
 #define _LSMIO_MANAGER_HPP_
 
-#include <mpi.h>
 #include <adios2.h>
 #include <adios2/helper/adiosComm.h>
 #include <adios2/helper/adiosCommMPI.h>
-
-#include <string>
+#include <mpi.h>
 
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/client/client.hpp>
 #include <lsmio/manager/store/store_ldb.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
+#include <string>
 
 #if ADIOS2_USE_MPI
 #else
@@ -61,7 +59,7 @@ class LSMIOManager {
     std::string _dbName;
     /// @brief Directory of the database.
     std::string _dbDir;
-   /// @brief Path to the database.
+    /// @brief Path to the database.
     std::string _dbPath;
 
     /// @brief Store instance.
@@ -119,8 +117,8 @@ class LSMIOManager {
     bool _isOpenRemote() const;
     bool _isServeLocal() const;
 
-    std::string _rankedKey(const int rank, const std::string& key) const;
-    std::string _rankedKey(const std::string& key) const;
+    std::string _rankedKey(const int rank, const std::string &key) const;
+    std::string _rankedKey(const std::string &key) const;
 
   public:
     /// @brief Aggregation rank constant.
@@ -131,17 +129,13 @@ class LSMIOManager {
     /**
      * @brief Constructor with MPI communicator.
      */
-    LSMIOManager(const std::string& dbName,
-                 const std::string& dbDir = "",
-                 const bool overWrite = false,
-                 MPI_Comm mpiComm = 0);
+    LSMIOManager(const std::string &dbName, const std::string &dbDir = "",
+                 const bool overWrite = false, MPI_Comm mpiComm = 0);
 
     /**
      * @brief Constructor with Adios communicator.
      */
-    LSMIOManager(const std::string& dbName,
-                 const std::string& dbDir,
-                 const bool overWrite,
+    LSMIOManager(const std::string &dbName, const std::string &dbDir, const bool overWrite,
                  adios2::helper::Comm *adiosComm);
 
     /**
@@ -150,13 +144,12 @@ class LSMIOManager {
     ~LSMIOManager();
 
     /// callback for collective I/O
-    void callbackForCollectiveIO(int rank, const std::string& command,
-                                 const std::string& key, std::string *gValue, std::string pValue);
+    void callbackForCollectiveIO(int rank, const std::string &command, const std::string &key,
+                                 std::string *gValue, std::string pValue);
 
     /// Get DB path
     /// @return dbName
     std::string getDbPath() const;
-
 
     /**
      * @brief Get a value associated with a key into the database.
@@ -165,7 +158,7 @@ class LSMIOManager {
      * @param value The value to write the retrieved value to.
      * @return Returns true if the operation is successful, false otherwise.
      */
-    bool get(const std::string& key, std::string *value);
+    bool get(const std::string &key, std::string *value);
 
     /**
      * @brief Put a value associated with a key into the database.
@@ -174,10 +167,10 @@ class LSMIOManager {
      * ...
      * @return Returns true if the operation is successful, false otherwise.
      */
-    bool put(const std::string& key, const std::string &value, bool flush);
-    bool put(const std::string& key, const std::string &value);
-    bool put(const std::string& key, const char *value, std::streamsize n);
-    bool put(const std::string& key, const void *ptr, size_t size, size_t count);
+    bool put(const std::string &key, const std::string &value, bool flush);
+    bool put(const std::string &key, const std::string &value);
+    bool put(const std::string &key, const char *value, std::streamsize n);
+    bool put(const std::string &key, const void *ptr, size_t size, size_t count);
 
     /**
      * @brief Append a value to an existing key in the database.
@@ -187,7 +180,7 @@ class LSMIOManager {
      * @param flush Whether to flush after appending.
      * @return Returns true if the operation is successful, false otherwise.
      */
-    bool append(const std::string& key, const std::string &value, bool flush);
+    bool append(const std::string &key, const std::string &value, bool flush);
 
     /**
      * @brief Delete a value associated with a key from the database.
@@ -196,8 +189,8 @@ class LSMIOManager {
      * ...
      * @return Returns true if the operation is successful, false otherwise.
      */
-    bool del(const std::string& key, bool flush);
-    bool del(const std::string& key);
+    bool del(const std::string &key, bool flush);
+    bool del(const std::string &key);
 
     /// read and write barrier for async operations
     /// @return bool success
@@ -205,13 +198,12 @@ class LSMIOManager {
     bool writeBarrier();
 
     void resetCounters();
-    void getCounters(uint64_t &writeBytes, uint64_t &readBytes,
-                     uint64_t &writeOps, uint64_t &readOps) const;
+    void getCounters(uint64_t &writeBytes, uint64_t &readBytes, uint64_t &writeOps,
+                     uint64_t &readOps) const;
 
-    static LSMIOManager *initialize(const std::string& dbName = "lsmiodb",
-                 const std::string& dbDir = "",
-                 const bool overWrite = false,
-                 adios2::helper::Comm *adiosComm = nullptr);
+    static LSMIOManager *initialize(const std::string &dbName = "lsmiodb",
+                                    const std::string &dbDir = "", const bool overWrite = false,
+                                    adios2::helper::Comm *adiosComm = nullptr);
     static LSMIOManager *getManager();
     static bool cleanup();
 };

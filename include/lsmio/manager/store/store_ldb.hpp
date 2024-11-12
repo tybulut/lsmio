@@ -3,14 +3,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 
+ *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 
+ *
  * 3. Neither the name of the copyright holder nor the names of its
  *    contributors may be used to endorse or promote products derived from
  *    this software without specific prior written permission.
@@ -31,43 +31,42 @@
 #ifndef _LSMIO_STORE_LDB_HPP_
 #define _LSMIO_STORE_LDB_HPP_
 
-#include <string>
-
 #include <leveldb/db.h>
 #include <leveldb/filter_policy.h>
 
-#include "store.hpp"
+#include <string>
 
+#include "store.hpp"
 
 namespace lsmio {
 
 class LSMIOStoreLDB : public LSMIOStore {
-
   private:
     leveldb::WriteOptions _wOptions;
     leveldb::ReadOptions _rOptions;
     leveldb::Options _options;
     leveldb::DB* _db;
-    leveldb::WriteBatch *_batch;
+    leveldb::WriteBatch* _batch;
 
-		/// start / stop batching
-		/// @return bool success
-		bool startBatch();
-		bool stopBatch();
+    /// start / stop batching
+    /// @return bool success
+    bool startBatch();
+    bool stopBatch();
 
-		bool _batchMutation(MutationType mType, const std::string key, const std::string value, bool flush);
+    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
+                        bool flush);
 
     /// cleanup the ENTIRE store
     /// @return bool success
     virtual bool dbCleanup();
 
   public:
-		LSMIOStoreLDB(const std::string& dbPath, const bool overWrite = false);
-		~LSMIOStoreLDB();
+    LSMIOStoreLDB(const std::string& dbPath, const bool overWrite = false);
+    ~LSMIOStoreLDB();
 
-		/// get value given a key
-		/// @return bool success
-		bool get(const std::string key, std::string *value);
+    /// get value given a key
+    /// @return bool success
+    bool get(const std::string key, std::string* value);
 
     /// sync batching
     /// @return bool success
@@ -75,6 +74,6 @@ class LSMIOStoreLDB : public LSMIOStore {
     bool writeBarrier();
 };
 
-}
+}  // namespace lsmio
 
 #endif
