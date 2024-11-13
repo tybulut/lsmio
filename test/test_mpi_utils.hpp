@@ -38,17 +38,37 @@
 
 namespace lsmioTest {
 
-enum class MPIWorld { Shared, Entire, EntireSerial, Self, Split };
+enum class MPIWorld {
+    Shared,
+    Entire,
+    EntireSerial,
+    Self,
+    Split
+};
+
+enum class UseComm {
+    CommWorld,
+    CommSelf
+};
+
+enum class AdiosEngine {
+    BP5,
+    Plugin
+};
 
 std::string generateRankString(int processRank);
 
 MPI_Comm getMPIComm(MPIWorld worldSize);
 lsmio::MPIAggType translateAggType(MPIWorld worldSize);
-
-std::string mpiWorldToString(const MPIWorld& worldSize);
 std::string genPreFix(const bool& valBool, const MPIWorld& valWorld);
 
+std::string mpiWorldToString(const MPIWorld& worldSize);
+std::string adiosEngineToString(const AdiosEngine& engine);
+std::string useCommToString(const UseComm& comm);
+
 void PrintTo(const MPIWorld& worldSize, std::ostream* os);
+void PrintTo(const AdiosEngine& engine, std::ostream* os);
+void PrintTo(const UseComm& comm, std::ostream* os);
 
 }  // namespace lsmioTest
 
