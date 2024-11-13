@@ -108,11 +108,42 @@ std::string mpiWorldToString(const MPIWorld& worldSize) {
     } else if (worldSize == MPIWorld::Split) {
         return "mpiSplit";
     } else {
-        return "(unknown)";
+        return "MPI_WORLD_(unknown)";
     }
 }
 
-void PrintTo(const MPIWorld& worldSize, std::ostream* os) { *os << mpiWorldToString(worldSize); }
+std::string adiosEngineToString(const AdiosEngine& engine) {
+    if (engine == AdiosEngine::BP5) {
+        return "bp5";
+    } else if (engine == AdiosEngine::Plugin) {
+        return "plugin";
+    } else {
+        return "Adios_Engine_(unknown)";
+    }
+}
+
+std::string useCommToString(const UseComm& comm) {
+    if (comm == UseComm::CommSelf) {
+        return "MPI_COMM_SELF";
+    } else if (comm == UseComm::CommWorld) {
+        return "MPI_COMM_WORLD";
+    } else {
+        return "MPI_COMM_(unknown)";
+    }
+}
+
+void PrintTo(const MPIWorld& worldSize, std::ostream* os) {
+    *os << mpiWorldToString(worldSize);
+}
+
+void PrintTo(const AdiosEngine& engine, std::ostream* os) {
+    *os << adiosEngineToString(engine);
+}
+
+void PrintTo(const UseComm& comm, std::ostream* os) {
+    *os << useCommToString(comm);
+}
+
 
 }  // namespace lsmioTest
 

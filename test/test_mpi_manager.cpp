@@ -47,17 +47,19 @@ namespace lsmioTest {
 
 const std::string TEST_DIR_MGR = "";
 
-struct managerMPITests : public ::testing::TestWithParam<std::tuple<bool, MPIWorld>> {};
+class managerMPITests : public ::testing::TestWithParam<std::tuple<UseComm, MPIWorld>> {
+  protected:
+    std::string getDBFile(const std::string &prefix, const UseComm &comm, const int &worldRank) {
+        std::string m_file = "test-mpi-mgr-" + prefix;
+        if (comm == UseComm::CommSelf) m_file += "-" + std::to_string(worldRank);
+        m_file += ".db";
+        return m_file;
+    }
+};
 
-std::string getDBFile(const std::string &prefix, const bool &useWorld, const int &worldRank) {
-    std::string m_file = "test-mpi-mgr-" + prefix;
-    if (!useWorld) m_file += "-" + std::to_string(worldRank);
-    m_file += ".db";
-    return m_file;
-}
 
 TEST_P(managerMPITests, Flush) {
-    bool useWorld = std::get<0>(GetParam());
+    UseComm comm = std::get<0>(GetParam());
     MPIWorld worldSize = std::get<1>(GetParam());
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -68,11 +70,11 @@ TEST_P(managerMPITests, Flush) {
     LOG(INFO) << "lsmioTest::ManagerMPI: :"
               << " number: " << worldRank << " out of: " << numProcesses << std::endl;
 
-    std::string prefix = genPreFix(useWorld, worldSize);
-    std::string dbFile = getDBFile(prefix, useWorld, worldRank);
+    std::string prefix = genPreFix((comm == UseComm::CommWorld), worldSize);
+    std::string dbFile = getDBFile(prefix, comm, worldRank);
     lsmio::LSMIOManager *lm = nullptr;
 
-    if (useWorld) {
+    if (comm == UseComm::CommWorld) {
         lsmio::gConfigLSMIO.mpiAggType = translateAggType(worldSize);
         lm = new lsmio::LSMIOManager(dbFile, TEST_DIR_MGR, true, MPI_COMM_WORLD);
     } else
@@ -116,11 +118,15 @@ TEST_P(managerMPITests, Flush) {
     delete lm;
 }
 
-INSTANTIATE_TEST_SUITE_P(lsmioTest, managerMPITests,
-                         ::testing::Values(std::make_tuple(false, MPIWorld::Shared),
-                                           std::make_tuple(true, MPIWorld::Shared),
-                                           std::make_tuple(true, MPIWorld::Entire),
-                                           std::make_tuple(true, MPIWorld::EntireSerial),
-                                           std::make_tuple(true, MPIWorld::Split)));
+
+auto managerTV = ::testing::Values(
+                     std::make_tuple(UseComm::CommSelf, MPIWorld::Shared),
+                     std::make_tuple(UseComm::CommWorld, MPIWorld::Shared),
+                     std::make_tuple(UseComm::CommWorld, MPIWorld::Entire),
+                     std::make_tuple(UseComm::CommWorld, MPIWorld::EntireSerial),
+                     std::make_tuple(UseComm::CommWorld, MPIWorld::Split)
+                 );
+
+INSTANTIATE_TEST_SUITE_P(lsmioTest, managerMPITests, managerTV);
 
 }  // namespace lsmioTest
