@@ -101,7 +101,7 @@ ISAMBARD_XCI_PLOTS_DIR = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
 # Determine HPC cluster
 UNKNOWN_HPC_ENVIRONMENT = \
 '''############################################
-# ERROR: Uknown HPC Environment            #
+# ERROR: Unknown HPC Environment            #
 ############################################
 '''
 HOSTNAME = platform.node()
@@ -123,7 +123,7 @@ elif 'viking' in HOSTNAME:
 
   LUSTRE_HDD_PATH = '/mnt/lustre'
   LUSTRE_SSD_PATH = '/mnt/bb/tmp'
-elif 'hp15' in HOSTNAME:
+elif 'hp15' in HOSTNAME or 'mba-sbulut' in HOSTNAME:
   HPC_ENV = 'DEV'
   HPC_MANAGER = 'DEV'
 
@@ -147,7 +147,10 @@ else:
 BM_DIR = os.path.join(LUSTRE_PATH, 'users', USER, 'benchmark')
 
 os.environ['PATH'] += ':' + BIN_DIR
-os.environ['LD_LIBRARY_PATH'] += ':' + LIB_DIR
+if 'LD_LIBRARY_PATH' in os.environ:
+  os.environ['LD_LIBRARY_PATH'] += ':' + LIB_DIR
+else:
+  os.environ['LD_LIBRARY_PATH'] = LIB_DIR
 os.environ['ADIOS2_PLUGIN_PATH'] = LIB_DIR
 
 
