@@ -42,27 +42,27 @@ class IorData(object):
     with open(fileName, newline='') as csvfile:
       csvReader = csv.reader(csvfile, delimiter=',', quotechar='|')
       for row in csvReader:
-        operation = row[3]
-        if operation not in self.csvData:
-          self.csvData[operation] = {}
-        numStripes = int(row[1])
-        if numStripes not in self.csvData[operation]:
-          self.csvData[operation][numStripes] = {}
-        stripeSize = row[2]
-        if stripeSize not in self.csvData[operation][numStripes]:
-          self.csvData[operation][numStripes][stripeSize] = {}
-        numNodes = int(row[0])
-        if numNodes not in self.csvData[operation][numStripes][stripeSize]:
-          self.csvData[operation][numStripes][stripeSize][numNodes] = {}
-        partData = {
-          'maxMB': float(0.00),
-          'minMB': float(0.00),
-          'meanMB': float(0.00),
-        }
-        if row[4]: partData['maxMB'] = float(row[4])
-        if row[5]: partData['minMB'] = float(row[5])
-        if row[6]: partData['meanMB'] = float(row[6])
-        self.csvData[operation][numStripes][stripeSize][numNodes] = partData
+          operation = row[3]
+          if operation not in self.csvData:
+              self.csvData[operation] = {}
+          numStripes = int(row[1])
+          if numStripes not in self.csvData[operation]:
+              self.csvData[operation][numStripes] = {}
+          stripeSize = row[2]
+          if stripeSize not in self.csvData[operation][numStripes]:
+              self.csvData[operation][numStripes][stripeSize] = {}
+          numNodes = int(row[0])
+          if numNodes not in self.csvData[operation][numStripes][stripeSize]:
+              self.csvData[operation][numStripes][stripeSize][numNodes] = {}
+          partData = {
+            'maxMB': float(0.00),
+            'minMB': float(0.00),
+            'meanMB': float(0.00),
+          }
+          if row[4]: partData['maxMB'] = float(row[4])
+          if row[5]: partData['minMB'] = float(row[5])
+          if row[6]: partData['meanMB'] = float(row[6])
+          self.csvData[operation][numStripes][stripeSize][numNodes] = partData
 
   def timeSeries(self, isRead: bool, numStripes: int, stripeSize: str):
     operation = 'read' if isRead == True else 'write'
@@ -70,8 +70,8 @@ class IorData(object):
     xSeries = []
     ySeries = []
     for node in sorted(partData):
-      xSeries.append(node)
-      ySeries.append(partData[node]['maxMB'])
+        xSeries.append(node)
+        ySeries.append(partData[node]['maxMB'])
     return (xSeries, ySeries)
 
 
