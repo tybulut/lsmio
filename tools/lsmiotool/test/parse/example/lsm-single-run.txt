@@ -1,0 +1,62 @@
+BENCHMARK PARAMETERS: 
+
+ fileName: /mnt/lustre/users/sb2984/benchmark/data/c4/b1M/lsmio-node074-0-rocks.db
+ dirName: 
+ useLSMIOPlugin: 0
+ loopAll: 0
+ verbose: 0
+ iterations: 10
+ segmentCount: 1024
+ keyCount: 4096
+ valueSize: 65535
+
+ useSync: 0
+ useBloomFilter: 0
+ enableWAL: 0
+ compression: 0
+ blockSize: 1048576
+ transferSize: 1048576
+ asyncBatchSize: 128
+ cacheSize: 0
+ writeBufferSize: 33554432
+ writeFileSize: 33554432
+BENCHMARK RESULTS: 
+
+Iteration-WRITE: RocksDB SYN: false BLF: false
+access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+------,---------,----------,----------,---------,----
+iwrite,224.36,1.141,1048576,1048576,0
+iwrite,145.63,1.758,1048576,1048576,1
+iwrite,174.14,1.470,1048576,1048576,2
+iwrite,140.18,1.826,1048576,1048576,3
+iwrite,235.36,1.088,1048576,1048576,4
+iwrite,111.98,2.286,1048576,1048576,5
+iwrite,178.61,1.433,1048576,1048576,6
+iwrite,174.86,1.464,1048576,1048576,7
+iwrite,156.30,1.638,1048576,1048576,8
+iwrite,216.33,1.183,1048576,1048576,9
+
+Bench-WRITE: RocksDB SYN: false BLF: false
+access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+------,---------,----------,----------,---------,----
+write,167.46,1.529,1048576,1048576,10
+
+Iteration-READ: RocksDB SYN: false BLF: false
+access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+------,---------,----------,----------,---------,----
+iread,318.32,0.804,1048576,1048576,0
+iread,317.89,0.805,1048576,1048576,1
+iread,326.74,0.783,1048576,1048576,2
+iread,317.81,0.806,1048576,1048576,3
+iread,325.25,0.787,1048576,1048576,4
+iread,321.14,0.797,1048576,1048576,5
+iread,322.51,0.794,1048576,1048576,6
+iread,323.96,0.790,1048576,1048576,7
+iread,321.46,0.796,1048576,1048576,8
+iread,313.18,0.817,1048576,1048576,9
+
+Bench-READ: RocksDB SYN: false BLF: false
+access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+------,---------,----------,----------,---------,----
+read,320.78,0.798,1048576,1048576,10
+

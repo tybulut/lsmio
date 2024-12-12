@@ -29,14 +29,15 @@
 # 
 
 import csv
+from lsmiotool.lib.debuggable import DebuggableObject
 
 
-class IorSingleRunData(object):
+class IorSingleRunData(DebuggableObject):
   def __init__(self, file_name):
     self.file_name = file_name
     self.run_data = {
-        "read": { "Max(MiB)" : 0.00 },
-        "write": { "Max(MiB)" : 0.00 }
+        "read": {},
+        "write": {}
     }
     #Summary of all tests:
     #Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
@@ -78,11 +79,67 @@ class IorSingleRunData(object):
     return self.run_data
 
 
-class LsmioSingleRunData(IorSingleRunData):
-  pass
+class LsmioSingleRunData(DebuggableObject):
+  def __init__(self, file_name):
+    self.file_name = file_name
+    self.run_data = {
+        "read": {},
+        "write": {}
+    }
+    #Bench-WRITE: RocksDB SYN: false BLF: false
+    #access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+    #------,---------,----------,----------,---------,----
+    #write,167.46,1.529,1048576,1048576,10
+    #
+    #Bench-READ: RocksDB SYN: false BLF: false
+    #access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+    #------,---------,----------,----------,---------,----
+    #read,320.78,0.798,1048576,1048576,10
+    #
+    with open(file_name, newline='') as infile:
+        head_line = ''
+        read_line = ''
+        write_line = ''
+        found_w_summary = False
+        found_r_summary = False
+        for line in infile:
+            if not found_w_summary and not write_line:
+                if line.startswith('Bench-WRITE:'):
+                    found_w_summary = True
+                    continue
+            if found_w_summary:
+                if line.startswith('access,bw'):
+                    head_line = line
+                if line.startswith('write'):
+                    found_w_summary = False
+                    write_line = line
+                continue
+            if not found_r_summary and not read_line:
+                if line.startswith('Bench-READ:'):
+                    found_r_summary = True
+                    continue
+            if found_r_summary:
+                if line.startswith('read'):
+                    read_line = line
+                continue
+            if head_line and read_line and write_line:
+                break
+        heads = head_line.split(",")[1:]
+        reads = read_line.split(",")[1:]
+        writes = write_line.split(",")[1:]
+        for i in range(len(heads)):
+            if heads[i] in ["bw(MiB/s)", "Latency(ms)", "block(KiB)", "xfer(KiB)"]:
+                self.run_data["read"][heads[i]] = float(reads[i])
+                self.run_data["write"][heads[i]] = float(writes[i])
+            else:
+                self.run_data["read"][heads[i]] = reads[i]
+                self.run_data["write"][heads[i]] = writes[i]
+
+  def runData(self):
+    return self.run_data
 
 
-class IorSummaryData(object):
+class IorSummaryData(DebuggableObject):
   def __init__(self, file_name):
     self.file_name = file_name
     self.csv_data = {

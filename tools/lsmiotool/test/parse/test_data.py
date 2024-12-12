@@ -85,3 +85,28 @@ class DataUnitTestCase(TestCase):
     self.assertEqual(run_data["read"]["StdDev"], 1195.05)
     self.assertEqual(run_data["read"]["Min(OPs)"], 10729.26)
 
+
+  #Bench-WRITE: RocksDB SYN: false BLF: false
+  #access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+  #------,---------,----------,----------,---------,----
+  #write,167.46,1.529,1048576,1048576,10
+  #
+  #Bench-READ: RocksDB SYN: false BLF: false
+  #access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+  #------,---------,----------,----------,---------,----
+  #read,320.78,0.798,1048576,1048576,10
+  #
+  def test_lsm_run_data(self):
+    data_file_list = ['example', 'lsm-single-run.txt']
+    data_file = os.path.join(MY_DIR, *data_file_list)
+    Console.debug('Reading LSMO single run file: ' + data_file + '.')
+    lsm_run = data.LsmioSingleRunData(data_file)
+    run_data = lsm_run.runData()
+    #Console.debug("test_lsm_run_data: " + pprint.pformat(run_data))
+    self.assertTrue("read" in run_data)
+    self.assertTrue("write" in run_data)
+    self.assertEqual(run_data["write"]["bw(MiB/s)"], 167.46)
+    self.assertEqual(run_data["write"]["Latency(ms)"], 1.529)
+    self.assertEqual(run_data["read"]["bw(MiB/s)"], 320.78)
+    self.assertEqual(run_data["read"]["Latency(ms)"], 0.798)
+
