@@ -32,77 +32,74 @@ import csv
 
 
 class IorSingleRunData(object):
-  def __init__(self, fileName):
-    self.fileName = fileName
-    self.csvData = {
-      # operation -> numStripes -> stripeSize -> numNodes
+  def __init__(self, file_name):
+    self.file_name = file_name
+    self.run_data = {
+        "read": { "Max(MiB)" : 0.00 },
+        "write": { "Max(MiB)" : 0.00 }
     }
-    # N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,...
-    # 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
-    with open(fileName, newline='') as csvfile:
-      csvReader = csv.reader(csvfile, delimiter=',', quotechar='|')
-      for row in csvReader:
-          operation = row[3]
-          if operation not in self.csvData:
-              self.csvData[operation] = {}
-          numStripes = int(row[1])
-          if numStripes not in self.csvData[operation]:
-              self.csvData[operation][numStripes] = {}
-          stripeSize = row[2]
-          if stripeSize not in self.csvData[operation][numStripes]:
-              self.csvData[operation][numStripes][stripeSize] = {}
-          numNodes = int(row[0])
-          if numNodes not in self.csvData[operation][numStripes][stripeSize]:
-              self.csvData[operation][numStripes][stripeSize][numNodes] = {}
-          partData = {
-            'maxMB': float(0.00),
-            'minMB': float(0.00),
-            'meanMB': float(0.00),
-          }
-          if row[4]: partData['maxMB'] = float(row[4])
-          if row[5]: partData['minMB'] = float(row[5])
-          if row[6]: partData['meanMB'] = float(row[6])
-          self.csvData[operation][numStripes][stripeSize][numNodes] = partData
+    #Summary of all tests:
+    #Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
+    #write        4214.58    2752.91    3571.98     466.80    4214.58    2752.91    3571.98     466.80    0.14599         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
+    #read        14959.41   10729.26   13695.54    1195.05   14959.41   10729.26   13695.54    1195.05    0.03771         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
+    with open(file_name, newline='') as infile:
+        head_line = ''
+        read_line = ''
+        write_line = ''
+        for line in infile:
+            if not head_line:
+                if line.startswith('Operation   Max(MiB)'):
+                    head_line = line
+                continue
+            if head_line:
+                if line.startswith('write'):
+                    write_line = line
+                if line.startswith('read'):
+                    read_line = line
+            if read_line and write_line:
+                break
+        heads = head_line.split()[1:]
+        reads = read_line.split()[1:]
+        writes = write_line.split()[1:]
+        for i in range(len(heads)):
+            if heads[i] in ["Max(MiB)", "Min(MiB)", "Mean(MiB)", "StdDev", "Max(OPs)", "Min(OPs)", "Mean(OPs)"]:
+                self.run_data["read"][heads[i]] = float(reads[i])
+                self.run_data["write"][heads[i]] = float(writes[i])
+            else:
+                self.run_data["read"][heads[i]] = reads[i]
+                self.run_data["write"][heads[i]] = writes[i]
 
-  def timeSeries(self, isRead: bool, numStripes: int, stripeSize: str):
-    operation = 'read' if isRead == True else 'write'
-    partData = self.csvData[operation][numStripes][stripeSize]
-    xSeries = []
-    ySeries = []
-    for node in sorted(partData):
-        xSeries.append(node)
-        ySeries.append(partData[node]['maxMB'])
-    return (xSeries, ySeries)
+  def runData(self):
+    return self.run_data
 
 
-# N,Stripes,BlockSize,Operation,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),
-# 1,16,1M,write,58.48,44.21,55.79,2559.96,40960,10
 class LsmioSingleRunData(IorSingleRunData):
   pass
 
+
 class IorSummaryData(object):
-  def __init__(self, fileName):
-    self.fileName = fileName
-    self.csvData = {
+  def __init__(self, file_name):
+    self.file_name = file_name
+    self.csv_data = {
       # operation -> numStripes -> stripeSize -> numNodes
     }
     # N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,...
     # 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
-    with open(fileName, newline='') as csvfile:
+    with open(file_name, newline='') as csvfile:
       csvReader = csv.reader(csvfile, delimiter=',', quotechar='|')
       for row in csvReader:
           operation = row[3]
-          if operation not in self.csvData:
-              self.csvData[operation] = {}
+          if operation not in self.csv_data:
+              self.csv_data[operation] = {}
           numStripes = int(row[1])
-          if numStripes not in self.csvData[operation]:
-              self.csvData[operation][numStripes] = {}
+          if numStripes not in self.csv_data[operation]:
+              self.csv_data[operation][numStripes] = {}
           stripeSize = row[2]
-          if stripeSize not in self.csvData[operation][numStripes]:
-              self.csvData[operation][numStripes][stripeSize] = {}
+          if stripeSize not in self.csv_data[operation][numStripes]:
+              self.csv_data[operation][numStripes][stripeSize] = {}
           numNodes = int(row[0])
-          if numNodes not in self.csvData[operation][numStripes][stripeSize]:
-              self.csvData[operation][numStripes][stripeSize][numNodes] = {}
+          if numNodes not in self.csv_data[operation][numStripes][stripeSize]:
+              self.csv_data[operation][numStripes][stripeSize][numNodes] = {}
           partData = {
             'maxMB': float(0.00),
             'minMB': float(0.00),
@@ -111,11 +108,11 @@ class IorSummaryData(object):
           if row[4]: partData['maxMB'] = float(row[4])
           if row[5]: partData['minMB'] = float(row[5])
           if row[6]: partData['meanMB'] = float(row[6])
-          self.csvData[operation][numStripes][stripeSize][numNodes] = partData
+          self.csv_data[operation][numStripes][stripeSize][numNodes] = partData
 
   def timeSeries(self, isRead: bool, numStripes: int, stripeSize: str):
     operation = 'read' if isRead == True else 'write'
-    partData = self.csvData[operation][numStripes][stripeSize]
+    partData = self.csv_data[operation][numStripes][stripeSize]
     xSeries = []
     ySeries = []
     for node in sorted(partData):
@@ -124,8 +121,6 @@ class IorSummaryData(object):
     return (xSeries, ySeries)
 
 
-# N,Stripes,BlockSize,Operation,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),
-# 1,16,1M,write,58.48,44.21,55.79,2559.96,40960,10
 class LsmioSummaryData(IorSummaryData):
   pass
 
