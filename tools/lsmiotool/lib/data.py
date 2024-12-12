@@ -37,8 +37,8 @@ class IorData(object):
     self.csvData = {
       # operation -> numStripes -> stripeSize -> numNodes
     }
-    # 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
     # N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,...
+    # 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
     with open(fileName, newline='') as csvfile:
       csvReader = csv.reader(csvfile, delimiter=',', quotechar='|')
       for row in csvReader:
@@ -75,8 +75,8 @@ class IorData(object):
     return (xSeries, ySeries)
 
 
-# 1,16,1M,write,58.48,44.21,55.79,2559.96,40960,10
 # N,Stripes,BlockSize,Operation,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),
+# 1,16,1M,write,58.48,44.21,55.79,2559.96,40960,10
 class LsmioData(IorData):
   pass
 

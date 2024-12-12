@@ -30,45 +30,33 @@
 
 from unittest import TestCase
 from io import StringIO
-from lsmiotool.lib.log import Log
-from lsmiotool.lib.debuggable import DebuggableObject
+from lsmiotool.lib.log import Console
+from lsmiotool.lib import data
 
+import os
+from pathlib import Path
 
-class MyTestObject(DebuggableObject):
+MY_DIR = Path(__file__).parent.resolve()
 
-  def methodDebugs(self, f_args):
-    self._logDebug(f_args)
+# N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,...
+# 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
+class DataUnitTestCase(TestCase):
 
+  def test_ior_data(self):
+    dataFileList = ['example', 'ior-report.csv']
+    dataFile = os.path.join(MY_DIR, *dataFileList)
+    Console.debug('Reading IOR CSV file: ' + dataFile + '.')
+    iorRun = data.IorData(dataFile)
+    (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
+    self.assertEqual(xSeries, [1, 2, 4, 8, 16, 24, 32, 40, 48])
+    self.assertEqual(ySeries, [885.43, 1693.98, 3482.97, 888.5, 366.97, 237.68, 180.52, 154.18, 147.4])
 
-  def methodWarns(self, f_args):
-    self._logWarning(f_args)
-
-
-  def methodErrors(self, f_args):
-    self._logError(f_args)
-
-
-class LogUnitTestCase(TestCase):
-
-  def test_traceable(self):
-    swap_output = Log().output
-    Log().output = StringIO()
-
-    to = MyTestObject()
-
-    Log().output.seek(0)
-    Log().output.truncate()
-    to.methodWarns({'b': 2 })
-    output = Log().output.getvalue()
-    self.assertEqual(output, 'lsmiotool: WARNING: MyTestObject::methodWarns(): b=2\n', output)
-
-    Log().output.seek(0)
-    Log().output.truncate()
-    to.methodErrors({'c': 3 })
-    output = Log().output.getvalue()
-    self.assertEqual(output, 'lsmiotool: ERROR: MyTestObject::methodErrors(): c=3\n', output)
-
-    Log().output = swap_output
-
-
+  def test_lsm_data(self):
+    dataFileList = ['example', 'lsm-report.csv']
+    dataFile = os.path.join(MY_DIR, *dataFileList)
+    Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
+    lsmioRun = data.LsmioData(dataFile)
+    (xSeries, ySeries) = lsmioRun.timeSeries(False, 4, '64K')
+    self.assertEqual(xSeries, [1, 2, 4, 8, 16, 24, 32, 40, 48])
+    self.assertEqual(ySeries, [224.62, 473.28, 841.07, 1518.08, 3220.35, 3466.01, 3617.18, 3911.51, 4165.44])
 

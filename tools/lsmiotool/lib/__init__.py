@@ -30,7 +30,7 @@
 
 import os, lsmiotool
 
-VERSION = "0.1"
+VERSION = "0.2"
 PROGRAM = "lsmiotool"
 LSMIOTOOL_DIR = os.path.dirname(os.path.abspath(lsmiotool.__file__))
 
