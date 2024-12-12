@@ -46,17 +46,22 @@ class IorSingleRunData(object):
         head_line = ''
         read_line = ''
         write_line = ''
+        found_summary = False
         for line in infile:
-            if not head_line:
-                if line.startswith('Operation   Max(MiB)'):
-                    head_line = line
+            if not found_summary:
+                if line.startswith('Summary of all tests'):
+                    found_summary = True
                 continue
-            if head_line:
-                if line.startswith('write'):
-                    write_line = line
-                if line.startswith('read'):
-                    read_line = line
-            if read_line and write_line:
+            if line.startswith('Operation   Max(MiB)'):
+                head_line = line
+                continue
+            if line.startswith('write'):
+                write_line = line
+                continue
+            if line.startswith('read'):
+                read_line = line
+                continue
+            if head_line and read_line and write_line:
                 break
         heads = head_line.split()[1:]
         reads = read_line.split()[1:]
