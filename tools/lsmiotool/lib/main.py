@@ -79,7 +79,7 @@ class DemoMain(BaseMain):
     log.Console.debug('Image generated: ' + fn + '.')
 
   def demoRunSingle(self):
-    iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
+    iorRun = data.IorSummaryData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
     fn = 'ior-write-4-64k.png'
     md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
@@ -89,7 +89,7 @@ class DemoMain(BaseMain):
     log.Console.debug('Image generated: ' + fn + '.')
 
   def demoRunMulti(self):
-    iorRun = data.IorData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
+    iorRun = data.IorSummaryData('/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv')
     fn = 'ior-write-64k.png'
     md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
 
@@ -158,12 +158,12 @@ class LatexMain(BaseMain):
     dataFileList = [self.ior_data['base'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
-    iorRun = data.IorData(dataFile)
+    iorRun = data.IorSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('41-comparison-write-base.pdf')
     md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -202,17 +202,17 @@ class LatexMain(BaseMain):
     dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
-    hdf5Run = data.IorData(dataFile)
+    hdf5Run = data.IorSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
-    adiosRun = data.LsmioData(dataFile)
+    adiosRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('42-comparison-write-lsmio.pdf')
     md = plot.PlotMetaData("HDF5 vs. ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -246,17 +246,17 @@ class LatexMain(BaseMain):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
-    adiosRun = data.LsmioData(dataFile)
+    adiosRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
-    pluginRun = data.LsmioData(dataFile)
+    pluginRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('43-comparison-write-plugin-4.pdf')
     md = plot.PlotMetaData("ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -290,17 +290,17 @@ class LatexMain(BaseMain):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
-    adiosRun = data.LsmioData(dataFile)
+    adiosRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
-    pluginRun = data.LsmioData(dataFile)
+    pluginRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('44-comparison-write-plugin-16.pdf')
     md = plot.PlotMetaData("ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -336,27 +336,27 @@ class LatexMain(BaseMain):
     dataFileList = [self.ior_data['base'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
-    iorRun = data.IorData(dataFile)
+    iorRun = data.IorSummaryData(dataFile)
 
     dataFileList = [self.ior_data['collective'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading IOR-collective CSV file: ' + dataFile + '.')
-    collectiveRun = data.IorData(dataFile)
+    collectiveRun = data.IorSummaryData(dataFile)
 
     dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading HDF5 CSV file: ' + dataFile + '.')
-    hdf5Run = data.IorData(dataFile)
+    hdf5Run = data.IorSummaryData(dataFile)
 
     dataFileList = [self.ior_data['hdf5-collective'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading HDF5-collective CSV file: ' + dataFile + '.')
-    hdf5cRun = data.IorData(dataFile)
+    hdf5cRun = data.IorSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('45-comparison-collective.pdf')
     md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -393,32 +393,32 @@ class LatexMain(BaseMain):
     dataFileList = [self.ior_data['base'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading IOR CSV file: ' + dataFile + '.')
-    iorRun = data.IorData(dataFile)
+    iorRun = data.IorSummaryData(dataFile)
 
     dataFileList = [self.ior_data['collective'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading IOR-collective CSV file: ' + dataFile + '.')
-    collectiveRun = data.IorData(dataFile)
+    collectiveRun = data.IorSummaryData(dataFile)
 
     dataFileList = [self.ior_data['hdf5'], 'ior-report.csv']
     dataFile = os.path.join(self.ior_dir, *dataFileList)
     log.Console.debug('Reading HDF5 CSV file: ' + dataFile + '.')
-    hdf5Run = data.IorData(dataFile)
+    hdf5Run = data.IorSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
-    adiosRun = data.LsmioData(dataFile)
+    adiosRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
-    pluginRun = data.LsmioData(dataFile)
+    pluginRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('46-comparison-read-base.pdf')
     md = plot.PlotMetaData("IOR vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -456,17 +456,17 @@ class LatexMain(BaseMain):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
-    adiosRun = data.LsmioData(dataFile)
+    adiosRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
-    pluginRun = data.LsmioData(dataFile)
+    pluginRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('91-comparison-adios-plugin-lsmio.pdf')
     md = plot.PlotMetaData("Write: ADIOS vs. PLUGIN vs. LSMIO", "# of Nodes", "Max BW in MB")
@@ -506,17 +506,17 @@ class LatexMain(BaseMain):
     dataFileList = [self.lsmio_data['adios'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading ADIOS CSV file: ' + dataFile + '.')
-    adiosRun = data.LsmioData(dataFile)
+    adiosRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['lsmio'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
 
     dataFileList = [self.lsmio_data['plugin'], 'lsm-report.csv']
     dataFile = os.path.join(self.lsmio_dir, *dataFileList)
     log.Console.debug('Reading PLUGIN CSV file: ' + dataFile + '.')
-    pluginRun = data.LsmioData(dataFile)
+    pluginRun = data.LsmioSummaryData(dataFile)
 
     fn = self._genPNGPath('92-comparison-adios-plugin-lsmio.pdf')
     md = plot.PlotMetaData("Read: ADIOS vs. PLUGIN vs. LSMIO", "# of Nodes", "Max BW in MB")

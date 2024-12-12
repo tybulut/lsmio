@@ -46,7 +46,7 @@ class DataUnitTestCase(TestCase):
     dataFileList = ['example', 'ior-report.csv']
     dataFile = os.path.join(MY_DIR, *dataFileList)
     Console.debug('Reading IOR CSV file: ' + dataFile + '.')
-    iorRun = data.IorData(dataFile)
+    iorRun = data.IorSummaryData(dataFile)
     (xSeries, ySeries) = iorRun.timeSeries(False, 4, '64K')
     self.assertEqual(xSeries, [1, 2, 4, 8, 16, 24, 32, 40, 48])
     self.assertEqual(ySeries, [885.43, 1693.98, 3482.97, 888.5, 366.97, 237.68, 180.52, 154.18, 147.4])
@@ -55,7 +55,7 @@ class DataUnitTestCase(TestCase):
     dataFileList = ['example', 'lsm-report.csv']
     dataFile = os.path.join(MY_DIR, *dataFileList)
     Console.debug('Reading LSMIO CSV file: ' + dataFile + '.')
-    lsmioRun = data.LsmioData(dataFile)
+    lsmioRun = data.LsmioSummaryData(dataFile)
     (xSeries, ySeries) = lsmioRun.timeSeries(False, 4, '64K')
     self.assertEqual(xSeries, [1, 2, 4, 8, 16, 24, 32, 40, 48])
     self.assertEqual(ySeries, [224.62, 473.28, 841.07, 1518.08, 3220.35, 3466.01, 3617.18, 3911.51, 4165.44])
