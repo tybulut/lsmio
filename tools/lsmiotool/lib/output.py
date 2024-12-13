@@ -38,7 +38,7 @@ class TraverseDir(DebuggableObject):
     self.root_dir = target_dir
     self.dir_recursive = self._gather(target_dir)
 
-  #outputs/4/2023-07-21/
+  #ior-outputs/4/2023-07-21/
   #  out-collective-16-1M-2023-07-21-node109-0.txt.2
   #  out-collective-16-1M-2023-07-21-node110-0.txt.2
   #  out-collective-16-1M-2023-07-21-node116-0.txt.2
@@ -100,8 +100,14 @@ class IorOutputDir(TraverseDir):
                 stripe_count = str(match.group(1))
                 stripe_size = str(match.group(2))
                 if stripe_count not in meta_dict[field_size]:
-                    meta_dict[field_size][stripe_count] = { stripe_size : {} }
-                meta_dict[field_size][stripe_count][stripe_size] = { key : val }
+                    meta_dict[field_size][stripe_count] = {}
+                if stripe_size not in meta_dict[field_size][stripe_count]:
+                    meta_dict[field_size][stripe_count][stripe_size] = {}
+                meta_dict[field_size][stripe_count][stripe_size][key] = val
     #Console.debug("meta_dict: " + pprint.pformat(meta_dict))
     return meta_dict
+
+
+class LsmioOutputDir(IorOutputDir):
+    pass
 

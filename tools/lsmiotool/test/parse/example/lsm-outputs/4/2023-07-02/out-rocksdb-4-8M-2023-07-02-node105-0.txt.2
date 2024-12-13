@@ -1,0 +1,69 @@
+BENCHMARK PARAMETERS: 
+
+ fileName: /mnt/lustre/users/sb2984/benchmark/data/c4/b8M/lsmio-node105-0-rocks.db
+ dirName: 
+ useLSMIOPlugin: 0
+ loopAll: 0
+ verbose: 0
+ mpi-barrier: 1
+ iterations: 10
+ segmentCount: 1024
+ keyCount: 4096
+ valueSize: 65535
+
+ useBloomFilter: 0
+ useSync: 0
+ enableWAL: 0
+ enableMMAP: 0
+ compression: 0
+ blockSize: 8388608
+ transferSize: 8388608
+
+ alwaysFlush: 0
+ asyncBatchSize: 512
+ asyncBatchBytes: 33554432
+
+ cacheSize: 0
+ writeBufferSize: 33554432
+ writeFileSize: 33554432
+
+BENCHMARK RESULTS: 
+
+Iteration-WRITE: RocksDB Flush: false BLF: false
+accessmax(MiB)/smin(MiB/s)mean(MiB/s)total(MiB)total(Ops)iteration
+--------------------------------------------------------------------
+iwrite,113.03,113.03,113.03,256.00,4096,1
+iwrite,124.27,124.27,124.27,256.00,4096,1
+iwrite,140.43,140.43,140.43,256.00,4096,1
+iwrite,141.92,141.92,141.92,256.00,4096,1
+iwrite,141.53,141.53,141.53,256.00,4096,1
+iwrite,147.24,147.24,147.24,256.00,4096,1
+iwrite,151.39,151.39,151.39,256.00,4096,1
+iwrite,147.87,147.87,147.87,256.00,4096,1
+iwrite,162.66,162.66,162.66,256.00,4096,1
+iwrite,154.43,154.43,154.43,256.00,4096,1
+
+Bench-WRITE: RocksDB Flush: false BLF: false
+access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
+------,----------,----------,-----------,-----------,----------,----------
+write,162.66,113.03,142.48,2559.96,40960,10
+
+Iteration-READ: RocksDB Flush: false BLF: false
+accessmax(MiB)/smin(MiB/s)mean(MiB/s)total(MiB)total(Ops)iteration
+--------------------------------------------------------------------
+iread,20.49,20.49,20.49,256.00,4096,1
+iread,20.41,20.41,20.41,256.00,4096,1
+iread,20.51,20.51,20.51,256.00,4096,1
+iread,20.45,20.45,20.45,256.00,4096,1
+iread,20.51,20.51,20.51,256.00,4096,1
+iread,20.81,20.81,20.81,256.00,4096,1
+iread,20.76,20.76,20.76,256.00,4096,1
+iread,20.91,20.91,20.91,256.00,4096,1
+iread,20.79,20.79,20.79,256.00,4096,1
+iread,21.31,21.31,21.31,256.00,4096,1
+
+Bench-READ: RocksDB Flush: false BLF: false
+access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
+------,----------,----------,-----------,-----------,----------,----------
+read,21.31,20.41,20.70,2559.96,40960,10
+

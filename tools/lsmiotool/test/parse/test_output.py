@@ -100,3 +100,22 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(len(dir_map['1']['4']), 3)
     self.assertEqual(dir_map['1']['4']['64K']['out-collective-4-64K-2023-07-21-node169-0.txt.2'], 6966)
 
+
+  def test_lsm_out_dir(self):
+    root_dir_list = ['example', 'lsm-outputs']
+    root_dir = os.path.join(MY_DIR, *root_dir_list)
+    Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
+    lsm_dir = output.LsmioOutputDir(root_dir)
+    dir_map = lsm_dir.getMetaMap()
+    #Console.debug("test_ior_out_dir map: " + pprint.pformat(dir_map))
+    self.assertTrue('4' in dir_map)
+    self.assertEqual(len(dir_map), 2)
+    self.assertTrue('16' in dir_map['4'])
+    self.assertEqual(len(dir_map['4']), 2)
+    self.assertTrue('8M' in dir_map['4']['16'])
+    self.assertEqual(len(dir_map['4']['16']), 3)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node103-0.txt.2'], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node105-0.txt.2'], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node108-0.txt.2'], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node113-0.txt.2'], 2190)
+
