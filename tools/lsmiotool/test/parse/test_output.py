@@ -102,7 +102,7 @@ class OutputUnitTestCase(TestCase):
 
 
   def test_lsm_out_dir(self):
-    root_dir_list = ['example', 'lsm-outputs']
+    root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
     lsm_dir = output.LsmioOutputDir(root_dir)

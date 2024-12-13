@@ -55,7 +55,7 @@ class DataUnitTestCase(TestCase):
 
 
   def test_lsm_data(self):
-    data_file_list = ['example', 'lsm-report.csv']
+    data_file_list = ['example', 'lsmio-report.csv']
     data_file = os.path.join(MY_DIR, *data_file_list)
     Console.debug('Reading LSMIO CSV file: ' + data_file + '.')
     lsmio_run = data.LsmioSummaryData(data_file)
@@ -97,7 +97,7 @@ class DataUnitTestCase(TestCase):
   #read,320.78,0.798,1048576,1048576,10
   #
   def test_lsm_run_data(self):
-    data_file_list = ['example', 'lsm-single-run.txt']
+    data_file_list = ['example', 'lsmio-single-run.txt']
     data_file = os.path.join(MY_DIR, *data_file_list)
     Console.debug('Reading LSMO single run file: ' + data_file + '.')
     lsm_run = data.LsmioSingleRunData(data_file)
