@@ -66,9 +66,37 @@ class OutputUnitTestCase(TestCase):
     traversed = output.TraverseDir(root_dir)
     dir_map = traversed.getMap()
     #Console.debug("test_traverse_dir map: " + pprint.pformat(dir_map))
-    self.assertTrue('ior-outputs' in dir_map)
-    self.assertTrue('1' in dir_map['ior-outputs'])
-    self.assertTrue('2023-07-21' in dir_map['ior-outputs']['1'])
-    self.assertEqual(len(dir_map['ior-outputs']['1']['2023-07-21']), 6)
-    self.assertEqual(dir_map['ior-outputs']['1']['2023-07-21']['out-collective-16-1M-2023-07-21-node169-0.txt.2'], 6952)
+    self.assertTrue('1' in dir_map)
+    self.assertEqual(len(dir_map), 2)
+    self.assertTrue('2023-07-21' in dir_map['1'])
+    self.assertEqual(len(dir_map['1']['2023-07-21']), 6)
+    self.assertEqual(dir_map['1']['2023-07-21']['out-collective-16-1M-2023-07-21-node169-0.txt.2'], 6952)
+
+
+  #{'1': {'16': {'1M': {'out-collective-16-1M-2023-07-21-node169-0.txt.2': 6952},
+  #              '64K': {'out-collective-16-64K-2023-07-21-node169-0.txt.2': 6969},
+  #              '8M': {'out-collective-16-8M-2023-07-21-node169-0.txt.2': 6949}},
+  #       '4': {'1M': {'out-collective-4-1M-2023-07-21-node169-0.txt.2': 6949},
+  #             '64K': {'out-collective-4-64K-2023-07-21-node169-0.txt.2': 6966},
+  #             '8M': {'out-collective-4-8M-2023-07-21-node169-0.txt.2': 6947}}},
+  # '2': {'16': {'1M': {'out-collective-16-1M-2023-07-21-node154-0.txt.2': 0},
+  #              '64K': {'out-collective-16-64K-2023-07-21-node154-0.txt.2': 0},
+  #              '8M': {'out-collective-16-8M-2023-07-21-node150-0.txt.2': 6950}},
+  #       '4': {'1M': {'out-collective-4-1M-2023-07-21-node150-0.txt.2': 6946},
+  #             '64K': {'out-collective-4-64K-2023-07-21-node154-0.txt.2': 0},
+  #             '8M': {'out-collective-4-8M-2023-07-21-node154-0.txt.2': 0}}}}
+  def test_ior_out_dir(self):
+    root_dir_list = ['example', 'ior-outputs']
+    root_dir = os.path.join(MY_DIR, *root_dir_list)
+    Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
+    ior_dir = output.IorOutputDir(root_dir)
+    dir_map = ior_dir.getMetaMap()
+    #Console.debug("test_ior_out_dir map: " + pprint.pformat(dir_map))
+    self.assertTrue('1' in dir_map)
+    self.assertEqual(len(dir_map), 2)
+    self.assertTrue('4' in dir_map['1'])
+    self.assertEqual(len(dir_map['1']), 2)
+    self.assertTrue('1M' in dir_map['1']['4'])
+    self.assertEqual(len(dir_map['1']['4']), 3)
+    self.assertEqual(dir_map['1']['4']['64K']['out-collective-4-64K-2023-07-21-node169-0.txt.2'], 6966)
 
