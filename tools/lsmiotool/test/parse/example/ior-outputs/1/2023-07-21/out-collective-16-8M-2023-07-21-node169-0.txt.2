@@ -1,0 +1,103 @@
+IOR-4.1.0+dev: MPI Coordinated Test of Parallel I/O
+Began               : Fri Jul 21 00:27:09 2023
+Command line        : /users/sb2984/src/usr/bin/ior -v -w -r -i=10 -c -a MPIIO -o /mnt/bb/tmp/users/sb2984/benchmark/data/c16/b8M/ior-c.data -t=8M -b=8M -s=128
+Machine             : Linux node169.pri.viking.alces.network
+TestID              : 0
+StartTime           : Fri Jul 21 00:27:09 2023
+Path                : /mnt/bb/tmp/users/sb2984/benchmark/data/c16/b8M/ior-c.data
+FS                  : 46.1 TiB   Used FS: 33.1%   Inodes: 4.0 Mi   Used Inodes: 74.2%
+Participating tasks : 1
+
+Options: 
+api                 : MPIIO
+apiVersion          : (3.1)
+test filename       : /mnt/bb/tmp/users/sb2984/benchmark/data/c16/b8M/ior-c.data
+access              : single-shared-file
+type                : collective
+segments            : 128
+ordering in a file  : sequential
+ordering inter file : no tasks offsets
+nodes               : 1
+tasks               : 1
+clients per node    : 1
+memoryBuffer        : CPU
+dataAccess          : CPU
+GPUDirect           : 0
+repetitions         : 10
+xfersize            : 8 MiB
+blocksize           : 8 MiB
+aggregate filesize  : 1 GiB
+verbose             : 1
+
+Results: 
+
+access    bw(MiB/s)  IOPS       Latency(s)  block(KiB) xfer(KiB)  open(s)    wr/rd(s)   close(s)   total(s)   iter
+------    ---------  ----       ----------  ---------- ---------  --------   --------   --------   --------   ----
+Commencing write performance test: Fri Jul 21 00:27:09 2023
+write     915.05     114.92     1.11        8192       8192       0.004689   1.11       0.000578   1.12       0   
+Commencing read performance test: Fri Jul 21 00:27:11 2023
+
+read      2620.39    329.47     0.388503    8192       8192       0.001751   0.388503   0.000516   0.390781   0   
+remove    -          -          -           -          -          -          -          -          0.237418   0   
+Commencing write performance test: Fri Jul 21 00:27:11 2023
+write     960.64     120.49     1.06        8192       8192       0.003124   1.06       0.000450   1.07       1   
+Commencing read performance test: Fri Jul 21 00:27:12 2023
+
+read      2765.44    348.05     0.367763    8192       8192       0.002007   0.367763   0.000507   0.370284   1   
+remove    -          -          -           -          -          -          -          -          0.228134   1   
+Commencing write performance test: Fri Jul 21 00:27:13 2023
+write     955.84     119.89     1.07        8192       8192       0.003148   1.07       0.000529   1.07       2   
+Commencing read performance test: Fri Jul 21 00:27:14 2023
+
+read      2743.91    345.33     0.370657    8192       8192       0.002052   0.370657   0.000474   0.373190   2   
+remove    -          -          -           -          -          -          -          -          0.227831   2   
+Commencing write performance test: Fri Jul 21 00:27:15 2023
+write     998.76     125.29     1.02        8192       8192       0.003173   1.02       0.000461   1.03       3   
+Commencing read performance test: Fri Jul 21 00:27:16 2023
+
+read      2826.67    356.43     0.359112    8192       8192       0.002618   0.359112   0.000527   0.362264   3   
+remove    -          -          -           -          -          -          -          -          0.222553   3   
+Commencing write performance test: Fri Jul 21 00:27:16 2023
+write     972.59     122.02     1.05        8192       8192       0.003376   1.05       0.000451   1.05       4   
+Commencing read performance test: Fri Jul 21 00:27:17 2023
+
+read      2952.72    371.71     0.344350    8192       8192       0.001993   0.344350   0.000450   0.346799   4   
+remove    -          -          -           -          -          -          -          -          0.214513   4   
+Commencing write performance test: Fri Jul 21 00:27:18 2023
+write     957.34     120.09     1.07        8192       8192       0.003281   1.07       0.000477   1.07       5   
+Commencing read performance test: Fri Jul 21 00:27:19 2023
+
+read      2951.66    371.65     0.344414    8192       8192       0.002036   0.344414   0.000467   0.346923   5   
+remove    -          -          -           -          -          -          -          -          0.213336   5   
+Commencing write performance test: Fri Jul 21 00:27:19 2023
+write     981.98     123.14     1.04        8192       8192       0.002896   1.04       0.000435   1.04       6   
+Commencing read performance test: Fri Jul 21 00:27:21 2023
+
+read      2948.32    371.31     0.344721    8192       8192       0.002027   0.344721   0.000562   0.347316   6   
+remove    -          -          -           -          -          -          -          -          0.212521   6   
+Commencing write performance test: Fri Jul 21 00:27:21 2023
+write     927.39     116.26     1.10        8192       8192       0.002641   1.10       0.000564   1.10       7   
+Commencing read performance test: Fri Jul 21 00:27:22 2023
+
+read      2801.04    352.59     0.363027    8192       8192       0.002087   0.363027   0.000453   0.365579   7   
+remove    -          -          -           -          -          -          -          -          0.219812   7   
+Commencing write performance test: Fri Jul 21 00:27:23 2023
+write     847.43     115.69     1.11        8192       8192       0.101414   1.11       0.000519   1.21       8   
+Commencing read performance test: Fri Jul 21 00:27:24 2023
+
+read      2607.18    327.58     0.390747    8192       8192       0.001563   0.390747   0.000446   0.392762   8   
+remove    -          -          -           -          -          -          -          -          0.240098   8   
+Commencing write performance test: Fri Jul 21 00:27:25 2023
+write     994.05     124.79     1.03        8192       8192       0.003247   1.03       0.001170   1.03       9   
+Commencing read performance test: Fri Jul 21 00:27:26 2023
+
+read      2943.81    371.06     0.344954    8192       8192       0.002318   0.344954   0.000570   0.347849   9   
+remove    -          -          -           -          -          -          -          -          0.214457   9   
+Max Write: 998.76 MiB/sec (1047.28 MB/sec)
+Max Read:  2952.72 MiB/sec (3096.15 MB/sec)
+
+Summary of all tests:
+Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
+write         998.76     847.43     951.11      42.77     124.85     105.93     118.89       5.35    1.07895         NA            NA     0      1   1   10   0     0        1         0    0    128  8388608  8388608    1024.0 MPIIO      0
+read         2952.72    2607.18    2816.11     126.85     369.09     325.90     352.01      15.86    0.36437         NA            NA     0      1   1   10   0     0        1         0    0    128  8388608  8388608    1024.0 MPIIO      0
+Finished            : Fri Jul 21 00:27:26 2023
