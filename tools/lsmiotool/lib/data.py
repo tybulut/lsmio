@@ -75,7 +75,7 @@ class IorSingleRunData(DebuggableObject):
                 self.run_data["read"][heads[i]] = reads[i]
                 self.run_data["write"][heads[i]] = writes[i]
 
-  def runData(self):
+  def getMap(self):
     return self.run_data
 
 
@@ -135,7 +135,7 @@ class LsmioSingleRunData(DebuggableObject):
                 self.run_data["read"][heads[i]] = reads[i]
                 self.run_data["write"][heads[i]] = writes[i]
 
-  def runData(self):
+  def getMap(self):
     return self.run_data
 
 

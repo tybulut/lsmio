@@ -39,6 +39,10 @@ import pprint
 
 MY_DIR = Path(__file__).parent.resolve()
 
+class TestIorAggOutput(output.IorAggOutput):
+  _node_counts= ['1', '2']
+
+
 class OutputUnitTestCase(TestCase):
 
   #ior-output
@@ -90,7 +94,7 @@ class OutputUnitTestCase(TestCase):
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
     ior_dir = output.IorOutputDir(root_dir)
-    dir_map = ior_dir.getMetaMap()
+    dir_map = ior_dir.getMap()
     #Console.debug("test_ior_out_dir map: " + pprint.pformat(dir_map))
     self.assertTrue('1' in dir_map)
     self.assertEqual(len(dir_map), 2)
@@ -98,7 +102,7 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(len(dir_map['1']), 2)
     self.assertTrue('1M' in dir_map['1']['4'])
     self.assertEqual(len(dir_map['1']['4']), 3)
-    self.assertEqual(dir_map['1']['4']['64K']['out-collective-4-64K-2023-07-21-node169-0.txt.2'], 6966)
+    self.assertEqual(dir_map['1']['4']['64K']['out-collective-4-64K-2023-07-21-node169-0.txt.2']["size"], 6966)
 
 
   def test_lsm_out_dir(self):
@@ -106,7 +110,7 @@ class OutputUnitTestCase(TestCase):
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
     lsm_dir = output.LsmioOutputDir(root_dir)
-    dir_map = lsm_dir.getMetaMap()
+    dir_map = lsm_dir.getMap()
     #Console.debug("test_ior_out_dir map: " + pprint.pformat(dir_map))
     self.assertTrue('4' in dir_map)
     self.assertEqual(len(dir_map), 2)
@@ -114,8 +118,39 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(len(dir_map['4']), 2)
     self.assertTrue('8M' in dir_map['4']['16'])
     self.assertEqual(len(dir_map['4']['16']), 3)
-    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node103-0.txt.2'], 2190)
-    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node105-0.txt.2'], 2190)
-    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node108-0.txt.2'], 2190)
-    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node113-0.txt.2'], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node103-0.txt.2']["size"], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node105-0.txt.2']["size"], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node108-0.txt.2']["size"], 2190)
+    self.assertEqual(dir_map['4']['16']['64K']['out-rocksdb-16-64K-2023-07-02-node113-0.txt.2']["size"], 2190)
+
+
+  #{'1': {'16': {'1M': [{'read': {'#Tasks': '1',
+  #                             'API': 'MPIIO',
+  #                             'Max(MiB)': 4152.58,
+  #                             'Max(OPs)': 4152.58,
+  #                             'Mean(MiB)': 3734.04,
+  #                             'Mean(OPs)': 3734.04,
+  #                             'Mean(s)': '0.13826',
+  #                             ...
+  #                    'write': {'#Tasks': '1',
+  #                              'API': 'MPIIO',
+  #                              'Max(MiB)': 1154.86,
+  #                              'Max(OPs)': 1154.86,
+  #                              'Mean(MiB)': 1022.76,
+  def test_ior_agg_out(self):
+    root_dir_list = ['example', 'ior-outputs']
+    root_dir = os.path.join(MY_DIR, *root_dir_list)
+    Console.debug('Reading example ior agg directory: ' + root_dir + '.')
+    ior_agg = TestIorAggOutput(root_dir)
+    agg_map = ior_agg.getMap()
+    #Console.debug("test_ior_agg_out map: " + pprint.pformat(agg_map))
+    self.assertTrue('1' in agg_map)
+    self.assertEqual(len(agg_map), 2)
+    self.assertTrue('4' in agg_map['1'])
+    self.assertEqual(len(agg_map['1']), 2)
+    self.assertTrue('1M' in agg_map['1']['4'])
+    self.assertEqual(len(agg_map['1']['4']), 3)
+    self.assertEqual(agg_map['1']['16']['1M']['read']["Max(MiB)"], 4152.58)
+    self.assertEqual(agg_map['1']['16']['1M']['write']["Max(OPs)"], 1154.86)
+
 
