@@ -148,10 +148,10 @@ class IorAggOutput(DebuggableObject):
                     self._logError({ n_count: 'node count not found in output directory)' })
                 if s_count not in dir_map[n_count]:
                     self._logError({ s_count: 'stripe count not found in output directory)' })
-                self.agg_data[n_count][s_count][s_size] = self._processAggFies(dir_map[n_count][s_count][s_size])
+                self.agg_data[n_count][s_count][s_size] = self._processAggFies(dir_map[n_count][s_count][s_size], n_count)
 
 
-  def _processAggFies(self, f_files):
+  def _processAggFies(self, f_files, f_count):
     sim_data = []
     for file in f_files:
         file_meta = f_files[file]
@@ -171,7 +171,53 @@ class IorAggOutput(DebuggableObject):
 
 
 class LsmioAggOutput(IorAggOutput):
-  pass
+
+  #access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
+  #write,473.28,318.5,441.18,5119.92,81920,10
+  #read,2646.78,2180.84,2427.9,5119.92,81920,10
+  def _processAggFies(self, f_files, f_count):
+    sim_data = []
+    for file in f_files:
+        file_meta = f_files[file]
+        sr_data = data.LsmioSingleRunData(file_meta["path"])
+        sr_map = sr_data.getMap()
+        sim_data.append(sr_map)
+        #Console.debug("Lsmio path: " + file_meta["path"])
+        #Console.debug("Lsmio sim: " + pprint.pformat(sr_map))
+    if len(sim_data) != f_count:
+        self._logError({ 0: 'number of simulation data does not match node count)' })
+    agg_map = {
+        'read': {
+            'max(MiB)/s' : float(0.00),
+            'min(MiB/s)' : float(0.00),
+            'mean(MiB/s)' : float(0.00),
+            'total(MiB)' : float(0),
+            'total(Ops)' : float(0),
+            'iteration' : int(0)
+        },
+        'write': {
+            'max(MiB)/s' : float(0.00),
+            'min(MiB/s)' : float(0.00),
+            'mean(MiB/s)' : float(0.00),
+            'total(MiB)' : float(0),
+            'total(Ops)' : float(0),
+            'iteration' : int(0)
+        }
+    }
+    for sim in sim_data:
+        agg_map['read']['max(MiB)/s'] += float(sim['read']['max(MiB)/s'])
+        agg_map['read']['min(MiB/s)'] += float(sim['read']['min(MiB/s)'])
+        agg_map['read']['mean(MiB/s)'] += float(sim['read']['mean(MiB/s)'])
+        agg_map['read']['total(MiB)'] += float(sim['read']['total(MiB)'])
+        agg_map['read']['total(Ops)'] += float(sim['read']['total(Ops)'])
+        agg_map['read']['iteration'] = int(sim['read']['iteration'])
+        agg_map['write']['max(MiB)/s'] += float(sim['write']['max(MiB)/s'])
+        agg_map['write']['min(MiB/s)'] += float(sim['write']['min(MiB/s)'])
+        agg_map['write']['mean(MiB/s)'] += float(sim['write']['mean(MiB/s)'])
+        agg_map['write']['total(MiB)'] += float(sim['write']['total(MiB)'])
+        agg_map['write']['total(Ops)'] += float(sim['write']['total(Ops)'])
+        agg_map['write']['iteration'] = int(sim['write']['iteration'])
+    return agg_map
 
 
 # class IorSumOutput

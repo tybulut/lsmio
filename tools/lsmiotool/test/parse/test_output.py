@@ -39,8 +39,13 @@ import pprint
 
 MY_DIR = Path(__file__).parent.resolve()
 
+
 class TestIorAggOutput(output.IorAggOutput):
   _node_counts= ['1', '2']
+
+
+class TestLsmioAggOutput(output.LsmioAggOutput):
+  _node_counts= ['1', '4']
 
 
 class OutputUnitTestCase(TestCase):
@@ -152,5 +157,26 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(len(agg_map['1']['4']), 3)
     self.assertEqual(agg_map['1']['16']['1M']['read']["Max(MiB)"], 4152.58)
     self.assertEqual(agg_map['1']['16']['1M']['write']["Max(OPs)"], 1154.86)
+
+
+  #agg-16-1M-report.csv
+  #access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
+  #write,731.39,457.88,623.48,10239.8,163840,10
+  #read,1231.2,1098.12,1165.55,10239.8,163840,10
+  def test_lsmio_agg_out(self):
+    root_dir_list = ['example', 'lsmio-outputs']
+    root_dir = os.path.join(MY_DIR, *root_dir_list)
+    Console.debug('Reading example lsmio agg directory: ' + root_dir + '.')
+    lsm_agg = TestLsmioAggOutput(root_dir)
+    agg_map = lsm_agg.getMap()
+    #Console.debug("test_lsmio_agg_out map: " + pprint.pformat(agg_map))
+    self.assertTrue('4' in agg_map)
+    self.assertEqual(len(agg_map), 2)
+    self.assertTrue('16' in agg_map['4'])
+    self.assertEqual(len(agg_map['4']), 2)
+    self.assertTrue('1M' in agg_map['4']['16'])
+    self.assertEqual(len(agg_map['4']['16']), 3)
+    self.assertEqual(agg_map['4']['16']['1M']['write']["mean(MiB/s)"], 623.48)
+    self.assertEqual(agg_map['4']['16']['1M']['read']["max(MiB)/s"], 1231.2)
 
 

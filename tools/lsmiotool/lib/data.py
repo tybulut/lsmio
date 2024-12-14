@@ -30,6 +30,7 @@
 
 import csv
 from lsmiotool.lib.debuggable import DebuggableObject
+from lsmiotool.lib.log import Console
 
 
 class IorSingleRunData(DebuggableObject):
@@ -64,9 +65,9 @@ class IorSingleRunData(DebuggableObject):
                 continue
             if head_line and read_line and write_line:
                 break
-        heads = head_line.split()[1:]
-        reads = read_line.split()[1:]
-        writes = write_line.split()[1:]
+        heads = head_line.rstrip().split()[1:]
+        reads = read_line.rstrip().split()[1:]
+        writes = write_line.rstrip().split()[1:]
         for i in range(len(heads)):
             if heads[i] in ["Max(MiB)", "Min(MiB)", "Mean(MiB)", "StdDev", "Max(OPs)", "Min(OPs)", "Mean(OPs)"]:
                 self.run_data["read"][heads[i]] = float(reads[i])
@@ -108,7 +109,7 @@ class LsmioSingleRunData(DebuggableObject):
                     found_w_summary = True
                     continue
             if found_w_summary:
-                if line.startswith('access,bw'):
+                if line.startswith('access,'):
                     head_line = line
                 if line.startswith('write'):
                     found_w_summary = False
@@ -124,9 +125,12 @@ class LsmioSingleRunData(DebuggableObject):
                 continue
             if head_line and read_line and write_line:
                 break
-        heads = head_line.split(",")[1:]
-        reads = read_line.split(",")[1:]
-        writes = write_line.split(",")[1:]
+        #Console.debug("Lsmio heads: " + head_line)
+        #Console.debug("Lsmio reads: " + read_line)
+        #Console.debug("Lsmio writes: " + write_line)
+        heads = head_line.rstrip().split(",")[1:]
+        reads = read_line.rstrip().split(",")[1:]
+        writes = write_line.rstrip().split(",")[1:]
         for i in range(len(heads)):
             if heads[i] in ["bw(MiB/s)", "Latency(ms)", "block(KiB)", "xfer(KiB)"]:
                 self.run_data["read"][heads[i]] = float(reads[i])
