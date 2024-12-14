@@ -53,9 +53,9 @@ class TraverseDir(DebuggableObject):
     for root, dirs, files in os.walk(gather_dir):
         for file in files:
             file_path = os.path.join(root, file)
-            folder_dict[file] = os.path.getsize(file_path)
+            folder_dict[str(file)] = os.path.getsize(file_path)
         for odir in dirs:
-            folder_dict[odir] = self._gather(os.path.join(root, odir))
+            folder_dict[str(odir)] = self._gather(os.path.join(root, odir))
         break
     return folder_dict
 
@@ -128,6 +128,7 @@ class IorAggOutput(DebuggableObject):
     ior_dir = IorOutputDir(self.out_dir)
     dir_map = ior_dir.getMap()
     self.agg_data = {}
+    #Console.debug("IorAggOutput::dir_map: " + pprint.pformat(dir_map))
     for n_count in self._node_counts:
         self.agg_data[n_count] = {}
         for s_count in self._stripe_counts:
@@ -137,6 +138,7 @@ class IorAggOutput(DebuggableObject):
                 # Sanity check dir_map
                 if n_count not in dir_map:
                     self._logError({ n_count: 'node count not found in output directory)' })
+                #Console.debug("IorAggOutput::n_count: " + n_count)
                 if s_count not in dir_map[n_count]:
                     self._logError({ s_count: 'stripe count not found in output directory)' })
                 if s_size not in dir_map[n_count][s_count]:
@@ -220,31 +222,26 @@ class LsmioAggOutput(IorAggOutput):
     return agg_map
 
 
-# class IorSumOutput
-#
-#    self.out_data = {
-#      # operation -> numStripes -> stripeSize -> numNodes
-#    }
-#          if numNodes not in self.csv_data[operation][numStripes][stripeSize]:
-#              self.csv_data[operation][numStripes][stripeSize][numNodes] = {}
-#          partData = {
-#            'maxMB': float(0.00),
-#            'minMB': float(0.00),
-#            'meanMB': float(0.00),
-#          }
-#          if row[4]: partData['maxMB'] = float(row[4])
-#          if row[5]: partData['minMB'] = float(row[5])
-#          if row[6]: partData['meanMB'] = float(row[6])
-#          self.csv_data[operation][numStripes][stripeSize][numNodes] = partData
-#
-#  def timeSeries(self, isRead: bool, numStripes: int, stripeSize: str):
-#    operation = 'read' if isRead == True else 'write'
-#    partData = self.csv_data[operation][numStripes][stripeSize]
-#    xSeries = []
-#    ySeries = []
-#    for node in sorted(partData):
-#        xSeries.append(node)
-#        ySeries.append(partData[node]['maxMB'])
-#    return (xSeries, ySeries)
-#
+class IorFullOutput(IorAggOutput):
+
+  def timeSeries(self, f_read: bool, f_stripe_count: int, f_stripe_size: str):
+    sum_data = self.getMap()
+    access = 'read' if f_read == True else 'write'
+    xSeries = self._node_counts
+    ySeries = []
+    for n_count in xSeries:
+        ySeries.append(sum_data[n_count][str(f_stripe_count)][f_stripe_size][access]['Max(MiB)'])
+    return (xSeries, ySeries)
+
+
+class LsmioFullOutput(LsmioAggOutput):
+
+  def timeSeries(self, f_read: bool, f_stripe_count: int, f_stripe_size: str):
+    sum_data = self.getMap()
+    access = 'read' if f_read == True else 'write'
+    xSeries = self._node_counts
+    ySeries = []
+    for n_count in xSeries:
+        ySeries.append(sum_data[n_count][str(f_stripe_count)][f_stripe_size][access]['max(MiB)/s'])
+    return (xSeries, ySeries)
 

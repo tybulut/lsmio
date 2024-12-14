@@ -40,11 +40,19 @@ import pprint
 MY_DIR = Path(__file__).parent.resolve()
 
 
-class TestIorAggOutput(output.IorAggOutput):
+class MockIorAggOutput(output.IorAggOutput):
   _node_counts= ['1', '2']
 
 
-class TestLsmioAggOutput(output.LsmioAggOutput):
+class MockLsmioAggOutput(output.LsmioAggOutput):
+  _node_counts= ['1', '4']
+
+
+class MockIorFullOutput(output.IorFullOutput):
+  _node_counts= ['1', '2']
+
+
+class MockLsmioFullOutput(output.LsmioFullOutput):
   _node_counts= ['1', '4']
 
 
@@ -146,7 +154,7 @@ class OutputUnitTestCase(TestCase):
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior agg directory: ' + root_dir + '.')
-    ior_agg = TestIorAggOutput(root_dir)
+    ior_agg = MockIorAggOutput(root_dir)
     agg_map = ior_agg.getMap()
     #Console.debug("test_ior_agg_out map: " + pprint.pformat(agg_map))
     self.assertTrue('1' in agg_map)
@@ -167,7 +175,7 @@ class OutputUnitTestCase(TestCase):
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example lsmio agg directory: ' + root_dir + '.')
-    lsm_agg = TestLsmioAggOutput(root_dir)
+    lsm_agg = MockLsmioAggOutput(root_dir)
     agg_map = lsm_agg.getMap()
     #Console.debug("test_lsmio_agg_out map: " + pprint.pformat(agg_map))
     self.assertTrue('4' in agg_map)
@@ -178,5 +186,39 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(len(agg_map['4']['16']), 3)
     self.assertEqual(agg_map['4']['16']['1M']['write']["mean(MiB/s)"], 623.48)
     self.assertEqual(agg_map['4']['16']['1M']['read']["max(MiB)/s"], 1231.2)
+
+
+  #'2': {'16': {'1M': {'read': {'#Tasks': '2',
+  #                              'Max(MiB)': 882.66,
+  #                              'Max(OPs)': 882.66,
+  #                              'Mean(MiB)': 787.69,
+  #                             ...
+  #                     'write': {'#Tasks': '2',
+  #                               'Mean(OPs)': 932.0,
+  #                               'Mean(s)': '1.10131',
+  #                               'Min(MiB)': 829.51,
+  #
+  def test_ior_full_output(self):
+    root_dir_list = ['example', 'ior-outputs']
+    root_dir = os.path.join(MY_DIR, *root_dir_list)
+    Console.debug('Reading example ior full directory: ' + root_dir + '.')
+    ior_full = MockIorFullOutput(root_dir)
+    full_map = ior_full.getMap()
+    (xSeries, ySeries) = ior_full.timeSeries(False, '4', '64K')
+    #Console.debug("test_ior_full_output map: " + pprint.pformat(full_map))
+    self.assertEqual(xSeries, ['1', '2'])
+    self.assertEqual(ySeries, [888.01, 836.94])
+
+
+  def test_lsmio_full_output(self):
+    root_dir_list = ['example', 'lsmio-outputs']
+    root_dir = os.path.join(MY_DIR, *root_dir_list)
+    Console.debug('Reading example lsmio full directory: ' + root_dir + '.')
+    lsm_full = MockLsmioFullOutput(root_dir)
+    full_map = lsm_full.getMap()
+    (xSeries, ySeries) = lsm_full.timeSeries(False, '4', '64K')
+    #Console.debug("test_lsmio_full_output map: " + pprint.pformat(full_map))
+    self.assertEqual(xSeries, ['1', '4'])
+    self.assertEqual(ySeries, [224.62, 841.0699999999999])
 
 
