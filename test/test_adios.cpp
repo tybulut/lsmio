@@ -53,8 +53,7 @@ void testAdiosWriter(adios2::ADIOS &adios, const std::string &testKey,
 
       const unsigned int file =
         io.AddTransport("File", {
-                                  {"Library", "POSIX"}, // POSIX (UNIX), FStream (Windows), stdio,
-      IME (DDN)
+                                  {"Library", "POSIX"}, // POSIX (UNIX), FStream (Windows), stdio, IME (DDN)
                                   {"Name","file2.bp" }
                                 });
 
