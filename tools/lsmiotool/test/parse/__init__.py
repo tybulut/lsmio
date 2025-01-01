@@ -28,5 +28,5 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-__all__ = [ 'test_log' ]
+__all__ = [ 'test_log', 'test_data', 'test_output' ]
 

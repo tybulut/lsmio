@@ -1,0 +1,69 @@
+BENCHMARK PARAMETERS: 
+
+ fileName: /mnt/lustre/users/sb2984/benchmark/data/c16/b64K/lsmio-node103-0-rocks.db
+ dirName: 
+ useLSMIOPlugin: 0
+ loopAll: 0
+ verbose: 0
+ mpi-barrier: 1
+ iterations: 10
+ segmentCount: 1024
+ keyCount: 4096
+ valueSize: 65535
+
+ useBloomFilter: 0
+ useSync: 0
+ enableWAL: 0
+ enableMMAP: 0
+ compression: 0
+ blockSize: 65536
+ transferSize: 65536
+
+ alwaysFlush: 0
+ asyncBatchSize: 512
+ asyncBatchBytes: 33554432
+
+ cacheSize: 0
+ writeBufferSize: 33554432
+ writeFileSize: 33554432
+
+BENCHMARK RESULTS: 
+
+Iteration-WRITE: RocksDB Flush: false BLF: false
+accessmax(MiB)/smin(MiB/s)mean(MiB/s)total(MiB)total(Ops)iteration
+--------------------------------------------------------------------
+iwrite,81.15,81.15,81.15,256.00,4096,1
+iwrite,155.56,155.56,155.56,256.00,4096,1
+iwrite,190.12,190.12,190.12,256.00,4096,1
+iwrite,191.82,191.82,191.82,256.00,4096,1
+iwrite,181.59,181.59,181.59,256.00,4096,1
+iwrite,199.40,199.40,199.40,256.00,4096,1
+iwrite,192.58,192.58,192.58,256.00,4096,1
+iwrite,111.77,111.77,111.77,256.00,4096,1
+iwrite,174.07,174.07,174.07,256.00,4096,1
+iwrite,204.92,204.92,204.92,256.00,4096,1
+
+Bench-WRITE: RocksDB Flush: false BLF: false
+access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
+------,----------,----------,-----------,-----------,----------,----------
+write,204.92,81.15,168.30,2559.96,40960,10
+
+Iteration-READ: RocksDB Flush: false BLF: false
+accessmax(MiB)/smin(MiB/s)mean(MiB/s)total(MiB)total(Ops)iteration
+--------------------------------------------------------------------
+iread,965.54,965.54,965.54,256.00,4096,1
+iread,831.23,831.23,831.23,256.00,4096,1
+iread,784.84,784.84,784.84,256.00,4096,1
+iread,851.31,851.31,851.31,256.00,4096,1
+iread,832.16,832.16,832.16,256.00,4096,1
+iread,822.46,822.46,822.46,256.00,4096,1
+iread,824.93,824.93,824.93,256.00,4096,1
+iread,835.78,835.78,835.78,256.00,4096,1
+iread,866.29,866.29,866.29,256.00,4096,1
+iread,874.84,874.84,874.84,256.00,4096,1
+
+Bench-READ: RocksDB Flush: false BLF: false
+access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
+------,----------,----------,-----------,-----------,----------,----------
+read,965.54,784.84,848.94,2559.96,40960,10
+
