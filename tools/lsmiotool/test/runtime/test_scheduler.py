@@ -28,59 +28,26 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-import sys, unittest
-import lsmiotool
-try:
-	import coverage
-	_HAS_COVERAGE = True
-except ImportError:
-	_HAS_COVERAGE = False
+from unittest import TestCase
+from io import StringIO
+from lsmiotool.lib.log import Log
+from lsmiotool.lib.scheduler import SlurmScheduler, PbsScheduler
+from lsmiotool.lib.debuggable import DebuggableObject
 
 
-_LSMIOTOOL_TEST_MODULES = [
-  'lsmiotool.test.parse',
-  'lsmiotool.test.runtime'
-]
+class MockSlurmScheduler(SlurmScheduler):
 
-# The modules needs to be loaded to be queried
-for _n in _LSMIOTOOL_TEST_MODULES:
-	exec("from %s import *" % _n)
-modules = list(globals().keys())
-lsmiotool_tests = []
-for m in modules:
-	if m.startswith('_'): continue
-	module = globals()[m]
-	if not module.__name__.startswith('lsmiotool.test.'): continue
-	if module.__name__ in _LSMIOTOOL_TEST_MODULES: continue
-	print(module.__name__)
-	lsmiotool_tests.append(module)
+  def execute(self, f_cmd: str, f_args: dict):
+    return f_cmd + str(f_args)
 
 
-def suite():
-	suite = unittest.TestSuite()
-	tests = []
-	for test in lsmiotool_tests:
-		tl = unittest.TestLoader().loadTestsFromModule(test)
-		tests += tl._tests
-	suite._tests = tests
-	return suite
+class SlurmUnitTestCase(TestCase):
+
+  def test_traceable(self):
+    slurm_scheduler = MockSlurmScheduler()
+    output = slurm_scheduler.run(4, 4, "job-small")
+    self.assertEqual(output, 'Hello World', output)
+    Log().output = swap_output
 
 
-def run_and_report():
-	if _HAS_COVERAGE:
-		cov = coverage.Coverage()
-		cov.erase()
-		cov.start()
-	tr = unittest.TextTestRunner(verbosity=2)
-	tr.run(suite())
-	if _HAS_COVERAGE:
-		cov.stop()
-		cov.analysis(lsmiotool.lib)
-
-	mc = []
-	for m in sys.modules.values():
-		if m and m.__name__.startswith('lsmiotool.lib'):
-			mc.append(m)
-	if _HAS_COVERAGE:
-		cov.report(mc, ignore_errors=1, show_missing=0)
 

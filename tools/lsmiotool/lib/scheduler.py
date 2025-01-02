@@ -64,7 +64,7 @@ class Scheduler(debuggable.DebuggableObject):
     self.wallhour = 2 + (self.nodes / 3)
     self.run_env['BM_NUM_TASKS'] = self.concurrency
     self.arg_one = self.encode(self.run_env)
-    self._runSubmit()
+    return self._runSubmit(f_job_script)
 
   def waitForCompletion(self):
     while True:
@@ -92,17 +92,17 @@ class SlurmScheduler(Scheduler):
   def _runSubmit(self, f_script: str):
     self.args_submit = [
       "--export=ALL",
-      "--ntasks=" + self.concurrency,
-      "--nodes=" + self.nodes,
-      "--job-name=LSMIO-" + f_script + "-" + self.concurrency,
-      "--time=" + self.wallhour + ":00:00",
+      "--ntasks=" + str(self.concurrency),
+      "--nodes=" + str(self.nodes),
+      "--job-name=LSMIO-" + f_script + "-" + str(self.concurrency),
+      "--time=" + str(self.wallhour) + ":00:00",
       "--account='" + self.run_env['SB_ACCOUNT'] + "'",
       "--mail-user='" + self.run_env['SB_EMAIL'] + "'",
       f_script + ".sbatch",
       "hpc-internal",
       self.arg_one
     ]
-    self.execute(self.cmd_submit, self.args_submit)
+    return self.execute(self.cmd_submit, self.args_submit)
 
   def _runStatus(self):
     self.args_status = [
@@ -125,12 +125,12 @@ class PbsScheduler(Scheduler):
       "-v", 
       "BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES",
       "-l",
-      "select=" + self.concurrency + ":mem=24GB",
+      "select=" + str(self.concurrency) + ":mem=24GB",
       f_script + ".pbs",
       "hpc-internal",
       self.arg_one
     ]
-    self.execute(self.cmd_submit, self.args_submit)
+    return self.execute(self.cmd_submit, self.args_submit)
 
   def _runStatus(self):
     self.args_status = [
