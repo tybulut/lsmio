@@ -34,6 +34,7 @@ import numpy as np
 from lsmiotool import settings
 from lsmiotool.lib import env, log, debuggable, plot
 from lsmiotool.lib import plot, data
+from lsmiotool.lib import scheduler
 
 # Catch CTRL-C
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -104,6 +105,12 @@ class DemoMain(BaseMain):
 
   def run(self):
     return self.demoRunMulti()
+
+
+class RunMain(BaseMain):
+
+  def run(self):
+    log.Console.debug('RunMain called')
 
 
 class LatexMain(BaseMain):

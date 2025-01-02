@@ -50,8 +50,9 @@ print("DEBUG: Starting lsmio tool...")
 
 
 # calculate 
-srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-sys.path.append(srv_path)
+LSMIOTOOL_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+LSMIOTOOL_MODULE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+sys.path.append(LSMIOTOOL_MODULE_DIR)
 
 from lsmiotool.lib import log, env, main
 
@@ -116,7 +117,7 @@ if __name__ == '__main__':
   elif args[0] == 'parse':
     class_main = main.NotImplemented
   elif args[0] == 'run':
-    class_main = main.NotImplemented
+    class_main = main.RunMain
   elif args[0] == 'shell':
     class_main = main.ShellMain
   elif args[0] == 'test':
