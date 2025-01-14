@@ -14,7 +14,6 @@ load_modules_viking() {
 }
 
 load_modules_viking2() {
-  module load HDF5/1.14.0-gompi-2023a
   module load GCCcore/12.3.0
   module load CMake/3.26.3-GCCcore-12.3.0
   module load OpenMPI/4.1.5-GCC-12.3.0
@@ -23,6 +22,9 @@ load_modules_viking2() {
   module load libunwind/1.6.2-GCCcore-12.3.0
   module load OpenJPEG/2.5.0-GCCcore-12.3.0
   module load FFTW/3.3.10-GCC-12.3.0
+  module load gflags/2.2.2-GCCcore-12.3.0
+  module load bzip2/1.0.8-GCCcore-12.3.0
+  module load HDF5/1.14.3-gompi-2023b
 }
 
 load_modules_isambard() {

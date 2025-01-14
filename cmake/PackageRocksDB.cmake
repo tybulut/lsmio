@@ -1,4 +1,22 @@
-# LevelDB
+# RocksDB Dependency: GFlags
+find_package(gflags 2.2 QUIET)
+if (NOT gflags_FOUND AND NOT TARGET gflags)
+  include(FetchContent)
+  set(FETCHCONTENT_QUIET FALSE)
+
+  option(GFLAGS_BUILD_TESTS "Build tests" OFF)
+  FetchContent_Declare(
+    gflags
+    GIT_REPOSITORY https://github.com/gflags/gflags.git
+    GIT_TAG        v2.2.2
+    GIT_SUBMODULES ""
+    GIT_PROGRESS   TRUE
+  )
+
+  FetchContent_MakeAvailable(gflags)
+endif()
+
+# RocksDB
 find_package(RocksDB 9 QUIET)
 if (NOT RocksDB_FOUND)
   find_package(RocksDB 8 QUIET)

@@ -20,23 +20,12 @@ if (N GREATER_EQUAL 2)
   message(STATUS "Main: Recommended minimum CMAKE_BUILD_PARALLEL_LEVEL: ${M}")
 endif()
 
-list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(LSMIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-
-# Compiler options
-option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-# To enable: -rdynamic
-#set_property(TARGET compiler PROPERTY ENABLE_EXPORTS ON)
-# To enable: -fPIC
-#set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-# Other options
-option(LSMIO_BUILD_BENCHMARKS "Build LSMIO benchmarks" ON)
-option(LSMIO_BUILD_TESTS "Build the testing tree." ON)
-
-# Other options
-
-# Custom package directory
 set(CUSTOM_PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(cmake/ProjectOptions.cmake)
+lsmio_setup_options()
 
 # Defines
 add_subdirectory(include)
@@ -61,3 +50,4 @@ if(LSMIO_BUILD_TESTS)
   add_subdirectory(test)
 endif()
 
+lsmio_print_build_config()
