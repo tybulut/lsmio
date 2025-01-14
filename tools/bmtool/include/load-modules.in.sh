@@ -23,6 +23,7 @@ load_modules_viking2() {
   module load libunwind/1.6.2-GCCcore-12.3.0
   module load OpenJPEG/2.5.0-GCCcore-12.3.0
   module load FFTW/3.3.10-GCC-12.3.0
+  module load gflags/2.2.2-GCCcore-12.3.0
 }
 
 load_modules_isambard() {
