@@ -53,7 +53,8 @@ enum class UseComm {
 
 enum class AdiosEngine {
     BP5,
-    Plugin
+    Plugin,
+    HDF5
 };
 
 std::string generateRankString(int processRank);

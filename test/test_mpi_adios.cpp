@@ -56,10 +56,30 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
     std::string getAdiosFile(const AdiosEngine &engine, const MPIWorld &worldSize,
                              const int &worldRank) {
         std::string m_file = "test-mpi";
-        m_file += (engine == AdiosEngine::Plugin) ? "-plugin" : "-adios";
+        switch(engine) {
+            case AdiosEngine::BP5:
+                m_file += "-adios";
+                break;
+            case AdiosEngine::Plugin:
+                m_file += "-plugin";
+                break;
+            case AdiosEngine::HDF5:
+                m_file += "hdf5";
+                break;
+        }
         m_file += "-" + genPreFix((engine == AdiosEngine::Plugin), worldSize);
         if (worldSize == MPIWorld::Self) m_file += "-" + std::to_string(worldRank);
-        m_file += (engine == AdiosEngine::Plugin) ? ".db" : ".bp";
+        switch(engine) {
+            case AdiosEngine::BP5:
+                m_file += ".bp";
+                break;
+            case AdiosEngine::Plugin:
+                m_file += ".db";
+                break;
+            case AdiosEngine::HDF5:
+                m_file += ".h5";
+                break;
+        }
         return m_file;
     }
 
@@ -67,10 +87,16 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                                   const int &worldRank) {
         adios2::Params params;
 
-        if (engine == AdiosEngine::Plugin) {
-            params["PluginName"] = "LSMIOPlugin";
-            params["PluginLibrary"] = "liblsmio_adios";
-            params["FileName"] = getAdiosFile(engine, worldSize, worldRank);
+        switch(engine) {
+            case AdiosEngine::HDF5:
+                break;
+            case AdiosEngine::Plugin:
+                params["PluginName"] = "LSMIOPlugin";
+                params["PluginLibrary"] = "liblsmio_adios";
+                params["FileName"] = getAdiosFile(engine, worldSize, worldRank);
+                break;
+            case AdiosEngine::BP5:
+                break;
         }
 
         if (worldSize != MPIWorld::Self) {
@@ -96,7 +122,7 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
     std::string adiosWriter(adios2::ADIOS &adios, const AdiosEngine &engine,
                             const MPIWorld &worldSize, const int &worldRank) {
         const std::string m_io_name = "test-mpi-adios-writer";
-        const std::string m_file = getAdiosFile(AdiosEngine::BP5, worldSize, worldRank);
+        const std::string m_file = getAdiosFile(engine, worldSize, worldRank);
         const std::string k_greeting = TEST_KEY + ":" + std::to_string(worldRank);
         const std::string v_greeting = TEST_VALUE + ": " + std::to_string(worldRank);
 
@@ -104,8 +130,15 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                   << " m_file: " << m_file << " k_greeting: " << k_greeting << std::endl;
 
         adios2::IO io = adios.DeclareIO(m_io_name);
-        if (engine == AdiosEngine::Plugin) {
-            io.SetEngine("Plugin");
+        switch(engine) {
+            case AdiosEngine::BP5:
+                break;
+            case AdiosEngine::Plugin:
+                io.SetEngine("Plugin");
+                break;
+            case AdiosEngine::HDF5:
+                io.SetEngine("HDF5");
+                break;
         }
         io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
 
@@ -126,7 +159,7 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
     std::string adiosReader(adios2::ADIOS &adios, const AdiosEngine &engine,
                             const MPIWorld &worldSize, const int &worldRank) {
         const std::string m_io_name = "test-mpi-adios-read";
-        const std::string m_file = getAdiosFile(AdiosEngine::BP5, worldSize, worldRank);
+        const std::string m_file = getAdiosFile(engine, worldSize, worldRank);
         const std::string k_greeting = TEST_KEY + ":" + std::to_string(worldRank);
         std::string v_greeting;
 
@@ -134,8 +167,15 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                   << " m_file: " << m_file << " k_greeting: " << k_greeting << std::endl;
 
         adios2::IO io = adios.DeclareIO(m_io_name);
-        if (engine == AdiosEngine::Plugin) {
-            io.SetEngine("Plugin");
+        switch(engine) {
+            case AdiosEngine::BP5:
+                break;
+            case AdiosEngine::Plugin:
+                io.SetEngine("Plugin");
+                break;
+            case AdiosEngine::HDF5:
+                io.SetEngine("HDF5");
+                break;
         }
         io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
 
@@ -189,7 +229,8 @@ auto adiosTV = ::testing::Values(std::make_tuple(AdiosEngine::BP5, MPIWorld::Sha
                                  std::make_tuple(AdiosEngine::Plugin, MPIWorld::Entire),
                                  std::make_tuple(AdiosEngine::Plugin, MPIWorld::EntireSerial),
                                  std::make_tuple(AdiosEngine::Plugin, MPIWorld::Self),
-                                 std::make_tuple(AdiosEngine::Plugin, MPIWorld::Split));
+                                 std::make_tuple(AdiosEngine::Plugin, MPIWorld::Split),
+                                 std::make_tuple(AdiosEngine::HDF5, MPIWorld::Shared));
 
 
 INSTANTIATE_TEST_SUITE_P(lsmioTest, adiosMPITests, adiosTV);

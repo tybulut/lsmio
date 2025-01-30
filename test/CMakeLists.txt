@@ -5,6 +5,7 @@ message(STATUS "Test module: Checking CMAKE_BUILD_PARALLEL_LEVEL: ${CMAKE_BUILD_
 
 # Find packages
 find_package(MPI REQUIRED)
+find_package(HDF5 REQUIRED)
 # continues
 include(PackageAdios)
 include(PackageGoogleLog)
@@ -106,6 +107,7 @@ add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
 target_include_directories(test_mpi_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_mpi_adios
   PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+  PUBLIC HDF5::HDF5
   PRIVATE lsmio_base
 )
 gtest_discover_tests(
