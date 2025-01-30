@@ -113,13 +113,19 @@ std::string mpiWorldToString(const MPIWorld& worldSize) {
 }
 
 std::string adiosEngineToString(const AdiosEngine& engine) {
-    if (engine == AdiosEngine::BP5) {
-        return "bp5";
-    } else if (engine == AdiosEngine::Plugin) {
-        return "plugin";
-    } else {
-        return "Adios_Engine_(unknown)";
+    const char *val;
+    switch(engine) {
+        case AdiosEngine::BP5:
+            val = "adios";
+            break;
+        case AdiosEngine::Plugin:
+            val = "plugin";
+            break;
+        case AdiosEngine::HDF5:
+            val = "hdf5";
+            break;
     }
+    return val;
 }
 
 std::string useCommToString(const UseComm& comm) {
