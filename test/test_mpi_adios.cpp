@@ -99,7 +99,15 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                 break;
         }
 
-        if (engine != AdiosEngine::HDF5) {
+        if (engine == AdiosEngine::HDF5) {
+            if (worldSize != MPIWorld::Self) {
+                params["H5CollectiveMPIO"] = "yes";
+                LOG(INFO) << "genAdiosParams: param: H5CollectiveMPIO: " << params["H5CollectiveMPIO"];
+            }
+            else
+                LOG(INFO) << "genAdiosParams: no params: for HDF5";
+        }
+        else {
             switch(worldSize) {
                 case MPIWorld::Self:
                     LOG(INFO) << "genAdiosParams: no params: for MPIWorld::Self" << std::endl;
@@ -123,8 +131,6 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                     LOG(INFO) << "genAdiosParams: param: AggregationType: " << params["AggregationType"];
                     break;
             }
-        } else {
-            LOG(INFO) << "genAdiosParams: no params: for HDF5";
         }
 
         return params;
@@ -158,8 +164,12 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
         adios2::Engine writer = io.Open(m_file, adios2::Mode::Write);
         writer.BeginStep();
 
-        writer.Put(varGreeting, v_greeting);
-        writer.PerformPuts();
+        try {
+            writer.Put(varGreeting, v_greeting);
+            writer.PerformPuts();
+        } catch (const std::exception &e) {
+            LOG(ERROR) << "adiosWriter: Exception: " << e.what();
+        }
 
         writer.EndStep();
         writer.Close();
@@ -193,8 +203,12 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
         adios2::Engine reader = io.Open(m_file, adios2::Mode::Read);
         reader.BeginStep();
 
-        adios2::Variable<std::string> varGreeting = io.InquireVariable<std::string>(k_greeting);
-        reader.Get(varGreeting, v_greeting);
+        try {
+            adios2::Variable<std::string> varGreeting = io.InquireVariable<std::string>(k_greeting);
+            reader.Get(varGreeting, v_greeting);
+        } catch (const std::exception &e) {
+            LOG(ERROR) << "adiosReader: Exception: " << e.what();
+        }
 
         reader.EndStep();
         reader.Close();
@@ -222,8 +236,11 @@ TEST_P(adiosMPITests, ReadWrite) {
         msgRead = adiosReader(adiosSelf, engine, worldSize, worldRank);
     } else {
         adios2::ADIOS adiosWorld(MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
         msgWritten = adiosWriter(adiosWorld, engine, worldSize, worldRank);
+        MPI_Barrier(MPI_COMM_WORLD);
         msgRead = adiosReader(adiosWorld, engine, worldSize, worldRank);
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 
     LOG(INFO) << "test_mpi_adios: " << msgRead << std::endl;
