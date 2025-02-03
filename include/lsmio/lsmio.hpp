@@ -31,11 +31,17 @@
 #ifndef _LSMIO_LSMIO_H
 #define _LSMIO_LSMIO_H
 
-#ifdef NDEBUG
-#define GOOGLE_STRIP_LOG 1
-#endif
-
+// TODO(sbulut): Configurable
+#if 1
 #include <glog/logging.h>
+#else
+#include <iostream>
+
+#define LOG(T)                                                                 \
+    if (false) std::cerr
+#define VLOG(T)                                                                \
+    if (false) std::cerr
+#endif
 
 #include <map>
 #include <string>

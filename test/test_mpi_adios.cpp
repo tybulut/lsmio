@@ -99,21 +99,32 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                 break;
         }
 
-        if (worldSize != MPIWorld::Self) {
-            if (worldSize == MPIWorld::Entire)
-                params["AggregationType"] = "EveryoneWrites";
-            else if (worldSize == MPIWorld::Split) {
-                params["AggregationType"] = "EveryoneWrites";
-                params["AggregatorRatio"] = "2";
-            } else if (worldSize == MPIWorld::EntireSerial)
-                params["AggregationType"] = "EveryoneWritesSerial";
-            else  // (worldSize == MPIWorld::Shared)
-                params["AggregationType"] = "TwoLevelShm";
-
-            LOG(INFO) << "genAdiosParams: param: AggregationType: " << params["AggregationType"]
-                      << std::endl;
+        if (engine != AdiosEngine::HDF5) {
+            switch(worldSize) {
+                case MPIWorld::Self:
+                    LOG(INFO) << "genAdiosParams: no params: for MPIWorld::Self" << std::endl;
+                    break;
+                case MPIWorld::Entire:
+                    params["AggregationType"] = "EveryoneWrites";
+                    LOG(INFO) << "genAdiosParams: param: AggregationType: " << params["AggregationType"];
+                    break;
+                case MPIWorld::Split:
+                    params["AggregationType"] = "EveryoneWrites";
+                    params["AggregatorRatio"] = "2";
+                    LOG(INFO) << "genAdiosParams: param: AggregationType: " << params["AggregationType"];
+                    LOG(INFO) << "genAdiosParams: param: AggregatorRatio: " << params["AggregatorRatio"];
+                    break;
+                case MPIWorld::EntireSerial:
+                    params["AggregationType"] = "EveryoneWritesSerial";
+                    LOG(INFO) << "genAdiosParams: param: AggregationType: " << params["AggregationType"];
+                    break;
+                case MPIWorld::Shared:
+                    params["AggregationType"] = "TwoLevelShm";
+                    LOG(INFO) << "genAdiosParams: param: AggregationType: " << params["AggregationType"];
+                    break;
+            }
         } else {
-            LOG(INFO) << "genAdiosParams: param: AggregationType: MPIWorld::Self" << std::endl;
+            LOG(INFO) << "genAdiosParams: no params: for HDF5";
         }
 
         return params;
@@ -230,7 +241,8 @@ auto adiosTV = ::testing::Values(std::make_tuple(AdiosEngine::BP5, MPIWorld::Sha
                                  std::make_tuple(AdiosEngine::Plugin, MPIWorld::EntireSerial),
                                  std::make_tuple(AdiosEngine::Plugin, MPIWorld::Self),
                                  std::make_tuple(AdiosEngine::Plugin, MPIWorld::Split),
-                                 std::make_tuple(AdiosEngine::HDF5, MPIWorld::Shared));
+                                 std::make_tuple(AdiosEngine::HDF5, MPIWorld::Self),
+                                 std::make_tuple(AdiosEngine::HDF5, MPIWorld::Entire));
 
 
 INSTANTIATE_TEST_SUITE_P(lsmioTest, adiosMPITests, adiosTV);
