@@ -115,3 +115,17 @@ gtest_discover_tests(
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
   PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
+
+# GTest: MPI: Adios and Plugin
+add_executable(test_mpi_hdf5 test_mpi_hdf5.cpp test_mpi_utils.cpp)
+target_include_directories(test_mpi_hdf5 PRIVATE ${LSMIO_INCLUDE_DIR})
+target_link_libraries(test_mpi_hdf5
+  PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+  PUBLIC HDF5::HDF5
+  PRIVATE lsmio_base
+)
+gtest_discover_tests(
+  test_mpi_hdf5
+  CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+)

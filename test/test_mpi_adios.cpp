@@ -147,6 +147,7 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                   << " m_file: " << m_file << " k_greeting: " << k_greeting << std::endl;
 
         adios2::IO io = adios.DeclareIO(m_io_name);
+        io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
         switch(engine) {
             case AdiosEngine::BP5:
                 break;
@@ -157,7 +158,6 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                 io.SetEngine("HDF5");
                 break;
         }
-        io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
 
         adios2::Variable<std::string> varGreeting = io.DefineVariable<std::string>(k_greeting);
 
@@ -188,6 +188,7 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                   << " m_file: " << m_file << " k_greeting: " << k_greeting << std::endl;
 
         adios2::IO io = adios.DeclareIO(m_io_name);
+        io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
         switch(engine) {
             case AdiosEngine::BP5:
                 break;
@@ -198,7 +199,6 @@ class adiosMPITests : public ::testing::TestWithParam<std::tuple<AdiosEngine, MP
                 io.SetEngine("HDF5");
                 break;
         }
-        io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
 
         adios2::Engine reader = io.Open(m_file, adios2::Mode::Read);
         reader.BeginStep();
