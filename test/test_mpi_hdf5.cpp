@@ -196,14 +196,13 @@ class Hdf5Test : public testing::Test {
 };
 
 
-TEST_F(Hdf5Test, BasicTest) {
-    LOG(INFO) << "Hdf5Test::BasicTest:: started.";
+TEST_F(Hdf5Test, ArrayTest) {
+    const std::string fName = "." + std::string(&adios2::PathSeparator, 1) + "test-mpi-hdf5-basic.h5";
+    LOG(INFO) << "Hdf5Test::BasicTest:: starting: " << fName;
 
     int numProcesses, worldRank;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
     MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
-
-    const std::string fName = "." + std::string(&adios2::PathSeparator, 1) + "test-mpi-hdf5-basic.h5";
 
     const std::string zero = std::to_string(0);
     const std::string s1_Array = std::string("s1_Array_") + zero;
@@ -225,9 +224,11 @@ TEST_F(Hdf5Test, BasicTest) {
     adios2::ADIOS adios(MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    {   
+    {
         adios2::IO io = adios.DeclareIO("TestIO");
         io.SetEngine("HDF5");
+
+        adios2::Engine engine = io.Open(fName, adios2::Mode::Write);
 
         // Declare Single Value Attributes
         io.DefineAttribute<std::string>(s1_Array, currentTestData.S3.data(),
@@ -254,56 +255,114 @@ TEST_F(Hdf5Test, BasicTest) {
         io.DefineAttribute<double>(r64_Array, currentTestData.R64.data(),
                                    currentTestData.R64.size());
 
-        adios2::Engine engine = io.Open(fName, adios2::Mode::Write);
         // only attributes are written
         engine.Close();
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
+    {
+        adios2::IO ioRead = adios.DeclareIO("ioRead");
+        ioRead.SetEngine("HDF5");
+
+        adios2::Engine bpRead = ioRead.Open(fName, adios2::Mode::Read);
+
+        auto attr_s1 = ioRead.InquireAttribute<std::string>(s1_Array);
+
+        auto attr_i8 = ioRead.InquireAttribute<int8_t>(i8_Array);
+        auto attr_i16 = ioRead.InquireAttribute<int16_t>(i16_Array);
+        auto attr_i32 = ioRead.InquireAttribute<int32_t>(i32_Array);
+        auto attr_i64 = ioRead.InquireAttribute<int64_t>(i64_Array);
+
+        auto attr_u8 = ioRead.InquireAttribute<uint8_t>(u8_Array);
+        auto attr_u16 = ioRead.InquireAttribute<uint16_t>(u16_Array);
+        auto attr_u32 = ioRead.InquireAttribute<uint32_t>(u32_Array);
+        auto attr_u64 = ioRead.InquireAttribute<uint64_t>(u64_Array);
+
+        auto attr_r32 = ioRead.InquireAttribute<float>(r32_Array);
+        auto attr_r64 = ioRead.InquireAttribute<double>(r64_Array);
+
+        EXPECT_TRUE(attr_s1);
+        ASSERT_EQ(attr_s1.Name(), s1_Array);
+        ASSERT_EQ(attr_s1.Data().size() == 1, false);
+        ASSERT_EQ(attr_s1.Type(), adios2::GetType<std::string>());
+
+        EXPECT_TRUE(attr_i8);
+        ASSERT_EQ(attr_i8.Name(), i8_Array);
+        ASSERT_EQ(attr_i8.Data().size() == 1, false);
+        ASSERT_EQ(attr_i8.Type(), adios2::GetType<int8_t>());
+
+        EXPECT_TRUE(attr_i16);
+        ASSERT_EQ(attr_i16.Name(), i16_Array);
+        ASSERT_EQ(attr_i16.Data().size() == 1, false);
+        ASSERT_EQ(attr_i16.Type(), adios2::GetType<int16_t>());
+
+        EXPECT_TRUE(attr_i32);
+        ASSERT_EQ(attr_i32.Name(), i32_Array);
+        ASSERT_EQ(attr_i32.Data().size() == 1, false);
+        ASSERT_EQ(attr_i32.Type(), adios2::GetType<int32_t>());
+
+        EXPECT_TRUE(attr_i64);
+        ASSERT_EQ(attr_i64.Name(), i64_Array);
+        ASSERT_EQ(attr_i64.Data().size() == 1, false);
+        ASSERT_EQ(attr_i64.Type(), adios2::GetType<int64_t>());
+
+        EXPECT_TRUE(attr_u8);
+        ASSERT_EQ(attr_u8.Name(), u8_Array);
+        ASSERT_EQ(attr_u8.Data().size() == 1, false);
+        ASSERT_EQ(attr_u8.Type(), adios2::GetType<uint8_t>());
+
+        EXPECT_TRUE(attr_u16);
+        ASSERT_EQ(attr_u16.Name(), u16_Array);
+        ASSERT_EQ(attr_u16.Data().size() == 1, false);
+        ASSERT_EQ(attr_u16.Type(), adios2::GetType<uint16_t>());
+
+        EXPECT_TRUE(attr_u32);
+        ASSERT_EQ(attr_u32.Name(), u32_Array);
+        ASSERT_EQ(attr_u32.Data().size() == 1, false);
+        ASSERT_EQ(attr_u32.Type(), adios2::GetType<uint32_t>());
+
+        EXPECT_TRUE(attr_u64);
+        ASSERT_EQ(attr_u64.Name(), u64_Array);
+        ASSERT_EQ(attr_u64.Data().size() == 1, false);
+        ASSERT_EQ(attr_u64.Type(), adios2::GetType<uint64_t>());
+
+        EXPECT_TRUE(attr_r32);
+        ASSERT_EQ(attr_r32.Name(), r32_Array);
+        ASSERT_EQ(attr_r32.Data().size() == 1, false);
+        ASSERT_EQ(attr_r32.Type(), adios2::GetType<float>());
+
+        EXPECT_TRUE(attr_r64);
+        ASSERT_EQ(attr_r64.Name(), r64_Array);
+        ASSERT_EQ(attr_r64.Data().size() == 1, false);
+        ASSERT_EQ(attr_r64.Type(), adios2::GetType<double>());
+
+        auto I8 = attr_i8.Data();
+        auto I16 = attr_i16.Data();
+        auto I32 = attr_i32.Data();
+        auto I64 = attr_i64.Data();
+
+        auto U8 = attr_u8.Data();
+        auto U16 = attr_u16.Data();
+        auto U32 = attr_u32.Data();
+        auto U64 = attr_u64.Data();
+
+        const size_t Nx = 10;
+        for (size_t i = 0; i < Nx; ++i)
+        {   
+            EXPECT_EQ(I8[i], currentTestData.I8[i]);
+            EXPECT_EQ(I16[i], currentTestData.I16[i]);
+            EXPECT_EQ(I32[i], currentTestData.I32[i]);
+            EXPECT_EQ(I64[i], currentTestData.I64[i]);
+
+            EXPECT_EQ(U8[i], currentTestData.U8[i]);
+            EXPECT_EQ(U16[i], currentTestData.U16[i]);
+            EXPECT_EQ(U32[i], currentTestData.U32[i]);
+            EXPECT_EQ(U64[i], currentTestData.U64[i]);
+        }
+
+        bpRead.Close();
+    }
 
     LOG(INFO) << "Hdf5Test::BasicTest:: concluded: " << fName;
 }
-
-/*
-    std::string adiosReader(adios2::ADIOS &adios, const AdiosEngine &engine,
-                            const MPIWorld &worldSize, const int &worldRank) {
-        const std::string m_io_name = "test-mpi-adios-read";
-        const std::string m_file = getAdiosFile(engine, worldSize, worldRank);
-        const std::string k_greeting = TEST_KEY + ":" + std::to_string(worldRank);
-        std::string v_greeting;
-
-        LOG(INFO) << "adiosReader 00: rank: " << worldRank << " m_io_name: " << m_io_name
-                  << " m_file: " << m_file << " k_greeting: " << k_greeting << std::endl;
-
-        adios2::IO io = adios.DeclareIO(m_io_name);
-        io.SetParameters(genAdiosParams(engine, worldSize, worldRank));
-        switch(engine) {
-            case AdiosEngine::BP5:
-                break;
-            case AdiosEngine::Plugin:
-                io.SetEngine("Plugin");
-                break;
-            case AdiosEngine::HDF5:
-                io.SetEngine("HDF5");
-                break;
-        }
-
-        adios2::Engine reader = io.Open(m_file, adios2::Mode::Read);
-        reader.BeginStep();
-
-        try {
-            adios2::Variable<std::string> varGreeting = io.InquireVariable<std::string>(k_greeting);
-            reader.Get(varGreeting, v_greeting);
-        } catch (const std::exception &e) {
-            LOG(ERROR) << "adiosReader: Exception: " << e.what();
-        }
-
-        reader.EndStep();
-        reader.Close();
-
-        return v_greeting;
-    }
-};
-*/
-
 
