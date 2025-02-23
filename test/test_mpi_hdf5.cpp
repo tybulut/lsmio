@@ -196,13 +196,19 @@ class Hdf5Test : public testing::Test {
 };
 
 
-TEST_F(Hdf5Test, ArrayTest) {
-    const std::string fName = "." + std::string(&adios2::PathSeparator, 1) + "test-mpi-hdf5-basic.h5";
-    LOG(INFO) << "Hdf5Test::BasicTest:: starting: " << fName;
+#define USE_HDF5_MPI 1
 
+TEST_F(Hdf5Test, ArrayTest) {
     int numProcesses, worldRank;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
     MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
+
+#if USE_HDF5_MPI
+    const std::string fName = "." + std::string(&adios2::PathSeparator, 1) + "test-mpi-hdf5-basic.h5";
+#else
+    const std::string fName = "." + std::string(&adios2::PathSeparator, 1) + "test-mpi-hdf5-basic-" + std::to_string(worldRank) + ".h5";
+#endif
+    LOG(INFO) << "Hdf5Test::BasicTest:: starting: " << fName;
 
     const std::string zero = std::to_string(0);
     const std::string s1_Array = std::string("s1_Array_") + zero;
@@ -221,7 +227,12 @@ TEST_F(Hdf5Test, ArrayTest) {
 
     LOG(INFO) << "Hdf5Test::BasicTest: rank: " << worldRank;
 
+#if USE_HDF5_MPI
     adios2::ADIOS adios(MPI_COMM_WORLD);
+#else
+    adios2::ADIOS adios;
+#endif
+
     MPI_Barrier(MPI_COMM_WORLD);
 
     {
