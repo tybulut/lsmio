@@ -21,7 +21,7 @@ load_modules_viking2() {
   module load lz4/1.9.4-GCCcore-13.2.0
   module load libunwind/1.6.2-GCCcore-13.2.0
   module load OpenJPEG/2.5.0-GCCcore-13.2.0
-  module load FTW/3.3.10-GCC-13.2.0
+  module load FFTW/3.3.10-GCC-13.2.0
   module load gflags/2.2.2-GCCcore-12.3.0
   module load bzip2/1.0.8-GCCcore-13.2.0
   module load HDF5/1.14.3-gompi-2023b
