@@ -30,6 +30,7 @@
 
 from unittest import TestCase
 from io import StringIO
+from typing import List, Dict, Tuple, Union, Any
 from lsmiotool.lib.log import Console
 from lsmiotool.lib import data
 
@@ -43,7 +44,7 @@ class DataUnitTestCase(TestCase):
 
   # N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,...
   # 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
-  def test_ior_data(self):
+  def test_ior_data(self) -> None:
     data_file_list = ['example', 'ior-report.csv']
     data_file = os.path.join(MY_DIR, *data_file_list)
     Console.debug('Reading IOR CSV file: ' + data_file + '.')
@@ -54,7 +55,7 @@ class DataUnitTestCase(TestCase):
     self.assertEqual(ySeries, [885.43, 1693.98, 3482.97, 888.5, 366.97, 237.68, 180.52, 154.18, 147.4])
 
 
-  def test_lsm_data(self):
+  def test_lsm_data(self) -> None:
     data_file_list = ['example', 'lsmio-report.csv']
     data_file = os.path.join(MY_DIR, *data_file_list)
     Console.debug('Reading LSMIO CSV file: ' + data_file + '.')
@@ -69,7 +70,7 @@ class DataUnitTestCase(TestCase):
   #Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
   #write        4214.58    2752.91    3571.98     466.80    4214.58    2752.91    3571.98     466.80    0.14599         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
   #read        14959.41   10729.26   13695.54    1195.05   14959.41   10729.26   13695.54    1195.05    0.03771         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
-  def test_ior_run_data(self):
+  def test_ior_run_data(self) -> None:
     data_file_list = ['example', 'ior-single-run.txt']
     data_file = os.path.join(MY_DIR, *data_file_list)
     Console.debug('Reading IOR single run file: ' + data_file + '.')
@@ -96,7 +97,7 @@ class DataUnitTestCase(TestCase):
   #------,---------,----------,----------,---------,----
   #read,320.78,0.798,1048576,1048576,10
   #
-  def test_lsm_run_data(self):
+  def test_lsm_run_data(self) -> None:
     data_file_list = ['example', 'lsmio-single-run.txt']
     data_file = os.path.join(MY_DIR, *data_file_list)
     Console.debug('Reading LSMO single run file: ' + data_file + '.')

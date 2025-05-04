@@ -30,6 +30,7 @@
 
 from unittest import TestCase
 from io import StringIO
+from typing import Dict, List, Any, Union
 from lsmiotool.lib.log import Console
 from lsmiotool.lib import output
 
@@ -41,19 +42,19 @@ MY_DIR = Path(__file__).parent.resolve()
 
 
 class MockIorAggOutput(output.IorAggOutput):
-  _node_counts= ['1', '2']
+  _node_counts: List[str] = ['1', '2']
 
 
 class MockLsmioAggOutput(output.LsmioAggOutput):
-  _node_counts= ['1', '4']
+  _node_counts: List[str] = ['1', '4']
 
 
 class MockIorFullOutput(output.IorFullOutput):
-  _node_counts= ['1', '2']
+  _node_counts: List[str] = ['1', '2']
 
 
 class MockLsmioFullOutput(output.LsmioFullOutput):
-  _node_counts= ['1', '4']
+  _node_counts: List[str] = ['1', '4']
 
 
 class OutputUnitTestCase(TestCase):
@@ -76,7 +77,7 @@ class OutputUnitTestCase(TestCase):
   #                                'out-collective-4-64K-2023-07-21-node169-0.txt.2': 6966,
   #                                'out-collective-4-8M-2023-07-21-node169-0.txt.2': 6947},
   # ...
-  def test_traverse_dir(self):
+  def test_traverse_dir(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example directory to traverse: ' + root_dir + '.')
@@ -102,7 +103,7 @@ class OutputUnitTestCase(TestCase):
   #       '4': {'1M': {'out-collective-4-1M-2023-07-21-node150-0.txt.2': 6946},
   #             '64K': {'out-collective-4-64K-2023-07-21-node154-0.txt.2': 0},
   #             '8M': {'out-collective-4-8M-2023-07-21-node154-0.txt.2': 0}}}}
-  def test_ior_out_dir(self):
+  def test_ior_out_dir(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
@@ -118,7 +119,7 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(dir_map['1']['4']['64K']['out-collective-4-64K-2023-07-21-node169-0.txt.2']["size"], 6966)
 
 
-  def test_lsm_out_dir(self):
+  def test_lsm_out_dir(self) -> None:
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
@@ -150,7 +151,7 @@ class OutputUnitTestCase(TestCase):
   #                              'Max(MiB)': 1154.86,
   #                              'Max(OPs)': 1154.86,
   #                              'Mean(MiB)': 1022.76,
-  def test_ior_agg_out(self):
+  def test_ior_agg_out(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior agg directory: ' + root_dir + '.')
@@ -171,7 +172,7 @@ class OutputUnitTestCase(TestCase):
   #access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
   #write,731.39,457.88,623.48,10239.8,163840,10
   #read,1231.2,1098.12,1165.55,10239.8,163840,10
-  def test_lsmio_agg_out(self):
+  def test_lsmio_agg_out(self) -> None:
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example lsmio agg directory: ' + root_dir + '.')

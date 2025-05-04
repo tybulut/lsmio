@@ -29,61 +29,59 @@
 # 
 
 import numpy as np
+from typing import List, Union, Any
+from numpy.typing import NDArray
 from matplotlib import pyplot
 
 class PlotMetaData(object):
-  def __init__(self, title: str, xLabel: str, yLabel: str):
-    self.title = title
-    self.xLabel = xLabel
-    self.yLabel = yLabel
+    def __init__(self, title: str, xLabel: str, yLabel: str) -> None:
+        self.title: str = title
+        self.xLabel: str = xLabel
+        self.yLabel: str = yLabel
 
 
 class PlotData(object):
-  def __init__(self, legend: str, xSeries: list[int], ySeries: list[float]):
-    self.legend = legend
-    self.xSeries = np.array(xSeries)
-    self.ySeries = np.array(ySeries)
+    def __init__(self, legend: str, xSeries: List[Union[int, str]], ySeries: List[float]) -> None:
+        self.legend: str = legend
+        self.xSeries: NDArray[Any] = np.array(xSeries)
+        self.ySeries: NDArray[np.float64] = np.array(ySeries)
 
 
 class Plot(object):
-  def __init__(self, metaData, plotData):
-    self.metaData = metaData
-    self.plotData = plotData
+    def __init__(self, metaData: PlotMetaData, plotData: PlotData) -> None:
+        self.metaData: PlotMetaData = metaData
+        self.plotData: PlotData = plotData
 
-  def plot(self, fileName: str):
-    # Metadata
-    pyplot.title(self.metaData.title)
-    pyplot.xlabel(self.metaData.xLabel)
-    pyplot.ylabel(self.metaData.yLabel)
-    # Plotdata
-    pyplot.plot(self.plotData.xSeries, self.plotData.ySeries)
-    # Image
-    pyplot.grid()
-    pyplot.savefig(fileName)
-    pyplot.close()
+    def plot(self, fileName: str) -> None:
+        # Metadata
+        pyplot.title(self.metaData.title)
+        pyplot.xlabel(self.metaData.xLabel)
+        pyplot.ylabel(self.metaData.yLabel)
+        # Plotdata
+        pyplot.plot(self.plotData.xSeries, self.plotData.ySeries)
+        # Image
+        pyplot.grid()
+        pyplot.savefig(fileName)
+        pyplot.close()
 
 
 class MultiPlot(object):
-  def __init__(self, metaData, *pdArgs):
-    self.metaData = metaData
-    self.plotDataList = []
-    for plotData in pdArgs:
-      self.plotDataList.append(plotData)
+    def __init__(self, metaData: PlotMetaData, *pdArgs: PlotData) -> None:
+        self.metaData: PlotMetaData = metaData
+        self.plotDataList: List[PlotData] = []
+        for plotData in pdArgs:
+            self.plotDataList.append(plotData)
 
-  def plot(self, fileName: str):
-    # Metadata
-    pyplot.title(self.metaData.title)
-    pyplot.xlabel(self.metaData.xLabel)
-    pyplot.ylabel(self.metaData.yLabel)
-    # Plotdata
-    for plotData in self.plotDataList:
-      pyplot.plot(plotData.xSeries, plotData.ySeries, label=plotData.legend)
-    # Image
-    pyplot.grid()
-    pyplot.legend()
-    pyplot.savefig(fileName)
-    pyplot.close()
-
-
-
-
+    def plot(self, fileName: str) -> None:
+        # Metadata
+        pyplot.title(self.metaData.title)
+        pyplot.xlabel(self.metaData.xLabel)
+        pyplot.ylabel(self.metaData.yLabel)
+        # Plotdata
+        for plotData in self.plotDataList:
+            pyplot.plot(plotData.xSeries, plotData.ySeries, label=plotData.legend)
+        # Image
+        pyplot.grid()
+        pyplot.legend()
+        pyplot.savefig(fileName)
+        pyplot.close()

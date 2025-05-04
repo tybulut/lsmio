@@ -30,27 +30,28 @@
 
 from unittest import TestCase
 from io import StringIO
+from typing import Dict, Any
 from lsmiotool.lib.log import Log
 from lsmiotool.lib.debuggable import DebuggableObject
 
 
 class MyTestObject(DebuggableObject):
 
-  def methodDebugs(self, f_args):
+  def methodDebugs(self, f_args: Dict[str, Any]) -> None:
     self._logDebug(f_args)
 
 
-  def methodWarns(self, f_args):
+  def methodWarns(self, f_args: Dict[str, Any]) -> None:
     self._logWarning(f_args)
 
 
-  def methodErrors(self, f_args):
+  def methodErrors(self, f_args: Dict[str, Any]) -> None:
     self._logError(f_args)
 
 
 class LogUnitTestCase(TestCase):
 
-  def test_traceable(self):
+  def test_traceable(self) -> None:
     swap_output = Log().output
     Log().output = StringIO()
 

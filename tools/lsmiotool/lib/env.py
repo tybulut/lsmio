@@ -31,6 +31,7 @@
 import os, sys, platform
 from datetime import datetime
 from enum import Enum
+from typing import List, Dict, TypedDict, Final
 
 class HpcEnv(Enum):
     ISAMBARD = "ISAMBARD"
@@ -43,124 +44,135 @@ class HpcManager(Enum):
     SLURM = "SLURM"
     DEV = "DEV"
 
+class IorData(TypedDict):
+    base: str
+    collective: str
+    hdf5: str
+    hdf5_collective: str
+
+class LsmioData(TypedDict):
+    adios: str
+    plugin: str
+    lsmio: str
+
 # Relative paths stored as a list to be concentenated later
-_REL_PROJECT_DIR = ['src', 'usr', 'bin']
-_REL_BIN_DIR = ['src', 'usr', 'bin']
-_REL_LIB_DIR = ['src', 'usr', 'lib']
+_REL_PROJECT_DIR: Final[List[str]] = ['src', 'usr', 'bin']
+_REL_BIN_DIR: Final[List[str]] = ['src', 'usr', 'bin']
+_REL_LIB_DIR: Final[List[str]] = ['src', 'usr', 'lib']
 
 # OS Environment
-USER = os.environ['USER']
-HOME = os.environ['HOME']
-LD_LIBRARY_PATH = os.environ['HOME']
+USER: Final[str] = os.environ['USER']
+HOME: Final[str] = os.environ['HOME']
+LD_LIBRARY_PATH: Final[str] = os.environ['HOME']
 
 # Data Environment
-_LSMIO_DATA_DIR = ['src', 'lsmio-data']
+_LSMIO_DATA_DIR: Final[List[str]] = ['src', 'lsmio-data']
 
-_VIKING_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'ior-small-hdd']
-_VIKING_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'lsmio-small-hdd']
-VIKING_IOR_DIR = os.path.join(HOME, *_VIKING_IOR_DIR)
-VIKING_IOR_DATA = {
-  'base': 'ior-base',
-  'collective': 'ior-collective',
-  'hdf5': 'ior-hdf5',
-  'hdf5-collective': 'ior-hdf5-c'
+_VIKING_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'ior-small-hdd']
+_VIKING_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'lsmio-small-hdd']
+VIKING_IOR_DIR: Final[str] = os.path.join(HOME, *_VIKING_IOR_DIR)
+VIKING_IOR_DATA: Final[IorData] = {
+    'base': 'ior-base',
+    'collective': 'ior-collective',
+    'hdf5': 'ior-hdf5',
+    'hdf5-collective': 'ior-hdf5-c'
 }
-VIKING_LSMIO_DIR = os.path.join(HOME, *_VIKING_LSMIO_DIR)
-VIKING_LSMIO_DATA = {
-  'adios': 'lsmio-adios-m-yes',
-  'plugin': 'lsmio-plugin-m-yes',
-  'lsmio': 'lsmio-rocksdb-m-yes'
+VIKING_LSMIO_DIR: Final[str] = os.path.join(HOME, *_VIKING_LSMIO_DIR)
+VIKING_LSMIO_DATA: Final[LsmioData] = {
+    'adios': 'lsmio-adios-m-yes',
+    'plugin': 'lsmio-plugin-m-yes',
+    'lsmio': 'lsmio-rocksdb-m-yes'
 }
-_VIKING_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'plots']
-VIKING_PLOTS_DIR = os.path.join(HOME, *_VIKING_PLOTS_DIR)
+_VIKING_PLOTS_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'viking', 'plots']
+VIKING_PLOTS_DIR: Final[str] = os.path.join(HOME, *_VIKING_PLOTS_DIR)
 
-_VIKING2_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'ior-small-hdd']
-_VIKING2_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'lsmio-small-hdd']
-VIKING2_IOR_DIR = os.path.join(HOME, *_VIKING2_IOR_DIR)
-VIKING2_IOR_DATA = {
-  'base': 'ior-base',
-  'collective': 'ior-collective',
-  'hdf5': 'ior-hdf5',
-  'hdf5-collective': 'ior-hdf5-c'
+_VIKING2_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'ior-small-hdd']
+_VIKING2_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'lsmio-small-hdd']
+VIKING2_IOR_DIR: Final[str] = os.path.join(HOME, *_VIKING2_IOR_DIR)
+VIKING2_IOR_DATA: Final[IorData] = {
+    'base': 'ior-base',
+    'collective': 'ior-collective',
+    'hdf5': 'ior-hdf5',
+    'hdf5-collective': 'ior-hdf5-c'
 }
-VIKING2_LSMIO_DIR = os.path.join(HOME, *_VIKING2_LSMIO_DIR)
-VIKING2_LSMIO_DATA = {
-  'adios': 'lsmio-adios-m',
-  'plugin': 'lsmio-plugin-m',
-  'lsmio': 'lsmio-rocksdb-m'
+VIKING2_LSMIO_DIR: Final[str] = os.path.join(HOME, *_VIKING2_LSMIO_DIR)
+VIKING2_LSMIO_DATA: Final[LsmioData] = {
+    'adios': 'lsmio-adios-m',
+    'plugin': 'lsmio-plugin-m',
+    'lsmio': 'lsmio-rocksdb-m'
 }
-_VIKING2_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'plots']
-VIKING2_PLOTS_DIR = os.path.join(HOME, *_VIKING2_PLOTS_DIR)
+_VIKING2_PLOTS_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'viking2', 'plots']
+VIKING2_PLOTS_DIR: Final[str] = os.path.join(HOME, *_VIKING2_PLOTS_DIR)
 
-_ISAMBARD_XCI_IOR_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'ior-small-hdd']
-_ISAMBARD_XCI_LSMIO_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'lsmio-small-hdd']
-ISAMBARD_XCI_IOR_DIR = os.path.join(HOME, *_ISAMBARD_XCI_IOR_DIR)
-ISAMBARD_XCI_IOR_DATA = {
-  'base': 'ior-base',
-  'collective': 'ior-collective',
-  'hdf5': 'ior-hdf5',
-  'hdf5-collective': 'ior-hdf5-c'
+_ISAMBARD_XCI_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'ior-small-hdd']
+_ISAMBARD_XCI_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'lsmio-small-hdd']
+ISAMBARD_XCI_IOR_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_IOR_DIR)
+ISAMBARD_XCI_IOR_DATA: Final[IorData] = {
+    'base': 'ior-base',
+    'collective': 'ior-collective',
+    'hdf5': 'ior-hdf5',
+    'hdf5-collective': 'ior-hdf5-c'
 }
-ISAMBARD_XCI_LSMIO_DIR = os.path.join(HOME, *_ISAMBARD_XCI_LSMIO_DIR)
-ISAMBARD_XCI_LSMIO_DATA = {
-  'adios': 'lsmio-adios-m',
-  'plugin': 'lsmio-plugin-m',
-  'lsmio': 'lsmio-rocksdb-m'
+ISAMBARD_XCI_LSMIO_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_LSMIO_DIR)
+ISAMBARD_XCI_LSMIO_DATA: Final[LsmioData] = {
+    'adios': 'lsmio-adios-m',
+    'plugin': 'lsmio-plugin-m',
+    'lsmio': 'lsmio-rocksdb-m'
 }
-_ISAMBARD_XCI_PLOTS_DIR = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'plots']
-ISAMBARD_XCI_PLOTS_DIR = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
+_ISAMBARD_XCI_PLOTS_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ['synthetic', 'isambard.xci', 'plots']
+ISAMBARD_XCI_PLOTS_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
 
 # Determine HPC cluster
-UNKNOWN_HPC_ENVIRONMENT = \
+UNKNOWN_HPC_ENVIRONMENT: Final[str] = \
 '''############################################
 # ERROR: Unknown HPC Environment            #
 ############################################
 '''
-HOSTNAME = platform.node()
+HOSTNAME: Final[str] = platform.node()
 if HOSTNAME.startswith('xci') or HOSTNAME.startswith('nid'):
-  HPC_ENV = HpcEnv.ISAMBARD
-  HPC_MANAGER = HpcManager.PBS
+    HPC_ENV: HpcEnv = HpcEnv.ISAMBARD
+    HPC_MANAGER: HpcManager = HpcManager.PBS
 
-  LUSTRE_HDD_PATH = '/projects/external/ri-sbulut'
-  LUSTRE_SSD_PATH = '/scratch'
+    LUSTRE_HDD_PATH: str = '/projects/external/ri-sbulut'
+    LUSTRE_SSD_PATH: str = '/scratch'
 elif 'viking2' in HOSTNAME:
-  HPC_ENV = HpcEnv.VIKING2
-  HPC_MANAGER = HpcManager.SLURM
+    HPC_ENV: HpcEnv = HpcEnv.VIKING2
+    HPC_MANAGER: HpcManager = HpcManager.SLURM
 
-  LUSTRE_HDD_PATH = '/mnt/scratch'
-  LUSTRE_SSD_PATH = '/mnt/scratch'
+    LUSTRE_HDD_PATH: str = '/mnt/scratch'
+    LUSTRE_SSD_PATH: str = '/mnt/scratch'
 elif 'viking' in HOSTNAME:
-  HPC_ENV = HpcEnv.VIKING
-  HPC_MANAGER = HpcManager.SLURM
+    HPC_ENV: HpcEnv = HpcEnv.VIKING
+    HPC_MANAGER: HpcManager = HpcManager.SLURM
 
-  LUSTRE_HDD_PATH = '/mnt/lustre'
-  LUSTRE_SSD_PATH = '/mnt/bb/tmp'
+    LUSTRE_HDD_PATH: str = '/mnt/lustre'
+    LUSTRE_SSD_PATH: str = '/mnt/bb/tmp'
 elif 'hp15' in HOSTNAME or 'mba-sbulut' in HOSTNAME:
-  HPC_ENV = HpcEnv.DEV
-  HPC_MANAGER = HpcManager.DEV
+    HPC_ENV: HpcEnv = HpcEnv.DEV
+    HPC_MANAGER: HpcManager = HpcManager.DEV
 
-  LUSTRE_HDD_PATH = os.path.join(HOME, 'scratch')
-  LUSTRE_SSD_PATH = os.path.join(HOME, 'scratch')
+    LUSTRE_HDD_PATH: str = os.path.join(HOME, 'scratch')
+    LUSTRE_SSD_PATH: str = os.path.join(HOME, 'scratch')
 else:
-  print(UNKNOWN_HPC_ENVIRONMENT)
-  exit(1)
+    print(UNKNOWN_HPC_ENVIRONMENT)
+    exit(1)
 
 # Benchmark Environment
-DS = datetime.today().strftime('%Y-%m-%d')
-PROJECT_DIR = os.path.join(HOME, *_REL_PROJECT_DIR)
-BIN_DIR = os.path.join(HOME, *_REL_BIN_DIR)
-LIB_DIR = os.path.join(HOME, *_REL_LIB_DIR)
+DS: Final[str] = datetime.today().strftime('%Y-%m-%d')
+PROJECT_DIR: Final[str] = os.path.join(HOME, *_REL_PROJECT_DIR)
+BIN_DIR: Final[str] = os.path.join(HOME, *_REL_BIN_DIR)
+LIB_DIR: Final[str] = os.path.join(HOME, *_REL_LIB_DIR)
 
 if False:
-  LUSTRE_PATH = LUSTRE_SSD_PATH
+    LUSTRE_PATH: str = LUSTRE_SSD_PATH
 else:
-  LUSTRE_PATH = LUSTRE_HDD_PATH
+    LUSTRE_PATH: str = LUSTRE_HDD_PATH
 
-BM_DIR = os.path.join(LUSTRE_PATH, 'users', USER, 'benchmark')
+BM_DIR: Final[str] = os.path.join(LUSTRE_PATH, 'users', USER, 'benchmark')
 
 os.environ['PATH'] += ':' + BIN_DIR
 if 'LD_LIBRARY_PATH' in os.environ:
-  os.environ['LD_LIBRARY_PATH'] += ':' + LIB_DIR
+    os.environ['LD_LIBRARY_PATH'] += ':' + LIB_DIR
 else:
-  os.environ['LD_LIBRARY_PATH'] = LIB_DIR
+    os.environ['LD_LIBRARY_PATH'] = LIB_DIR
 os.environ['ADIOS2_PLUGIN_PATH'] = LIB_DIR
