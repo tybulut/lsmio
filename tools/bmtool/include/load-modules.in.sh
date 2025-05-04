@@ -26,6 +26,7 @@ load_modules_viking2() {
   module load bzip2/1.0.8-GCCcore-13.2.0
   module load HDF5/1.14.3-gompi-2023b
   module load SciPy-bundle/2023.11-gfbf-2023b
+  module load matplotlib/3.8.2-gfbf-2023b
 }
 
 load_modules_isambard() {

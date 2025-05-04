@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 #
 # Copyright 2023 Serdar Bulut
 #
@@ -35,16 +35,17 @@ preferred = os.path.realpath("/opt/homebrew/bin/python3")
 fallback = os.path.realpath("/usr/bin/python3")
 
 # Check if preferred interpreter is available
-if os.path.exists(preferred) and os.access(preferred, os.X_OK):
-  exec_path = os.path.realpath(sys.executable)
-  if exec_path != preferred:
-    os.execvp(preferred, [preferred] + sys.argv)
-elif os.path.exists(fallback) and os.access(fallback, os.X_OK):
-  exec_path = os.path.realpath(sys.executable)
-  if exec_path != fallback:
-    os.execvp(fallback, [fallback] + sys.argv)
-else:
-  raise EnvironmentError("No suitable Python interpreter found.")
+if os.access(preferred, os.X_OK):
+  if os.path.exists(preferred):
+    exec_path = os.path.realpath(sys.executable)
+    if exec_path != preferred:
+        os.execvp(preferred, [preferred] + sys.argv)
+  elif os.path.exists(fallback):
+    exec_path = os.path.realpath(sys.executable)
+    if exec_path != fallback:
+        os.execvp(fallback, [fallback] + sys.argv)
+  else:
+    raise EnvironmentError("No suitable Python interpreter found.")
 
 print("DEBUG: Starting lsmio tool...")
 
