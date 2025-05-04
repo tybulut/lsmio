@@ -30,6 +30,18 @@
 
 import os, sys, platform
 from datetime import datetime
+from enum import Enum
+
+class HpcEnv(Enum):
+    ISAMBARD = "ISAMBARD"
+    VIKING2 = "VIKING2"
+    VIKING = "VIKING"
+    DEV = "DEV"
+
+class HpcManager(Enum):
+    PBS = "PBS"
+    SLURM = "SLURM"
+    DEV = "DEV"
 
 # Relative paths stored as a list to be concentenated later
 _REL_PROJECT_DIR = ['src', 'usr', 'bin']
@@ -106,26 +118,26 @@ UNKNOWN_HPC_ENVIRONMENT = \
 '''
 HOSTNAME = platform.node()
 if HOSTNAME.startswith('xci') or HOSTNAME.startswith('nid'):
-  HPC_ENV = 'ISAMBARD'
-  HPC_MANAGER = 'PBS'
+  HPC_ENV = HpcEnv.ISAMBARD
+  HPC_MANAGER = HpcManager.PBS
 
   LUSTRE_HDD_PATH = '/projects/external/ri-sbulut'
   LUSTRE_SSD_PATH = '/scratch'
 elif 'viking2' in HOSTNAME:
-  HPC_ENV = 'VIKING2'
-  HPC_MANAGER = 'SLURM'
+  HPC_ENV = HpcEnv.VIKING2
+  HPC_MANAGER = HpcManager.SLURM
 
   LUSTRE_HDD_PATH = '/mnt/scratch'
   LUSTRE_SSD_PATH = '/mnt/scratch'
 elif 'viking' in HOSTNAME:
-  HPC_ENV = 'VIKING'
-  HPC_MANAGER = 'SLURM'
+  HPC_ENV = HpcEnv.VIKING
+  HPC_MANAGER = HpcManager.SLURM
 
   LUSTRE_HDD_PATH = '/mnt/lustre'
   LUSTRE_SSD_PATH = '/mnt/bb/tmp'
 elif 'hp15' in HOSTNAME or 'mba-sbulut' in HOSTNAME:
-  HPC_ENV = 'DEV'
-  HPC_MANAGER = 'DEV'
+  HPC_ENV = HpcEnv.DEV
+  HPC_MANAGER = HpcManager.DEV
 
   LUSTRE_HDD_PATH = os.path.join(HOME, 'scratch')
   LUSTRE_SSD_PATH = os.path.join(HOME, 'scratch')
@@ -152,5 +164,3 @@ if 'LD_LIBRARY_PATH' in os.environ:
 else:
   os.environ['LD_LIBRARY_PATH'] = LIB_DIR
 os.environ['ADIOS2_PLUGIN_PATH'] = LIB_DIR
-
-
