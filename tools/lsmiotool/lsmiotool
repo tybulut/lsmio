@@ -54,7 +54,7 @@ print("DEBUG: Starting lsmio tool...")
 srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.append(srv_path)
 
-from lsmiotool.lib import log, env, main
+from lsmiotool.lib import log, env, main, hpc
 
 LSMIOTOOL_HELP = '''How to run
 -----------------------------------------------------------------------
@@ -113,7 +113,7 @@ if __name__ == '__main__':
       sys.exit(1)
     class_main = main.LatexMain
   elif args[0] == 'load-modules':
-    class_main = main.NotImplemented
+    class_main = hpc.HpcEnvMain
   elif args[0] == 'parse':
     class_main = main.NotImplemented
   elif args[0] == 'run':

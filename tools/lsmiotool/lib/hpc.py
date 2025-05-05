@@ -26,27 +26,51 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+
 
 import subprocess
 import sys
 
-from lsmiotool import settings
-from lsmiotool.lib import env, log, debuggable, main
+from lsmiotool.lib import env
+from lsmiotool.lib.env import HpcEnv
+from lsmiotool.lib.log import Console
+from lsmiotool.lib.main import BaseMain
 
 
 class HpcEnvMain(BaseMain):
+    """
+    A class to manage HPC environment.
+    """
+
     def __init__(self, *args, **kwargs):
+        """
+        Initialize the HpcEnvMain class.
+
+        Args:
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
+        """
         super(HpcEnvMain, self).__init__(*args, **kwargs)
 
     def runModuleCommand(self, command):
-        """Run a module command using bash shell."""
+        """
+        Run a module command using bash shell.
+
+        Args:
+            command (str): The module command to run.
+        """
         subprocess.run(f"module {command}", shell=True, executable="/bin/bash", check=True)
 
     def purgeModules(self):
+        """
+        Purge all loaded modules.
+        """
         self.runModuleCommand("purge")
 
     def loadModulesViking(self):
+        """
+        Load modules for Viking HPC environment.
+        """
         modules = [
             "data/HDF5/1.10.7-gompi-2020b",
             "compiler/GCC/11.3.0",
@@ -62,6 +86,9 @@ class HpcEnvMain(BaseMain):
             self.runModuleCommand(f"load {mod}")
 
     def loadModulesViking2(self):
+        """
+        Load modules for Viking2 HPC environment.
+        """
         modules = [
             "GCCcore/13.2.0",
             "CMake/3.27.6-GCCcore-13.2.0",
@@ -81,6 +108,9 @@ class HpcEnvMain(BaseMain):
             self.runModuleCommand(f"load {mod}")
 
     def loadModulesIsambard(self):
+        """
+        Load modules for Isambard HPC environment.
+        """
         modules = [
             "modules/3.2.11.4",
             "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
@@ -113,17 +143,20 @@ class HpcEnvMain(BaseMain):
         for mod in modules:
             self.runModuleCommand(f"load {mod}")
 
-    def run(self, hpcEnv):
-        print(f"Loading modules for: {hpcEnv}")
+    def run(self):
+        """
+        Run the HpcEnvMain class.
+        """
+        hpc_env = env.HPC_ENV
+        Console.debug(f"Loading modules for: {hpc_env}")
         self.purgeModules()
 
-        if hpcEnv == "isambard":
+        if hpc_env == HpcEnv.ISAMBARD:
             self.loadModulesIsambard()
-        elif hpcEnv == "viking":
+        elif hpc_env == HpcEnv.VIKING:
             self.loadModulesViking()
-        elif hpcEnv == "viking2":
+        elif hpc_env == HpcEnv.VIKING2:
             self.loadModulesViking2()
         else:
-            print("Unknown HPC environment")
+            Console.debug("Unknown HPC environment")
             sys.exit(1)
-
