@@ -52,7 +52,7 @@ class HpcEnvMain(BaseMain):
         """
         super(HpcEnvMain, self).__init__(*args, **kwargs)
 
-    def runModuleCommand(self, command):
+    def run_module_command(self, command):
         """
         Run a module command using bash shell.
 
@@ -61,13 +61,13 @@ class HpcEnvMain(BaseMain):
         """
         subprocess.run(f"module {command}", shell=True, executable="/bin/bash", check=True)
 
-    def purgeModules(self):
+    def purge_modules(self):
         """
         Purge all loaded modules.
         """
-        self.runModuleCommand("purge")
+        self.run_module_command("purge")
 
-    def loadModulesViking(self):
+    def load_modules_viking(self):
         """
         Load modules for Viking HPC environment.
         """
@@ -83,9 +83,9 @@ class HpcEnvMain(BaseMain):
             "numlib/FFTW/3.3.10-GCC-11.3.0",
         ]
         for mod in modules:
-            self.runModuleCommand(f"load {mod}")
+            self.run_module_command(f"load {mod}")
 
-    def loadModulesViking2(self):
+    def load_modules_viking2(self):
         """
         Load modules for Viking2 HPC environment.
         """
@@ -105,9 +105,9 @@ class HpcEnvMain(BaseMain):
             "matplotlib/3.8.2-gfbf-2023b",
         ]
         for mod in modules:
-            self.runModuleCommand(f"load {mod}")
+            self.run_module_command(f"load {mod}")
 
-    def loadModulesIsambard(self):
+    def load_modules_isambard(self):
         """
         Load modules for Isambard HPC environment.
         """
@@ -141,7 +141,7 @@ class HpcEnvMain(BaseMain):
             "gdb4hpc/4.10.6",
         ]
         for mod in modules:
-            self.runModuleCommand(f"load {mod}")
+            self.run_module_command(f"load {mod}")
 
     def run(self):
         """
@@ -149,14 +149,14 @@ class HpcEnvMain(BaseMain):
         """
         hpc_env = env.HPC_ENV
         Console.debug(f"Loading modules for: {hpc_env}")
-        self.purgeModules()
+        self.purge_modules()
 
         if hpc_env == HpcEnv.ISAMBARD:
-            self.loadModulesIsambard()
+            self.load_modules_isambard()
         elif hpc_env == HpcEnv.VIKING:
-            self.loadModulesViking()
+            self.load_modules_viking()
         elif hpc_env == HpcEnv.VIKING2:
-            self.loadModulesViking2()
+            self.load_modules_viking2()
         else:
             Console.debug("Unknown HPC environment")
             sys.exit(1)
