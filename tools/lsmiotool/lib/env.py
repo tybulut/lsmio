@@ -28,6 +28,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
+import copy
+import json
 import os
 import platform
 from datetime import datetime
@@ -76,87 +78,14 @@ USER: Final[str] = os.environ["USER"]
 HOME: Final[str] = os.environ["HOME"]
 LD_LIBRARY_PATH: Final[str] = os.environ["HOME"]
 
-# Data Environment
-_LSMIO_DATA_DIR: Final[List[str]] = ["src", "lsmio-data"]
-
-_VIKING_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ["synthetic", "viking", "ior-small-hdd"]
-_VIKING_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ["synthetic", "viking", "lsmio-small-hdd"]
-VIKING_IOR_DIR: Final[str] = os.path.join(HOME, *_VIKING_IOR_DIR)
-VIKING_IOR_DATA: Final[IorData] = {
-    "base": "ior-base",
-    "collective": "ior-collective",
-    "hdf5": "ior-hdf5",
-    "hdf5-collective": "ior-hdf5-c"
-}
-VIKING_LSMIO_DIR: Final[str] = os.path.join(HOME, *_VIKING_LSMIO_DIR)
-VIKING_LSMIO_DATA: Final[LsmioData] = {
-    "adios": "lsmio-adios-m-yes",
-    "plugin": "lsmio-plugin-m-yes",
-    "lsmio": "lsmio-rocksdb-m-yes"
-}
-_VIKING_PLOTS_DIR: Final[List[str]] = (
-
-    _LSMIO_DATA_DIR + ["synthetic", "viking", "plots"]
-)
-VIKING_PLOTS_DIR: Final[str] = os.path.join(HOME, *_VIKING_PLOTS_DIR)
-
-_VIKING2_IOR_DIR: Final[List[str]] = (
-    _LSMIO_DATA_DIR + ["synthetic", "viking2", "ior-small-hdd"]
-)
-_VIKING2_LSMIO_DIR: Final[List[str]] = (
-    _LSMIO_DATA_DIR + ["synthetic", "viking2", "lsmio-small-hdd"]
-)
-VIKING2_IOR_DIR: Final[str] = os.path.join(HOME, *_VIKING2_IOR_DIR)
-VIKING2_IOR_DATA: Final[IorData] = {
-    "base": "ior-base",
-    "collective": "ior-collective",
-    "hdf5": "ior-hdf5",
-    "hdf5-collective": "ior-hdf5-c"
-}
-VIKING2_LSMIO_DIR: Final[str] = os.path.join(HOME, *_VIKING2_LSMIO_DIR)
-VIKING2_LSMIO_DATA: Final[LsmioData] = {
-    "adios": "lsmio-adios-m",
-    "plugin": "lsmio-plugin-m",
-    "lsmio": "lsmio-rocksdb-m"
-}
-_VIKING2_PLOTS_DIR: Final[List[str]] = (
-    _LSMIO_DATA_DIR + ["synthetic", "viking2", "plots"]
-)
-VIKING2_PLOTS_DIR: Final[str] = os.path.join(HOME, *_VIKING2_PLOTS_DIR)
-
-_ISAMBARD_XCI_IOR_DIR: Final[List[str]] = (
-    _LSMIO_DATA_DIR + ["synthetic", "isambard.xci", "ior-small-hdd"]
-)
-_ISAMBARD_XCI_LSMIO_DIR: Final[List[str]] = (
-    _LSMIO_DATA_DIR + ["synthetic", "isambard.xci", "lsmio-small-hdd"]
-)
-ISAMBARD_XCI_IOR_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_IOR_DIR)
-ISAMBARD_XCI_IOR_DATA: Final[IorData] = {
-    "base": "ior-base",
-    "collective": "ior-collective",
-    "hdf5": "ior-hdf5",
-    "hdf5-collective": "ior-hdf5-c"
-}
-ISAMBARD_XCI_LSMIO_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_LSMIO_DIR)
-ISAMBARD_XCI_LSMIO_DATA: Final[LsmioData] = {
-    "adios": "lsmio-adios-m",
-    "plugin": "lsmio-plugin-m",
-    "lsmio": "lsmio-rocksdb-m"
-}
-_ISAMBARD_XCI_PLOTS_DIR: Final[List[str]] = (
-    _LSMIO_DATA_DIR + ["synthetic", "isambard.xci", "plots"]
-)
-ISAMBARD_XCI_PLOTS_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
-
 # Error message for unknown environments
 UNKNOWN_HPC_ENVIRONMENT: Final[str] = "Unknown HPC Environment"
 
-# Determine HPC cluster
-#
-# You can override environment detection by setting the LSMIO_ENV environment variable.
-# Example: LSMIO_ENV=dev ./lsmiotool load-modules
-# Supported values: ISAMBARD, VIKING2, VIKING, DEV (case-insensitive)
+# --- Environment Configuration via JSON ---
+# Per-environment settings are loaded from ../etc/environments.json
+# Edit that file to update IOR/LSMIO data, paths, etc. for each environment.
 
+# Detect environment
 lsmio_env = os.environ.get("LSMIO_ENV", None)
 if lsmio_env is not None:
     lsmio_env = lsmio_env.upper()
@@ -187,24 +116,45 @@ else:
         exit(1)
 
 
-if HPC_ENV == HpcEnv.ISAMBARD:
-    HPC_MANAGER: HpcManager = HpcManager.PBS
-    LUSTRE_HDD_PATH: str = "/projects/external/ri-sbulut"
-    LUSTRE_SSD_PATH: str = "/scratch"
-elif HPC_ENV == HpcEnv.VIKING2:
-    HPC_MANAGER: HpcManager = HpcManager.SLURM
-    LUSTRE_HDD_PATH: str = "/mnt/scratch"
-    LUSTRE_SSD_PATH: str = "/mnt/scratch"
-elif HPC_ENV == HpcEnv.VIKING:
-    HPC_MANAGER: HpcManager = HpcManager.SLURM
-    LUSTRE_HDD_PATH: str = "/mnt/lustre"
-    LUSTRE_SSD_PATH: str = "/mnt/bb/tmp"
-elif HPC_ENV == HpcEnv.DEV:
-    HPC_MANAGER: HpcManager = HpcManager.DEV
-    LUSTRE_HDD_PATH: str = os.path.join(HOME, "scratch")
-    LUSTRE_SSD_PATH: str = os.path.join(HOME, "scratch")
-else:
-    Console.error(f"Unknown HPC_ENV value: {HPC_ENV}")
+
+# Load JSON config
+_json_path = os.path.join(os.path.dirname(__file__), "..", "etc", "environments.json")
+with open(_json_path, "r") as _f:
+    _env_configs = json.load(_f)
+
+if "DEFAULT" not in _env_configs:
+    Console.error("DEFAULT section missing in environments.json")
+    exit(1)
+# If the detected environment is not found, just use DEFAULT (no overrides)
+
+def _deep_merge(dict1, dict2):
+    """Merge dict2 into dict1 recursively, returning a new dict."""
+    result = copy.deepcopy(dict1)
+    for k, v in dict2.items():
+        if (
+            k in result
+            and isinstance(result[k], dict)
+            and isinstance(v, dict)
+        ):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+_env = _deep_merge(_env_configs["DEFAULT"], _env_configs.get(HPC_ENV.value, {}))
+
+hpc_manager = _env["hpc_manager"]
+base_path = _env["base_path"]
+ior_dir = os.path.join(base_path, *_env["ior_dirs"])
+lsmio_dir = os.path.join(base_path, *_env["lsmio_dirs"])
+plots_dir = os.path.join(base_path, *_env["plots_dirs"])
+ior_data = _env["ior_data"]
+lsmio_data = _env["lsmio_data"]
+lustre_hdd_path = _env["lustre_hdd_path"]
+lustre_ssd_path = _env["lustre_ssd_path"]
+
+if HPC_ENV.value not in _env_configs:
+    Console.error(f"Unknown _env_configs value: {HPC_ENV.value}")
     Console.error(UNKNOWN_HPC_ENVIRONMENT)
     exit(1)
 
@@ -216,11 +166,11 @@ BIN_DIR: Final[str] = os.path.join(HOME, *_REL_BIN_DIR)
 LIB_DIR: Final[str] = os.path.join(HOME, *_REL_LIB_DIR)
 
 if False:
-    LUSTRE_PATH: str = LUSTRE_SSD_PATH
+    lustre_path: str = lustre_ssd_path
 else:
-    LUSTRE_PATH: str = LUSTRE_HDD_PATH
+    lustre_path: str = lustre_hdd_path
 
-BM_DIR: Final[str] = os.path.join(LUSTRE_PATH, "users", USER, "benchmark")
+BM_DIR: Final[str] = os.path.join(lustre_path, "users", USER, "benchmark")
 
 os.environ["PATH"] += ":" + BIN_DIR
 if "LD_LIBRARY_PATH" in os.environ:

@@ -34,7 +34,7 @@ import os
 import sys
 from enum import IntEnum
 from logging import handlers as lh
-from typing import Any, Optional, TextIO, Type, Union
+from typing import Any, List, Optional, TextIO, Type, Union
 
 from lsmiotool.lib import PROGRAM
 
@@ -48,7 +48,7 @@ class LogLevel(IntEnum):
     INFO = 3
 
 LOG_LEVEL = LogLevel
-LOG_LEVEL_NAMES: list[str] = ['ERROR', 'WARNING', 'DEBUG', 'INFO']
+LOG_LEVEL_NAMES: List[str] = ['ERROR', 'WARNING', 'DEBUG', 'INFO']
 
 
 class LogOutput(object):

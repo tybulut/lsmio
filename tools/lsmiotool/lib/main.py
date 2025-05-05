@@ -151,27 +151,27 @@ class LatexMain(BaseMain):
 
     def _results_from_viking(self) -> None:
         """Set up paths for Viking HPC environment."""
-        self.ior_dir = env.VIKING_IOR_DIR
-        self.ior_data = env.VIKING_IOR_DATA
-        self.lsmio_dir = env.VIKING_LSMIO_DIR
-        self.lsmio_data = env.VIKING_LSMIO_DATA
-        self.plots_dir = env.VIKING_PLOTS_DIR
+        self.ior_data = env.ior_data
+        self.lsmio_dir = env.lsmio_dir
+        self.lsmio_data = env.lsmio_data
+        self.plots_dir = env.plots_dir
+        # If you need an ior_dir, construct it from lsmio_dir or add to JSON
 
     def _results_from_viking2(self) -> None:
         """Set up paths for Viking2 HPC environment."""
-        self.ior_dir = env.VIKING2_IOR_DIR
-        self.ior_data = env.VIKING2_IOR_DATA
-        self.lsmio_dir = env.VIKING2_LSMIO_DIR
-        self.lsmio_data = env.VIKING2_LSMIO_DATA
-        self.plots_dir = env.VIKING2_PLOTS_DIR
+        self.ior_data = env.ior_data
+        self.lsmio_dir = env.lsmio_dir
+        self.lsmio_data = env.lsmio_data
+        self.plots_dir = env.plots_dir
+        # If you need an ior_dir, construct it from lsmio_dir or add to JSON
 
     def _results_from_isambard(self) -> None:
         """Set up paths for Isambard HPC environment."""
-        self.ior_dir = env.ISAMBARD_XCI_IOR_DIR
-        self.ior_data = env.ISAMBARD_XCI_IOR_DATA
-        self.lsmio_dir = env.ISAMBARD_XCI_LSMIO_DIR
-        self.lsmio_data = env.ISAMBARD_XCI_LSMIO_DATA
-        self.plots_dir = env.ISAMBARD_XCI_PLOTS_DIR
+        self.ior_data = env.ior_data
+        self.lsmio_dir = env.lsmio_dir
+        self.lsmio_data = env.lsmio_data
+        self.plots_dir = env.plots_dir
+        # If you need an ior_dir, construct it from lsmio_dir or add to JSON
 
     def _gen_png_name(self, title: str, is_read: bool, num_stripes: int, stripe_size: str) -> str:
         """Generate PNG filename from plot parameters."""
