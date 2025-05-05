@@ -33,6 +33,7 @@ import platform
 from datetime import datetime
 from enum import Enum
 from typing import List, TypedDict, Final
+from lsmiotool.lib.log import Console
 
 
 class HpcEnv(Enum):
@@ -147,40 +148,66 @@ _ISAMBARD_XCI_PLOTS_DIR: Final[List[str]] = (
 )
 ISAMBARD_XCI_PLOTS_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
 
-# Determine HPC cluster
-UNKNOWN_HPC_ENVIRONMENT: Final[str] = (
-    "#" * 44 + "\n"
-    "# ERROR: Unknown HPC Environment            #\n"
-    "#" * 44 + "\n"
-)
-HOSTNAME: Final[str] = platform.node()
-if HOSTNAME.startswith("xci") or HOSTNAME.startswith("nid"):
-    HPC_ENV: HpcEnv = HpcEnv.ISAMBARD
-    HPC_MANAGER: HpcManager = HpcManager.PBS
+# Error message for unknown environments
+UNKNOWN_HPC_ENVIRONMENT: Final[str] = "Unknown HPC Environment"
 
+# Determine HPC cluster
+#
+# You can override environment detection by setting the LSMIO_ENV environment variable.
+# Example: LSMIO_ENV=dev ./lsmiotool load-modules
+# Supported values: ISAMBARD, VIKING2, VIKING, DEV (case-insensitive)
+
+lsmio_env = os.environ.get("LSMIO_ENV", None)
+if lsmio_env is not None:
+    lsmio_env = lsmio_env.upper()
+    if lsmio_env == "ISAMBARD":
+        HPC_ENV: HpcEnv = HpcEnv.ISAMBARD
+    elif lsmio_env == "VIKING2":
+        HPC_ENV: HpcEnv = HpcEnv.VIKING2
+    elif lsmio_env == "VIKING":
+        HPC_ENV: HpcEnv = HpcEnv.VIKING
+    elif lsmio_env == "DEV":
+        HPC_ENV: HpcEnv = HpcEnv.DEV
+    else:
+        Console.error(f"Unknown LSMIO_ENV value: {lsmio_env}")
+        Console.error(UNKNOWN_HPC_ENVIRONMENT)
+        exit(1)
+else:
+    # Hostname-based detection (legacy)
+    HOSTNAME: Final[str] = platform.node()
+    if HOSTNAME.startswith("xci") or HOSTNAME.startswith("nid"):
+        HPC_ENV: HpcEnv = HpcEnv.ISAMBARD
+    elif "viking2" in HOSTNAME:
+        HPC_ENV: HpcEnv = HpcEnv.VIKING2
+    elif "viking" in HOSTNAME:
+        HPC_ENV: HpcEnv = HpcEnv.VIKING
+    else:
+        Console.error(f"Unfamiliar host environment: {HOSTNAME}")
+        Console.error(UNKNOWN_HPC_ENVIRONMENT)
+        exit(1)
+
+
+if HPC_ENV == HpcEnv.ISAMBARD:
+    HPC_MANAGER: HpcManager = HpcManager.PBS
     LUSTRE_HDD_PATH: str = "/projects/external/ri-sbulut"
     LUSTRE_SSD_PATH: str = "/scratch"
-elif "viking2" in HOSTNAME:
-    HPC_ENV: HpcEnv = HpcEnv.VIKING2
+elif HPC_ENV == HpcEnv.VIKING2:
     HPC_MANAGER: HpcManager = HpcManager.SLURM
-
     LUSTRE_HDD_PATH: str = "/mnt/scratch"
     LUSTRE_SSD_PATH: str = "/mnt/scratch"
-elif "viking" in HOSTNAME:
-    HPC_ENV: HpcEnv = HpcEnv.VIKING
+elif HPC_ENV == HpcEnv.VIKING:
     HPC_MANAGER: HpcManager = HpcManager.SLURM
-
     LUSTRE_HDD_PATH: str = "/mnt/lustre"
     LUSTRE_SSD_PATH: str = "/mnt/bb/tmp"
-elif "hp15" in HOSTNAME or "mba-sbulut" in HOSTNAME:
-    HPC_ENV: HpcEnv = HpcEnv.DEV
+elif HPC_ENV == HpcEnv.DEV:
     HPC_MANAGER: HpcManager = HpcManager.DEV
-
     LUSTRE_HDD_PATH: str = os.path.join(HOME, "scratch")
     LUSTRE_SSD_PATH: str = os.path.join(HOME, "scratch")
 else:
-    print(UNKNOWN_HPC_ENVIRONMENT)
+    Console.error(f"Unknown HPC_ENV value: {HPC_ENV}")
+    Console.error(UNKNOWN_HPC_ENVIRONMENT)
     exit(1)
+
 
 # Benchmark Environment
 DATE_STAMP: Final[str] = datetime.today().strftime("%Y-%m-%d")

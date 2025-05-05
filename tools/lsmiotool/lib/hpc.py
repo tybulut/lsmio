@@ -148,8 +148,8 @@ class HpcEnvMain(BaseMain):
         Return a list of all module commands (purge and loads) for the current HPC environment.
         """
         hpc_env = env.HPC_ENV
-        commands = ["module purge"]
         if hpc_env == HpcEnv.ISAMBARD:
+            commands = ["module purge"]
             modules = [
                 "modules/3.2.11.4",
                 "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
@@ -180,6 +180,7 @@ class HpcEnvMain(BaseMain):
                 "gdb4hpc/4.10.6",
             ]
         elif hpc_env == HpcEnv.VIKING:
+            commands = ["module purge"]
             modules = [
                 "data/HDF5/1.10.7-gompi-2020b",
                 "compiler/GCC/11.3.0",
@@ -192,6 +193,7 @@ class HpcEnvMain(BaseMain):
                 "numlib/FFTW/3.3.10-GCC-11.3.0",
             ]
         elif hpc_env == HpcEnv.VIKING2:
+            commands = ["module purge"]
             modules = [
                 "GCCcore/13.2.0",
                 "CMake/3.27.6-GCCcore-13.2.0",
@@ -207,10 +209,12 @@ class HpcEnvMain(BaseMain):
                 "SciPy-bundle/2023.11-gfbf-2023b",
                 "matplotlib/3.8.2-gfbf-2023b",
             ]
-        else:
-            Console.error("Unknown HPC environment")
-            sys.exit(1)
+        elif hpc_env == HpcEnv.DEV:
+            commands = []
             modules = []
+        else:
+            Console.error(env.UNKNOWN_HPC_ENVIRONMENT)
+            sys.exit(1)
         commands += [f"module load {mod}" for mod in modules]
         return commands
 

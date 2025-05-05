@@ -74,5 +74,5 @@ class TestHpcEnvMain(unittest.TestCase):
     def test_get_all_module_commands_unknown_env(self, mock_console):
         with self.assertRaises(SystemExit):
             self.hpc_env_main._get_all_module_commands()
-        mock_console.error.assert_called_once_with('Unknown HPC environment')
+        mock_console.error.assert_called_once_with('Unknown HPC Environment')
 
