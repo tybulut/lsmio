@@ -28,11 +28,14 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-import os, sys, logging
 import csv
-from logging import handlers as lh
+import logging
+import os
+import sys
 from enum import IntEnum
-from typing import Optional, TextIO, Type, Any, Union
+from logging import handlers as lh
+from typing import Any, Optional, TextIO, Type, Union
+
 from lsmiotool.lib import PROGRAM
 
 

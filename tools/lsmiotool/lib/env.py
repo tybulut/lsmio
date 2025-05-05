@@ -29,41 +29,43 @@
 # 
 
 import os
-import sys
 import platform
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, TypedDict, Final
+from typing import List, TypedDict, Final
+
 
 class HpcEnv(Enum):
+    """Enumeration of supported HPC environments."""
     ISAMBARD = "ISAMBARD"
     VIKING2 = "VIKING2"
     VIKING = "VIKING"
     DEV = "DEV"
 
 
-
 class HpcManager(Enum):
+    """Enumeration of supported HPC job management systems."""
     PBS = "PBS"
     SLURM = "SLURM"
     DEV = "DEV"
 
 
-
 class IorData(TypedDict):
+    """Type definition for IOR benchmark data paths."""
     base: str
     collective: str
     hdf5: str
     hdf5_collective: str
 
 
-
 class LsmioData(TypedDict):
+    """Type definition for LSMIO benchmark data paths."""
     adios: str
     plugin: str
     lsmio: str
 
-# Relative paths stored as a list to be concentenated later
+
+# Relative paths stored as a list to be concatenated later
 _REL_PROJECT_DIR: Final[List[str]] = ["src", "usr", "bin"]
 _REL_BIN_DIR: Final[List[str]] = ["src", "usr", "bin"]
 _REL_LIB_DIR: Final[List[str]] = ["src", "usr", "lib"]
@@ -77,9 +79,7 @@ LD_LIBRARY_PATH: Final[str] = os.environ["HOME"]
 _LSMIO_DATA_DIR: Final[List[str]] = ["src", "lsmio-data"]
 
 _VIKING_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ["synthetic", "viking", "ior-small-hdd"]
-_VIKING_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "viking", "lsmio-small-hdd"
-]
+_VIKING_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + ["synthetic", "viking", "lsmio-small-hdd"]
 VIKING_IOR_DIR: Final[str] = os.path.join(HOME, *_VIKING_IOR_DIR)
 VIKING_IOR_DATA: Final[IorData] = {
     "base": "ior-base",
@@ -93,17 +93,18 @@ VIKING_LSMIO_DATA: Final[LsmioData] = {
     "plugin": "lsmio-plugin-m-yes",
     "lsmio": "lsmio-rocksdb-m-yes"
 }
-_VIKING_PLOTS_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "viking", "plots"
-]
+_VIKING_PLOTS_DIR: Final[List[str]] = (
+
+    _LSMIO_DATA_DIR + ["synthetic", "viking", "plots"]
+)
 VIKING_PLOTS_DIR: Final[str] = os.path.join(HOME, *_VIKING_PLOTS_DIR)
 
-_VIKING2_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "viking2", "ior-small-hdd"
-]
-_VIKING2_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "viking2", "lsmio-small-hdd"
-]
+_VIKING2_IOR_DIR: Final[List[str]] = (
+    _LSMIO_DATA_DIR + ["synthetic", "viking2", "ior-small-hdd"]
+)
+_VIKING2_LSMIO_DIR: Final[List[str]] = (
+    _LSMIO_DATA_DIR + ["synthetic", "viking2", "lsmio-small-hdd"]
+)
 VIKING2_IOR_DIR: Final[str] = os.path.join(HOME, *_VIKING2_IOR_DIR)
 VIKING2_IOR_DATA: Final[IorData] = {
     "base": "ior-base",
@@ -117,17 +118,17 @@ VIKING2_LSMIO_DATA: Final[LsmioData] = {
     "plugin": "lsmio-plugin-m",
     "lsmio": "lsmio-rocksdb-m"
 }
-_VIKING2_PLOTS_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "viking2", "plots"
-]
+_VIKING2_PLOTS_DIR: Final[List[str]] = (
+    _LSMIO_DATA_DIR + ["synthetic", "viking2", "plots"]
+)
 VIKING2_PLOTS_DIR: Final[str] = os.path.join(HOME, *_VIKING2_PLOTS_DIR)
 
-_ISAMBARD_XCI_IOR_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "isambard.xci", "ior-small-hdd"
-]
-_ISAMBARD_XCI_LSMIO_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "isambard.xci", "lsmio-small-hdd"
-]
+_ISAMBARD_XCI_IOR_DIR: Final[List[str]] = (
+    _LSMIO_DATA_DIR + ["synthetic", "isambard.xci", "ior-small-hdd"]
+)
+_ISAMBARD_XCI_LSMIO_DIR: Final[List[str]] = (
+    _LSMIO_DATA_DIR + ["synthetic", "isambard.xci", "lsmio-small-hdd"]
+)
 ISAMBARD_XCI_IOR_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_IOR_DIR)
 ISAMBARD_XCI_IOR_DATA: Final[IorData] = {
     "base": "ior-base",
@@ -141,16 +142,16 @@ ISAMBARD_XCI_LSMIO_DATA: Final[LsmioData] = {
     "plugin": "lsmio-plugin-m",
     "lsmio": "lsmio-rocksdb-m"
 }
-_ISAMBARD_XCI_PLOTS_DIR: Final[List[str]] = _LSMIO_DATA_DIR + [
-    "synthetic", "isambard.xci", "plots"
-]
+_ISAMBARD_XCI_PLOTS_DIR: Final[List[str]] = (
+    _LSMIO_DATA_DIR + ["synthetic", "isambard.xci", "plots"]
+)
 ISAMBARD_XCI_PLOTS_DIR: Final[str] = os.path.join(HOME, *_ISAMBARD_XCI_PLOTS_DIR)
 
 # Determine HPC cluster
 UNKNOWN_HPC_ENVIRONMENT: Final[str] = (
-    "############################################\n"
+    "#" * 44 + "\n"
     "# ERROR: Unknown HPC Environment            #\n"
-    "############################################\n"
+    "#" * 44 + "\n"
 )
 HOSTNAME: Final[str] = platform.node()
 if HOSTNAME.startswith("xci") or HOSTNAME.startswith("nid"):

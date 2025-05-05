@@ -28,9 +28,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-import sys, subprocess
+import subprocess
+import sys
+
 from lsmiotool import settings
 from lsmiotool.lib import env, log, debuggable, main
+
 
 class HpcEnvMain(BaseMain):
     def __init__(self, *args, **kwargs):

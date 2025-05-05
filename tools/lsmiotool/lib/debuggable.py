@@ -28,9 +28,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-import inspect, traceback, threading
-from typing import Dict, Any, Optional, List, Tuple, Type
+import inspect
+import threading
+import traceback
 from types import TracebackType
+from typing import Any, Dict, List, Optional, Tuple, Type
+
 from lsmiotool.lib.log import Log, LOG_LEVEL
 
 

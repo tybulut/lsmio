@@ -30,6 +30,7 @@
 
 import csv
 from typing import Dict, List, TypedDict, Union, Tuple
+
 from lsmiotool.lib.debuggable import DebuggableObject
 from lsmiotool.lib.log import Console
 
@@ -92,7 +93,7 @@ class IorSingleRunData(DebuggableObject):
                     self.run_data["read"][heads[i]] = reads[i]
                     self.run_data["write"][heads[i]] = writes[i]
 
-    def getMap(self) -> RunData:
+    def get_map(self) -> RunData:
         return self.run_data
 
 
@@ -152,7 +153,7 @@ class LsmioSingleRunData(DebuggableObject):
                     self.run_data["read"][heads[i]] = reads[i]
                     self.run_data["write"][heads[i]] = writes[i]
 
-    def getMap(self) -> RunData:
+    def get_map(self) -> RunData:
         return self.run_data
 
 
@@ -196,7 +197,7 @@ class IorSummaryData(DebuggableObject):
                 if row[6]: partData['meanMB'] = float(row[6])
                 self.csv_data[access][numStripes][stripeSize][numNodes] = partData
 
-    def timeSeries(self, isRead: bool, numStripes: int, stripeSize: str) -> Tuple[List[int], List[float]]:
+    def time_series(self, isRead: bool, numStripes: int, stripeSize: str) -> Tuple[List[int], List[float]]:
         access = 'read' if isRead == True else 'write'
         partData = self.csv_data[access][numStripes][stripeSize]
         xSeries: List[int] = []

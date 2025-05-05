@@ -26,11 +26,12 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
 
+import argparse
 import importlib
 import os
 import signal
+import subprocess
 import sys
 
 import numpy as np
@@ -43,13 +44,12 @@ from lsmiotool.lib import data, debuggable, env, log, plot
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 
-
 class BaseMain(debuggable.DebuggableObject):
     """Base class for all main execution modes."""
-    
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super(BaseMain, self).__init__()
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize base main execution mode."""
+        super(BaseMain, self).__init__()
 
 
 class TestMain(BaseMain):
@@ -59,7 +59,6 @@ class TestMain(BaseMain):
         """Execute test suite and report results."""
         from lsmiotool import test
         test.run_and_report()
-
 
 
 class ShellMain(BaseMain):
@@ -104,7 +103,7 @@ class DemoMain(BaseMain):
         ior_run = data.IorSummaryData(
             "/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv"
         )
-        x_series, y_series = ior_run.timeSeries(False, 4, "64K")
+        x_series, y_series = ior_run.time_series(False, 4, "64K")
         fn = "ior-write-4-64k.png"
         md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
         pd = plot.PlotData("ior-base-4-64k", x_series, y_series)
@@ -120,9 +119,9 @@ class DemoMain(BaseMain):
         fn = "ior-write-64k.png"
         md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
 
-        x_series, y_series = ior_run.timeSeries(False, 4, "64K")
+        x_series, y_series = ior_run.time_series(False, 4, "64K")
         pda = plot.PlotData("ior-base-4-64k", x_series, y_series)
-        x_series, y_series = ior_run.timeSeries(False, 16, "64K")
+        x_series, y_series = ior_run.time_series(False, 16, "64K")
         pdb = plot.PlotData("ior-base-16-64k", x_series, y_series)
 
         p = plot.MultiPlot(md, pda, pdb)
