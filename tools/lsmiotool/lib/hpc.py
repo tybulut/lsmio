@@ -3,18 +3,18 @@
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -30,6 +30,7 @@
 
 import subprocess
 import sys
+from typing import List, Any
 
 from lsmiotool.lib import env
 from lsmiotool.lib.env import HpcEnv
@@ -42,7 +43,7 @@ class HpcEnvMain(BaseMain):
     A class to manage HPC environment.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
         Initialize the HpcEnvMain class.
 
@@ -50,28 +51,28 @@ class HpcEnvMain(BaseMain):
             *args: Variable length argument list.
             **kwargs: Arbitrary keyword arguments.
         """
-        super(HpcEnvMain, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
-    def run_module_command(self, command):
+    def run_module_command(self, command: str) -> None:
         """
         Run a module command using bash shell.
 
         Args:
-            command (str): The module command to run.
+            command: The module command to run.
         """
         subprocess.run(f"module {command}", shell=True, executable="/bin/bash", check=True)
 
-    def purge_modules(self):
+    def purge_modules(self) -> None:
         """
         Purge all loaded modules.
         """
         self.run_module_command("purge")
 
-    def load_modules_viking(self):
+    def load_modules_viking(self) -> None:
         """
         Load modules for Viking HPC environment.
         """
-        modules = [
+        modules: List[str] = [
             "data/HDF5/1.10.7-gompi-2020b",
             "compiler/GCC/11.3.0",
             "devel/CMake/3.24.3-GCCcore-11.3.0",
@@ -85,11 +86,11 @@ class HpcEnvMain(BaseMain):
         for mod in modules:
             self.run_module_command(f"load {mod}")
 
-    def load_modules_viking2(self):
+    def load_modules_viking2(self) -> None:
         """
         Load modules for Viking2 HPC environment.
         """
-        modules = [
+        modules: List[str] = [
             "GCCcore/13.2.0",
             "CMake/3.27.6-GCCcore-13.2.0",
             "OpenMPI/4.1.6-GCC-13.2.0",
@@ -107,11 +108,11 @@ class HpcEnvMain(BaseMain):
         for mod in modules:
             self.run_module_command(f"load {mod}")
 
-    def load_modules_isambard(self):
+    def load_modules_isambard(self) -> None:
         """
         Load modules for Isambard HPC environment.
         """
-        modules = [
+        modules: List[str] = [
             "modules/3.2.11.4",
             "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
             "craype-network-aries",
@@ -143,14 +144,17 @@ class HpcEnvMain(BaseMain):
         for mod in modules:
             self.run_module_command(f"load {mod}")
 
-    def _get_all_module_commands(self):
+    def _get_all_module_commands(self) -> List[str]:
         """
         Return a list of all module commands (purge and loads) for the current HPC environment.
+
+        Returns:
+            List of module commands to execute.
         """
         hpc_env = env.HPC_ENV
         if hpc_env == HpcEnv.ISAMBARD:
-            commands = ["module purge"]
-            modules = [
+            commands: List[str] = ["module purge"]
+            modules: List[str] = [
                 "modules/3.2.11.4",
                 "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
                 "craype-network-aries",
@@ -218,7 +222,7 @@ class HpcEnvMain(BaseMain):
         commands += [f"module load {mod}" for mod in modules]
         return commands
 
-    def run(self):
+    def run(self) -> None:
         """
         Print all module commands (purge and loads) for the current HPC environment.
         """
@@ -226,7 +230,7 @@ class HpcEnvMain(BaseMain):
         for cmd in commands:
             print(cmd)
 
-    def execute(self):
+    def execute(self) -> None:
         """
         Execute all module commands (purge and loads) for the current HPC environment in a single subprocess shell.
         """

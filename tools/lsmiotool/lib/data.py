@@ -29,14 +29,14 @@
 # 
 
 import csv
-from typing import Dict, List, TypedDict, Union, Tuple
+from typing import Dict, List, TypedDict, Union, Tuple, Any
 
 from lsmiotool.lib.debuggable import DebuggableObject
 from lsmiotool.lib.log import Console
 
 
 class RunDataMetrics(TypedDict):
-    """Metrics for a single run"""
+    """Metrics for a single run."""
     max_mib: float  # Max(MiB)
     min_mib: float  # Min(MiB)
     mean_mib: float  # Mean(MiB)
@@ -45,22 +45,33 @@ class RunDataMetrics(TypedDict):
     min_ops: float  # Min(OPs)
     mean_ops: float  # Mean(OPs)
 
+
 class RunData(TypedDict):
-    """Data for read/write operations"""
+    """Data for read/write operations."""
     read: Dict[str, Union[float, str]]
     write: Dict[str, Union[float, str]]
 
+
 class IorSingleRunData(DebuggableObject):
+    """Process single IOR run data."""
+
     def __init__(self, file_name: str) -> None:
+        """
+        Initialize IOR single run data processor.
+
+        Args:
+            file_name: Path to IOR output file
+        """
+        super().__init__()
         self.file_name: str = file_name
         self.run_data: RunData = {
             "read": {},
             "write": {}
         }
-        #Summary of all tests:
-        #Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
-        #write        4214.58    2752.91    3571.98     466.80    4214.58    2752.91    3571.98     466.80    0.14599         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
-        #read        14959.41   10729.26   13695.54    1195.05   14959.41   10729.26   13695.54    1195.05    0.03771         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
+        # Summary of all tests:
+        # Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
+        # write        4214.58    2752.91    3571.98     466.80    4214.58    2752.91    3571.98     466.80    0.14599         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
+        # read        14959.41   10729.26   13695.54    1195.05   14959.41   10729.26   13695.54    1195.05    0.03771         NA            NA     0      4   1   10   0     0        1         0    0    128  1048576  1048576     512.0 POSIX      0
         with open(file_name, newline='') as infile:
             head_line = ''
             read_line = ''
@@ -86,7 +97,10 @@ class IorSingleRunData(DebuggableObject):
             reads = read_line.rstrip().split()[1:]
             writes = write_line.rstrip().split()[1:]
             for i in range(len(heads)):
-                if heads[i] in ["Max(MiB)", "Min(MiB)", "Mean(MiB)", "StdDev", "Max(OPs)", "Min(OPs)", "Mean(OPs)"]:
+                if heads[i] in [
+                    "Max(MiB)", "Min(MiB)", "Mean(MiB)", "StdDev",
+                    "Max(OPs)", "Min(OPs)", "Mean(OPs)"
+                ]:
                     self.run_data["read"][heads[i]] = float(reads[i])
                     self.run_data["write"][heads[i]] = float(writes[i])
                 else:
@@ -94,25 +108,40 @@ class IorSingleRunData(DebuggableObject):
                     self.run_data["write"][heads[i]] = writes[i]
 
     def get_map(self) -> RunData:
+        """
+        Get the run data map.
+
+        Returns:
+            Dictionary containing read/write metrics
+        """
         return self.run_data
 
 
 class LsmioSingleRunData(DebuggableObject):
+    """Process single LSMIO run data."""
+
     def __init__(self, file_name: str) -> None:
+        """
+        Initialize LSMIO single run data processor.
+
+        Args:
+            file_name: Path to LSMIO output file
+        """
+        super().__init__()
         self.file_name: str = file_name
         self.run_data: RunData = {
             "read": {},
             "write": {}
         }
-        #Bench-WRITE: RocksDB SYN: false BLF: false
-        #access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
-        #------,---------,----------,----------,---------,----
-        #write,167.46,1.529,1048576,1048576,10
+        # Bench-WRITE: RocksDB SYN: false BLF: false
+        # access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+        # ------,---------,----------,----------,---------,----
+        # write,167.46,1.529,1048576,1048576,10
         #
-        #Bench-READ: RocksDB SYN: false BLF: false
-        #access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
-        #------,---------,----------,----------,---------,----
-        #read,320.78,0.798,1048576,1048576,10
+        # Bench-READ: RocksDB SYN: false BLF: false
+        # access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter
+        # ------,---------,----------,----------,---------,----
+        # read,320.78,0.798,1048576,1048576,10
         #
         with open(file_name, newline='') as infile:
             head_line = ''
@@ -146,7 +175,9 @@ class LsmioSingleRunData(DebuggableObject):
             reads = read_line.rstrip().split(",")[1:]
             writes = write_line.rstrip().split(",")[1:]
             for i in range(len(heads)):
-                if heads[i] in ["bw(MiB/s)", "Latency(ms)", "block(KiB)", "xfer(KiB)"]:
+                if heads[i] in [
+                    "bw(MiB/s)", "Latency(ms)", "block(KiB)", "xfer(KiB)"
+                ]:
                     self.run_data["read"][heads[i]] = float(reads[i])
                     self.run_data["write"][heads[i]] = float(writes[i])
                 else:
@@ -154,59 +185,112 @@ class LsmioSingleRunData(DebuggableObject):
                     self.run_data["write"][heads[i]] = writes[i]
 
     def get_map(self) -> RunData:
+        """
+        Get the run data map.
+
+        Returns:
+            Dictionary containing read/write metrics
+        """
         return self.run_data
 
 
 class PartData(TypedDict):
+    """Performance data for a single part."""
     maxMB: float
     minMB: float
     meanMB: float
 
+
 class CsvData(TypedDict):
+    """CSV data structure."""
     read: Dict[int, Dict[str, Dict[int, PartData]]]
     write: Dict[int, Dict[str, Dict[int, PartData]]]
 
+
 class IorSummaryData(DebuggableObject):
+    """Process IOR summary data."""
+
     def __init__(self, file_name: str) -> None:
+        """
+        Initialize IOR summary data processor.
+
+        Args:
+            file_name: Path to IOR summary CSV file
+        """
+        super().__init__()
         self.file_name: str = file_name
         self.csv_data: Dict[str, Dict[int, Dict[str, Dict[int, PartData]]]] = {}
         # N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,...
         # 1,16,8M,read,5353.38,5160.61,5293.08,49.88,66...
         with open(file_name, newline='') as csvfile:
-            csvReader = csv.reader(csvfile, delimiter=',', quotechar='|')
-            for row in csvReader:
+            csv_reader = csv.reader(csvfile, delimiter=',', quotechar='|')
+            for row in csv_reader:
                 access = row[3]
                 if access not in self.csv_data:
                     self.csv_data[access] = {}
-                numStripes = int(row[1])
-                if numStripes not in self.csv_data[access]:
-                    self.csv_data[access][numStripes] = {}
-                stripeSize = row[2]
-                if stripeSize not in self.csv_data[access][numStripes]:
-                    self.csv_data[access][numStripes][stripeSize] = {}
-                numNodes = int(row[0])
-                if numNodes not in self.csv_data[access][numStripes][stripeSize]:
-                    self.csv_data[access][numStripes][stripeSize][numNodes] = {}
-                partData: PartData = {
+                num_stripes = int(row[1])
+                if num_stripes not in self.csv_data[access]:
+                    self.csv_data[access][num_stripes] = {}
+                stripe_size = row[2]
+                if stripe_size not in self.csv_data[access][num_stripes]:
+                    self.csv_data[access][num_stripes][stripe_size] = {}
+                num_nodes = int(row[0])
+                if num_nodes not in self.csv_data[access][num_stripes][stripe_size]:
+                    self.csv_data[access][num_stripes][stripe_size][num_nodes] = {}
+                part_data: PartData = {
                     'maxMB': float(0.00),
                     'minMB': float(0.00),
                     'meanMB': float(0.00),
                 }
-                if row[4]: partData['maxMB'] = float(row[4])
-                if row[5]: partData['minMB'] = float(row[5])
-                if row[6]: partData['meanMB'] = float(row[6])
-                self.csv_data[access][numStripes][stripeSize][numNodes] = partData
+                if row[4]:
+                    part_data['maxMB'] = float(row[4])
+                if row[5]:
+                    part_data['minMB'] = float(row[5])
+                if row[6]:
+                    part_data['meanMB'] = float(row[6])
+                self.csv_data[access][num_stripes][stripe_size][num_nodes] = part_data
 
-    def time_series(self, isRead: bool, numStripes: int, stripeSize: str) -> Tuple[List[int], List[float]]:
-        access = 'read' if isRead == True else 'write'
-        partData = self.csv_data[access][numStripes][stripeSize]
-        xSeries: List[int] = []
-        ySeries: List[float] = []
-        for node in sorted(partData):
-            xSeries.append(node)
-            ySeries.append(partData[node]['maxMB'])
-        return (xSeries, ySeries)
+    def time_series(
+        self,
+        is_read: bool,
+        num_stripes: int,
+        stripe_size: str
+    ) -> Tuple[List[int], List[float]]:
+        """
+        Get time series data for the specified parameters.
+
+        Args:
+            is_read: Whether to get read or write data
+            num_stripes: Number of stripes
+            stripe_size: Size of stripes
+
+        Returns:
+            Tuple of node counts and corresponding performance values
+        """
+        access = "read" if is_read else "write"
+        x_series: List[int] = []
+        y_series: List[float] = []
+        if access in self.csv_data:
+            if num_stripes in self.csv_data[access]:
+                if stripe_size in self.csv_data[access][num_stripes]:
+                    for num_nodes in sorted(
+                        self.csv_data[access][num_stripes][stripe_size].keys()
+                    ):
+                        x_series.append(num_nodes)
+                        y_series.append(
+                            self.csv_data[access][num_stripes][stripe_size][num_nodes]['maxMB']
+                        )
+        return x_series, y_series
 
 
 class LsmioSummaryData(IorSummaryData):
-    pass
+    """Process LSMIO summary data."""
+
+    def __init__(self, file_name: str) -> None:
+        """
+        Initialize LSMIO summary data processor.
+
+        Args:
+            file_name: Path to LSMIO summary CSV file
+        """
+        super().__init__(file_name)

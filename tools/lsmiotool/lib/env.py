@@ -3,18 +3,18 @@
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -26,7 +26,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+#
 
 import copy
 import json
@@ -34,7 +34,7 @@ import os
 import platform
 from datetime import datetime
 from enum import Enum
-from typing import List, TypedDict, Final
+from typing import Dict, List, TypedDict, Final, Any, Optional
 from lsmiotool.lib.log import Console
 
 
@@ -86,7 +86,7 @@ UNKNOWN_HPC_ENVIRONMENT: Final[str] = "Unknown HPC Environment"
 # Edit that file to update IOR/LSMIO data, paths, etc. for each environment.
 
 # Detect environment
-lsmio_env = os.environ.get("LSMIO_ENV", None)
+lsmio_env: Optional[str] = os.environ.get("LSMIO_ENV", None)
 if lsmio_env is not None:
     lsmio_env = lsmio_env.upper()
     if lsmio_env == "ISAMBARD":
@@ -116,19 +116,27 @@ else:
         exit(1)
 
 
-
 # Load JSON config
-_json_path = os.path.join(os.path.dirname(__file__), "..", "etc", "environments.json")
+_json_path: str = os.path.join(os.path.dirname(__file__), "..", "etc", "environments.json")
 with open(_json_path, "r") as _f:
-    _env_configs = json.load(_f)
+    _env_configs: Dict[str, Any] = json.load(_f)
 
 if "DEFAULT" not in _env_configs:
     Console.error("DEFAULT section missing in environments.json")
     exit(1)
-# If the detected environment is not found, just use DEFAULT (no overrides)
 
-def _deep_merge(dict1, dict2):
-    """Merge dict2 into dict1 recursively, returning a new dict."""
+
+def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge dict2 into dict1 recursively, returning a new dict.
+
+    Args:
+        dict1: Base dictionary to merge into
+        dict2: Dictionary to merge from
+
+    Returns:
+        Merged dictionary
+    """
     result = copy.deepcopy(dict1)
     for k, v in dict2.items():
         if (
@@ -141,17 +149,18 @@ def _deep_merge(dict1, dict2):
             result[k] = v
     return result
 
-_env = _deep_merge(_env_configs["DEFAULT"], _env_configs.get(HPC_ENV.value, {}))
 
-hpc_manager = _env["hpc_manager"]
-base_path = _env["base_path"]
-ior_dir = os.path.join(base_path, *_env["ior_dirs"])
-lsmio_dir = os.path.join(base_path, *_env["lsmio_dirs"])
-plots_dir = os.path.join(base_path, *_env["plots_dirs"])
-ior_data = _env["ior_data"]
-lsmio_data = _env["lsmio_data"]
-lustre_hdd_path = _env["lustre_hdd_path"]
-lustre_ssd_path = _env["lustre_ssd_path"]
+_env: Dict[str, Any] = _deep_merge(_env_configs["DEFAULT"], _env_configs.get(HPC_ENV.value, {}))
+
+hpc_manager: str = _env["hpc_manager"]
+base_path: str = _env["base_path"]
+ior_dir: str = os.path.join(base_path, *_env["ior_dirs"])
+lsmio_dir: str = os.path.join(base_path, *_env["lsmio_dirs"])
+plots_dir: str = os.path.join(base_path, *_env["plots_dirs"])
+ior_data: IorData = _env["ior_data"]
+lsmio_data: LsmioData = _env["lsmio_data"]
+lustre_hdd_path: str = _env["lustre_hdd_path"]
+lustre_ssd_path: str = _env["lustre_ssd_path"]
 
 if HPC_ENV.value not in _env_configs:
     Console.error(f"Unknown _env_configs value: {HPC_ENV.value}")
@@ -165,10 +174,8 @@ PROJECT_DIR: Final[str] = os.path.join(HOME, *_REL_PROJECT_DIR)
 BIN_DIR: Final[str] = os.path.join(HOME, *_REL_BIN_DIR)
 LIB_DIR: Final[str] = os.path.join(HOME, *_REL_LIB_DIR)
 
-if False:
-    lustre_path: str = lustre_ssd_path
-else:
-    lustre_path: str = lustre_hdd_path
+# Use SSD path by default
+lustre_path: str = lustre_ssd_path
 
 BM_DIR: Final[str] = os.path.join(lustre_path, "users", USER, "benchmark")
 

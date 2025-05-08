@@ -3,18 +3,18 @@
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -26,11 +26,12 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+#
 
 import os
+from typing import Any, Dict, List, Union, Sequence
+
 import numpy as np
-from typing import Any, Dict, List, Union
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 
@@ -39,7 +40,8 @@ class PlotMetaData:
     """Metadata for plot visualization, including title and axis labels."""
 
     def __init__(self, title: str, x_label: str, y_label: str) -> None:
-        """Initialize plot metadata.
+        """
+        Initialize plot metadata.
 
         Args:
             title: Plot title
@@ -60,7 +62,8 @@ class PlotData:
         x_series: List[Union[int, str]],
         y_series: List[float]
     ) -> None:
-        """Initialize plot data.
+        """
+        Initialize plot data.
 
         Args:
             legend: Legend label for the data series
@@ -72,11 +75,12 @@ class PlotData:
         self.y_series: NDArray[np.float64] = np.array(y_series)
 
 
-class Plot(object):
+class Plot:
     """Single data series plot with metadata."""
 
     def __init__(self, meta_data: PlotMetaData, plot_data: PlotData) -> None:
-        """Initialize plot with metadata and data series.
+        """
+        Initialize plot with metadata and data series.
 
         Args:
             meta_data: Plot metadata
@@ -86,61 +90,66 @@ class Plot(object):
         self.plot_data: PlotData = plot_data
 
     def plot(self, file_name: str) -> None:
-        """Generate and save the plot.
+        """
+        Generate and save the plot.
 
         Args:
             file_name: Path to save the plot image
         """
         # Metadata
-        pyplot.title(self.meta_data.title)
-        pyplot.xlabel(self.meta_data.x_label)
-        pyplot.ylabel(self.meta_data.y_label)
+        plt.title(self.meta_data.title)
+        plt.xlabel(self.meta_data.x_label)
+        plt.ylabel(self.meta_data.y_label)
 
         # Plot data
-        pyplot.plot(self.plot_data.x_series, self.plot_data.y_series)
+        plt.plot(self.plot_data.x_series, self.plot_data.y_series)
 
         # Configure and save image
-        pyplot.grid()
-        pyplot.savefig(file_name)
-        pyplot.close()
+        plt.grid()
+        plt.savefig(file_name)
+        plt.close()
 
 
-class MultiPlot(object):
+class MultiPlot:
     """Multiple data series plot with metadata."""
 
-    def __init__(self, meta_data: PlotMetaData, *plot_data_args: PlotData) -> None:
-        """Initialize plot with metadata and multiple data series.
+    def __init__(
+        self,
+        meta_data: PlotMetaData,
+        *plot_data_args: PlotData
+    ) -> None:
+        """
+        Initialize plot with metadata and multiple data series.
 
         Args:
             meta_data: Plot metadata
             *plot_data_args: Variable number of data series to plot
         """
         self.meta_data: PlotMetaData = meta_data
-        self.plot_data_list: List[PlotData] = []
-        for plot_data in plot_data_args:
-            self.plot_data_list.append(plot_data)
+        self.plot_data_list: List[PlotData] = list(plot_data_args)
 
     def plot(self, file_name: str) -> None:
-        """Generate and save the plot.
+        """
+        Generate and save the plot.
 
         Args:
             file_name: Path to save the plot image
         """
         # Metadata
-        pyplot.title(self.meta_data.title)
-        pyplot.xlabel(self.meta_data.x_label)
-        pyplot.ylabel(self.meta_data.y_label)
+        plt.title(self.meta_data.title)
+        plt.xlabel(self.meta_data.x_label)
+        plt.ylabel(self.meta_data.y_label)
 
         # Plot data series
         for plot_data in self.plot_data_list:
-            pyplot.plot(
+            plt.plot(
                 plot_data.x_series,
                 plot_data.y_series,
                 label=plot_data.legend
             )
 
         # Configure and save image
-        pyplot.grid()
-        pyplot.legend()
-        pyplot.savefig(file_name)
-        pyplot.close()
+        plt.grid()
+        plt.legend()
+        plt.savefig(file_name)
+        plt.close()

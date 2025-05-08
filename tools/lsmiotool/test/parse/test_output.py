@@ -199,26 +199,24 @@ class OutputUnitTestCase(TestCase):
   #                               'Mean(s)': '1.10131',
   #                               'Min(MiB)': 829.51,
   #
-  def test_ior_full_output(self):
+  def test_ior_full_output(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior full directory: ' + root_dir + '.')
     ior_full = MockIorFullOutput(root_dir)
     full_map = ior_full.get_map()
     (xSeries, ySeries) = ior_full.time_series(False, '4', '64K')
-    #Console.debug("test_ior_full_output map: " + pprint.pformat(full_map))
     self.assertEqual(xSeries, ['1', '2'])
     self.assertEqual(ySeries, [888.01, 836.94])
 
 
-  def test_lsmio_full_output(self):
+  def test_lsmio_full_output(self) -> None:
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example lsmio full directory: ' + root_dir + '.')
     lsm_full = MockLsmioFullOutput(root_dir)
     full_map = lsm_full.get_map()
     (xSeries, ySeries) = lsm_full.time_series(False, '4', '64K')
-    #Console.debug("test_lsmio_full_output map: " + pprint.pformat(full_map))
     self.assertEqual(xSeries, ['1', '4'])
     self.assertEqual(ySeries, [224.62, 841.0699999999999])
 
