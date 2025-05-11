@@ -218,6 +218,7 @@ class OutputUnitTestCase(TestCase):
     full_map = lsm_full.get_map()
     (xSeries, ySeries) = lsm_full.time_series(False, '4', '64K')
     self.assertEqual(xSeries, ['1', '4'])
-    self.assertEqual(ySeries, [224.62, 841.0699999999999])
+    for a, b in zip(ySeries, [224.62, 841.07]):
+        self.assertAlmostEqual(a, b, places=5)
 
 
