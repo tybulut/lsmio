@@ -34,8 +34,8 @@ import os
 import platform
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Final, Any, Optional
-from lsmiotool.lib.compat import TypedDict
+from typing import Dict, List, Any, Optional
+from lsmiotool.lib.compat import TypedDict, Final
 from lsmiotool.lib.log import Console
 
 

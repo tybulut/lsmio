@@ -31,7 +31,7 @@
 import os
 import re
 from typing import Dict, List, Union, Tuple, Optional, Any
-from lsmiotool.lib.compat import TypedDict
+from lsmiotool.lib.compat import TypedDict, Final
 
 from lsmiotool.lib.debuggable import DebuggableObject
 from lsmiotool.lib.log import Console

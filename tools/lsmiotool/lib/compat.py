@@ -31,8 +31,11 @@
 import copy
 
 try:
-    from typing import TypedDict
+    from typing import TypedDict, Final
 except ImportError:
     class TypedDict(dict):
         """Minimal stand-in for typing.TypedDict for Python < 3.8. Does not enforce types at runtime."""
         pass
+    def Final(tp):
+        # No-op for type hinting
+        return tp
