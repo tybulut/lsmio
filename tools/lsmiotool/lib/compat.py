@@ -40,3 +40,5 @@ except ImportError:
         """Minimal stand-in for typing.Final for Python < 3.8. Supports subscripting for type hints."""
         def __class_getitem__(cls, item):
             return item
+        def __getitem__(self, item):
+            return item
