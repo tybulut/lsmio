@@ -29,7 +29,8 @@
 # 
 
 import csv
-from typing import Dict, List, TypedDict, Union, Tuple, Any
+from typing import Dict, List, Union, Tuple, Any
+from lsmiotool.lib.compat import TypedDict
 
 from lsmiotool.lib.debuggable import DebuggableObject
 from lsmiotool.lib.log import Console
