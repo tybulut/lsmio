@@ -36,6 +36,7 @@ except ImportError:
     class TypedDict(dict):
         """Minimal stand-in for typing.TypedDict for Python < 3.8. Does not enforce types at runtime."""
         pass
-    def Final(tp):
-        # No-op for type hinting
-        return tp
+    class Final:
+        """Minimal stand-in for typing.Final for Python < 3.8. Supports subscripting for type hints."""
+        def __class_getitem__(cls, item):
+            return item
