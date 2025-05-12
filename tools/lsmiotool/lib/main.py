@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from lsmiotool import settings
-from lsmiotool.lib import jobs
+from lsmiotool.lib import jobs, dirs, env
 from lsmiotool.lib import data, debuggable, env, log, plot
 
 # Catch CTRL-C
@@ -60,6 +60,73 @@ class TestMain(BaseMain):
         """Execute test suite and report results."""
         from lsmiotool import test
         test.run_and_report()
+
+
+class RunMain(BaseMain):
+    """Run command"""
+    _options = {
+        'ior' : {
+            'bm_setup': ['BASE', 'HDF5', 'HDF5-C', 'COLLECTIVE', 'FSYNC', 'REVERSE' ],
+            'sb_bin': '$HOME/src/usr/bin',
+            'bs': ['64K', '1M', '8M' ],
+            'dirs_bm_base': dirs.get_base_dir(env.BM_DIR)['BASE'],
+            'ior_dir_output': dirs.get_log_dir(env.BM_DIR)['LOG'],
+        }
+    }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Command: run <ior|lsmio|lmp> <local|bake|small|large>
+
+        Args:
+            *args: Variable length argument list
+            **kwargs: Arbitrary keyword arguments
+        """
+        super().__init__()
+        self.command: str = args[0]
+        self.mode: str = args[1]
+        allowed_commands = ['ior', 'lsmio', 'lmp']
+        if self.command not in allowed_commands:
+            log.Console.error("Command to execute has to be in: " + str(allowed_commands))
+            sys.exit(1)
+        allowed_modes = ['local', 'bake', 'small', 'large']
+        if self.mode not in allowed_modes:
+            log.Console.error("Command mode has to be in: " + str(allowed_modes))
+            sys.exit(1)
+
+    def _run_IOR(self) -> None:
+        if self.mode == 'local':
+            pass
+        elif self.mode == 'bake':
+            pass
+        elif self.mode == 'small':
+            pass
+        elif self.mode == 'large':
+            pass
+        else:
+            log.Console.error("Mode [" + self.mode + "] unimplemented.")
+            sys.exit(1)
+        bench = jobs.IORBenchmark(
+            bm_setup=self._options['ior']['bm_setup'][0],
+            sb_bin=self._options['ior']['sb_bin'],
+            dirs_bm_base=self._options['ior']['dirs_bm_base'],
+            ior_dir_output=self._options['ior']['ior_dir_output']
+        )
+        result = bench.run('16', '64K')
+
+    def _run_LSMIO(self) -> None:
+        pass
+
+    def _run_LMP(self) -> None:
+        pass
+
+    def run(self) -> None:
+        if self.command == 'ior':
+            self._run_IOR()
+        elif self.command == 'lsmio':
+            self._run_LSMIO()
+        elif self.command == 'lmp':
+            self._run_LMP()
 
 
 class ShellMain(BaseMain):

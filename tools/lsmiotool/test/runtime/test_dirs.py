@@ -39,35 +39,44 @@ from lsmiotool.lib.log import Console
 class TestDirs(unittest.TestCase):
     def test_get_dirs_structure(self):
         bm_path = '/tmp/fakebm'
-        result = dirs.get_dirs(bm_path)
+        result = dirs.get_data_dirs(bm_path)
         self.assertIsInstance(result, dict)
-        self.assertTrue(all(isinstance(v, str) for v in result.values()))
-        self.assertIn('BM_C4_B64', result)
-        self.assertTrue(result['LOG'].startswith(bm_path))
+        # Check top-level keys
+        self.assertIn('4', result['DATA'])
+        self.assertIn('16', result['DATA'])
+        # Check sub-keys and their values
+        for core in ['4', '16']:
+            for block in ['64K', '1M', '8M']:
+                self.assertIn(block, result['DATA'][core])
+                self.assertIsInstance(result['DATA'][core][block], str)
+                self.assertTrue(result['DATA'][core][block].endswith(os.path.join(core, block)))
+
 
     def test_setup_and_cleanup_dirs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             # Setup
             dirs.setup_data_dirs(tmpdir)
-            paths = dirs.get_data_dirs(tmpdir)
+            paths = dirs.get_data_dirs(tmpdir)['DATA']
             Console.debug("paths: " + pprint.pformat(paths))
-            for path in paths.values():
-                Console.debug("setup-path: " + path)
-                self.assertTrue(os.path.isdir(path))
-                # Create a file and a subdirectory for cleanup test
-                file_path = os.path.join(path, 'testfile.txt')
-                subdir_path = os.path.join(path, 'subdir')
-                with open(file_path, 'w'):
-                    pass
-                os.makedirs(subdir_path, exist_ok=True)
-                self.assertTrue(os.path.isfile(file_path))
-                self.assertTrue(os.path.isdir(subdir_path))
+            for core_dict in paths.values():
+                for path in core_dict.values():
+                    Console.debug("setup-path: " + path)
+                    self.assertTrue(os.path.isdir(path))
+                    # Create a file and a subdirectory for cleanup test
+                    file_path = os.path.join(path, 'testfile.txt')
+                    subdir_path = os.path.join(path, 'subdir')
+                    with open(file_path, 'w'):
+                        pass
+                    os.makedirs(subdir_path, exist_ok=True)
+                    self.assertTrue(os.path.isfile(file_path))
+                    self.assertTrue(os.path.isdir(subdir_path))
             # Cleanup
             dirs.cleanup_data_dirs(tmpdir)
-            for path in paths.values():
-                Console.debug("cleanup-path: " + path)
-                self.assertTrue(os.path.isdir(path))
-                self.assertEqual(os.listdir(path), [])
+            for core_dict in paths.values():
+                for path in core_dict.values():
+                    Console.debug("cleanup-path: " + path)
+                    self.assertTrue(os.path.isdir(path))
+                    self.assertEqual(os.listdir(path), [])
 
     def test_get_log_dir(self):
         with tempfile.TemporaryDirectory() as tmpdir:

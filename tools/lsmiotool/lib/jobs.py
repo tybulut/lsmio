@@ -36,7 +36,7 @@ import time
 import getpass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from lsmiotool.lib import debuggable, dirs, env
+from lsmiotool.lib import debuggable, dirs, env, log
 
 
 def setup_job_environment_and_dirs(bm_path: str) -> Dict[str, str]:
@@ -195,6 +195,16 @@ class JobScriptGenerator(debuggable.DebuggableObject):
 . {batch_in_sh}
 """
 
+    @staticmethod
+    def get_unique_uid() -> str:
+        if hpc_manager == "slurm":
+            return "${SLURMD_NODENAME}-${SLURM_LOCALID}"
+        elif hpc_manager == "pbs":
+            return "${BM_NODENAME}-${ALPS_APP_PE}"
+        else:
+            raise RuntimeError(f"get_unique_uid: Unknown HPC manager: {hpc_manager}")
+
+
 
 class IORBenchmark(debuggable.DebuggableObject):
     """
@@ -212,17 +222,15 @@ class IORBenchmark(debuggable.DebuggableObject):
         bm_setup: str = "BASE",
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
-        ior_dir_output: Optional[str] = None,
-        bm_unique_uid: Optional[str] = None,
-        ds: Optional[str] = None,
+        ior_dir_output: Optional[str] = None
     ) -> None:
         """Initialize IORBenchmark with setup and environment variables."""
         self.bm_setup = bm_setup
         self.sb_bin = sb_bin or os.environ.get("SB_BIN", "")
         self.dirs_bm_base = dirs_bm_base or os.environ.get("DIRS_BM_BASE", "")
         self.ior_dir_output = ior_dir_output or os.environ.get("IOR_DIR_OUTPUT", "")
-        self.bm_unique_uid = bm_unique_uid or os.environ.get("BM_UNIQUE_UID", "")
-        self.ds = ds or os.environ.get("DS", "")
+        self.bm_unique_uid = os.environ.get("BM_UNIQUE_UID", "")
+        self.ds = os.environ.get("DS", "")
 
     def run(self, rf: str, bs: str) -> subprocess.CompletedProcess:
         """Run the IOR benchmark for the given rf and bs."""
@@ -245,6 +253,7 @@ class IORBenchmark(debuggable.DebuggableObject):
             f"{self.ior_dir_output}/out-{infix}-{rf}-{bs}-"
             f"{self.ds}-{self.bm_unique_uid}.txt"
         )
+        log_file = os.path.expanduser(log_file)
         base_cmd = [
             f"{self.sb_bin}/ior",
             "-v",
@@ -269,7 +278,9 @@ class IORBenchmark(debuggable.DebuggableObject):
             cmd = base_cmd + ["-C"]
         else:
             cmd = base_cmd
-        with open(log_file, "w") as logf:
+        log.Console.debug(f"IORBenchmark cmd: {cmd}")
+        log.Console.debug(f"IORBenchmark log file: {log_file}")
+        with open(log_file, "a+") as logf:
             result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT)
         return result
 
@@ -292,17 +303,15 @@ class LMPBenchmark(debuggable.DebuggableObject):
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
         lmp_dir_output: Optional[str] = None,
-        bm_unique_uid: Optional[str] = None,
-        ds: Optional[str] = None,
-        bm_num_tasks: Optional[int] = None,
+        bm_num_tasks: Optional[int] = None
     ) -> None:
         """Initialize LMPBenchmark with setup and environment variables."""
         self.bm_setup = bm_setup
         self.sb_bin = sb_bin or os.environ.get("SB_BIN", "")
         self.dirs_bm_base = dirs_bm_base or os.environ.get("DIRS_BM_BASE", "")
         self.lmp_dir_output = lmp_dir_output or os.environ.get("LMP_DIR_OUTPUT", "")
-        self.bm_unique_uid = bm_unique_uid or os.environ.get("BM_UNIQUE_UID", "")
-        self.ds = ds or os.environ.get("DS", "")
+        self.bm_unique_uid = os.environ.get("BM_UNIQUE_UID", "")
+        self.ds = os.environ.get("DS", "")
         self.bm_num_tasks = int(bm_num_tasks or os.environ.get("BM_NUM_TASKS", "1"))
 
     def run(self, rf: str, bs: str) -> subprocess.CompletedProcess:
@@ -391,17 +400,15 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
         bm_setup: str = "ADIOS-M",
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
-        lsm_dir_output: Optional[str] = None,
-        bm_unique_uid: Optional[str] = None,
-        ds: Optional[str] = None,
+        lsm_dir_output: Optional[str] = None
     ) -> None:
         """Initialize LSMIOBenchmark with setup and environment variables."""
         self.bm_setup = bm_setup
         self.sb_bin = sb_bin or os.environ.get("SB_BIN", "")
         self.dirs_bm_base = dirs_bm_base or os.environ.get("DIRS_BM_BASE", "")
         self.lsm_dir_output = lsm_dir_output or os.environ.get("LSM_DIR_OUTPUT", "")
-        self.bm_unique_uid = bm_unique_uid or os.environ.get("BM_UNIQUE_UID", "")
-        self.ds = ds or os.environ.get("DS", "")
+        self.bm_unique_uid = os.environ.get("BM_UNIQUE_UID", "")
+        self.ds = os.environ.get("DS", "")
 
     def run(self, rf: str, bs: str) -> subprocess.CompletedProcess:
         """Run the LSMIO benchmark for the given rf and bs."""

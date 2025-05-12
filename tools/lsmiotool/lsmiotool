@@ -117,7 +117,11 @@ if __name__ == '__main__':
   elif args[0] == 'parse':
     class_main = main.NotImplemented
   elif args[0] == 'run':
-    class_main = main.NotImplemented
+    m_args = args[1:]
+    if len(m_args) != 2:
+      log.Console.error('Run: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>')
+      sys.exit(1)
+    class_main = main.RunMain
   elif args[0] == 'shell':
     class_main = main.ShellMain
   elif args[0] == 'test':

@@ -40,7 +40,7 @@ def get_base_dir(bm_path: str) -> Dict[str, str]:
     Return the base directory path as a dict
     """
     return {
-        'BM_BASE': os.path.join(bm_path, 'data'),
+        'BASE': os.path.join(bm_path, 'data'),
     }
 
 
@@ -49,12 +49,18 @@ def get_data_dirs(bm_path: str) -> Dict[str, str]:
     Return dictionary of data directory paths.
     """
     return {
-        'BM_C4_B64': os.path.join(bm_path, 'data', 'c4', 'b64K'),
-        'BM_c16_B64': os.path.join(bm_path, 'data', 'c16', 'b64K'),
-        'BM_C4_B1M': os.path.join(bm_path, 'data', 'c4', 'b1M'),
-        'BM_c16_B1M': os.path.join(bm_path, 'data', 'c16', 'b1M'),
-        'BM_C4_B8M': os.path.join(bm_path, 'data', 'c4', 'b8M'),
-        'BM_c16_B8M': os.path.join(bm_path, 'data', 'c16', 'b8M'),
+        'DATA': {
+            '4': {
+                '64K': os.path.join(bm_path, 'data', '4', '64K'),
+                '1M': os.path.join(bm_path, 'data', '4', '1M'),
+                '8M': os.path.join(bm_path, 'data', '4', '8M'),
+            },
+            '16': {
+                '64K': os.path.join(bm_path, 'data', '16', '64K'),
+                '1M': os.path.join(bm_path, 'data', '16', '1M'),
+                '8M': os.path.join(bm_path, 'data', '16', '8M'),
+            }
+        }
     }
 
 
@@ -84,9 +90,13 @@ def setup_data_dirs(bm_path: str) -> None:
     Args:
         bm_path: Base path for benchmark directories.
     """
-    dirs = get_data_dirs(bm_path)
-    for d in dirs.values():
-        os.makedirs(d, exist_ok=True)
+    dirs = get_data_dirs(bm_path)['DATA']
+    for core_dict in dirs.values():
+        for d in core_dict.values():
+            os.makedirs(d, exist_ok=True)
+    # Ensure log dir exists
+    log_dir = get_log_dir(bm_path)['LOG']
+    os.makedirs(log_dir, exist_ok=True)
 
 
 def cleanup_data_dirs(bm_path: str) -> None:
@@ -95,9 +105,14 @@ def cleanup_data_dirs(bm_path: str) -> None:
     Args:
         bm_path: Base path for benchmark directories.
     """
-    dirs = get_data_dirs(bm_path)
+    dirs = get_data_dirs(bm_path)['DATA']
+    # Flatten all paths from nested dict
+    all_paths = []
+    for core_dict in dirs.values():
+        for d in core_dict.values():
+            all_paths.append(d)
     # Sort directories by descending path length (deepest first)
-    dir_list = sorted(dirs.values(), key=lambda x: -len(x))
+    dir_list = sorted(all_paths, key=lambda x: -len(x))
     for d in dir_list:
         if os.path.isdir(d):
             for entry in os.listdir(d):
@@ -123,12 +138,12 @@ def config_data_dirs(bm_path: str) -> None:
         print('Warning: lfs not found, skipping setstripe configuration.')
         return
     setstripe_cmds: List[List[str]] = [
-        ['lfs', 'setstripe', '-S', '64K', '-c', '4', dirs['BM_C4_B64']],
-        ['lfs', 'setstripe', '-S', '64K', '-c', '16', dirs['BM_c16_B64']],
-        ['lfs', 'setstripe', '-S', '1M', '-c', '4', dirs['BM_C4_B1M']],
-        ['lfs', 'setstripe', '-S', '1M', '-c', '16', dirs['BM_c16_B1M']],
-        ['lfs', 'setstripe', '-S', '8M', '-c', '4', dirs['BM_C4_B8M']],
-        ['lfs', 'setstripe', '-S', '8M', '-c', '16', dirs['BM_c16_B8M']],
+        ['lfs', 'setstripe', '-S', '64K', '-c', '4', dirs['4']['64K']],
+        ['lfs', 'setstripe', '-S', '64K', '-c', '16', dirs['16']['64K']],
+        ['lfs', 'setstripe', '-S', '1M', '-c', '4', dirs['4']['1M']],
+        ['lfs', 'setstripe', '-S', '1M', '-c', '16', dirs['16']['1M']],
+        ['lfs', 'setstripe', '-S', '8M', '-c', '4', dirs['4']['8M']],
+        ['lfs', 'setstripe', '-S', '8M', '-c', '16', dirs['16']['8M']],
     ]
     for cmd in setstripe_cmds:
         try:

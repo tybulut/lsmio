@@ -144,9 +144,7 @@ class TestIORBenchmark(unittest.TestCase):
             bm_setup='BASE',
             sb_bin='/bin',
             dirs_bm_base='/base',
-            ior_dir_output='/out',
-            bm_unique_uid='uid',
-            ds='ds'
+            ior_dir_output='/out'
         )
         mock_open.return_value.__enter__.return_value = MagicMock()
         mock_run.return_value = MagicMock()
@@ -172,8 +170,6 @@ class TestLMPBenchmark(unittest.TestCase):
             sb_bin='/bin',
             dirs_bm_base='/base',
             lmp_dir_output='/out',
-            bm_unique_uid='uid',
-            ds='ds',
             bm_num_tasks=1
         )
         mock_open.return_value.__enter__.return_value = MagicMock()
@@ -198,9 +194,7 @@ class TestLSMIOBenchmark(unittest.TestCase):
             bm_setup='ADIOS-M',
             sb_bin='/bin',
             dirs_bm_base='/base',
-            lsm_dir_output='/out',
-            bm_unique_uid='uid',
-            ds='ds'
+            lsm_dir_output='/out'
         )
         mock_open.return_value.__enter__.return_value = MagicMock()
         mock_run.return_value = MagicMock()
