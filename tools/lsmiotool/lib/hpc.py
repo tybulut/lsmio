@@ -32,13 +32,12 @@ import subprocess
 import sys
 from typing import List, Any
 
-from lsmiotool.lib import env
+from lsmiotool.lib import env, debuggable
 from lsmiotool.lib.env import HpcEnv
 from lsmiotool.lib.log import Console
-from lsmiotool.lib.main import BaseMain
 
 
-class HpcEnvMain(BaseMain):
+class HpcModules(debuggable.DebuggableObject):
     """
     A class to manage HPC environment.
     """
@@ -53,26 +52,11 @@ class HpcEnvMain(BaseMain):
         """
         super().__init__(*args, **kwargs)
 
-    def run_module_command(self, command: str) -> None:
-        """
-        Run a module command using bash shell.
 
-        Args:
-            command: The module command to run.
-        """
-        subprocess.run(f"module {command}", shell=True, executable="/bin/bash", check=True)
-
-    def purge_modules(self) -> None:
-        """
-        Purge all loaded modules.
-        """
-        self.run_module_command("purge")
-
-    def load_modules_viking(self) -> None:
-        """
-        Load modules for Viking HPC environment.
-        """
-        modules: List[str] = [
+    def _get_modules(self, hpc_env: HpcEnv) -> List[str]:
+        modules: List[str] = []
+        if hpc_env == HpcEnv.VIKING:
+            modules = [
             "data/HDF5/1.10.7-gompi-2020b",
             "compiler/GCC/11.3.0",
             "devel/CMake/3.24.3-GCCcore-11.3.0",
@@ -82,15 +66,9 @@ class HpcEnvMain(BaseMain):
             "lib/libunwind/1.6.2-GCCcore-11.3.0",
             "lib/OpenJPEG/2.5.0-GCCcore-11.3.0",
             "numlib/FFTW/3.3.10-GCC-11.3.0",
-        ]
-        for mod in modules:
-            self.run_module_command(f"load {mod}")
-
-    def load_modules_viking2(self) -> None:
-        """
-        Load modules for Viking2 HPC environment.
-        """
-        modules: List[str] = [
+            ]
+        elif hpc_env == HpcEnv.VIKING2:
+            modules = [
             "GCCcore/13.2.0",
             "CMake/3.27.6-GCCcore-13.2.0",
             "OpenMPI/4.1.6-GCC-13.2.0",
@@ -104,15 +82,9 @@ class HpcEnvMain(BaseMain):
             "HDF5/1.14.3-gompi-2023b",
             "SciPy-bundle/2023.11-gfbf-2023b",
             "matplotlib/3.8.2-gfbf-2023b",
-        ]
-        for mod in modules:
-            self.run_module_command(f"load {mod}")
-
-    def load_modules_isambard(self) -> None:
-        """
-        Load modules for Isambard HPC environment.
-        """
-        modules: List[str] = [
+            ]
+        elif hpc_env == HpcEnv.ISAMBARD:
+            modules = [
             "modules/3.2.11.4",
             "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
             "craype-network-aries",
@@ -140,79 +112,21 @@ class HpcEnvMain(BaseMain):
             "cray-hdf5-parallel/1.12.0.4",
             "cray-fftw/3.3.8.10",
             "gdb4hpc/4.10.6",
-        ]
-        for mod in modules:
-            self.run_module_command(f"load {mod}")
+            ]
+        return modules
 
-    def _get_all_module_commands(self) -> List[str]:
-        """
-        Return a list of all module commands (purge and loads) for the current HPC environment.
 
-        Returns:
-            List of module commands to execute.
-        """
-        hpc_env = env.HPC_ENV
+    def _get_all_module_commands(self, hpc_env: HpcEnv) -> List[str]:
+        Console.debug('_get_all_module_commands: ' + hpc_env.value)
         if hpc_env == HpcEnv.ISAMBARD:
             commands: List[str] = ["module purge"]
-            modules: List[str] = [
-                "modules/3.2.11.4",
-                "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
-                "craype-network-aries",
-                "Base-opts/2.4.142-7.0.2.1_2.69__g8f27585.ari",
-                "alps/6.6.59-7.0.2.1_3.62__g872a8d62.ari",
-                "nodestat/2.3.89-7.0.2.1_2.53__g8645157.ari",
-                "craype/2.6.2",
-                "sdb/3.3.812-7.0.2.1_2.74__gd6c4e58.ari",
-                "cray-libsci/20.09.1",
-                "udreg/2.3.2-7.0.2.1_2.24__g8175d3d.ari",
-                "pmi/5.0.17",
-                "ugni/6.0.14.0-7.0.2.1_3.24__ge78e5b0.ari",
-                "atp/3.11.7",
-                "gni-headers/5.0.12.0-7.0.2.1_2.27__g3b1768f.ari",
-                "rca/2.2.20-7.0.2.1_2.76__g8e3fb5b.ari",
-                "dmapp/7.1.1-7.0.2.1_2.75__g38cf134.ari",
-                "perftools-base/21.05.0",
-                "xpmem/2.2.20-7.0.2.1_2.61__g87eb960.ari",
-                "llm/21.4.629-7.0.2.1_2.53__g8cae6ef.ari",
-                "cray-mpich/7.7.17",
-                "gcc/10.3.0",
-                "tools/cmake/3.24.2",
-                "PrgEnv-gnu/6.0.9",
-                "cray-mpich-abi/7.7.17",
-                "cray-hdf5-parallel/1.12.0.4",
-                "cray-fftw/3.3.8.10",
-                "gdb4hpc/4.10.6",
-            ]
+            modules = self._get_modules(HpcEnv.ISAMBARD)
         elif hpc_env == HpcEnv.VIKING:
             commands = ["module purge"]
-            modules = [
-                "data/HDF5/1.10.7-gompi-2020b",
-                "compiler/GCC/11.3.0",
-                "devel/CMake/3.24.3-GCCcore-11.3.0",
-                "mpi/OpenMPI/4.1.4-GCC-11.3.0",
-                "lib/zlib/1.2.12-GCCcore-11.3.0",
-                "lib/lz4/1.9.3-GCCcore-11.3.0",
-                "lib/libunwind/1.6.2-GCCcore-11.3.0",
-                "lib/OpenJPEG/2.5.0-GCCcore-11.3.0",
-                "numlib/FFTW/3.3.10-GCC-11.3.0",
-            ]
+            modules = self._get_modules(HpcEnv.VIKING)
         elif hpc_env == HpcEnv.VIKING2:
             commands = ["module purge"]
-            modules = [
-                "GCCcore/13.2.0",
-                "CMake/3.27.6-GCCcore-13.2.0",
-                "OpenMPI/4.1.6-GCC-13.2.0",
-                "zlib/1.2.13-GCCcore-13.2.0",
-                "lz4/1.9.4-GCCcore-13.2.0",
-                "libunwind/1.6.2-GCCcore-13.2.0",
-                "OpenJPEG/2.5.0-GCCcore-13.2.0",
-                "FFTW/3.3.10-GCC-13.2.0",
-                "gflags/2.2.2-GCCcore-12.3.0",
-                "bzip2/1.0.8-GCCcore-13.2.0",
-                "HDF5/1.14.3-gompi-2023b",
-                "SciPy-bundle/2023.11-gfbf-2023b",
-                "matplotlib/3.8.2-gfbf-2023b",
-            ]
+            modules = self._get_modules(HpcEnv.VIKING2)
         elif hpc_env == HpcEnv.DEV:
             commands = []
             modules = []
@@ -222,18 +136,20 @@ class HpcEnvMain(BaseMain):
         commands += [f"module load {mod}" for mod in modules]
         return commands
 
-    def run(self) -> None:
+
+    def shell_output(self, hpc_env: HpcEnv) -> str:
         """
         Print all module commands (purge and loads) for the current HPC environment.
         """
-        commands = self._get_all_module_commands()
-        for cmd in commands:
-            print(cmd)
+        commands = self._get_all_module_commands(hpc_env)
+        script = "\n".join(commands)
+        return script
 
-    def execute(self) -> None:
+
+    def load(self, hpc_env: HpcEnv) -> None:
         """
         Execute all module commands (purge and loads) for the current HPC environment in a single subprocess shell.
         """
-        commands = self._get_all_module_commands()
+        commands = self._get_all_module_commands(hpc_env)
         script = "\n".join(commands)
         subprocess.run(script, shell=True, executable="/bin/bash", check=True)

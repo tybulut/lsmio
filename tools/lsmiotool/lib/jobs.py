@@ -36,7 +36,7 @@ import time
 import getpass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from lsmiotool.lib import debuggable, dirs, env, log
+from lsmiotool.lib import debuggable, dirs, env, hpc, log
 
 
 def setup_job_environment_and_dirs(bm_path: str) -> Dict[str, str]:
@@ -284,6 +284,7 @@ class IORBenchmark(debuggable.DebuggableObject):
             cmd = base_cmd
         log.Console.debug(f"IORBenchmark cmd: {cmd}")
         log.Console.debug(f"IORBenchmark log file: {log_file}")
+        hpc_env = env.HPC_ENV
         with open(log_file, "a+") as logf:
             result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT)
         return result

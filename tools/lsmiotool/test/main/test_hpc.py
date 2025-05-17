@@ -32,47 +32,36 @@ import unittest
 from unittest.mock import patch, MagicMock
 from lsmiotool.lib import hpc, env
 
-class TestHpcEnvMain(unittest.TestCase):
+class TestHpcModules(unittest.TestCase):
     def setUp(self) -> None:
-        self.hpc_env_main = hpc.HpcEnvMain()
+        self.hpc_modules = hpc.HpcModules()
 
-    @patch('lsmiotool.lib.env.HPC_ENV', env.HpcEnv.VIKING)
     def test_get_all_module_commands_viking(self) -> None:
-        cmds = self.hpc_env_main._get_all_module_commands()
+        cmds = self.hpc_modules._get_all_module_commands(env.HpcEnv.VIKING)
         self.assertIn('module purge', cmds)
         self.assertIn('module load data/HDF5/1.10.7-gompi-2020b', cmds)
         self.assertTrue(any(cmd.startswith('module load') for cmd in cmds))
 
-    @patch('lsmiotool.lib.env.HPC_ENV', env.HpcEnv.VIKING2)
     def test_get_all_module_commands_viking2(self) -> None:
-        cmds = self.hpc_env_main._get_all_module_commands()
+        cmds = self.hpc_modules._get_all_module_commands(env.HpcEnv.VIKING2)
         self.assertIn('module purge', cmds)
         self.assertIn('module load GCCcore/13.2.0', cmds)
 
-    @patch('lsmiotool.lib.env.HPC_ENV', env.HpcEnv.ISAMBARD)
     def test_get_all_module_commands_isambard(self) -> None:
-        cmds = self.hpc_env_main._get_all_module_commands()
+        cmds = self.hpc_modules._get_all_module_commands(env.HpcEnv.ISAMBARD)
         self.assertIn('module purge', cmds)
         self.assertIn('module load modules/3.2.11.4', cmds)
 
-    @patch('lsmiotool.lib.env.HPC_ENV', env.HpcEnv.VIKING)
     @patch('builtins.print')
-    def test_run_prints_commands(self, mock_print) -> None:
-        self.hpc_env_main.run()
-        mock_print.assert_any_call('module purge')
-        mock_print.assert_any_call('module load data/HDF5/1.10.7-gompi-2020b')
+    def test_shell_output(self, mock_print) -> None:
+        script = self.hpc_modules.shell_output(env.HpcEnv.VIKING)
+        self.assertIn('module purge', script)
+        self.assertIn('module load data/HDF5/1.10.7-gompi-2020b', script)
 
-    @patch('lsmiotool.lib.env.HPC_ENV', env.HpcEnv.VIKING)
     @patch('subprocess.run')
-    def test_execute_runs_commands(self, mock_run) -> None:
-        self.hpc_env_main.execute()
-        script = '\n'.join(self.hpc_env_main._get_all_module_commands())
+    def test_load(self, mock_run) -> None:
+        script = self.hpc_modules.shell_output(env.HpcEnv.VIKING)
+        self.hpc_modules.load(env.HpcEnv.VIKING)
         mock_run.assert_called_once_with(script, shell=True, executable='/bin/bash', check=True)
 
-    @patch('lsmiotool.lib.env.HPC_ENV', 'UNKNOWN_ENV')
-    @patch('lsmiotool.lib.hpc.Console')
-    def test_get_all_module_commands_unknown_env(self, mock_console) -> None:
-        with self.assertRaises(SystemExit):
-            self.hpc_env_main._get_all_module_commands()
-        mock_console.error.assert_called_once_with('Unknown HPC Environment')
 
