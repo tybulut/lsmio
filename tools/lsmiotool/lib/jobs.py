@@ -254,8 +254,11 @@ class IORBenchmark(debuggable.DebuggableObject):
             f"{self.ds}-{self.bm_unique_uid}.txt"
         )
         log_file = os.path.expanduser(log_file)
+        log_file = os.path.expandvars(log_file)
+        sb_exe = os.path.expanduser(f"{self.sb_bin}/ior")
+        sb_exe = os.path.expandvars(sb_exe)
         base_cmd = [
-            f"{self.sb_bin}/ior",
+            sb_exe,
             "-v",
             "-w",
             "-r",
