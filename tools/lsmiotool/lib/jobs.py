@@ -286,7 +286,7 @@ class IORBenchmark(debuggable.DebuggableObject):
         log.Console.debug(f"IORBenchmark log file: {log_file}")
         hpc_env = env.HPC_ENV
         with open(log_file, "a+") as logf:
-            result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT)
+            result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, shell=True, executable="/bin/bash", check=True)
         return result
 
 

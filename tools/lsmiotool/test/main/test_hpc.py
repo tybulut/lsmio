@@ -36,19 +36,19 @@ class TestHpcModules(unittest.TestCase):
     def setUp(self) -> None:
         self.hpc_modules = hpc.HpcModules()
 
-    def test_get_all_module_commands_viking(self) -> None:
-        cmds = self.hpc_modules._get_all_module_commands(env.HpcEnv.VIKING)
+    def testshell_commands_viking(self) -> None:
+        cmds = self.hpc_modules.shell_commands(env.HpcEnv.VIKING)
         self.assertIn('module purge', cmds)
         self.assertIn('module load data/HDF5/1.10.7-gompi-2020b', cmds)
         self.assertTrue(any(cmd.startswith('module load') for cmd in cmds))
 
-    def test_get_all_module_commands_viking2(self) -> None:
-        cmds = self.hpc_modules._get_all_module_commands(env.HpcEnv.VIKING2)
+    def testshell_commands_viking2(self) -> None:
+        cmds = self.hpc_modules.shell_commands(env.HpcEnv.VIKING2)
         self.assertIn('module purge', cmds)
         self.assertIn('module load GCCcore/13.2.0', cmds)
 
-    def test_get_all_module_commands_isambard(self) -> None:
-        cmds = self.hpc_modules._get_all_module_commands(env.HpcEnv.ISAMBARD)
+    def testshell_commands_isambard(self) -> None:
+        cmds = self.hpc_modules.shell_commands(env.HpcEnv.ISAMBARD)
         self.assertIn('module purge', cmds)
         self.assertIn('module load modules/3.2.11.4', cmds)
 

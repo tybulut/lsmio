@@ -116,8 +116,8 @@ class HpcModules(debuggable.DebuggableObject):
         return modules
 
 
-    def _get_all_module_commands(self, hpc_env: HpcEnv) -> List[str]:
-        Console.debug('_get_all_module_commands: ' + hpc_env.value)
+    def shell_commands(self, hpc_env: HpcEnv) -> List[str]:
+        Console.debug('shell_commands: ' + hpc_env.value)
         if hpc_env == HpcEnv.ISAMBARD:
             commands: List[str] = ["module purge"]
             modules = self._get_modules(HpcEnv.ISAMBARD)
@@ -141,7 +141,7 @@ class HpcModules(debuggable.DebuggableObject):
         """
         Print all module commands (purge and loads) for the current HPC environment.
         """
-        commands = self._get_all_module_commands(hpc_env)
+        commands = self.shell_commands(hpc_env)
         script = "\n".join(commands)
         return script
 
@@ -150,6 +150,6 @@ class HpcModules(debuggable.DebuggableObject):
         """
         Execute all module commands (purge and loads) for the current HPC environment in a single subprocess shell.
         """
-        commands = self._get_all_module_commands(hpc_env)
+        commands = self.shell_commands(hpc_env)
         script = "\n".join(commands)
         subprocess.run(script, shell=True, executable="/bin/bash", check=True)
