@@ -229,8 +229,9 @@ class IORBenchmark(debuggable.DebuggableObject):
         self.sb_bin = sb_bin or os.environ.get("SB_BIN", "")
         self.dirs_bm_base = dirs_bm_base or os.environ.get("DIRS_BM_BASE", "")
         self.ior_dir_output = ior_dir_output or os.environ.get("IOR_DIR_OUTPUT", "")
-        self.bm_unique_uid = os.environ.get("BM_UNIQUE_UID", "")
-        self.ds = os.environ.get("DS", "")
+        self.bm_unique_uid = env.BM_UNIQUE_UID
+        self.ds = env.DATE_STAMP
+
 
     def run(self, rf: str, bs: str) -> subprocess.CompletedProcess:
         """Run the IOR benchmark for the given rf and bs."""

@@ -32,6 +32,7 @@ import copy
 import json
 import os
 import platform
+import socket
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Any, Optional
@@ -179,6 +180,16 @@ LIB_DIR: Final[str] = os.path.join(HOME, *_REL_LIB_DIR)
 lustre_path: str = lustre_ssd_path
 
 BM_DIR: Final[str] = os.path.join(lustre_path, "users", USER, "benchmark")
+BM_NUM_CORES: int = 1
+BM_NUM_TASKS: int = int(os.environ.get("SLURM_JOB_NUM_NODES", 1))
+BM_NODENAME: str = str(socket.gethostname())
+BM_UNIQUE_UID: str = BM_NODENAME + "-" + datetime.today().strftime("%Y%m%d-%H%M")
+
+if hpc_manager == HpcManager.SLURM:
+    BM_NODENAME = os.environ.get("SLURMD_NODENAME")
+    BM_UNIQUE_UID = os.path.expandvars("${SLURMD_NODENAME}-${SLURM_LOCALID}")
+elif hpc_manager == HpcManager.PBS:
+    BM_UNIQUE_UID = os.path.expandvars(BM_NODENAME + "-${ALPS_APP_PE}")
 
 os.environ["PATH"] += ":" + BIN_DIR
 if "LD_LIBRARY_PATH" in os.environ:
