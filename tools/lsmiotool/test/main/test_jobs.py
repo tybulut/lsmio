@@ -34,7 +34,7 @@ import unittest
 from typing import Dict, Any, Optional, List, Union
 from unittest.mock import MagicMock, Mock, patch
 
-from lsmiotool.lib import jobs
+from lsmiotool.lib import jobs, env
 
 
 class TestSetupJobEnvironmentAndDirs(unittest.TestCase):
@@ -69,7 +69,7 @@ class TestBatchJobOrchestration(unittest.TestCase):
         mock_copytree: Mock,
         mock_setup: Mock
     ) -> None:
-        jobs.batch_job_orchestration('lmp', '/tmp', 'slurm', 'ds')
+        jobs.batch_job_orchestration('lmp', '/tmp', env.HpcManager.SLURM, 'ds')
         mock_run.assert_called()
         self.assertTrue(mock_copytree.called)
         self.assertTrue(mock_rmtree.called)
@@ -85,7 +85,7 @@ class TestBatchJobOrchestration(unittest.TestCase):
         mock_run: Mock,
         mock_setup: Mock
     ) -> None:
-        jobs.batch_job_orchestration('ior', '/tmp', 'pbs', 'ds')
+        jobs.batch_job_orchestration('ior', '/tmp', env.HpcManager.PBS, 'ds')
         mock_run.assert_called()
         self.assertTrue(mock_sleep.called)
 
@@ -214,8 +214,8 @@ class TestJobsRunner(unittest.TestCase):
         jobs.JobsRunner.run(
             4,
             2,
-            'myscript',
-            'slurm',
+            jobs.JobSize.SMALL,
+            env.HpcManager.SLURM,
             'testacct',
             'me@example.com',
             None,
@@ -235,8 +235,8 @@ class TestJobsRunner(unittest.TestCase):
             jobs.JobsRunner.run(
                 8,
                 4,
-                'myscript',
-                'pbs',
+                jobs.JobSize.SMALL,
+                env.HpcManager.PBS,
                 None,
                 None,
                 'dir',
@@ -252,8 +252,7 @@ class TestJobsRunner(unittest.TestCase):
                 args
             )
             self.assertIn('-l select=8:mem=32GB', args)
-            self.assertIn('myscript.pbs', args)
-            mock_chdir.assert_called_with('dir')
+            self.assertIn('SMALL.pbs', args)
 
     @patch('subprocess.run')
     @patch('getpass.getuser', return_value='testuser')
@@ -268,7 +267,7 @@ class TestJobsRunner(unittest.TestCase):
             MagicMock(stdout='JOBID\n1234\n'),
             MagicMock(stdout='JOBID\n')
         ]
-        jobs.JobsRunner.wait_for_completion('slurm')
+        jobs.JobsRunner.wait_for_completion(env.HpcManager.SLURM)
         self.assertEqual(mock_run.call_count, 2)
         args1 = mock_run.call_args_list[0][0][0]
         self.assertIn('squeue', args1)
@@ -287,7 +286,7 @@ class TestJobsRunner(unittest.TestCase):
             MagicMock(stdout='JOBID\n5678\n'),
             MagicMock(stdout='JOBID\n')
         ]
-        jobs.JobsRunner.wait_for_completion('pbs')
+        jobs.JobsRunner.wait_for_completion(env.HpcManager.PBS)
         self.assertEqual(mock_run.call_count, 2)
         args1 = mock_run.call_args_list[0][0][0]
         self.assertIn('qstat', args1)
@@ -300,14 +299,14 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_local('testdir', 'slurm')
+        jobs.JobsRunner.run_local(env.HpcManager.SLURM)
         mock_run.assert_called_with(
             1,
             1,
-            'testdir/jobs/job-small',
-            'slurm'
+            jobs.JobSize.SMALL,
+            env.HpcManager.SLURM
         )
-        mock_wait.assert_called_with('slurm')
+        mock_wait.assert_called_with(env.HpcManager.SLURM)
 
     @patch.object(jobs.JobsRunner, 'run')
     @patch.object(jobs.JobsRunner, 'wait_for_completion')
@@ -316,14 +315,14 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_bake('testdir', 'pbs')
+        jobs.JobsRunner.run_bake(env.HpcManager.PBS)
         mock_run.assert_called_with(
             4,
             1,
-            'testdir/jobs/job-small',
-            'pbs'
+            jobs.JobSize.SMALL,
+            env.HpcManager.PBS
         )
-        mock_wait.assert_called_with('pbs')
+        mock_wait.assert_called_with(env.HpcManager.PBS)
 
     @patch.object(jobs.JobsRunner, 'run')
     @patch.object(jobs.JobsRunner, 'wait_for_completion')
@@ -332,20 +331,20 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_small('testdir', 'slurm')
+        jobs.JobsRunner.run_small(env.HpcManager.SLURM)
         self.assertEqual(mock_run.call_count, 9)
         self.assertEqual(mock_wait.call_count, 9)
         mock_run.assert_any_call(
             1,
             1,
-            'testdir/jobs/job-small',
-            'slurm'
+            jobs.JobSize.SMALL,
+            env.HpcManager.SLURM
         )
         mock_run.assert_any_call(
             48,
             1,
-            'testdir/jobs/job-small',
-            'slurm'
+            jobs.JobSize.SMALL,
+            env.HpcManager.SLURM
         )
 
     @patch.object(jobs.JobsRunner, 'run')
@@ -355,19 +354,19 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_large('testdir', 'pbs')
+        jobs.JobsRunner.run_large(env.HpcManager.PBS)
         self.assertEqual(mock_run.call_count, 8)
         self.assertEqual(mock_wait.call_count, 8)
         mock_run.assert_any_call(
             4,
             4,
-            'testdir/jobs/job-large',
-            'pbs'
+            jobs.JobSize.LARGE,
+            env.HpcManager.PBS
         )
         mock_run.assert_any_call(
             256,
             4,
-            'testdir/jobs/job-large',
-            'pbs'
+            jobs.JobSize.LARGE,
+            env.HpcManager.PBS
         )
 

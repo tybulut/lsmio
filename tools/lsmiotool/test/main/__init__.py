@@ -28,5 +28,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-__all__ = [ 'test_hpc' ]
+__all__ = [
+    'test_dirs',
+    'test_hpc',
+    'test_jobs'
+]
 

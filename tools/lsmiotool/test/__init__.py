@@ -39,8 +39,7 @@ except ImportError:
 
 _LSMIOTOOL_TEST_MODULES = [
     'lsmiotool.test.main',
-    'lsmiotool.test.parse',
-    'lsmiotool.test.runtime'
+    'lsmiotool.test.parse'
 ]
 
 # The modules needs to be loaded to be queried

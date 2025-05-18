@@ -34,10 +34,16 @@ import socket
 import subprocess
 import time
 import getpass
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from lsmiotool.lib import debuggable, dirs, env, hpc, log
+from lsmiotool.lib.env import HpcManager
 
+
+class JobSize(Enum):
+    SMALL = "SMALL"
+    LARGE = "LARGE"
 
 def setup_job_environment_and_dirs(bm_path: str) -> Dict[str, str]:
     """
@@ -61,7 +67,7 @@ def setup_job_environment_and_dirs(bm_path: str) -> Dict[str, str]:
 def batch_job_orchestration(
     bm_type: str,
     bm_path: str,
-    hpc_manager: str,
+    hpc_manager: HpcManager,
     ds: str
 ) -> None:
     """
@@ -91,7 +97,7 @@ def batch_job_orchestration(
                     shutil.rmtree(lmp_outputs)
                 lmp_reaxff = os.path.join(bm_path, "lmp-reaxff")
                 shutil.copytree(lmp_reaxff, lmp_outputs)
-            if hpc_manager == "slurm":
+            if hpc_manager == HpcManager.SLURM:
                 subprocess.run([
                     "srun",
                     f"{bm_path}/jobs/{bm_type}-benchmark.sh",
@@ -99,7 +105,7 @@ def batch_job_orchestration(
                     bs,
                     "--export=ALL",
                 ])
-            elif hpc_manager == "pbs":
+            elif hpc_manager == HpcManager.PBS:
                 num_tasks = os.environ.get("BM_NUM_TASKS", "1")
                 num_cores = os.environ.get("BM_NUM_CORES", "1")
                 subprocess.run([
@@ -108,6 +114,12 @@ def batch_job_orchestration(
                     str(num_tasks),
                     "-N",
                     str(num_cores),
+                    f"{bm_path}/jobs/{bm_type}-benchmark.sh",
+                    str(rf),
+                    bs,
+                ])
+            elif hpc_manager == HpcManager.DEV:
+                subprocess.run([
                     f"{bm_path}/jobs/{bm_type}-benchmark.sh",
                     str(rf),
                     bs,
@@ -197,10 +209,12 @@ class JobScriptGenerator(debuggable.DebuggableObject):
 
     @staticmethod
     def get_unique_uid() -> str:
-        if hpc_manager == "slurm":
+        if hpc_manager == HpcManager.SLURM:
             return "${SLURMD_NODENAME}-${SLURM_LOCALID}"
-        elif hpc_manager == "pbs":
+        elif hpc_manager == HpcManager.PBS:
             return "${BM_NODENAME}-${ALPS_APP_PE}"
+        elif hpc_manager == HpcManager.DEV:
+            return "${BM_NODENAME}-DEV"
         else:
             raise RuntimeError(f"get_unique_uid: Unknown HPC manager: {hpc_manager}")
 
@@ -489,11 +503,10 @@ class JobsRunner(debuggable.DebuggableObject):
     def run(
         concurrency: int,
         pernode: int,
-        job_script: str,
-        hpc_manager: str,
+        job_size: JobSize,
+        hpc_manager: HpcManager,
         sb_account: Optional[str] = None,
         sb_email: Optional[str] = None,
-        bm_dirname: Optional[str] = None,
         bm_type: Optional[str] = None,
         bm_scale: Optional[str] = None,
         bm_ssd: Optional[str] = None,
@@ -504,7 +517,9 @@ class JobsRunner(debuggable.DebuggableObject):
         nodes = int(concurrency) // int(pernode)
         wallhour = 2 + (nodes // 3)
         os.environ["BM_NUM_TASKS"] = str(concurrency)
-        if hpc_manager == "slurm":
+        job_script = job_size.value
+        os.chdir(".")
+        if hpc_manager == HpcManager.SLURM:
             cmd = [
                 "sbatch",
                 "--export=ALL",
@@ -519,11 +534,9 @@ class JobsRunner(debuggable.DebuggableObject):
                 cmd.append(f"--mail-user={sb_email}")
             cmd.append(f"{job_script}.sbatch")
             subprocess.run(cmd)
-        elif hpc_manager == "pbs":
+        elif hpc_manager == HpcManager.PBS:
             os.environ["BM_NUM_TASKS"] = str(concurrency)
             os.environ["BM_NUM_CORES"] = str(pernode)
-            if bm_dirname:
-                os.chdir(bm_dirname)
             cmd = [
                 "qsub",
                 "-v",
@@ -533,25 +546,30 @@ class JobsRunner(debuggable.DebuggableObject):
                 f"{job_script}.pbs"
             ]
             subprocess.run(cmd)
+        elif hpc_manager == HpcManager.DEV:
+            cmd = [ "echo Hello World" ]
+            subprocess.run(cmd)
         else:
             raise RuntimeError(f"Unknown HPC manager: {hpc_manager}")
 
     @staticmethod
-    def wait_for_completion(hpc_manager: str) -> None:
+    def wait_for_completion(hpc_manager: HpcManager) -> None:
         """
         Wait for all jobs to complete, ported from submission.in.sh.
         """
         user = getpass.getuser()
         while True:
-            if hpc_manager == "slurm":
+            if hpc_manager == HpcManager.SLURM:
                 cmd = [
                     "squeue",
                     "-u",
                     user,
                     "--format=%.15i %.9P %.20j %.8u %.8T %.10M %.9l %.6D %R"
                 ]
-            elif hpc_manager == "pbs":
+            elif hpc_manager == HpcManager.PBS:
                 cmd = ["qstat", "-u", user]
+            elif hpc_manager == HpcManager.DEV:
+                break
             else:
                 raise RuntimeError(f"Unknown HPC manager: {hpc_manager}")
             proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -566,53 +584,53 @@ class JobsRunner(debuggable.DebuggableObject):
         time.sleep(1)
 
     @staticmethod
-    def run_local(bm_dirname: str, hpc_manager: str) -> None:
+    def run_local(hpc_manager: HpcManager) -> None:
         """Run a local job with minimal concurrency."""
         for concurrency in [1]:
             pernode = 1
             JobsRunner.run(
                 concurrency,
                 pernode,
-                f"{bm_dirname}/jobs/job-small",
+                JobSize.SMALL,
                 hpc_manager
             )
             JobsRunner.wait_for_completion(hpc_manager)
 
     @staticmethod
-    def run_bake(bm_dirname: str, hpc_manager: str) -> None:
+    def run_bake(hpc_manager: HpcManager) -> None:
         """Run a bake job with moderate concurrency."""
         for concurrency in [4]:
             pernode = 1
             JobsRunner.run(
                 concurrency,
                 pernode,
-                f"{bm_dirname}/jobs/job-small",
+                JobSize.SMALL,
                 hpc_manager
             )
             JobsRunner.wait_for_completion(hpc_manager)
 
     @staticmethod
-    def run_small(bm_dirname: str, hpc_manager: str) -> None:
+    def run_small(hpc_manager: HpcManager) -> None:
         """Run small-scale jobs with varying concurrency."""
         for concurrency in [1, 2, 4, 8, 16, 24, 32, 40, 48]:
             pernode = 1
             JobsRunner.run(
                 concurrency,
                 pernode,
-                f"{bm_dirname}/jobs/job-small",
+                JobSize.SMALL,
                 hpc_manager
             )
             JobsRunner.wait_for_completion(hpc_manager)
 
     @staticmethod
-    def run_large(bm_dirname: str, hpc_manager: str) -> None:
+    def run_large(hpc_manager: HpcManager) -> None:
         """Run large-scale jobs with varying concurrency."""
         for concurrency in [4, 8, 16, 32, 64, 128, 192, 256]:
             pernode = 4
             JobsRunner.run(
                 concurrency,
                 pernode,
-                f"{bm_dirname}/jobs/job-large",
+                JobSize.LARGE,
                 hpc_manager
             )
             JobsRunner.wait_for_completion(hpc_manager)
