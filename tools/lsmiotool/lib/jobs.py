@@ -507,19 +507,24 @@ class JobsRunner(debuggable.DebuggableObject):
     def __init__(
         self,
         hpc_mgr: HpcManager,
+        sb_account: Optional[str] = None,
+        sb_email: Optional[str] = None,
+        bm_type: Optional[str] = None,
+        bm_scale: Optional[str] = None,
+        bm_ssd: Optional[str] = None
     ) -> None:
         self.hpc_manager = hpc_mgr
+        self.slurm_account = sb_account
+        self.slurm_email = sb_email
+        self.bench_type = bm_type
+        self.bench_scale = bm_scale
+        self.bench_ssd = bm_ssd
 
     def run(
         self,
         concurrency: int,
         pernode: int,
-        job_size: JobSize,
-        sb_account: Optional[str] = None,
-        sb_email: Optional[str] = None,
-        bm_type: Optional[str] = None,
-        bm_scale: Optional[str] = None,
-        bm_ssd: Optional[str] = None,
+        job_size: JobSize
     ) -> None:
         """
         Submit a batch job using sbatch or qsub, ported from submission.in.sh.
@@ -535,13 +540,13 @@ class JobsRunner(debuggable.DebuggableObject):
                 "--export=ALL",
                 f"--ntasks={concurrency}",
                 f"--nodes={nodes}",
-                f"--job-name=LSMIO-SM-{bm_type}-{concurrency}",
+                f"--job-name=LSMIO-SM-{self.bench_scale}-{concurrency}",
                 f"--time={wallhour}:00:00",
             ]
-            if sb_account:
-                cmd.append(f"--account={sb_account}")
-            if sb_email:
-                cmd.append(f"--mail-user={sb_email}")
+            if self.slurm_account:
+                cmd.append(f"--account={self.slurm_account}")
+            if self.slurm_email:
+                cmd.append(f"--mail-user={self.slurm_email}")
             cmd.append(f"{job_script}.sbatch")
             subprocess.run(cmd)
         elif self.hpc_manager == HpcManager.PBS:

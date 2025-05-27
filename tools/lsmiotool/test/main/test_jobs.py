@@ -211,16 +211,18 @@ class TestJobsRunner(unittest.TestCase):
 
     @patch('subprocess.run')
     def test_run_slurm(self, mock_run: Mock) -> None:
-        runner = jobs.JobsRunner(env.HpcManager.SLURM)
-        runner.run(
-            4,
-            2,
-            jobs.JobSize.SMALL,
+        runner = jobs.JobsRunner(
+            env.HpcManager.SLURM,
             'testacct',
             'me@example.com',
             None,
             'ior',
             None
+        )
+        runner.run(
+            4,
+            2,
+            jobs.JobSize.SMALL
         )
         args = mock_run.call_args[0][0]
         self.assertIn('sbatch', args)
@@ -231,17 +233,19 @@ class TestJobsRunner(unittest.TestCase):
 
     @patch('subprocess.run')
     def test_run_pbs(self, mock_run: Mock) -> None:
-        runner = jobs.JobsRunner(env.HpcManager.PBS)
-        with patch('os.chdir') as mock_chdir:
-            runner.run(
-                8,
-                4,
-                jobs.JobSize.SMALL,
+        runner = jobs.JobsRunner(
+            env.HpcManager.PBS,
                 None,
                 None,
                 'dir',
                 'ior',
                 None
+        )
+        with patch('os.chdir') as mock_chdir:
+            runner.run(
+                8,
+                4,
+                jobs.JobSize.SMALL
             )
             args = mock_run.call_args[0][0]
             self.assertIn('qsub', args)
