@@ -98,23 +98,25 @@ class RunMain(BaseMain):
 
     def _run_IOR(self) -> None:
         if self.mode == 'local':
-            pass
+            bench = jobs.IORBenchmark(
+                bm_setup=self._options['ior']['bm_setup'][0],
+                sb_bin=self._options['ior']['sb_bin'],
+                dirs_bm_base=self._options['ior']['dirs_bm_base'],
+                ior_dir_output=self._options['ior']['ior_dir_output']
+            )
+            result = bench.run('16', '64K')
         elif self.mode == 'bake':
-            pass
+            log.Console.error("argument bake: Not Implemented")
+            sys.exit(1)
         elif self.mode == 'small':
-            pass
+            log.Console.error("argument small: Not Implemented")
+            sys.exit(1)
         elif self.mode == 'large':
-            pass
+            log.Console.error("argument large: Not Implemented")
+            sys.exit(1)
         else:
             log.Console.error("Mode [" + self.mode + "] unimplemented.")
             sys.exit(1)
-        bench = jobs.IORBenchmark(
-            bm_setup=self._options['ior']['bm_setup'][0],
-            sb_bin=self._options['ior']['sb_bin'],
-            dirs_bm_base=self._options['ior']['dirs_bm_base'],
-            ior_dir_output=self._options['ior']['ior_dir_output']
-        )
-        result = bench.run('16', '64K')
 
     def _run_LSMIO(self) -> None:
         pass
