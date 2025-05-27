@@ -504,12 +504,17 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
 class JobsRunner(debuggable.DebuggableObject):
     """Manages job submission and execution for different HPC managers."""
 
-    @staticmethod
+    def __init__(
+        self,
+        hpc_mgr: HpcManager,
+    ) -> None:
+        self.hpc_manager = hpc_mgr
+
     def run(
+        self,
         concurrency: int,
         pernode: int,
         job_size: JobSize,
-        hpc_manager: HpcManager,
         sb_account: Optional[str] = None,
         sb_email: Optional[str] = None,
         bm_type: Optional[str] = None,
@@ -524,7 +529,7 @@ class JobsRunner(debuggable.DebuggableObject):
         os.environ["BM_NUM_TASKS"] = str(concurrency)
         job_script = job_size.value
         os.chdir(".")
-        if hpc_manager == HpcManager.SLURM:
+        if self.hpc_manager == HpcManager.SLURM:
             cmd = [
                 "sbatch",
                 "--export=ALL",
@@ -539,7 +544,7 @@ class JobsRunner(debuggable.DebuggableObject):
                 cmd.append(f"--mail-user={sb_email}")
             cmd.append(f"{job_script}.sbatch")
             subprocess.run(cmd)
-        elif hpc_manager == HpcManager.PBS:
+        elif self.hpc_manager == HpcManager.PBS:
             os.environ["BM_NUM_TASKS"] = str(concurrency)
             os.environ["BM_NUM_CORES"] = str(pernode)
             cmd = [
@@ -551,32 +556,31 @@ class JobsRunner(debuggable.DebuggableObject):
                 f"{job_script}.pbs"
             ]
             subprocess.run(cmd)
-        elif hpc_manager == HpcManager.DEV:
+        elif self.hpc_manager == HpcManager.DEV:
             cmd = [ "echo Hello World" ]
             subprocess.run(cmd)
         else:
-            raise RuntimeError(f"Unknown HPC manager: {hpc_manager}")
+            raise RuntimeError(f"Unknown HPC manager: {self.hpc_manager}")
 
-    @staticmethod
-    def wait_for_completion(hpc_manager: HpcManager) -> None:
+    def wait_for_completion(self) -> None:
         """
         Wait for all jobs to complete, ported from submission.in.sh.
         """
         user = getpass.getuser()
         while True:
-            if hpc_manager == HpcManager.SLURM:
+            if self.hpc_manager == HpcManager.SLURM:
                 cmd = [
                     "squeue",
                     "-u",
                     user,
                     "--format=%.15i %.9P %.20j %.8u %.8T %.10M %.9l %.6D %R"
                 ]
-            elif hpc_manager == HpcManager.PBS:
+            elif self.hpc_manager == HpcManager.PBS:
                 cmd = ["qstat", "-u", user]
-            elif hpc_manager == HpcManager.DEV:
+            elif self.hpc_manager == HpcManager.DEV:
                 break
             else:
-                raise RuntimeError(f"Unknown HPC manager: {hpc_manager}")
+                raise RuntimeError(f"Unknown HPC manager: {self.hpc_manager}")
             proc = subprocess.run(cmd, capture_output=True, text=True)
             lines = [
                 l for l in proc.stdout.splitlines()
@@ -588,55 +592,36 @@ class JobsRunner(debuggable.DebuggableObject):
             time.sleep(8)
         time.sleep(1)
 
-    @staticmethod
-    def run_local(hpc_manager: HpcManager) -> None:
-        """Run a local job with minimal concurrency."""
-        for concurrency in [1]:
-            pernode = 1
-            JobsRunner.run(
-                concurrency,
-                pernode,
-                JobSize.SMALL,
-                hpc_manager
-            )
-            JobsRunner.wait_for_completion(hpc_manager)
-
-    @staticmethod
-    def run_bake(hpc_manager: HpcManager) -> None:
+    def run_bake(self) -> None:
         """Run a bake job with moderate concurrency."""
         for concurrency in [4]:
             pernode = 1
-            JobsRunner.run(
+            self.run(
                 concurrency,
                 pernode,
-                JobSize.SMALL,
-                hpc_manager
+                JobSize.SMALL
             )
-            JobsRunner.wait_for_completion(hpc_manager)
+            self.wait_for_completion()
 
-    @staticmethod
-    def run_small(hpc_manager: HpcManager) -> None:
+    def run_small(self) -> None:
         """Run small-scale jobs with varying concurrency."""
         for concurrency in [1, 2, 4, 8, 16, 24, 32, 40, 48]:
             pernode = 1
-            JobsRunner.run(
+            self.run(
                 concurrency,
                 pernode,
-                JobSize.SMALL,
-                hpc_manager
+                JobSize.SMALL
             )
-            JobsRunner.wait_for_completion(hpc_manager)
+            self.wait_for_completion()
 
-    @staticmethod
-    def run_large(hpc_manager: HpcManager) -> None:
+    def run_large(self) -> None:
         """Run large-scale jobs with varying concurrency."""
         for concurrency in [4, 8, 16, 32, 64, 128, 192, 256]:
             pernode = 4
-            JobsRunner.run(
+            self.run(
                 concurrency,
                 pernode,
-                JobSize.LARGE,
-                hpc_manager
+                JobSize.LARGE
             )
-            JobsRunner.wait_for_completion(hpc_manager)
+            self.wait_for_completion()
 

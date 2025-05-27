@@ -207,15 +207,15 @@ class TestLSMIOBenchmark(unittest.TestCase):
 class TestJobsRunner(unittest.TestCase):
     """Unit tests for JobsRunner class methods."""
     def setUp(self) -> None:
-        self.runner: jobs.JobsRunner = jobs.JobsRunner()
+        pass
 
     @patch('subprocess.run')
     def test_run_slurm(self, mock_run: Mock) -> None:
-        jobs.JobsRunner.run(
+        runner = jobs.JobsRunner(env.HpcManager.SLURM)
+        runner.run(
             4,
             2,
             jobs.JobSize.SMALL,
-            env.HpcManager.SLURM,
             'testacct',
             'me@example.com',
             None,
@@ -231,12 +231,12 @@ class TestJobsRunner(unittest.TestCase):
 
     @patch('subprocess.run')
     def test_run_pbs(self, mock_run: Mock) -> None:
+        runner = jobs.JobsRunner(env.HpcManager.PBS)
         with patch('os.chdir') as mock_chdir:
-            jobs.JobsRunner.run(
+            runner.run(
                 8,
                 4,
                 jobs.JobSize.SMALL,
-                env.HpcManager.PBS,
                 None,
                 None,
                 'dir',
@@ -267,7 +267,8 @@ class TestJobsRunner(unittest.TestCase):
             MagicMock(stdout='JOBID\n1234\n'),
             MagicMock(stdout='JOBID\n')
         ]
-        jobs.JobsRunner.wait_for_completion(env.HpcManager.SLURM)
+        runner = jobs.JobsRunner(env.HpcManager.SLURM)
+        runner.wait_for_completion()
         self.assertEqual(mock_run.call_count, 2)
         args1 = mock_run.call_args_list[0][0][0]
         self.assertIn('squeue', args1)
@@ -286,27 +287,12 @@ class TestJobsRunner(unittest.TestCase):
             MagicMock(stdout='JOBID\n5678\n'),
             MagicMock(stdout='JOBID\n')
         ]
-        jobs.JobsRunner.wait_for_completion(env.HpcManager.PBS)
+        runner = jobs.JobsRunner(env.HpcManager.PBS)
+        runner.wait_for_completion()
         self.assertEqual(mock_run.call_count, 2)
         args1 = mock_run.call_args_list[0][0][0]
         self.assertIn('qstat', args1)
         self.assertTrue(mock_sleep.called)
-
-    @patch.object(jobs.JobsRunner, 'run')
-    @patch.object(jobs.JobsRunner, 'wait_for_completion')
-    def test_run_local(
-        self,
-        mock_wait: Mock,
-        mock_run: Mock
-    ) -> None:
-        jobs.JobsRunner.run_local(env.HpcManager.SLURM)
-        mock_run.assert_called_with(
-            1,
-            1,
-            jobs.JobSize.SMALL,
-            env.HpcManager.SLURM
-        )
-        mock_wait.assert_called_with(env.HpcManager.SLURM)
 
     @patch.object(jobs.JobsRunner, 'run')
     @patch.object(jobs.JobsRunner, 'wait_for_completion')
@@ -315,14 +301,14 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_bake(env.HpcManager.PBS)
+        runner = jobs.JobsRunner(env.HpcManager.PBS)
+        runner.run_bake()
         mock_run.assert_called_with(
             4,
             1,
-            jobs.JobSize.SMALL,
-            env.HpcManager.PBS
+            jobs.JobSize.SMALL
         )
-        mock_wait.assert_called_with(env.HpcManager.PBS)
+        mock_wait.assert_called()
 
     @patch.object(jobs.JobsRunner, 'run')
     @patch.object(jobs.JobsRunner, 'wait_for_completion')
@@ -331,20 +317,19 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_small(env.HpcManager.SLURM)
+        runner = jobs.JobsRunner(env.HpcManager.SLURM)
+        runner.run_small()
         self.assertEqual(mock_run.call_count, 9)
         self.assertEqual(mock_wait.call_count, 9)
         mock_run.assert_any_call(
             1,
             1,
-            jobs.JobSize.SMALL,
-            env.HpcManager.SLURM
+            jobs.JobSize.SMALL
         )
         mock_run.assert_any_call(
             48,
             1,
-            jobs.JobSize.SMALL,
-            env.HpcManager.SLURM
+            jobs.JobSize.SMALL
         )
 
     @patch.object(jobs.JobsRunner, 'run')
@@ -354,19 +339,18 @@ class TestJobsRunner(unittest.TestCase):
         mock_wait: Mock,
         mock_run: Mock
     ) -> None:
-        jobs.JobsRunner.run_large(env.HpcManager.PBS)
+        runner = jobs.JobsRunner(env.HpcManager.PBS)
+        runner.run_large()
         self.assertEqual(mock_run.call_count, 8)
         self.assertEqual(mock_wait.call_count, 8)
         mock_run.assert_any_call(
             4,
             4,
-            jobs.JobSize.LARGE,
-            env.HpcManager.PBS
+            jobs.JobSize.LARGE
         )
         mock_run.assert_any_call(
             256,
             4,
-            jobs.JobSize.LARGE,
-            env.HpcManager.PBS
+            jobs.JobSize.LARGE
         )
 
