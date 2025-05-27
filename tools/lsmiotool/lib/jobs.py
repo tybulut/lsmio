@@ -29,6 +29,7 @@
 #
 
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -271,7 +272,6 @@ class IORBenchmark(debuggable.DebuggableObject):
         log_file = os.path.expanduser(log_file)
         log_file = os.path.expandvars(log_file)
         sb_exe = os.path.expanduser(f"{self.sb_bin}/ior")
-        sb_exe = os.path.expandvars(sb_exe)
         base_cmd = [
             sb_exe,
             "-v",
@@ -296,11 +296,16 @@ class IORBenchmark(debuggable.DebuggableObject):
             cmd = base_cmd + ["-C"]
         else:
             cmd = base_cmd
-        log.Console.debug(f"IORBenchmark cmd: {cmd}")
-        log.Console.debug(f"IORBenchmark log file: {log_file}")
         hpc_env = env.HPC_ENV
+        command = " ".join(cmd)
+        #command = " ".join(shlex.quote(os.path.expandvars(os.path.expanduser(arg))) for arg in cmd)
+        commands = "#!/bin/bash -x\n" \
+            + f"\n{command}"
+        log.Console.debug(f"IORBenchmark cmd: {cmd}")
+        log.Console.debug(f"IORBenchmark commands: \n{commands}")
+        log.Console.debug(f"IORBenchmark log file: {log_file}")
         with open(log_file, "a+") as logf:
-            result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, shell=True, executable="/bin/bash", check=True)
+            result = subprocess.run(["/bin/bash", "-c", commands], stdout=logf, stderr=subprocess.STDOUT, text=True, check=True)
         return result
 
 
