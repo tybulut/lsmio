@@ -63,12 +63,14 @@ class TestMain(BaseMain):
 
 
 class RunMain(BaseMain):
-    """Run command"""
+    """Run command for executing benchmarks and tests."""
+
     _options = {
-        'ior' : {
-            'bm_setup': ['BASE', 'HDF5', 'HDF5-C', 'COLLECTIVE', 'FSYNC', 'REVERSE' ],
+        'ior': {
+            'bm_setup': ['BASE', 'HDF5', 'HDF5-C', 'COLLECTIVE', 'FSYNC',
+                        'REVERSE'],
             'sb_bin': '$HOME/src/usr/bin',
-            'bs': ['64K', '1M', '8M' ],
+            'bs': ['64K', '1M', '8M'],
             'dirs_bm_base': dirs.get_base_dir(env.BM_DIR)['BASE'],
             'ior_dir_output': dirs.get_log_dir(env.BM_DIR)['LOG'],
         }

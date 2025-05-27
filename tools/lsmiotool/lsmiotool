@@ -29,28 +29,30 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # 
 
-import os, sys, getopt, site
+import os
+import sys
+import getopt
+import site
 
 preferred = os.path.realpath("/opt/homebrew/bin/python3")
 fallback = os.path.realpath("/usr/bin/python3")
 
 # Check if preferred interpreter is available
 if os.access(preferred, os.X_OK):
-  if os.path.exists(preferred):
-    exec_path = os.path.realpath(sys.executable)
-    if exec_path != preferred:
-        os.execvp(preferred, [preferred] + sys.argv)
-  elif os.path.exists(fallback):
-    exec_path = os.path.realpath(sys.executable)
-    if exec_path != fallback:
-        os.execvp(fallback, [fallback] + sys.argv)
-  else:
-    raise EnvironmentError("No suitable Python interpreter found.")
+    if os.path.exists(preferred):
+        exec_path = os.path.realpath(sys.executable)
+        if exec_path != preferred:
+            os.execvp(preferred, [preferred] + sys.argv)
+    elif os.path.exists(fallback):
+        exec_path = os.path.realpath(sys.executable)
+        if exec_path != fallback:
+            os.execvp(fallback, [fallback] + sys.argv)
+    else:
+        raise EnvironmentError("No suitable Python interpreter found.")
 
 print("DEBUG: Starting lsmio tool...")
 
-
-# calculate 
+# Calculate server path
 srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.append(srv_path)
 
@@ -78,60 +80,58 @@ options:
 '''
 
 if __name__ == '__main__':
-  debug = False
-  log.Log.setLevel(log.LOG_LEVEL.DEBUG) # Tentative default log level
-  try:
-    opts, args = getopt.getopt(sys.argv[1:], 'dhstv',
-            ['debug', 'help', 'ssd', 'test', 'version'])
-    for opt, arg in opts:
-      if opt in '--help':
-        log.Console.dump(LSMIOTOOL_HELP)
+    debug = False
+    log.Log.setLevel(log.LOG_LEVEL.DEBUG)  # Tentative default log level
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], 'dhstv',
+                ['debug', 'help', 'ssd', 'test', 'version'])
+        for opt, arg in opts:
+            if opt in '--help':
+                log.Console.dump(LSMIOTOOL_HELP)
+                sys.exit(1)
+            elif opt in '--version':
+                log.Console.info('version: ' + config.VERSION)
+                sys.exit(1)
+            elif opt in '--debug':
+                debug = True
+                log.Log.setLevel(log.LOG_LEVEL.DEBUG)
+            else:
+                log.Console.error('Unknown option: ' + opt)
+                sys.exit(1)
+    except getopt.GetoptError as err:
+        log.Console.error(err)
         sys.exit(1)
-      elif opt in '--version':
-        log.Console.info('version: ' + config.VERSION)
+
+    m_args = []
+    m_kwargs = {}
+
+    if not args:
+        log.Console.error('Empty command.')
         sys.exit(1)
-      elif opt in '--debug':
-        debug = True
-        log.Log.setLevel(log.LOG_LEVEL.DEBUG)
-      else:
-        log.Console.error('Unknown option: ' + opt)
+    elif args[0] == 'latex':
+        m_args = args[1:]
+        if not m_args:
+            log.Console.error('Latex: Needs argument such as viking, viking2, ...')
+            sys.exit(1)
+        class_main = main.LatexMain
+    elif args[0] == 'load-modules':
+        class_main = hpc.HpcEnvMain
+    elif args[0] == 'parse':
+        class_main = main.NotImplemented
+    elif args[0] == 'run':
+        m_args = args[1:]
+        if len(m_args) != 2:
+            log.Console.error('Run: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>')
+            sys.exit(1)
+        class_main = main.RunMain
+    elif args[0] == 'shell':
+        class_main = main.ShellMain
+    elif args[0] == 'test':
+        class_main = main.TestMain
+    else:
+        log.Console.error('Unknown command: ' + str(args))
         sys.exit(1)
-  except getopt.GetoptError as err:
-    log.Console.error(err)
-    sys.exit(1)
 
-  m_args = []
-  m_kwargs = {}
-
-  if not args:
-    log.Console.error('Empty command.')
-    sys.exit(1)
-  elif args[0] == 'latex':
-    m_args = args[1:]
-    if not m_args:
-      log.Console.error('Latex: Needs argument such as viking, viking2, ...')
-      sys.exit(1)
-    class_main = main.LatexMain
-  elif args[0] == 'load-modules':
-    class_main = hpc.HpcEnvMain
-  elif args[0] == 'parse':
-    class_main = main.NotImplemented
-  elif args[0] == 'run':
-    m_args = args[1:]
-    if len(m_args) != 2:
-      log.Console.error('Run: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>')
-      sys.exit(1)
-    class_main = main.RunMain
-  elif args[0] == 'shell':
-    class_main = main.ShellMain
-  elif args[0] == 'test':
-    class_main = main.TestMain
-  else:
-    log.Console.error('Unknown command: ' + str(args))
-    sys.exit(1)
-
-
-  inst_main = class_main(*m_args, **m_kwargs)
-  inst_main = class_main(*m_args, **m_kwargs)
-  inst_main.run()
+    inst_main = class_main(*m_args, **m_kwargs)
+    inst_main.run()
 
