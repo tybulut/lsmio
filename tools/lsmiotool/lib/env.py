@@ -154,13 +154,13 @@ def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
 
 _env: Dict[str, Any] = _deep_merge(_env_configs["DEFAULT"], _env_configs.get(HPC_ENV.value, {}))
 
-hpc_manager: str = _env["hpc_manager"]
+hpc_manager: HpcManager = HpcManager(_env["hpc_manager"])
 base_path: str = _env["base_path"]
 ior_dir: str = os.path.join(base_path, *_env["ior_dirs"])
 lsmio_dir: str = os.path.join(base_path, *_env["lsmio_dirs"])
 plots_dir: str = os.path.join(base_path, *_env["plots_dirs"])
-ior_data: IorData = _env["ior_data"]
-lsmio_data: LsmioData = _env["lsmio_data"]
+ior_data: IorData = IorData(_env["ior_data"])
+lsmio_data: LsmioData = LsmioData(_env["lsmio_data"])
 lustre_hdd_path: str = _env["lustre_hdd_path"]
 lustre_ssd_path: str = _env["lustre_ssd_path"]
 

@@ -107,8 +107,8 @@ class RunMain(BaseMain):
             result = bench.run('16', '64K')
         elif self.mode == 'bake':
             runner = jobs.JobsRunner(env.hpc_manager)
-            log.Console.error("argument bake: Not Implemented")
-            sys.exit(1)
+            runner.run_bake()
+            runner.wait_for_completion()
         elif self.mode == 'small':
             log.Console.error("argument small: Not Implemented")
             sys.exit(1)

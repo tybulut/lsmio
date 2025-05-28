@@ -565,7 +565,7 @@ class JobsRunner(debuggable.DebuggableObject):
             cmd = [ "echo Hello World" ]
             subprocess.run(cmd)
         else:
-            raise RuntimeError(f"Unknown HPC manager: {self.hpc_manager}")
+            raise RuntimeError(f"Unknown HPC manager: '{self.hpc_manager}'")
 
     def wait_for_completion(self) -> None:
         """
