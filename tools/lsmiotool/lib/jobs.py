@@ -532,7 +532,18 @@ class JobsRunner(debuggable.DebuggableObject):
         nodes = int(concurrency) // int(pernode)
         wallhour = 2 + (nodes // 3)
         os.environ["BM_NUM_TASKS"] = str(concurrency)
-        job_script = job_size.value
+        if job_size == JobSize.LARGE:
+            args = [
+                "#SBATCH --ntasks-per-node=4",
+                "#SBATCH --ntasks-per-socket=2",
+                "#SBATCH --ntasks-per-core=1"
+            ]
+        else:
+            args = [
+                "#SBATCH --ntasks-per-node=1",
+                "#SBATCH --ntasks-per-socket=1",
+                "#SBATCH --cpus-per-task=1"
+            ]
         os.chdir(".")
         if self.hpc_manager == HpcManager.SLURM:
             cmd = [
@@ -547,7 +558,6 @@ class JobsRunner(debuggable.DebuggableObject):
                 cmd.append(f"--account={self.slurm_account}")
             if self.slurm_email:
                 cmd.append(f"--mail-user={self.slurm_email}")
-            cmd.append(f"{job_script}.sbatch")
         elif self.hpc_manager == HpcManager.PBS:
             os.environ["BM_NUM_TASKS"] = str(concurrency)
             os.environ["BM_NUM_CORES"] = str(pernode)
@@ -557,15 +567,27 @@ class JobsRunner(debuggable.DebuggableObject):
                 "BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,"
                 "BM_NUM_TASKS,BM_NUM_CORES",
                 f"-l select={concurrency}:mem=32GB",
-                f"{job_script}.pbs"
             ]
         elif self.hpc_manager == HpcManager.DEV:
             cmd = [ "echo Hello World" ]
         else:
             raise RuntimeError(f"Unknown HPC manager: '{self.hpc_manager}'")
+        sbh = [
+            "#SBATCH --mail-type=END,FAIL",
+            "#SBATCH --mem=8gb",
+            "#SBATCH --distribution=cyclic:cyclic",
+            "#SBATCH --output=logs/sbatch-lsmio-%j.log",
+            "#SBATCH --error=logs/sbatch-lsmio-%j.err"
+        ] + args
         command = " ".join(cmd)
+        sbatch = "\n".join(sbh)
         commands = "#!/bin/bash -x\n" \
-            + f"\n{command}"
+            + f"\n{command} << EOF" \
+            + "\n#!/bin/sh -x" \
+            + f"\n{sbatch}" \
+            + "\n" \
+            + "\n./lsmiotool ipc command" \
+            + "\nEOF"
         log.Console.debug(f"JobsRunner cmd: {cmd}")
         log.Console.debug(f"JobsRunner commands: \n{commands}")
         result = subprocess.run(["/bin/bash", "-c", commands], stderr=subprocess.STDOUT, text=True, check=True)
