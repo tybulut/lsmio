@@ -297,8 +297,8 @@ class IORBenchmark(debuggable.DebuggableObject):
         else:
             cmd = base_cmd
         hpc_env = env.HPC_ENV
-        command = " ".join(cmd)
         #command = " ".join(shlex.quote(os.path.expandvars(os.path.expanduser(arg))) for arg in cmd)
+        command = " ".join(cmd)
         commands = "#!/bin/bash -x\n" \
             + f"\n{command}"
         log.Console.debug(f"IORBenchmark cmd: {cmd}")
@@ -548,7 +548,6 @@ class JobsRunner(debuggable.DebuggableObject):
             if self.slurm_email:
                 cmd.append(f"--mail-user={self.slurm_email}")
             cmd.append(f"{job_script}.sbatch")
-            subprocess.run(cmd)
         elif self.hpc_manager == HpcManager.PBS:
             os.environ["BM_NUM_TASKS"] = str(concurrency)
             os.environ["BM_NUM_CORES"] = str(pernode)
@@ -560,12 +559,17 @@ class JobsRunner(debuggable.DebuggableObject):
                 f"-l select={concurrency}:mem=32GB",
                 f"{job_script}.pbs"
             ]
-            subprocess.run(cmd)
         elif self.hpc_manager == HpcManager.DEV:
             cmd = [ "echo Hello World" ]
-            subprocess.run(cmd)
         else:
             raise RuntimeError(f"Unknown HPC manager: '{self.hpc_manager}'")
+        command = " ".join(cmd)
+        commands = "#!/bin/bash -x\n" \
+            + f"\n{command}"
+        log.Console.debug(f"JobsRunner cmd: {cmd}")
+        log.Console.debug(f"JobsRunner commands: \n{commands}")
+        result = subprocess.run(["/bin/bash", "-c", commands], stderr=subprocess.STDOUT, text=True, check=True)
+
 
     def wait_for_completion(self) -> None:
         """
@@ -594,7 +598,9 @@ class JobsRunner(debuggable.DebuggableObject):
             if not lines:
                 break
             print(proc.stdout)
+            log.Console.debug(f"JobsRunner wait_for_completion: waiting for 8 seconds")
             time.sleep(8)
+        log.Console.debug(f"JobsRunner wait_for_completion: waiting for 1 second")
         time.sleep(1)
 
     def run_bake(self) -> None:

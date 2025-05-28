@@ -225,11 +225,11 @@ class TestJobsRunner(unittest.TestCase):
             jobs.JobSize.SMALL
         )
         args = mock_run.call_args[0][0]
-        self.assertIn('sbatch', args)
-        self.assertIn('--account=testacct', args)
-        self.assertIn('--mail-user=me@example.com', args)
-        self.assertIn('--ntasks=4', args)
-        self.assertIn('--nodes=2', args)
+        self.assertIn('sbatch', args[2])
+        self.assertIn('--account=testacct', args[2])
+        self.assertIn('--mail-user=me@example.com', args[2])
+        self.assertIn('--ntasks=4', args[2])
+        self.assertIn('--nodes=2', args[2])
 
     @patch('subprocess.run')
     def test_run_pbs(self, mock_run: Mock) -> None:
@@ -248,15 +248,15 @@ class TestJobsRunner(unittest.TestCase):
                 jobs.JobSize.SMALL
             )
             args = mock_run.call_args[0][0]
-            self.assertIn('qsub', args)
-            self.assertIn('-v', args)
+            self.assertIn('qsub', args[2])
+            self.assertIn('-c', args[1])
             self.assertIn(
                 'BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,'
                 'BM_NUM_TASKS,BM_NUM_CORES',
-                args
+                args[2]
             )
-            self.assertIn('-l select=8:mem=32GB', args)
-            self.assertIn('SMALL.pbs', args)
+            self.assertIn('-l select=8:mem=32GB', args[2])
+            self.assertIn('SMALL.pbs', args[2])
 
     @patch('subprocess.run')
     @patch('getpass.getuser', return_value='testuser')

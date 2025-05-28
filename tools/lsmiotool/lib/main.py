@@ -108,7 +108,6 @@ class RunMain(BaseMain):
         elif self.mode == 'bake':
             runner = jobs.JobsRunner(env.hpc_manager)
             runner.run_bake()
-            runner.wait_for_completion()
         elif self.mode == 'small':
             log.Console.error("argument small: Not Implemented")
             sys.exit(1)
