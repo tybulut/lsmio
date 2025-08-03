@@ -115,7 +115,7 @@ if __name__ == '__main__':
             sys.exit(1)
         class_main = main.LatexMain
     elif args[0] == 'load-modules':
-        class_main = hpc.HpcEnvMain
+        class_main = main.HpcEnvMain
     elif args[0] == 'parse':
         class_main = main.NotImplemented
     elif args[0] == 'run':

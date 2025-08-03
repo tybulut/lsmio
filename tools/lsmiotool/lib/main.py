@@ -38,8 +38,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from lsmiotool import settings
-from lsmiotool.lib import jobs, dirs, env
-from lsmiotool.lib import data, debuggable, env, log, plot
+from lsmiotool.lib import jobs, dirs, env, hpc
+from lsmiotool.lib import data, debuggable, log
 
 # Catch CTRL-C
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -142,6 +142,15 @@ class ShellMain(BaseMain):
         code.interact(local=dict(globals(), **locals()))
 
 
+class HpcEnvMain(BaseMain):
+    """Interactive load HPC Modules."""
+
+    def run(self) -> None:
+        """Start an interactive Python shell with local context."""
+        hpc_modules = hpc.HpcModules()
+        hpc_modules.load(env.HPC_ENV)
+
+
 class NotImplemented(BaseMain):
     """Placeholder for unimplemented execution modes."""
 
@@ -153,6 +162,10 @@ class NotImplemented(BaseMain):
 
 class DemoMain(BaseMain):
     """Demo execution mode for example plots."""
+
+
+    def __init__(self):
+        import plot
 
     def demoRunDummy(self) -> None:
         """Generate a dummy plot with sample data."""

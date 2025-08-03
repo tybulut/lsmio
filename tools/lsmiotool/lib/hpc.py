@@ -41,7 +41,7 @@ class HpcModules(debuggable.DebuggableObject):
     """A class to manage HPC environment."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Initialize the HpcEnvMain class.
+        """Initialize the HpcModules class.
 
         Args:
             *args: Variable length argument list.
@@ -168,4 +168,7 @@ class HpcModules(debuggable.DebuggableObject):
         """
         commands = self.shell_commands(hpc_env)
         script = "\n".join(commands)
-        subprocess.run(script, shell=True, executable="/bin/bash", check=True)
+        result = subprocess.run(script, shell=True, executable="/bin/bash", \
+                        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        print("Loading modules: stdout:", result.stdout)
+        print("Loading modules: stderr:", result.stderr)
