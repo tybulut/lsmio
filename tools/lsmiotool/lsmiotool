@@ -50,13 +50,15 @@ if os.access(preferred, os.X_OK):
     else:
         raise EnvironmentError("No suitable Python interpreter found.")
 
-print("DEBUG: Starting lsmio tool...")
-
 # Calculate server path
 srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.append(srv_path)
 
-from lsmiotool.lib import log, env, main, hpc
+from lsmiotool.lib import log
+log.Log.setLevel(log.LOG_LEVEL.WARNING)  # Default log level
+log.Console.debug("Starting lsmiotool...")
+
+from lsmiotool.lib import env, main, hpc
 
 LSMIOTOOL_HELP = '''How to run
 -----------------------------------------------------------------------
@@ -81,7 +83,6 @@ options:
 
 if __name__ == '__main__':
     debug = False
-    log.Log.setLevel(log.LOG_LEVEL.DEBUG)  # Tentative default log level
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'dhstv',
                 ['debug', 'help', 'ssd', 'test', 'version'])
