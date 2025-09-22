@@ -1,0 +1,46 @@
+{
+  "DEFAULT": {
+    "hpc_manager": "DEV",
+    "lustre_hdd_path": "~/scratch",
+    "lustre_ssd_path": "~/scratch",
+    "base_path": "~/src/lsmio-data",
+    "ior_dirs": ["synthetic", "viking", "ior-small-hdd"],
+    "ior_data": {
+      "base": "ior-base",
+      "collective": "ior-collective",
+      "hdf5": "ior-hdf5",
+      "hdf5_collective": "ior-hdf5-c"
+    },
+    "lsmio_dirs": ["synthetic", "viking", "lsmio-small-hdd"],
+    "lsmio_data": {
+      "adios": "lsmio-adios-m",
+      "plugin": "lsmio-plugin-m",
+      "lsmio": "lsmio-rocksdb-m"
+    },
+    "plots_dirs": ["synthetic", "viking", "plots"]
+  },
+  "VIKING": {
+    "hpc_manager": "SLURM",
+    "base_path": "/mnt/lustre/lsmio",
+    "lustre_hdd_path": "/mnt/lustre",
+    "lustre_ssd_path": "/mnt/bb/tmp"
+  },
+  "ISAMBARD": {
+    "hpc_manager": "PBS",
+    "base_path": "/projects/external/ri-sbulut/lsmio",
+    "ior_dirs": ["synthetic", "isambard", "ior-small-hdd"],
+    "lsmio_dirs": ["synthetic", "isambard", "lsmio-small-hdd"],
+    "lustre_hdd_path": "/projects/external/ri-sbulut",
+    "lustre_ssd_path": "/scratch"
+  },
+  "VIKING2": {
+    "hpc_manager": "SLURM",
+    "base_path": "/mnt/scratch/lsmio",
+    "ior_dirs": ["synthetic", "viking2", "ior-small-hdd"],
+    "lsmio_dirs": ["synthetic", "viking2", "lsmio-small-hdd"],
+    "lustre_hdd_path": "/mnt/scratch",
+    "lustre_ssd_path": "/mnt/scratch"
+  },
+  "DEV": {
+  }
+}

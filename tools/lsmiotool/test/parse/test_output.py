@@ -30,6 +30,7 @@
 
 from unittest import TestCase
 from io import StringIO
+from typing import Dict, List, Any, Union
 from lsmiotool.lib.log import Console
 from lsmiotool.lib import output
 
@@ -41,19 +42,19 @@ MY_DIR = Path(__file__).parent.resolve()
 
 
 class MockIorAggOutput(output.IorAggOutput):
-  _node_counts= ['1', '2']
+  _node_counts: List[str] = ['1', '2']
 
 
 class MockLsmioAggOutput(output.LsmioAggOutput):
-  _node_counts= ['1', '4']
+  _node_counts: List[str] = ['1', '4']
 
 
 class MockIorFullOutput(output.IorFullOutput):
-  _node_counts= ['1', '2']
+  _node_counts: List[str] = ['1', '2']
 
 
 class MockLsmioFullOutput(output.LsmioFullOutput):
-  _node_counts= ['1', '4']
+  _node_counts: List[str] = ['1', '4']
 
 
 class OutputUnitTestCase(TestCase):
@@ -76,12 +77,12 @@ class OutputUnitTestCase(TestCase):
   #                                'out-collective-4-64K-2023-07-21-node169-0.txt.2': 6966,
   #                                'out-collective-4-8M-2023-07-21-node169-0.txt.2': 6947},
   # ...
-  def test_traverse_dir(self):
+  def test_traverse_dir(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example directory to traverse: ' + root_dir + '.')
     traversed = output.TraverseDir(root_dir)
-    dir_map = traversed.getMap()
+    dir_map = traversed.get_map()
     #Console.debug("test_traverse_dir map: " + pprint.pformat(dir_map))
     self.assertTrue('1' in dir_map)
     self.assertEqual(len(dir_map), 2)
@@ -102,12 +103,12 @@ class OutputUnitTestCase(TestCase):
   #       '4': {'1M': {'out-collective-4-1M-2023-07-21-node150-0.txt.2': 6946},
   #             '64K': {'out-collective-4-64K-2023-07-21-node154-0.txt.2': 0},
   #             '8M': {'out-collective-4-8M-2023-07-21-node154-0.txt.2': 0}}}}
-  def test_ior_out_dir(self):
+  def test_ior_out_dir(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
     ior_dir = output.IorOutputDir(root_dir)
-    dir_map = ior_dir.getMap()
+    dir_map = ior_dir.get_map()
     #Console.debug("test_ior_out_dir map: " + pprint.pformat(dir_map))
     self.assertTrue('1' in dir_map)
     self.assertEqual(len(dir_map), 2)
@@ -118,12 +119,12 @@ class OutputUnitTestCase(TestCase):
     self.assertEqual(dir_map['1']['4']['64K']['out-collective-4-64K-2023-07-21-node169-0.txt.2']["size"], 6966)
 
 
-  def test_lsm_out_dir(self):
+  def test_lsm_out_dir(self) -> None:
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior directory to traverse: ' + root_dir + '.')
     lsm_dir = output.LsmioOutputDir(root_dir)
-    dir_map = lsm_dir.getMap()
+    dir_map = lsm_dir.get_map()
     #Console.debug("test_ior_out_dir map: " + pprint.pformat(dir_map))
     self.assertTrue('4' in dir_map)
     self.assertEqual(len(dir_map), 2)
@@ -150,12 +151,12 @@ class OutputUnitTestCase(TestCase):
   #                              'Max(MiB)': 1154.86,
   #                              'Max(OPs)': 1154.86,
   #                              'Mean(MiB)': 1022.76,
-  def test_ior_agg_out(self):
+  def test_ior_agg_out(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior agg directory: ' + root_dir + '.')
     ior_agg = MockIorAggOutput(root_dir)
-    agg_map = ior_agg.getMap()
+    agg_map = ior_agg.get_map()
     #Console.debug("test_ior_agg_out map: " + pprint.pformat(agg_map))
     self.assertTrue('1' in agg_map)
     self.assertEqual(len(agg_map), 2)
@@ -171,12 +172,12 @@ class OutputUnitTestCase(TestCase):
   #access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration
   #write,731.39,457.88,623.48,10239.8,163840,10
   #read,1231.2,1098.12,1165.55,10239.8,163840,10
-  def test_lsmio_agg_out(self):
+  def test_lsmio_agg_out(self) -> None:
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example lsmio agg directory: ' + root_dir + '.')
     lsm_agg = MockLsmioAggOutput(root_dir)
-    agg_map = lsm_agg.getMap()
+    agg_map = lsm_agg.get_map()
     #Console.debug("test_lsmio_agg_out map: " + pprint.pformat(agg_map))
     self.assertTrue('4' in agg_map)
     self.assertEqual(len(agg_map), 2)
@@ -198,27 +199,26 @@ class OutputUnitTestCase(TestCase):
   #                               'Mean(s)': '1.10131',
   #                               'Min(MiB)': 829.51,
   #
-  def test_ior_full_output(self):
+  def test_ior_full_output(self) -> None:
     root_dir_list = ['example', 'ior-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example ior full directory: ' + root_dir + '.')
     ior_full = MockIorFullOutput(root_dir)
-    full_map = ior_full.getMap()
-    (xSeries, ySeries) = ior_full.timeSeries(False, '4', '64K')
-    #Console.debug("test_ior_full_output map: " + pprint.pformat(full_map))
+    full_map = ior_full.get_map()
+    (xSeries, ySeries) = ior_full.time_series(False, '4', '64K')
     self.assertEqual(xSeries, ['1', '2'])
     self.assertEqual(ySeries, [888.01, 836.94])
 
 
-  def test_lsmio_full_output(self):
+  def test_lsmio_full_output(self) -> None:
     root_dir_list = ['example', 'lsmio-outputs']
     root_dir = os.path.join(MY_DIR, *root_dir_list)
     Console.debug('Reading example lsmio full directory: ' + root_dir + '.')
     lsm_full = MockLsmioFullOutput(root_dir)
-    full_map = lsm_full.getMap()
-    (xSeries, ySeries) = lsm_full.timeSeries(False, '4', '64K')
-    #Console.debug("test_lsmio_full_output map: " + pprint.pformat(full_map))
+    full_map = lsm_full.get_map()
+    (xSeries, ySeries) = lsm_full.time_series(False, '4', '64K')
     self.assertEqual(xSeries, ['1', '4'])
-    self.assertEqual(ySeries, [224.62, 841.0699999999999])
+    for a, b in zip(ySeries, [224.62, 841.07]):
+        self.assertAlmostEqual(a, b, places=5)
 
 

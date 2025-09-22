@@ -3,18 +3,18 @@
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -26,64 +26,130 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+#
+
+import os
+from typing import Any, Dict, List, Union, Sequence
 
 import numpy as np
-from matplotlib import pyplot
-
-class PlotMetaData(object):
-  def __init__(self, title: str, xLabel: str, yLabel: str):
-    self.title = title
-    self.xLabel = xLabel
-    self.yLabel = yLabel
+from numpy.typing import NDArray
+import matplotlib.pyplot as plt
 
 
-class PlotData(object):
-  def __init__(self, legend: str, xSeries: list[int], ySeries: list[float]):
-    self.legend = legend
-    self.xSeries = np.array(xSeries)
-    self.ySeries = np.array(ySeries)
+class PlotMetaData:
+    """Metadata for plot visualization, including title and axis labels."""
+
+    def __init__(self, title: str, x_label: str, y_label: str) -> None:
+        """
+        Initialize plot metadata.
+
+        Args:
+            title: Plot title
+            x_label: Label for x-axis
+            y_label: Label for y-axis
+        """
+        self.title: str = title
+        self.x_label: str = x_label
+        self.y_label: str = y_label
 
 
-class Plot(object):
-  def __init__(self, metaData, plotData):
-    self.metaData = metaData
-    self.plotData = plotData
+class PlotData:
+    """Data series for plotting, including legend and x/y values."""
 
-  def plot(self, fileName: str):
-    # Metadata
-    pyplot.title(self.metaData.title)
-    pyplot.xlabel(self.metaData.xLabel)
-    pyplot.ylabel(self.metaData.yLabel)
-    # Plotdata
-    pyplot.plot(self.plotData.xSeries, self.plotData.ySeries)
-    # Image
-    pyplot.grid()
-    pyplot.savefig(fileName)
-    pyplot.close()
+    def __init__(
+        self,
+        legend: str,
+        x_series: List[Union[int, str]],
+        y_series: List[float]
+    ) -> None:
+        """
+        Initialize plot data.
 
-
-class MultiPlot(object):
-  def __init__(self, metaData, *pdArgs):
-    self.metaData = metaData
-    self.plotDataList = []
-    for plotData in pdArgs:
-      self.plotDataList.append(plotData)
-
-  def plot(self, fileName: str):
-    # Metadata
-    pyplot.title(self.metaData.title)
-    pyplot.xlabel(self.metaData.xLabel)
-    pyplot.ylabel(self.metaData.yLabel)
-    # Plotdata
-    for plotData in self.plotDataList:
-      pyplot.plot(plotData.xSeries, plotData.ySeries, label=plotData.legend)
-    # Image
-    pyplot.grid()
-    pyplot.legend()
-    pyplot.savefig(fileName)
-    pyplot.close()
+        Args:
+            legend: Legend label for the data series
+            x_series: List of x-axis values
+            y_series: List of y-axis values
+        """
+        self.legend: str = legend
+        self.x_series: NDArray[Any] = np.array(x_series)
+        self.y_series: NDArray[np.float64] = np.array(y_series)
 
 
+class Plot:
+    """Single data series plot with metadata."""
+
+    def __init__(self, meta_data: PlotMetaData, plot_data: PlotData) -> None:
+        """
+        Initialize plot with metadata and data series.
+
+        Args:
+            meta_data: Plot metadata
+            plot_data: Data series to plot
+        """
+        self.meta_data: PlotMetaData = meta_data
+        self.plot_data: PlotData = plot_data
+
+    def plot(self, file_name: str) -> None:
+        """
+        Generate and save the plot.
+
+        Args:
+            file_name: Path to save the plot image
+        """
+        # Metadata
+        plt.title(self.meta_data.title)
+        plt.xlabel(self.meta_data.x_label)
+        plt.ylabel(self.meta_data.y_label)
+
+        # Plot data
+        plt.plot(self.plot_data.x_series, self.plot_data.y_series)
+
+        # Configure and save image
+        plt.grid()
+        plt.savefig(file_name)
+        plt.close()
 
 
+class MultiPlot:
+    """Multiple data series plot with metadata."""
+
+    def __init__(
+        self,
+        meta_data: PlotMetaData,
+        *plot_data_args: PlotData
+    ) -> None:
+        """
+        Initialize plot with metadata and multiple data series.
+
+        Args:
+            meta_data: Plot metadata
+            *plot_data_args: Variable number of data series to plot
+        """
+        self.meta_data: PlotMetaData = meta_data
+        self.plot_data_list: List[PlotData] = list(plot_data_args)
+
+    def plot(self, file_name: str) -> None:
+        """
+        Generate and save the plot.
+
+        Args:
+            file_name: Path to save the plot image
+        """
+        # Metadata
+        plt.title(self.meta_data.title)
+        plt.xlabel(self.meta_data.x_label)
+        plt.ylabel(self.meta_data.y_label)
+
+        # Plot data series
+        for plot_data in self.plot_data_list:
+            plt.plot(
+                plot_data.x_series,
+                plot_data.y_series,
+                label=plot_data.legend
+            )
+
+        # Configure and save image
+        plt.grid()
+        plt.legend()
+        plt.savefig(file_name)
+        plt.close()
