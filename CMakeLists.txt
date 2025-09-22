@@ -13,6 +13,11 @@ else(CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Main: 32-bit compiler detected")
 endif(CMAKE_SIZEOF_VOID_P EQUAL 8)
 
+# MacOS
+if(APPLE)
+    add_compile_options(-Wno-vla-cxx-extension)
+endif()
+
 include(ProcessorCount)
 ProcessorCount(N)
 if (N GREATER_EQUAL 2)
