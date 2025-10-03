@@ -46,15 +46,6 @@ class LSMIOStoreRDB : public LSMIOStore {
     rocksdb::ReadOptions _rOptions;
     rocksdb::Options _options;
     rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
-
-    /// start / stop batching
-    /// @return bool success
-    bool startBatch();
-    bool stopBatch();
-
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush);
 
     /// cleanup the ENTIRE store
     /// @return bool success
@@ -67,10 +58,18 @@ class LSMIOStoreRDB : public LSMIOStore {
     /// get value given a key
     /// @return bool success
     bool get(const std::string key, std::string *value);
+    bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values);
 
-    /// sync batching
+    /// put value given a key
     /// @return bool success
-    bool readBarrier();
+    bool put(const std::string key, const std::string value, bool flush = true);
+
+    /// delete value given a key
+    /// @return bool success
+    bool del(const std::string key, bool flush = true);
+
+    /// sync barriers
+    /// @return bool success
     bool writeBarrier();
 };
 

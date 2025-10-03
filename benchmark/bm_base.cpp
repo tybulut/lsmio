@@ -230,8 +230,6 @@ std::string genOptionsToString() {
               << "\n blockSize: " << lsmio::gConfigLSMIO.blockSize
               << "\n transferSize: " << lsmio::gConfigLSMIO.transferSize
               << "\n\n alwaysFlush: " << lsmio::gConfigLSMIO.alwaysFlush
-              << "\n asyncBatchSize: " << lsmio::gConfigLSMIO.asyncBatchSize
-              << "\n asyncBatchBytes: " << lsmio::gConfigLSMIO.asyncBatchBytes
               << "\n\n cacheSize: " << lsmio::gConfigLSMIO.cacheSize
               << "\n writeBufferSize: " << lsmio::gConfigLSMIO.writeBufferSize
               << "\n writeFileSize: " << lsmio::gConfigLSMIO.writeFileSize << "\n";
@@ -281,10 +279,6 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--ldb-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
                        "[leveldb] disable batching and makes read available immediately after "
                        "write (default: no)");
-        app.add_option("--ldb-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
-                       "[leveldb] deferred batch size (default: 512)");
-        app.add_option("--ldb-batch-bytes", lsmio::gConfigLSMIO.asyncBatchBytes,
-                       "[leveldb] deferred batch size (default: 32M)");
 
         app.add_option("--lsmio-cache", lsmio::gConfigLSMIO.cacheSize,
                        "LRU cache size (default: 0)");

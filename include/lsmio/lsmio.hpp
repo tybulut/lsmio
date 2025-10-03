@@ -105,22 +105,18 @@ class LSMIOConfig {
     /// @brief Flag to enable write-ahead logging.
     bool enableWAL = false;
     /// @brief Number of write buffers.
-    int writeBufferNumber = 1;
+    int writeBufferNumber = 2;
 
     // LevelDB specific settings
     /// @brief Flag for batch flushing.
     bool alwaysFlush = false;  // BATCH
-    /// @brief Size of asynchronous batches.
-    int asyncBatchSize = 512;
-    /// @brief Number of bytes in asynchronous batches.
-    int asyncBatchBytes = 32 * 1024 * 1024;
 
     /// @brief Default cache size.
     int cacheSize = 0;
     /// @brief Default write buffer size.
-    int writeBufferSize = 32 * 1024 * 1024;
+    int writeBufferSize = 64 * 1024 * 1024;
     /// @brief Default write file size.
-    int writeFileSize = 32 * 1024 * 1024;
+    int writeFileSize = 8 * 1024 * 1024;
 };
 
 /// Global configuration instance for LSMIO.
