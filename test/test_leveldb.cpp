@@ -68,14 +68,21 @@ TEST(lsmioLevelDB, Flush) {
     LOG(INFO) << "Test value for key2: " << value << std::endl;
     EXPECT_EQ(value, value2);
 
-    success = lc.append(key1, value2);
+    success = lc.metaPut(key1, value2);
     EXPECT_EQ(success, true);
 
-    success = lc.get(key1, &value);
+    success = lc.metaGet(key1, &value);
     EXPECT_EQ(success, true);
 
-    LOG(INFO) << "Test value1+value2 for key2: " << value << std::endl;
-    EXPECT_EQ(value, (value1 + value2));
+    LOG(INFO) << "Test value for meta-key1: " << value << std::endl;
+    EXPECT_EQ(value, value2);
+
+    std::vector<std::tuple<std::string, std::string>> values;
+    success = lc.metaGetAll(&values);
+    EXPECT_EQ(values.size(), 1);
+    for (const auto& [mKey, mValue] : values) {
+        EXPECT_EQ(mValue, value2);
+    }
 
     success = lc.del(key1, false);
     EXPECT_EQ(success, true);

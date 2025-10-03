@@ -29,11 +29,9 @@
  */
 
 #include <rocksdb/cache.h>
-#include <rocksdb/merge_operator.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/options_type.h>
-#include <rocksdb/write_batch.h>
 
 #include <atomic>
 #include <filesystem>
@@ -50,46 +48,12 @@ static std::unordered_map<std::string, rocksdb::OptionTypeInfo> stringappend_mer
 };
 }
 
-class StringAppendOperator : public rocksdb::AssociativeMergeOperator {
-  private:
-    std::string _delim;
-
-  public:
-    explicit StringAppendOperator(const std::string& delim) {
-        _delim.assign(delim);
-        RegisterOptions("Delimiter", &_delim, &stringappend_merge_type_info);
-    }
-
-    static const char* kClassName() { return "StringAppendOperator"; }
-    static const char* kNickName() { return "stringappend"; }
-    virtual const char* Name() const override { return kClassName(); }
-    virtual const char* NickName() const override { return kNickName(); }
-
-    virtual bool Merge(const rocksdb::Slice& key, const rocksdb::Slice* existing_value,
-                       const rocksdb::Slice& value, std::string* new_value,
-                       rocksdb::Logger* logger) const override {
-        new_value->clear();
-
-        if (!existing_value) {
-            new_value->assign(value.data(), value.size());
-        } else {
-            new_value->reserve(existing_value->size() + _delim.size() + value.size());
-            new_value->assign(existing_value->data(), existing_value->size());
-            new_value->append(_delim);
-            new_value->append(value.data(), value.size());
-        }
-
-        return true;
-    }
-};
-
 LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     : LSMIOStore(dbPath, overWrite) {
     rocksdb::Status status;
     rocksdb::BlockBasedTableOptions tableOptions;
 
     _options.create_if_missing = true;
-    _batch = nullptr;
 
     if (gConfigLSMIO.useBloomFilter) {
         tableOptions.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
@@ -108,7 +72,6 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     _options.write_buffer_size = gConfigLSMIO.writeBufferSize;
     _options.max_write_buffer_number = gConfigLSMIO.writeBufferNumber;
     _options.writable_file_max_buffer_size = gConfigLSMIO.writeFileSize;
-    _options.max_write_batch_group_size_bytes = gConfigLSMIO.asyncBatchBytes;
 
     _options.compaction_style = rocksdb::kCompactionStyleNone;
     _options.disable_auto_compactions = true;        // false
@@ -119,7 +82,6 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     _options.allow_mmap_reads = gConfigLSMIO.enableMMAP;
     // _options.unordered_write = true;  // false
 
-    _options.merge_operator = std::make_shared<StringAppendOperator>("");
     _options.max_successive_merges = 4096;
 
     _wOptions.disableWAL = !gConfigLSMIO.enableWAL;
@@ -176,42 +138,45 @@ bool LSMIOStoreRDB::get(const std::string key, std::string* value) {
     return s.ok();
 }
 
-bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string key,
-                                   const std::string value, bool flush) {
+bool LSMIOStoreRDB::getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) {
+    rocksdb::Status s;
+    
+    LOG(INFO) << "LSMIOStoreRDB::getPrefix(): key: " << key << std::endl;
+    rocksdb::Iterator* it = _db->NewIterator(_rOptions);
+
+    it->Seek(key);
+    while (it->Valid() && it->key().starts_with(key)) {
+        values->emplace_back(it->key().ToString(), it->value().ToString());
+        it->Next();
+    }
+
+    s = it->status();
+    delete it;
+    
+    return s.ok();
+}
+
+bool LSMIOStoreRDB::put(const std::string key, const std::string value, bool flush) {
     rocksdb::Status s;
     bool retValue;
 
-    const unsigned int futureSize = _batchSize + 1;
-    const unsigned int futureBytes = _batchBytes + value.size();
+    LOG(INFO) << "LSMIOStoreRDB::put(): key: " << key << " flush: " << flush << " size: " << value.size()
+              << std::endl;
 
-    LOG(INFO) << "LSMIOStoreRDB::_batchMutation: key: " << key
-              << " flush (not-applicable): " << flush << " size: " << value.size()
-              << " futureSize: " << futureSize << " futureBytes: " << futureBytes << std::endl;
-
-    LOG(INFO) << "LSMIOStoreRDB::_batchMutation: mutation: " << getMutationType(mType) << std::endl;
-    if (mType == MutationType::Put) {
-        s = _db->Put(_wOptions, key, value);
-    } else if (mType == MutationType::Append) {
-        s = _db->Merge(_wOptions, key, value);
-    } else if (mType == MutationType::Del) {
-        s = _db->Delete(_wOptions, key);
-    } else {
-        throw std::invalid_argument(
-            "ERROR: LSMIOStoreRDB:::_batchMutation: Mutation not implemented.");
-    }
-
+    s = _db->Put(_wOptions, key, value);
     retValue = s.ok();
     return retValue;
 }
 
-bool LSMIOStoreRDB::startBatch() {
-    LOG(INFO) << "LSMIOStoreRDB::startBatch(): (not-applicable)" << std::endl;
-    return true;
-}
+bool LSMIOStoreRDB::del(const std::string key, bool flush) {
+    rocksdb::Status s;
+    bool retValue;
 
-bool LSMIOStoreRDB::stopBatch() {
-    LOG(INFO) << "LSMIOStoreRDB::stopBatch(): not-applicable)" << std::endl;
-    return true;
+    LOG(INFO) << "LSMIOStoreRDB::del(): key: " << key << " flush: " << flush << std::endl;
+
+    s = _db->Delete(_wOptions, key);
+    retValue = s.ok();
+    return retValue;
 }
 
 bool LSMIOStoreRDB::dbCleanup() {
@@ -229,8 +194,6 @@ bool LSMIOStoreRDB::dbCleanup() {
 
     return s.ok();
 }
-
-bool LSMIOStoreRDB::readBarrier() { return true; }
 
 bool LSMIOStoreRDB::writeBarrier() {
     rocksdb::Status s;

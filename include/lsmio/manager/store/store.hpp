@@ -38,28 +38,12 @@
 
 namespace lsmio {
 
-enum class MutationType { Put, Append, Del };
-
-std::string getMutationType(MutationType mType);
-
 class LSMIOStore {
   protected:
     std::string _dbPath;
-    int _maxBatchSize;
-    int _maxBatchBytes;
     bool _writeSync;
 
-    std::atomic<uint> _batchSize = {0};
-    std::atomic<uint> _batchBytes = {0};
-    std::mutex _batchMutex;
-
-    /// start / stop batching
-    /// @return bool success
-    virtual bool startBatch() = 0;
-    virtual bool stopBatch() = 0;
-
-    virtual bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                                bool flush) = 0;
+    const std::string _metaPrefix = "__lsmio_md::";
 
     /// cleanup the ENTIRE store
     /// @return bool success
@@ -72,23 +56,26 @@ class LSMIOStore {
     /// get value given a key
     /// @return bool success
     virtual bool get(const std::string key, std::string* value) = 0;
+    virtual bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) = 0;
 
     /// put value given a key
     /// @return bool success
-    virtual bool put(const std::string key, const std::string value, bool flush = true);
-
-    /// append value given a key
-    /// @return bool success
-    virtual bool append(const std::string key, const std::string value, bool flush = true);
+    virtual bool put(const std::string key, const std::string value, bool flush = true) = 0;
 
     /// delete value given a key
     /// @return bool success
-    virtual bool del(const std::string key, bool flush = true);
+    virtual bool del(const std::string key, bool flush = true) = 0;
 
-    /// sync batching
+    /// meta operations
     /// @return bool success
-    virtual bool readBarrier() = 0;
-    virtual bool writeBarrier() = 0;
+    virtual bool metaGet(const std::string key, std::string* value);
+    virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values);
+    virtual bool metaPut(const std::string key, const std::string value, bool flush = true);
+
+    /// sync barriers
+    /// @return bool success
+    virtual bool readBarrier();
+    virtual bool writeBarrier();
 };
 
 }  // namespace lsmio

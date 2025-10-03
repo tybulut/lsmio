@@ -53,11 +53,15 @@ namespace lsmio {
 const std::string KV_CMD::GET = "get";
 const std::string KV_CMD::PUT = "put";
 const std::string KV_CMD::DEL = "del";
-const std::string KV_CMD::APPEND = "append";
+const std::string KV_CMD::META_GET = "metaGet";
+const std::string KV_CMD::META_GET_ALL = "metaGetAll";
+const std::string KV_CMD::META_PUT = "metaPut";
 const std::string KV_CMD::READ_BARRIER = "rBarrier";
 const std::string KV_CMD::WRITE_BARRIER = "wBarrier";
 
 const std::string KV_CMD_RETURN::GET = "getBack";
+const std::string KV_CMD_RETURN::META_GET = "metaGetBack";
+const std::string KV_CMD_RETURN::META_GET_ALL = "metaGetAllBack";
 const std::string KV_CMD_RETURN::READ_BARRIER = "rBarrierBack";
 const std::string KV_CMD_RETURN::WRITE_BARRIER = "wBarrierBack";
 

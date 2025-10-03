@@ -255,28 +255,6 @@ bool LSMIOManager::put(const std::string& key, const void* value, size_t size, s
     return put(key, nValue, gConfigLSMIO.alwaysFlush);
 }
 
-bool LSMIOManager::append(const std::string& key, const std::string& value, bool flush) {
-    bool retValue = true;
-
-    LOG(INFO) << "LSMIOManager::append: rank: " << _aggRank << " key: " << key << "("
-              << key.length() << ")"
-              << " value.len: " << value.length() << " flush: " << flush << std::endl;
-
-    _counterWriteBytes += value.length();
-    _counterWriteOps++;
-
-    if (_isOpenLocal()) {
-        LOG(INFO) << "LSMIOManager::append: LOCAL for rank: " << _aggRank << std::endl;
-        return _lcStore->append(_rankedKey(key), value, flush);
-    }
-
-    if (_isOpenRemote()) {
-        retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::APPEND, key, value);
-    }
-
-    return retValue;
-}
-
 bool LSMIOManager::del(const std::string& key, bool flush) {
     bool retValue = true;
 
@@ -296,6 +274,95 @@ bool LSMIOManager::del(const std::string& key, bool flush) {
 bool LSMIOManager::del(const std::string& key) {
     LOG(INFO) << "LSMIOManager::del: for rank: " << _aggRank << " key: " << key << std::endl;
     return del(key, gConfigLSMIO.alwaysFlush);
+}
+
+bool LSMIOManager::metaGet(const std::string& key, std::string* value) {
+    bool retValue = true;
+
+    LOG(INFO) << "LSMIOManager::metaGet: for rank: " << _aggRank << " key: " << key << std::endl;
+    if (_isOpenLocal()) {
+        LOG(INFO) << "LSMIOManager::metaGet: LOCAL for rank: " << _aggRank << std::endl;
+        retValue = _lcStore->metaGet(_rankedKey(key), value);
+
+        _counterReadBytes += value->length();
+        _counterReadOps++;
+
+        return retValue;
+    }
+
+    if (_isOpenRemote()) {
+        retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::META_GET, key, KV_DUMMY);
+
+        std::string cCommand, cKey;
+        retValue &= _lcMPI->recvCommand(AGGREGATION_RANK, &cCommand, &cKey, value);
+
+        _counterReadBytes += value->length();
+        _counterReadOps++;
+
+        if (cCommand != KV_CMD_RETURN::META_GET) {
+            LOG(ERROR) << "LSMIOManager::get: received incorrect command: " << cCommand
+                       << std::endl;
+            return false;
+        }
+    }
+
+    return retValue;
+}
+
+bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values) {
+    bool retValue = true;
+
+    LOG(INFO) << "LSMIOManager::metaGetAll: for rank: " << _aggRank << std::endl;
+    if (_isOpenLocal()) {
+        LOG(INFO) << "LSMIOManager::metaGetAll: LOCAL for rank: " << _aggRank << std::endl;
+        retValue = _lcStore->metaGetAll(values);
+
+        _counterReadBytes += values->size();
+        _counterReadOps++;
+
+        return retValue;
+    }
+
+    if (_isOpenRemote()) {
+        retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::META_GET_ALL, KV_DUMMY, KV_DUMMY);
+
+        std::string cCommand, cKey;
+        std::string value;
+        retValue &= _lcMPI->recvCommand(AGGREGATION_RANK, &cCommand, &cKey, &value);
+
+        _counterReadBytes += value.length();
+        _counterReadOps++;
+
+        if (cCommand != KV_CMD_RETURN::META_GET_ALL) {
+            LOG(ERROR) << "LSMIOManager::metaGetAll: received incorrect command: " << cCommand
+                       << std::endl;
+            return false;
+        }
+    }
+
+    return retValue;
+}
+
+bool LSMIOManager::metaPut(const std::string& key, const std::string& value, bool flush) {
+    bool retValue = true;
+
+    LOG(INFO) << "LSMIOManager::metaPut: rank: " << _aggRank << " key: " << key << "("
+              << key.length() << ")"
+              << " value.len: " << value.length() << " flush: " << flush << std::endl;
+
+    _counterWriteBytes += value.length();
+    _counterWriteOps++;
+
+    if (_isOpenLocal()) {
+        LOG(INFO) << "LSMIOManager::metaPut: LOCAL for rank: " << _aggRank << std::endl;
+        return _lcStore->metaPut(_rankedKey(key), value, flush);
+    }
+
+    if (_isOpenRemote()) {
+        retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::META_PUT, key, value);
+    }
+
+    return retValue;
 }
 
 bool LSMIOManager::readBarrier() {
@@ -360,8 +427,8 @@ void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
         retValue &= _lcStore->get(_rankedKey(rank, key), gValue);
     } else if (command == KV_CMD::PUT) {
         retValue &= _lcStore->put(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
-    } else if (command == KV_CMD::APPEND) {
-        retValue &= _lcStore->append(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
+    } else if (command == KV_CMD::META_PUT) {
+        retValue &= _lcStore->metaPut(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::DEL) {
         retValue &= _lcStore->del(_rankedKey(rank, key), gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::WRITE_BARRIER) {

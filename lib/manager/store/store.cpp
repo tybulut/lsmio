@@ -33,65 +33,38 @@
 
 namespace lsmio {
 
-std::string getMutationType(MutationType mType) {
-    std::string sVal;
-
-    switch (mType) {
-        case MutationType::Put:
-            sVal = "Put";
-            break;
-        case MutationType::Append:
-            sVal = "Append";
-            break;
-        case MutationType::Del:
-            sVal = "Del";
-            break;
-    }
-
-    return sVal;
-}
-
 LSMIOStore::LSMIOStore(const std::string& dbPath, const bool overWrite) {
     _dbPath = dbPath;
-    _maxBatchSize = gConfigLSMIO.asyncBatchSize;
-    _maxBatchBytes = gConfigLSMIO.asyncBatchBytes;
 }
 
 LSMIOStore::~LSMIOStore() {}
 
-bool LSMIOStore::put(const std::string key, const std::string value, bool flush) {
-    rocksdb::Status s;
-    bool retValue;
-
-    LOG(INFO) << "LSMIOStore::put: key: " << key << " flush: " << flush << " size: " << value.size()
-              << std::endl;
-
-    return _batchMutation(MutationType::Put, key, value, flush);
+bool LSMIOStore::metaGet(const std::string key, std::string* value) {
+    LOG(INFO) << "LSMIOStore::metaGet: " << std::endl;
+    return get(_metaPrefix + key, value);
 }
 
-bool LSMIOStore::append(const std::string key, const std::string value, bool flush) {
-    rocksdb::Status s;
-    bool retValue;
-
-    LOG(INFO) << "LSMIOStore::append: key: " << key << " flush: " << flush << std::endl;
-
-    return _batchMutation(MutationType::Append, key, value, flush);
+bool LSMIOStore::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values) {
+    LOG(INFO) << "LSMIOStore::metaGetAll: " << std::endl;
+    return getPrefix(_metaPrefix, values);
 }
 
-bool LSMIOStore::del(const std::string key, bool flush) {
-    rocksdb::Status s;
-    bool retValue;
+bool LSMIOStore::metaPut(const std::string key, const std::string value, bool flush) {
+    LOG(INFO) << "LSMIOStore::metaPut: " << std::endl;
+    return put(_metaPrefix + key, value, flush);
+}
 
-    LOG(INFO) << "LSMIOStore::del: key: " << key << " flush: " << flush << std::endl;
+bool LSMIOStore::readBarrier() {
+    bool status;
 
-    return _batchMutation(MutationType::Del, key, "", flush);
+    LOG(INFO) << "LSMIOStore::writeBarrier: " << std::endl;
+    return true;
 }
 
 bool LSMIOStore::writeBarrier() {
     bool status;
 
     LOG(INFO) << "LSMIOStore::writeBarrier: " << std::endl;
-    status = stopBatch();
     return true;
 }
 

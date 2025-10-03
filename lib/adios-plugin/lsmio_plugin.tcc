@@ -184,7 +184,7 @@ std::string LsmioPlugin::WriteVariableInfo(core::Variable<T> &variable) {
     std::ostringstream valueStream;
 
     valueStream << variable.m_Name << ";" << variable.m_Type << ";" << variable.m_Shape << ";"
-                << variable.m_Start << ";" << variable.m_Count << std::endl;
+                << variable.m_Start << ";" << variable.m_Count;
 
     LOG(INFO) << "LsmioPlugin::WriteVariableInfo(): key: " << _variableStoreKey << ": "
               << valueStream.str() << std::endl;

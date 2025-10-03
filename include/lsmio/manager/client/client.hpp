@@ -54,8 +54,10 @@ class KV_CMD {
     static const std::string PUT;
     /// @brief Command for deleting a key-value.
     static const std::string DEL;
-    /// @brief Command for appending data to an existing key.
-    static const std::string APPEND;
+    /// @brief Command for metadata operations
+    static const std::string META_GET;
+    static const std::string META_GET_ALL;
+    static const std::string META_PUT;
     /// @brief Command for read synchronization.
     static const std::string READ_BARRIER;
     /// @brief Command for write synchronization.
@@ -73,6 +75,8 @@ class KV_CMD_RETURN {
   public:
     /// @brief Return command after a "get" operation.
     static const std::string GET;
+    static const std::string META_GET;
+    static const std::string META_GET_ALL;
     /// @brief Return command after a read barrier.
     static const std::string READ_BARRIER;
     /// @brief Return command after a write barrier.
