@@ -38,7 +38,7 @@
 
 namespace lsmio {
 
-enum class MutationType { Put, Append, Del };
+enum class MutationType { Put, Del };
 
 std::string getMutationType(MutationType mType);
 
@@ -48,6 +48,8 @@ class LSMIOStore {
     int _maxBatchSize;
     int _maxBatchBytes;
     bool _writeSync;
+
+    const std::string _metaPrefix = "__lsmio_md::";
 
     std::atomic<uint> _batchSize = {0};
     std::atomic<uint> _batchBytes = {0};
@@ -72,20 +74,23 @@ class LSMIOStore {
     /// get value given a key
     /// @return bool success
     virtual bool get(const std::string key, std::string* value) = 0;
+    virtual bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) = 0;
 
     /// put value given a key
     /// @return bool success
     virtual bool put(const std::string key, const std::string value, bool flush = true);
 
-    /// append value given a key
-    /// @return bool success
-    virtual bool append(const std::string key, const std::string value, bool flush = true);
-
     /// delete value given a key
     /// @return bool success
     virtual bool del(const std::string key, bool flush = true);
 
-    /// sync batching
+    /// meta operations
+    /// @return bool success
+    virtual bool metaGet(const std::string key, std::string* value);
+    virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values);
+    virtual bool metaPut(const std::string key, const std::string value, bool flush = true);
+
+    /// sync barriers
     /// @return bool success
     virtual bool readBarrier() = 0;
     virtual bool writeBarrier() = 0;

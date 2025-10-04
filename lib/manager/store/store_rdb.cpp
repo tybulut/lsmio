@@ -50,39 +50,6 @@ static std::unordered_map<std::string, rocksdb::OptionTypeInfo> stringappend_mer
 };
 }
 
-class StringAppendOperator : public rocksdb::AssociativeMergeOperator {
-  private:
-    std::string _delim;
-
-  public:
-    explicit StringAppendOperator(const std::string& delim) {
-        _delim.assign(delim);
-        RegisterOptions("Delimiter", &_delim, &stringappend_merge_type_info);
-    }
-
-    static const char* kClassName() { return "StringAppendOperator"; }
-    static const char* kNickName() { return "stringappend"; }
-    virtual const char* Name() const override { return kClassName(); }
-    virtual const char* NickName() const override { return kNickName(); }
-
-    virtual bool Merge(const rocksdb::Slice& key, const rocksdb::Slice* existing_value,
-                       const rocksdb::Slice& value, std::string* new_value,
-                       rocksdb::Logger* logger) const override {
-        new_value->clear();
-
-        if (!existing_value) {
-            new_value->assign(value.data(), value.size());
-        } else {
-            new_value->reserve(existing_value->size() + _delim.size() + value.size());
-            new_value->assign(existing_value->data(), existing_value->size());
-            new_value->append(_delim);
-            new_value->append(value.data(), value.size());
-        }
-
-        return true;
-    }
-};
-
 LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     : LSMIOStore(dbPath, overWrite) {
     rocksdb::Status status;
@@ -119,7 +86,6 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     _options.allow_mmap_reads = gConfigLSMIO.enableMMAP;
     // _options.unordered_write = true;  // false
 
-    _options.merge_operator = std::make_shared<StringAppendOperator>("");
     _options.max_successive_merges = 4096;
 
     _wOptions.disableWAL = !gConfigLSMIO.enableWAL;
@@ -176,6 +142,24 @@ bool LSMIOStoreRDB::get(const std::string key, std::string* value) {
     return s.ok();
 }
 
+bool LSMIOStoreRDB::getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) {
+    rocksdb::Status s;
+
+    LOG(INFO) << "LSMIOStoreRDB::getPrefix(): key: " << key << std::endl;
+    rocksdb::Iterator* it = _db->NewIterator(_rOptions);
+
+    it->Seek(key);
+    while (it->Valid() && it->key().starts_with(key)) {
+        values->emplace_back(it->key().ToString(), it->value().ToString());
+        it->Next();
+    }
+
+    s = it->status();
+    delete it;
+
+    return s.ok();
+}
+
 bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string key,
                                    const std::string value, bool flush) {
     rocksdb::Status s;
@@ -191,8 +175,6 @@ bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string key,
     LOG(INFO) << "LSMIOStoreRDB::_batchMutation: mutation: " << getMutationType(mType) << std::endl;
     if (mType == MutationType::Put) {
         s = _db->Put(_wOptions, key, value);
-    } else if (mType == MutationType::Append) {
-        s = _db->Merge(_wOptions, key, value);
     } else if (mType == MutationType::Del) {
         s = _db->Delete(_wOptions, key);
     } else {

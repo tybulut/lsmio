@@ -40,9 +40,6 @@ std::string getMutationType(MutationType mType) {
         case MutationType::Put:
             sVal = "Put";
             break;
-        case MutationType::Append:
-            sVal = "Append";
-            break;
         case MutationType::Del:
             sVal = "Del";
             break;
@@ -59,6 +56,21 @@ LSMIOStore::LSMIOStore(const std::string& dbPath, const bool overWrite) {
 
 LSMIOStore::~LSMIOStore() {}
 
+bool LSMIOStore::metaGet(const std::string key, std::string* value) {
+    LOG(INFO) << "LSMIOStore::metaGet: " << std::endl;
+    return get(_metaPrefix + key, value);
+}
+
+bool LSMIOStore::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values) {
+    LOG(INFO) << "LSMIOStore::metaGetAll: " << std::endl;
+    return getPrefix(_metaPrefix, values);
+}
+
+bool LSMIOStore::metaPut(const std::string key, const std::string value, bool flush) {
+    LOG(INFO) << "LSMIOStore::metaPut: " << std::endl;
+    return put(_metaPrefix + key, value, flush);
+}
+
 bool LSMIOStore::put(const std::string key, const std::string value, bool flush) {
     rocksdb::Status s;
     bool retValue;
@@ -67,15 +79,6 @@ bool LSMIOStore::put(const std::string key, const std::string value, bool flush)
               << std::endl;
 
     return _batchMutation(MutationType::Put, key, value, flush);
-}
-
-bool LSMIOStore::append(const std::string key, const std::string value, bool flush) {
-    rocksdb::Status s;
-    bool retValue;
-
-    LOG(INFO) << "LSMIOStore::append: key: " << key << " flush: " << flush << std::endl;
-
-    return _batchMutation(MutationType::Append, key, value, flush);
 }
 
 bool LSMIOStore::del(const std::string key, bool flush) {
