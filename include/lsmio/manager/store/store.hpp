@@ -87,7 +87,7 @@ class LSMIOStore {
     /// meta operations
     /// @return bool success
     virtual bool metaGet(const std::string key, std::string* value);
-    virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values);
+    virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix = "");
     virtual bool metaPut(const std::string key, const std::string value, bool flush = true);
 
     /// sync barriers

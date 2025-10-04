@@ -30,6 +30,11 @@
 
 #include <filesystem>
 #include <iostream>
+#include <sstream>
+#include <string>
+#include <tuple>
+#include <vector>
+
 #include <lsmio/manager/client/client_adios.hpp>
 #include <lsmio/manager/client/client_mpi.hpp>
 #include <lsmio/manager/manager.hpp>
@@ -40,6 +45,33 @@ LSMIOManager* LSMIOManager::_lm = nullptr;
 std::atomic<int> LSMIOManager::_lmInitialized = 0;
 std::atomic<int> LSMIOManager::_lmInitializing = 0;
 std::atomic<int> LSMIOManager::_lmCleaning = 0;
+
+
+void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values, std::string &value) {
+    std::stringstream ss;
+    for (const auto& tup : values) {
+        ss << std::get<0>(tup) << "|" << std::get<1>(tup) << "\n";
+    }
+    value = ss.str();
+}
+
+void vectorTupleDeserialize(const std::string& serialized_data, std::vector<std::tuple<std::string, std::string>> &values) {
+    std::stringstream ss(serialized_data);
+    std::string line;
+
+    while (std::getline(ss, line, '\n')) {
+        if (line.empty()) {
+            continue;
+        }
+
+        size_t delimiter_pos = line.find('|');
+        if (delimiter_pos != std::string::npos) {
+            std::string first_str = line.substr(0, delimiter_pos);
+            std::string second_str = line.substr(delimiter_pos + 1);
+            values.emplace_back(first_str, second_str);
+        }
+    }
+}
 
 LSMIOManager::LSMIOManager(const std::string& dbName, const std::string& dbDir,
                            const bool overWrite, MPI_Comm mpiComm) {
@@ -300,7 +332,7 @@ bool LSMIOManager::metaGet(const std::string& key, std::string* value) {
         _counterReadOps++;
 
         if (cCommand != KV_CMD_RETURN::META_GET) {
-            LOG(ERROR) << "LSMIOManager::get: received incorrect command: " << cCommand
+            LOG(ERROR) << "LSMIOManager::metaGet: received incorrect command: " << cCommand
                        << std::endl;
             return false;
         }
@@ -309,13 +341,13 @@ bool LSMIOManager::metaGet(const std::string& key, std::string* value) {
     return retValue;
 }
 
-bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values) {
+bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix) {
     bool retValue = true;
 
     LOG(INFO) << "LSMIOManager::metaGetAll: for rank: " << _aggRank << std::endl;
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::metaGetAll: LOCAL for rank: " << _aggRank << std::endl;
-        retValue = _lcStore->metaGetAll(values);
+        retValue = _lcStore->metaGetAll(values, inFix);
 
         _counterReadBytes += values->size();
         _counterReadOps++;
@@ -324,14 +356,20 @@ bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>*
     }
 
     if (_isOpenRemote()) {
+        LOG(INFO) << "LSMIOManager::metaGetAll: REMOTE to rank: " << _aggRank << std::endl;
         retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::META_GET_ALL, KV_DUMMY, KV_DUMMY);
 
         std::string cCommand, cKey;
         std::string value;
+
+        LOG(INFO) << "LSMIOManager::metaGetAll: waiting for REMOTE." << std::endl;
         retValue &= _lcMPI->recvCommand(AGGREGATION_RANK, &cCommand, &cKey, &value);
+        LOG(INFO) << "LSMIOManager::metaGetAll: REMOTE response received len: " << value.length() << std::endl;
 
         _counterReadBytes += value.length();
         _counterReadOps++;
+
+        lsmio::vectorTupleDeserialize(value, *values);
 
         if (cCommand != KV_CMD_RETURN::META_GET_ALL) {
             LOG(ERROR) << "LSMIOManager::metaGetAll: received incorrect command: " << cCommand
@@ -427,10 +465,17 @@ void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
         retValue &= _lcStore->get(_rankedKey(rank, key), gValue);
     } else if (command == KV_CMD::PUT) {
         retValue &= _lcStore->put(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
-    } else if (command == KV_CMD::META_PUT) {
-        retValue &= _lcStore->metaPut(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::DEL) {
         retValue &= _lcStore->del(_rankedKey(rank, key), gConfigLSMIO.alwaysFlush);
+    } else if (command == KV_CMD::META_GET) {
+        retValue &= _lcStore->metaGet(_rankedKey(rank, key), gValue);
+    } else if (command == KV_CMD::META_GET_ALL) {
+        std::vector<std::tuple<std::string, std::string>> values;
+        std::string inFix = std::to_string(rank) + "::"; // _rankedKey
+        retValue &= _lcStore->metaGetAll(&values, inFix);
+        lsmio::vectorTupleSerialize(values, *gValue);
+    } else if (command == KV_CMD::META_PUT) {
+        retValue &= _lcStore->metaPut(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::WRITE_BARRIER) {
         retValue &= _lcStore->writeBarrier();
     } else {
@@ -438,6 +483,8 @@ void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
                    << std::endl;
         retValue = false;
     }
+
+    LOG(INFO) << "LSMIOManager::callbackForCollectiveIO: " << command << ": COMPLETED." << std::endl;
 }
 
 void LSMIOManager::resetCounters() {

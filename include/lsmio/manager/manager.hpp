@@ -193,7 +193,7 @@ class LSMIOManager {
      * @return Returns true if the operation is successful, false otherwise.
      */
     bool metaGet(const std::string &key, std::string* value);
-    bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values);
+    bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix = "");
     bool metaPut(const std::string &key, const std::string &value, bool flush);
 
     /// read and write barrier for async operations

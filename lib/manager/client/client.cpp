@@ -250,6 +250,10 @@ void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
 
             if (str_cmd == KV_CMD::GET) {
                 sendCommand(recv_i, KV_CMD_RETURN::GET, str_key, retValue);
+            } else if (str_cmd == KV_CMD::META_GET) {
+                sendCommand(recv_i, KV_CMD_RETURN::META_GET, str_key, retValue);
+            } else if (str_cmd == KV_CMD::META_GET_ALL) {
+                sendCommand(recv_i, KV_CMD_RETURN::META_GET_ALL, str_key, retValue);
             } else if (str_cmd == KV_CMD::READ_BARRIER) {
                 sendCommand(recv_i, KV_CMD_RETURN::READ_BARRIER, str_key, retValue);
             } else if (str_cmd == KV_CMD::WRITE_BARRIER) {
