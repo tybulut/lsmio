@@ -104,6 +104,24 @@ bool LSMIOStoreLDB::get(const std::string key, std::string *value) {
     return s.ok();
 }
 
+bool LSMIOStoreLDB::getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) {
+    leveldb::Status s;
+
+    LOG(INFO) << "LSMIOStoreLDB::getPrefix(): key: " << key << std::endl;
+    leveldb::Iterator* it = _db->NewIterator(_rOptions);
+
+    it->Seek(key);
+    while (it->Valid() && it->key().starts_with(key)) {
+        values->emplace_back(it->key().ToString(), it->value().ToString());
+        it->Next();
+    }
+
+    s = it->status();
+    delete it;
+
+    return s.ok();
+}
+
 bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
                                    const std::string value, bool flush) {
     leveldb::Status s;
@@ -112,14 +130,6 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
 
     const unsigned int futureSize = _batchSize + 1;
     const unsigned int futureBytes = _batchBytes + value.size();
-
-    if (mType == MutationType::Append) {
-        LOG(INFO) << "LSMIOStoreLDB::append: calling Get()." << std::endl;
-        _db->Get(_rOptions, key, &origValue);
-        LOG(INFO) << "LSMIOStoreLDB::append: origValue: " << origValue << std::endl;
-        finalValue = origValue + value;
-        LOG(INFO) << "LSMIOStoreLDB::append: finalValue: " << finalValue << std::endl;
-    }
 
     LOG(INFO) << "LSMIOStoreLDB::_batchMutation: key: " << key << " flush: " << flush
               << " size: " << value.size() << " futureSize: " << futureSize
@@ -132,8 +142,6 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
                   << std::endl;
         if (mType == MutationType::Put) {
             s = _db->Put(_wOptions, key, value);
-        } else if (mType == MutationType::Append) {
-            s = _db->Put(_wOptions, key, finalValue);
         } else if (mType == MutationType::Del) {
             s = _db->Delete(_wOptions, key);
         } else {
@@ -157,8 +165,6 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
 
             if (mType == MutationType::Put) {
                 _batch->Put(key, value);
-            } else if (mType == MutationType::Append) {
-                _batch->Put(key, finalValue);
             } else if (mType == MutationType::Del) {
                 _batch->Delete(key);
             }

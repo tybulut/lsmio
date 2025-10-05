@@ -41,6 +41,8 @@
 #include <lsmio/manager/store/store_ldb.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #if ADIOS2_USE_MPI
 #else
@@ -173,16 +175,6 @@ class LSMIOManager {
     bool put(const std::string &key, const void *ptr, size_t size, size_t count);
 
     /**
-     * @brief Append a value to an existing key in the database.
-     *
-     * @param key The key associated with the value.
-     * @param value The value to append.
-     * @param flush Whether to flush after appending.
-     * @return Returns true if the operation is successful, false otherwise.
-     */
-    bool append(const std::string &key, const std::string &value, bool flush);
-
-    /**
      * @brief Delete a value associated with a key from the database.
      *
      * @param key The key associated with the value to delete.
@@ -191,6 +183,18 @@ class LSMIOManager {
      */
     bool del(const std::string &key, bool flush);
     bool del(const std::string &key);
+
+    /**
+     * @brief Metadata operations
+     *
+     * @param key The key associated with the value.
+     * @param value The value to append.
+     * @param flush Whether to flush after appending.
+     * @return Returns true if the operation is successful, false otherwise.
+     */
+    bool metaGet(const std::string &key, std::string* value);
+    bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix = "");
+    bool metaPut(const std::string &key, const std::string &value, bool flush);
 
     /// read and write barrier for async operations
     /// @return bool success

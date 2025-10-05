@@ -89,7 +89,7 @@ class LsmioPlugin : public adios2::plugin::PluginEngineInterface {
     void DoClose(const int transportIndex = -1) override;
 
   private:
-    const std::string _variableStoreKey = "__var_info_internal";
+    const std::string _variableStoreKey = "__adios_metadata";
 
     std::string _dbName;
     LSMIOManager *_lm = nullptr;

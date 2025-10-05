@@ -33,6 +33,10 @@
 #include <adios2/helper/adiosSystem.h>
 #include <adios2/helper/adiosType.h>
 
+#include <string>
+#include <tuple>
+#include <vector>
+
 #include "lsmio_plugin.tcc"
 
 using namespace adios2;
@@ -117,14 +121,17 @@ void LsmioPlugin::Init() {
 
     if (m_OpenMode == adios2::Mode::Read) {
         LOG(INFO) << "LsmioPlugin::Init: Opened for reading..." << std::endl;
-        std::string value;
-        bool success = _lm->get(_variableStoreKey, &value);
 
-        LOG(INFO) << "LsmioPlugin::Init: variableStoreKey: [" << value << "]" << std::endl;
-        std::stringstream sStream(value);
+        std::vector<std::tuple<std::string, std::string>> values;
+        bool success = _lm->metaGetAll(&values);
 
-        while (sStream.good()) {
+        LOG(INFO) << "LsmioPlugin::Init: variableStoreKey success: [" << success << "]" << std::endl;
+
+        for (const auto& [key, value] : values) {
             std::string name, typeStr, shapeStr, startStr, countStr;
+
+            std::stringstream sStream(value);
+
             std::getline(sStream, name, ';');
             std::getline(sStream, typeStr, ';');
             std::getline(sStream, shapeStr, ';');
@@ -220,6 +227,7 @@ void LsmioPlugin::Flush(const int transportIndex) {
 void LsmioPlugin::WriteVarsFromIO(const Mode launch) {
     bool isSync = (launch == Mode::Sync) ? true : false;
     std::string keyTypes;
+    bool success;
 
     LOG(INFO) << "LsmioPlugin::WriteVarsFromIO(): Begin..." << std::endl;
     const core::VarMap &variables = m_IO.GetVariables();
@@ -234,14 +242,13 @@ void LsmioPlugin::WriteVarsFromIO(const Mode launch) {
         if (!v) {                                                \
             return;                                              \
         }                                                        \
-        keyTypes += WriteVariableInfo(*v);                       \
+        keyTypes = WriteVariableInfo(*v);                        \
+        success = _lm->metaPut(v->m_Name, keyTypes, isSync);     \
     }
 
         ADIOS2_FOREACH_STDTYPE_1ARG(declare_template_instantiation)
 #undef declare_template_instantiation
     }
-
-    bool success = _lm->append(_variableStoreKey, keyTypes, isSync);
 }
 
 }  // namespace lsmio

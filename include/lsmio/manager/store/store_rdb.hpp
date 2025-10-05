@@ -67,6 +67,7 @@ class LSMIOStoreRDB : public LSMIOStore {
     /// get value given a key
     /// @return bool success
     bool get(const std::string key, std::string *value);
+    bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values);
 
     /// sync batching
     /// @return bool success
