@@ -120,7 +120,7 @@ class LSMIOConfig {
     /// @brief Default write buffer size.
     int writeBufferSize = 64 * 1024 * 1024;
     /// @brief Default write file size.
-    int writeFileSize = 8 * 1024 * 1024;
+    int writeFileSize = 8 * writeBufferSize;
 };
 
 /// Global configuration instance for LSMIO.
