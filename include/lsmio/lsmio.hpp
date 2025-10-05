@@ -118,7 +118,7 @@ class LSMIOConfig {
     /// @brief Default cache size.
     int cacheSize = 0;
     /// @brief Default write buffer size.
-    int writeBufferSize = 64 * 1024 * 1024;
+    int writeBufferSize = 128 * 1024 * 1024;
     /// @brief Default write file size.
     int writeFileSize = 8 * writeBufferSize;
 };
