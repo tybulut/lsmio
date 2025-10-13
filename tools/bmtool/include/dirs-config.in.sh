@@ -1,5 +1,5 @@
 #
-if [ "$HPC_ENV" = "viking2" && "$BM_SSD" = "on" ]; then
+if [ "$HPC_ENV" = "viking2" -a "$BM_SSD" = "on" ]; then
   lfs setstripe -S 64K -c 4 $DIRS_BM_C4_B64 -p scratch.flash
   lfs setstripe -S 64K -c 16 $DIRS_BM_c16_B64 -p scratch.flash
   lfs setstripe -S 1M -c 4 $DIRS_BM_C4_B1M -p scratch.flash
