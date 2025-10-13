@@ -244,47 +244,47 @@ int BMBase::beginMain(int argc, char **argv) {
     try {
         app.add_option("-o,--output-file", gConfigBM.fileName, "output file")->required();
         app.add_option("-d,--output-dir", gConfigBM.dirName, "output directory");
-        app.add_option("-v,--verbose", gConfigBM.verbose, "verbose mode (default: not-verbose)");
-        app.add_option("-g,--debug", gConfigBM.debug, "debug mode (default: no)");
-        app.add_option("-m,--mpi-barrier", gConfigBM.useMPIBarrier,
+        app.add_flag("-v,--verbose", gConfigBM.verbose, "verbose mode (default: not-verbose)");
+        app.add_flag("-g,--debug", gConfigBM.debug, "debug mode (default: no)");
+        app.add_flag("-m,--mpi-barrier", gConfigBM.useMPIBarrier,
                        "use mpi-barrier to start and stop the benchmark");
-        app.add_option("-c,--collective-io", gConfigBM.enableCollectiveIO,
+        app.add_flag("-c,--collective-io", gConfigBM.enableCollectiveIO,
                        "use collective-io while benchmarking");
         bool flag_mpi_io_world = false;
-        app.add_option("-w,--mpi-io-world", flag_mpi_io_world,
+        app.add_flag("-w,--mpi-io-world", flag_mpi_io_world,
                        "use MPI world in collective-io (default: host level grouping)");
 
         app.add_option("-i,--iterations", gConfigBM.iterations, "terations (default: 1)");
-        app.add_option("-l,--loop-all", gConfigBM.loopAll,
+        app.add_flag("-l,--loop-all", gConfigBM.loopAll,
                        "loop all options (default: only specified run)");
-        app.add_option("-e,--sync", lsmio::gConfigLSMIO.useSync, "use sync API (default: false)");
+        app.add_flag("-e,--sync", lsmio::gConfigLSMIO.useSync, "use sync API (default: false)");
         app.add_option("-k,--key-count", gConfigBM.keyCount, "number of keys (default: 1024)");
         app.add_option("-z,--value-size", gConfigBM.valueSize,
                        "size of the value for a key (default: 64K)");
         app.add_option("-s,--segment-count", gConfigBM.segmentCount,
                        "segment count (default: 1024)");
 
-        app.add_option("--lsmio-plugin", gConfigBM.useLSMIOPlugin,
+        app.add_flag("--lsmio-plugin", gConfigBM.useLSMIOPlugin,
                        "use lsmio plugin for adios benchmark (default: no plugin)");
-        app.add_option("--lsmio-bfilter", lsmio::gConfigLSMIO.useBloomFilter,
+        app.add_flag("--lsmio-bfilter", lsmio::gConfigLSMIO.useBloomFilter,
                        "use bloom filter (default: no bloom filter)");
-        app.add_option("--lsmio-wal", lsmio::gConfigLSMIO.enableWAL,
+        app.add_flag("--lsmio-wal", lsmio::gConfigLSMIO.enableWAL,
                        "use write-ahead log (default: no WAL)");
-        app.add_option("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
+        app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                        "use MMAP read/write (default: no MMAP)");
-        app.add_option("--lsmio-compress", lsmio::gConfigLSMIO.compression,
+        app.add_flag("--lsmio-compress", lsmio::gConfigLSMIO.compression,
                        "enable compression (default: no)");
         app.add_option("--lsmio-bs", lsmio::gConfigLSMIO.blockSize, "block size (default: 64K)");
         app.add_option("--lsmio-ts", lsmio::gConfigLSMIO.transferSize,
                        "transfer size (default: 64K)");
 
-        app.add_option("--ldb-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
-                       "[leveldb] disable batching and makes read available immediately after "
+        app.add_flag("--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
+                       "disable batching and makes read available immediately after "
                        "write (default: no)");
-        app.add_option("--ldb-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
-                       "[leveldb] deferred batch size (default: 512)");
-        app.add_option("--ldb-batch-bytes", lsmio::gConfigLSMIO.asyncBatchBytes,
-                       "[leveldb] deferred batch size (default: 32M)");
+        app.add_option("--lsmio-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
+                       "batch size (default: 512)");
+        app.add_option("--lsmio-batch-bytes", lsmio::gConfigLSMIO.asyncBatchBytes,
+                       "deferred batch size (default: 32M)");
 
         app.add_option("--lsmio-cache", lsmio::gConfigLSMIO.cacheSize,
                        "LRU cache size (default: 0)");
