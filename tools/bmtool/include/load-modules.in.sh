@@ -34,6 +34,7 @@ Clang/16.0.6-GCCcore-12.3.0
 CMake/3.26.3-GCCcore-12.3.0
 Automake/1.16.5-GCCcore-12.3.0
 Autoconf/2.71-GCCcore-12.3.0
+Autotools/20220317-GCCcore-12.3.0
 libtool/2.4.7-GCCcore-12.3.0
 OpenMPI/4.1.5-GCC-12.3.0
 zlib/1.2.13-GCCcore-12.3.0
