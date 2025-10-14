@@ -5,6 +5,7 @@ cd $HOME/src/packages/12-ior
 
 git clone https://github.com/hpc/ior.git
 cd ior
+git checkout 3.3
 
 ./bootstrap
 ./configure \
