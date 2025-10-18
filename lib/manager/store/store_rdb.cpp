@@ -35,6 +35,7 @@
 #include <rocksdb/utilities/options_type.h>
 #include <rocksdb/write_batch.h>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <iostream>
@@ -78,6 +79,12 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     _options.max_write_batch_group_size_bytes = gConfigLSMIO.asyncBatchBytes;
 
     _options.compaction_style = rocksdb::kCompactionStyleNone;
+    _options.level0_file_num_compaction_trigger = 1024;  // >> default (4)
+    /* TODO(tybulut): Further tunables:
+     * _options.min_write_buffer_number_to_merge = 1;
+     * _options.max_background_jobs = std::clamp(gConfigLSMIO.writeBufferNumber, 2, 8);
+     */
+
     _options.disable_auto_compactions = true;        // false
     _options.info_log_level = rocksdb::ERROR_LEVEL;  // DEBUG_LEVEL
     _options.skip_stats_update_on_db_open = false;
