@@ -29,6 +29,7 @@
  */
 
 #include "bm_base.hpp"
+#include <lsmio/lsmio.hpp>
 
 #include <fmt/format.h>
 #include <signal.h>
@@ -226,6 +227,7 @@ std::string genOptionsToString() {
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
               << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP
+              << "\n useLevelDB: " << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
               << "\n compression: " << lsmio::gConfigLSMIO.compression
               << "\n blockSize: " << lsmio::gConfigLSMIO.blockSize
               << "\n transferSize: " << lsmio::gConfigLSMIO.transferSize
@@ -272,6 +274,10 @@ int BMBase::beginMain(int argc, char **argv) {
                        "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                        "use MMAP read/write (default: no MMAP)");
+
+        bool flag_use_leveldb = false;
+        app.add_flag("--lsmio-use-leveldb", flag_use_leveldb,
+                       "use LevelDB instead (default: use RocksDB)");
         app.add_flag("--lsmio-compress", lsmio::gConfigLSMIO.compression,
                        "enable compression (default: no)");
         app.add_option("--lsmio-bs", lsmio::gConfigLSMIO.blockSize, "block size (default: 64K)");
@@ -297,6 +303,8 @@ int BMBase::beginMain(int argc, char **argv) {
 
         lsmio::gConfigLSMIO.mpiAggType =
             flag_mpi_io_world ? lsmio::MPIAggType::Entire : lsmio::MPIAggType::Shared;
+        lsmio::gConfigLSMIO.storageType = 
+            flag_use_leveldb ? lsmio::StorageType::LevelDB : lsmio::StorageType::RocksDB;
 
         if (gConfigBM.fileName.empty()) {
             throw std::runtime_error("ERROR: Output file is required.");

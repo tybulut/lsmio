@@ -213,9 +213,7 @@ ADIOS2_FOREACH_STDTYPE_1ARG(declare)
 
 void LsmioPlugin::PerformPuts() {
     LOG(INFO) << "LsmioPlugin::PerformPuts(): " << std::endl;
-    // WriteVarsFromIO(adios2::Mode::Sync);
     WriteVarsFromIO(adios2::Mode::Deferred);
-    _lm->writeBarrier();
 }
 
 /*
