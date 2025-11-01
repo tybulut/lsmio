@@ -78,15 +78,22 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     _options.writable_file_max_buffer_size = gConfigLSMIO.writeFileSize;
     _options.max_write_batch_group_size_bytes = gConfigLSMIO.asyncBatchBytes;
 
+    _options.target_file_size_base = gConfigLSMIO.writeFileSize;
+    _options.max_bytes_for_level_base = gConfigLSMIO.writeFileSize;
+
+    // level0_stop_writes_trigger(36) >= level0_slowdown_writes_trigger(20) >= level0_file_num_compaction_trigger(1024)
     _options.compaction_style = rocksdb::kCompactionStyleNone;
-    _options.level0_file_num_compaction_trigger = 1024;  // >> default (4)
+    _options.level0_file_num_compaction_trigger = 1024;
+    //_options.level0_slowdown_writes_trigger = 256;
+    //_options.level0_stop_writes_trigger = 128;
+
     /* TODO(tybulut): Further tunables:
      * _options.min_write_buffer_number_to_merge = 1;
      * _options.max_background_jobs = std::clamp(gConfigLSMIO.writeBufferNumber, 2, 8);
      */
 
     _options.disable_auto_compactions = true;        // false
-    _options.info_log_level = rocksdb::ERROR_LEVEL;  // DEBUG_LEVEL
+    _options.info_log_level = rocksdb::INFO_LEVEL;  // DEBUG_LEVEL
     _options.skip_stats_update_on_db_open = false;
 
     _options.allow_mmap_writes = gConfigLSMIO.enableMMAP;

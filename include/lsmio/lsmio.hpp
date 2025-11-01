@@ -111,16 +111,16 @@ class LSMIOConfig {
     /// @brief Flag for batch flushing.
     bool alwaysFlush = false;  // BATCH
     /// @brief Size of asynchronous batches.
-    int asyncBatchSize = 512;
+    int asyncBatchSize = 1;
     /// @brief Number of bytes in asynchronous batches.
-    int asyncBatchBytes = 32 * 1024 * 1024;
+    int asyncBatchBytes = 128 * 1024 * 1024;
 
     /// @brief Default cache size.
     int cacheSize = 0;
     /// @brief Default write buffer size.
-    int writeBufferSize = 32 * 1024 * 1024;
+    int writeBufferSize = 128 * 1024 * 1024;
     /// @brief Default write file size.
-    int writeFileSize = 8 * writeBufferSize;
+    int writeFileSize = writeBufferSize;
 };
 
 /// Global configuration instance for LSMIO.
