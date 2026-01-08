@@ -37,17 +37,21 @@ include(CMakeParseArguments)
 
 function(add_lsmio_base_test x)
   message("Adding LSMIO base testing for ${x}.cpp")
+
   add_executable(${x} "${x}.cpp")
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main
     PRIVATE lsmio::base
   )
-  gtest_add_tests(TARGET ${x})
+
+  gtest_add_tests(TARGET ${x} TEST_LIST tests)
+  set_tests_properties(${tests} PROPERTIES TIMEOUT 10)
 endfunction()
 
 function(add_lsmio_store_test x)
   message("Adding LSMIO store testing for ${x}.cpp")
+
   add_executable(${x} "${x}.cpp")
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
@@ -55,11 +59,14 @@ function(add_lsmio_store_test x)
     PRIVATE lsmio::store
     PRIVATE lsmio::posix
   )
-  gtest_add_tests(TARGET ${x})
+
+  gtest_add_tests(TARGET ${x} TEST_LIST tests)
+  set_tests_properties(${tests} PROPERTIES TIMEOUT 10)
 endfunction()
 
 function(add_lsmio_mpi_test x)
   message("Adding LSMIO MPI testing for ${x}.cpp")
+
   add_executable(${x}
     "${x}.cpp"
     test_mpi_utils.cpp
@@ -70,9 +77,11 @@ function(add_lsmio_mpi_test x)
     PRIVATE lsmio_base
     PRIVATE lsmio::store
   )
+
   gtest_discover_tests(
     ${x}
     CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+    PROPERTIES TIMEOUT 10
   )
 endfunction()
 
@@ -101,6 +110,7 @@ gtest_discover_tests(
   test_adios
   PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
+set_tests_properties(${test_adios} PROPERTIES TIMEOUT 10)
 
 # GTest: MPI: Adios and Plugin
 add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
@@ -112,5 +122,8 @@ target_link_libraries(test_mpi_adios
 gtest_discover_tests(
   test_mpi_adios
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
-  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+  PROPERTIES
+    ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+    TIMEOUT 10
 )
+
