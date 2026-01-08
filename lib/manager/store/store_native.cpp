@@ -81,7 +81,7 @@ LSMIOStoreNative::~LSMIOStoreNative() {
     }
 
     // Final flush of any remaining in-memory data.
-    if (_active_memtable_size > 0) {
+    if (!_active_memtable->empty()) {
         _immutable_memtables.push_back(std::move(_active_memtable));
     }
     while (!_immutable_memtables.empty()) {
@@ -269,6 +269,7 @@ bool LSMIOStoreNative::ReadValueAt(const std::string& sstable_path, uint64_t off
     if (sst_file.fail()) return false;
 
     out_value = val_from_file;
+    sst_file.close();
     return true;
 }
 
@@ -331,6 +332,7 @@ void LSMIOStoreNative::RecoverStateFromDisk() {
 
                 new_index.offsets.emplace_back(key, current_offset);
             }
+            sst_file.close();
         }
 
         // --- Batch Indexing Optimization (Recovery) ---
