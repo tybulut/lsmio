@@ -76,7 +76,9 @@ class LSMIOStoreNative : public LSMIOStore {
     std::thread _flush_thread;
     std::condition_variable _flush_cv;
     std::condition_variable _backpressure_cv;
+    std::condition_variable _barrier_cv;
     std::atomic<bool> _shutting_down{false};
+    std::atomic<bool> _flush_in_progress{false};
 
     void FlushWorkLoop();
     void FlushMemtableToL0(std::unique_ptr<Memtable> memtable);

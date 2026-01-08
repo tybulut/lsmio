@@ -109,6 +109,7 @@ void LSMIOStoreNative::FlushWorkLoop() {
                 // Get the oldest immutable memtable from the front of the queue
                 memtable_to_flush = std::move(_immutable_memtables.front());
                 _immutable_memtables.pop_front();
+                _flush_in_progress = true;
             }
         }  // Release lock
 
@@ -124,6 +125,12 @@ void LSMIOStoreNative::FlushWorkLoop() {
             } catch (...) {
                 std::cerr << "[NATIVE] UNKNOWN ERROR in FlushWorkLoop" << std::endl;
             }
+
+            {
+                std::unique_lock<std::mutex> lock(_state_mutex);
+                _flush_in_progress = false;
+            }
+            _barrier_cv.notify_all();
         }
     }
 }
@@ -574,7 +581,7 @@ bool LSMIOStoreNative::writeBarrier() {
         _flush_cv.notify_one();
     }
 
-    _backpressure_cv.wait(lock, [this] { return _immutable_memtables.empty(); });
+    _barrier_cv.wait(lock, [this] { return _immutable_memtables.empty() && !_flush_in_progress; });
 
     return true;
 }
