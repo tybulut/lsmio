@@ -136,9 +136,17 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
 }
 
 LSMIOStoreRDB::~LSMIOStoreRDB() {
-    LOG(INFO) << "LSMIOStoreRDB::~LSMIOStoreRDB(): cleaning up." << std::endl;
-    writeBarrier();
-    delete _db;
+    close();
+}
+
+void LSMIOStoreRDB::close() {
+    LOG(INFO) << "LSMIOStoreRDB::close(): cleaning up." << std::endl;
+    if (_db) {
+        writeBarrier();
+        _db->Close();
+        delete _db;
+        _db = nullptr;
+    }
 }
 
 bool LSMIOStoreRDB::get(const std::string key, std::string* value) {

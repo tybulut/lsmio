@@ -2,7 +2,7 @@
 
 # Default values
 ITER=5
-BM_DIR="/media/500GB/benchmark"
+BM_DIR="$HOME/benchmark"
 RUN_ADIOS=false
 RUN_PLUGIN=false
 RUN_ROCKSDB=false
@@ -55,6 +55,8 @@ if [ "$TARGETS_SELECTED" = false ]; then
     echo "Usage: $0 [adios] [plugin] [rocksdb] [leveldb] [native] [-i iterations]"
     exit 1
 fi
+
+mkdir -p "${BM_DIR}"
 
 # Change to the build directory relative to the script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

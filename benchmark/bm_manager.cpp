@@ -57,6 +57,7 @@ class BMManager : public BMBase {
 
     virtual bool doWriteFinalize() {
         _lm->writeBarrier();
+        _lm->close();
         return true;
     }
 

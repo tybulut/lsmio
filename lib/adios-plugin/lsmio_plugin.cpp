@@ -185,6 +185,7 @@ void LsmioPlugin::EndStep() {
 void LsmioPlugin::DoClose(const int transportIndex) {
     LOG(INFO) << "LsmioPlugin::DoClose(): " << std::endl;
     PerformPuts();
+    if (_lm) _lm->close();
 }
 
 #define declare(T)                                                                  \

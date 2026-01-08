@@ -71,6 +71,9 @@ class LSMIOStore {
     LSMIOStore(const std::string& dbPath, const bool overWrite = false);
     virtual ~LSMIOStore();
 
+    /// close the store
+    virtual void close() = 0;
+
     /// get value given a key
     /// @return bool success
     virtual bool get(const std::string key, std::string* value) = 0;

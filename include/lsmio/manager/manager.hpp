@@ -145,6 +145,11 @@ class LSMIOManager {
      */
     ~LSMIOManager();
 
+    /**
+     * @brief Close the manager and its underlying store.
+     */
+    void close();
+
     /// callback for collective I/O
     void callbackForCollectiveIO(int rank, const std::string &command, const std::string &key,
                                  std::string *gValue, std::string pValue);

@@ -74,12 +74,22 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
 }
 
 LSMIOStoreNative::~LSMIOStoreNative() {
-    _shutting_down = true;
+    close();
+}
+
+void LSMIOStoreNative::close() {
+    // Prevent double closing
+    bool expected = false;
+    if (!_shutting_down.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
     _flush_cv.notify_one();  // Wake up the flush thread
     if (_flush_thread.joinable()) {
         _flush_thread.join();
     }
 
+    std::unique_lock<std::mutex> lock(_state_mutex);
     // Final flush of any remaining in-memory data.
     if (!_active_memtable->empty()) {
         _immutable_memtables.push_back(std::move(_active_memtable));
@@ -87,7 +97,12 @@ LSMIOStoreNative::~LSMIOStoreNative() {
     while (!_immutable_memtables.empty()) {
         auto memtable_to_flush = std::move(_immutable_memtables.front());
         _immutable_memtables.pop_front();
+        // Release lock during I/O if possible? 
+        // For simplicity and safety during shutdown, we can keep it or release it.
+        // FlushMemtableToL0 acquires the lock internally, so we MUST release it.
+        lock.unlock();
         FlushMemtableToL0(std::move(memtable_to_flush));
+        lock.lock();
     }
 }
 

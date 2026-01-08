@@ -183,16 +183,27 @@ void LSMIOManager::_init() {
 }
 
 LSMIOManager::~LSMIOManager() {
-    LOG(INFO) << "LSMIOManager::~LSMIOManager(): rank: " << _aggRank << std::endl;
+    close();
+}
+
+void LSMIOManager::close() {
+    LOG(INFO) << "LSMIOManager::close(): rank: " << _aggRank << std::endl;
     // Delete MPI first because its cleanup might require RDB being open
-    if (_isServeLocal()) {
-        _lcMPI->stopCollectiveIOServer();
-    } else if (_isOpenRemote()) {
-        _lcMPI->stopCollectiveIOClient(AGGREGATION_RANK);
+    if (_lcMPI) {
+        if (_isServeLocal()) {
+            _lcMPI->stopCollectiveIOServer();
+        } else if (_isOpenRemote()) {
+            _lcMPI->stopCollectiveIOClient(AGGREGATION_RANK);
+        }
+        delete _lcMPI;
+        _lcMPI = nullptr;
     }
 
-    delete _lcMPI;
-    delete _lcStore;
+    if (_lcStore) {
+        _lcStore->close();
+        delete _lcStore;
+        _lcStore = nullptr;
+    }
 }
 
 bool LSMIOManager::_isOpenLocal() const { return (!_isShared || _aggRank == AGGREGATION_RANK); }

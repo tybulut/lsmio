@@ -50,29 +50,31 @@ class LSMIOStoreRDB : public LSMIOStore {
 
     /// start / stop batching
     /// @return bool success
-    bool startBatch();
-    bool stopBatch();
+    bool startBatch() override;
+    bool stopBatch() override;
 
     bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush);
+                        bool flush) override;
 
     /// cleanup the ENTIRE store
     /// @return bool success
-    virtual bool dbCleanup();
+    bool dbCleanup() override;
 
   public:
     LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB();
+    ~LSMIOStoreRDB() override;
+
+    void close() override;
 
     /// get value given a key
     /// @return bool success
-    bool get(const std::string key, std::string *value);
-    bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values);
+    bool get(const std::string key, std::string *value) override;
+    bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) override;
 
     /// sync batching
     /// @return bool success
-    bool readBarrier();
-    bool writeBarrier();
+    bool readBarrier() override;
+    bool writeBarrier() override;
 };
 
 }  // namespace lsmio

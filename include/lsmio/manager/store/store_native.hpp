@@ -97,6 +97,8 @@ class LSMIOStoreNative : public LSMIOStore {
     LSMIOStoreNative(const std::string& dbPath, const bool overWrite = false);
     ~LSMIOStoreNative() override;
 
+    void close() override;
+
     bool get(const std::string key, std::string* value) override;
     bool getPrefix(const std::string key,
                    std::vector<std::tuple<std::string, std::string>>* values) override;

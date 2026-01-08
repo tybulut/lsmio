@@ -52,10 +52,19 @@ class BMNative : public BMBase {
 
     virtual bool doWriteFinalize() {
         _lc->writeBarrier();
+        _lc->close();
         return true;
     }
 
-    virtual int readPrepare(bool opt) { return 0; }
+    virtual int readPrepare(bool opt) {
+        if (_lc) {
+            delete _lc;
+            _lc = nullptr;
+        }
+        _lc = new lsmio::LSMIOStoreNative(
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+        return 0;
+    }
 
     virtual int readCleanup() {
         delete _lc;
