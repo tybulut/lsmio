@@ -2,7 +2,7 @@
 
 # Default values
 ITER=5
-BM_DIR="/media/400GB/benchmark"
+BM_DIR="/media/500GB/benchmark"
 RUN_ADIOS=false
 RUN_PLUGIN=false
 RUN_ROCKSDB=false
