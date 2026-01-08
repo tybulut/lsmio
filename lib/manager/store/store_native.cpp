@@ -200,9 +200,7 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable) {
         sst_file.write(serialization_buffer.data(), serialization_buffer.size());
     }
 
-    if (lsmio::gConfigLSMIO.useSync) {
-        sst_file.flush();
-    }
+    sst_file.flush();
     sst_file.close();
 
     // --- Batch Indexing Optimization ---
@@ -574,7 +572,7 @@ bool LSMIOStoreNative::readBarrier() {
 bool LSMIOStoreNative::writeBarrier() {
     std::unique_lock<std::mutex> lock(_state_mutex);
 
-    if (_active_memtable_size > 0) {
+    if (!_active_memtable->empty()) {
         _immutable_memtables.push_back(std::move(_active_memtable));
         _active_memtable = std::make_unique<Memtable>();
         _active_memtable_size = 0;
