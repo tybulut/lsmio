@@ -1,0 +1,165 @@
+/*
+ * Copyright 2023 Serdar Bulut
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * 3. Neither the name of the copyright holder nor the names of its
+ *    contributors may be used to endorse or promote products derived from
+ *    this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <gtest/gtest.h>
+
+#include <iostream>
+#include <lsmio/manager/manager.hpp>
+#include <lsmio/manager/store/store_native.hpp> // Use Native store
+
+std::string TEST_DIR_NATIVE = ""; // Changed from TEST_DIR_RDB
+
+TEST(lsmioNative, Flush) { // Changed from lsmioRocksDB
+    bool success = true;
+    std::string value;
+
+    std::string key1 = "serdar";
+    std::string key2 = "bulut";
+    std::string value1 = "alpino";
+    std::string value2 = "teomos";
+
+    std::string dbName = "test-native-store-flush.db"; // Changed db name
+    std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
+
+    lsmio::LSMIOStoreNative lc(dbPath, true); // Use LSMIOStoreNative and set overWrite to true for clean test env
+    LOG(INFO) << "Created a test database called: " << dbPath << std::endl;
+
+    success = lc.put(key1, value1);
+    EXPECT_EQ(success, true);
+
+    success = lc.get(key1, &value);
+    EXPECT_EQ(success, true);
+
+    LOG(INFO) << "Test value for key1: " << value << std::endl;
+    EXPECT_EQ(value, value1);
+
+    success = lc.put(key2, value2);
+    EXPECT_EQ(success, true);
+
+    success = lc.get(key2, &value);
+    EXPECT_EQ(success, true);
+
+    LOG(INFO) << "Test value for key2: " << value << std::endl;
+    EXPECT_EQ(value, value2);
+
+    success = lc.metaPut(key1, value2);
+    EXPECT_EQ(success, true);
+
+    success = lc.metaGet(key1, &value);
+    EXPECT_EQ(success, true);
+
+    LOG(INFO) << "Test value for meta-key1: " << value << std::endl;
+    EXPECT_EQ(value, value2);
+
+    std::vector<std::tuple<std::string, std::string>> values;
+    success = lc.metaGetAll(&values);
+    EXPECT_EQ(values.size(), 1);
+    for (const auto& [mKey, mValue] : values) {
+        EXPECT_EQ(mValue, value2);
+    }
+
+    success = lc.del(key1, false);
+    EXPECT_EQ(success, true);
+
+    success = lc.del(key2, false);
+    EXPECT_EQ(success, true);
+
+    // Give some time for background flushes to complete for delete operations
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
+TEST(lsmioNative, Deferred) { // Changed from lsmioRocksDB
+    bool success = true;
+    std::string value;
+
+    std::string key1 = "serdar";
+    std::string key2 = "bulut";
+    std::string value1 = "alpino";
+    std::string value2 = "teomos";
+
+    std::string dbName = "test-native-store-deferred.db"; // Changed db name
+    std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
+
+    lsmio::LSMIOStoreNative lc(dbPath, true); // Use LSMIOStoreNative and set overWrite to true
+    LOG(INFO) << "Created a test database called: " << dbPath << std::endl;
+
+    success = lc.put(key1, value1, false);
+    EXPECT_EQ(success, true);
+
+    success = lc.put(key2, value2, false);
+    EXPECT_EQ(success, true);
+
+    // Values are in memtable, should be directly retrievable
+    success = lc.get(key1, &value);
+    EXPECT_EQ(success, true);
+
+    LOG(INFO) << "Test value for key1: " << value << std::endl;
+    EXPECT_EQ(value, value1);
+
+    success = lc.get(key2, &value);
+    EXPECT_EQ(success, true);
+
+    LOG(INFO) << "Test value for key2: " << value << std::endl;
+    EXPECT_EQ(value, value2);
+
+    success = lc.metaPut(key1, value2, false);
+    EXPECT_EQ(success, true);
+
+    success = lc.metaGet(key1, &value);
+    EXPECT_EQ(success, true);
+
+    LOG(INFO) << "Test value for meta-key1: " << value << std::endl;
+    EXPECT_EQ(value, value2);
+
+    std::vector<std::tuple<std::string, std::string>> values;
+    success = lc.metaGetAll(&values);
+    EXPECT_EQ(values.size(), 1);
+    for (const auto& [mKey, mValue] : values) {
+        EXPECT_EQ(mValue, value2);
+    }
+
+    success = lc.del(key1);
+    EXPECT_EQ(success, true);
+
+    success = lc.del(key2);
+    EXPECT_EQ(success, true);
+
+    success = lc.writeBarrier();
+    EXPECT_EQ(success, true);
+
+    // Give some time for background flushes to complete for delete operations
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
+int main(int argc, char **argv) {
+    lsmio::initLSMIODebug(argv[0]);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

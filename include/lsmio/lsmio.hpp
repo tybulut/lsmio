@@ -92,7 +92,7 @@ class LSMIOConfig {
     /// @brief Flag for synchronous operations.
     bool useSync = false;
     /// @brief Flag to enable memory-mapped files.
-    bool enableMMAP = false;
+    bool enableMMAP = true;
     /// @brief Flag to enable data compression.
     bool compression = false;
 

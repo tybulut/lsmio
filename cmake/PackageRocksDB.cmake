@@ -17,7 +17,10 @@ if (NOT gflags_FOUND AND NOT TARGET gflags)
 endif()
 
 # RocksDB
-find_package(RocksDB 9 QUIET)
+find_package(RocksDB 10 QUIET)
+if (NOT RocksDB_FOUND)
+  find_package(RocksDB 9 QUIET)
+endif()
 if (NOT RocksDB_FOUND)
   find_package(RocksDB 8 QUIET)
 endif()
@@ -26,6 +29,7 @@ if (NOT RocksDB_FOUND)
 endif()
 
 if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
+  message(STATUS "RocksDB: Could not find rocksdb version 8 <-> 10.")
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
@@ -66,5 +70,7 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
     add_library(RocksDB::rocksdb-shared ALIAS rocksdb)
   endblock()
+else()
+  message(STATUS "RocksDB: Found rocksdb version ${RocksDB_VERSION}.")
 endif()
 
