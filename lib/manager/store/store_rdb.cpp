@@ -91,6 +91,7 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
 
     _options.allow_mmap_writes = gConfigLSMIO.enableMMAP;
     _options.allow_mmap_reads = gConfigLSMIO.enableMMAP;
+    _options.allow_fallocate = gConfigLSMIO.preAllocate;
     // _options.unordered_write = true;  // false
 
     _options.max_successive_merges = 4096;
