@@ -215,7 +215,6 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable) {
         sst_file.write(serialization_buffer.data(), serialization_buffer.size());
     }
 
-    sst_file.flush();
     sst_file.close();
 
     // --- Batch Indexing Optimization ---
