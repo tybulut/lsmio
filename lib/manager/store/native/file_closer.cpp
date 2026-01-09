@@ -29,7 +29,7 @@
  */
 
 #include <iostream>
-#include <lsmio/manager/store/file_closer.hpp>
+#include <lsmio/manager/store/native/file_closer.hpp>
 
 namespace lsmio {
 

@@ -32,7 +32,7 @@
 
 #include <iostream>
 #include <lsmio/manager/manager.hpp>
-#include <lsmio/manager/store/store_native.hpp> // Use Native store
+#include <lsmio/manager/store/native/store_native.hpp>
 
 std::string TEST_DIR_NATIVE = ""; // Changed from TEST_DIR_RDB
 

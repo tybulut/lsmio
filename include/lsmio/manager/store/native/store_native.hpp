@@ -43,7 +43,7 @@
 
 #include "file_closer.hpp"
 #include "file_pool.hpp"
-#include "store.hpp"
+#include <lsmio/manager/store/store.hpp>
 
 namespace lsmio {
 

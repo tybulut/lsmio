@@ -51,9 +51,9 @@ set(LIB_STORE_CPP_FILES
   ${LIB_SOURCE_DIR}/manager/store/store.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_ldb.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_rdb.cpp
-  ${LIB_SOURCE_DIR}/manager/store/store_native.cpp
-  ${LIB_SOURCE_DIR}/manager/store/file_pool.cpp
-  ${LIB_SOURCE_DIR}/manager/store/file_closer.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/store_native.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/file_pool.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/file_closer.cpp
 )
 set(LIB_ADIOS_CPP_FILES
   ${LIB_STORE_CPP_FILES}

@@ -31,7 +31,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
-#include <lsmio/manager/store/file_pool.hpp>
+#include <lsmio/manager/store/native/file_pool.hpp>
 #include <sstream>
 #include <cstring>
 

@@ -37,7 +37,7 @@
 #include <fstream>
 #include <iomanip>  // For std::setw, std::setfill
 #include <iostream>
-#include <lsmio/manager/store/store_native.hpp>
+#include <lsmio/manager/store/native/store_native.hpp>
 #include <map>
 #include <mutex>
 #include <set>      // For getPrefix tracking

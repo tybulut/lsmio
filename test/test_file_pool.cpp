@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <lsmio/manager/store/file_pool.hpp>
+#include <lsmio/manager/store/native/file_pool.hpp>
 #include <filesystem>
 #include <fstream>
 #include <thread>

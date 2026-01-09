@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <lsmio/manager/store/file_closer.hpp>
+#include <lsmio/manager/store/native/file_closer.hpp>
 #include <fstream>
 #include <thread>
 #include <filesystem>

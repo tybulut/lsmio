@@ -29,7 +29,7 @@
  */
 
 #include <iostream>
-#include <lsmio/manager/store/store_native.hpp>
+#include <lsmio/manager/store/native/store_native.hpp>
 
 #include "bm_base.hpp"
 

@@ -19,7 +19,7 @@ set(INC_STORE_HPP_FILES
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store_ldb.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store_rdb.hpp
-  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store_native.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/store_native.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/client/client.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/client/client_mpi.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/client/client_adios.hpp
