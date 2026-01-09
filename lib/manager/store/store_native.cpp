@@ -68,6 +68,16 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     // Recover on-disk state
     RecoverStateFromDisk();
 
+    size_t pre_alloc_bytes = 0;
+    if (gConfigLSMIO.preAllocate) {
+        pre_alloc_bytes = _memtable_max_size_bytes;
+    }
+
+    // Initialize FilePool
+    _file_pool = std::make_unique<FilePool>(_dbPath, "L0-", ".sst", 5, _next_sstable_id.load(),
+                                            pre_alloc_bytes);
+    _file_closer = std::make_unique<FileCloser>(5);
+
     // Start the background flush thread
     _shutting_down = false;
     _flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
@@ -166,25 +176,16 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable) {
     );
     */
 
-    // 1. Generate a new, unique SSTable filename
-    std::string sstable_path;
-    uint64_t sstable_id = _next_sstable_id.fetch_add(1);
+    // 1. Get file from pool
+    auto [sstable_path, sst_file_ptr] = _file_pool->acquire();
+    std::ofstream& sst_file = *sst_file_ptr;
 
-    {
-        // Format ID with padding (e.g., L0-000001.sst)
-        std::ostringstream oss;
-        oss << "L0-" << std::setw(6) << std::setfill('0') << sstable_id << ".sst";
-        sstable_path = (std::filesystem::path(_dbPath) / oss.str()).string();
-    }
-
-    // 2. Write file and build index
-    std::ofstream sst_file;
     // Reuse the class-level buffer for the file stream
+    // Note: pubsetbuf after open works on many implementations if no I/O has occurred yet
     sst_file.rdbuf()->pubsetbuf(_flush_buffer.data(), _flush_buffer.size());
-    sst_file.open(sstable_path, std::ios::binary);
 
     if (!sst_file) {
-        std::cerr << "[Flush Thread] ERROR: Failed to open SSTable file: " << sstable_path
+        std::cerr << "[Flush Thread] ERROR: Failed to acquire SSTable file: " << sstable_path
                   << std::endl;
         return;
     }
@@ -215,8 +216,7 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable) {
         sst_file.write(serialization_buffer.data(), serialization_buffer.size());
     }
 
-    sst_file.flush();
-    sst_file.close();
+    _file_closer->scheduleClose(std::move(sst_file_ptr));
 
     // --- Batch Indexing Optimization ---
     // 1. Sort by Key ASC, then Offset DESC (so the latest update is first)

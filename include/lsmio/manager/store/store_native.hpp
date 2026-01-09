@@ -41,6 +41,8 @@
 #include <thread>
 #include <vector>
 
+#include "file_closer.hpp"
+#include "file_pool.hpp"
 #include "store.hpp"
 
 namespace lsmio {
@@ -70,6 +72,8 @@ class LSMIOStoreNative : public LSMIOStore {
     std::vector<L0Index> _l0_indices;  // Parallel to _l0_files
 
     std::atomic<uint64_t> _next_sstable_id{0};
+    std::unique_ptr<FilePool> _file_pool;
+    std::unique_ptr<FileCloser> _file_closer;
 
     std::mutex _state_mutex;
     std::vector<char> _flush_buffer;

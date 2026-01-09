@@ -92,6 +92,8 @@ add_lsmio_base_test(test_benchmark)
 add_lsmio_store_test(test_leveldb)
 add_lsmio_store_test(test_rocksdb)
 add_lsmio_store_test(test_native)
+add_lsmio_store_test(test_file_pool)
+add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
 add_lsmio_store_test(test_posix)
 

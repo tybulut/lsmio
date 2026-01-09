@@ -121,6 +121,8 @@ class LSMIOConfig {
     int writeBufferSize = 32 * 1024 * 1024;
     /// @brief Default write file size.
     int writeFileSize = 8 * writeBufferSize;
+    /// @brief Flag to enable file pre-allocation (uses writeBufferSize).
+    bool preAllocate = false;
 };
 
 /// Global configuration instance for LSMIO.
