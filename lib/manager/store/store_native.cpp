@@ -74,9 +74,9 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     }
 
     // Initialize FilePool
-    _file_pool = std::make_unique<FilePool>(_dbPath, "L0-", ".sst", 5, _next_sstable_id.load(),
-                                            pre_alloc_bytes);
-    _file_closer = std::make_unique<FileCloser>(5);
+    _file_pool = std::make_unique<FilePool>(_dbPath, "L0-", ".sst", gConfigLSMIO.filePoolSize,
+                                            _next_sstable_id.load(), pre_alloc_bytes);
+    _file_closer = std::make_unique<FileCloser>(gConfigLSMIO.filePoolSize);
 
     // Start the background flush thread
     _shutting_down = false;

@@ -237,7 +237,8 @@ std::string genOptionsToString() {
               << "\n\n cacheSize: " << lsmio::gConfigLSMIO.cacheSize
               << "\n writeBufferSize: " << lsmio::gConfigLSMIO.writeBufferSize
               << "\n writeFileSize: " << lsmio::gConfigLSMIO.writeFileSize
-              << "\n preAllocate: " << lsmio::gConfigLSMIO.preAllocate << "\n";
+              << "\n preAllocate: " << lsmio::gConfigLSMIO.preAllocate
+              << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize << "\n";
 
     return optStream.str();
 }
@@ -301,6 +302,8 @@ int BMBase::beginMain(int argc, char **argv) {
                        "first-level file size (default: 32M)");
         app.add_flag("--lsmio-prealloc", lsmio::gConfigLSMIO.preAllocate,
                        "enable file pre-allocation (uses write buffer size)");
+        app.add_option("--lsmio-pool", lsmio::gConfigLSMIO.filePoolSize,
+                       "number of pre-allocated files (default: 4)");
 
         app.parse(argc, argv);
 
