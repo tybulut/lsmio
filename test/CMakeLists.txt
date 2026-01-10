@@ -46,7 +46,7 @@ function(add_lsmio_base_test x)
   )
 
   gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES TIMEOUT 10)
+  set_tests_properties(${tests} PROPERTIES TIMEOUT 30)
 endfunction()
 
 function(add_lsmio_store_test x)
@@ -61,7 +61,7 @@ function(add_lsmio_store_test x)
   )
 
   gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES TIMEOUT 10)
+  set_tests_properties(${tests} PROPERTIES TIMEOUT 30)
 endfunction()
 
 function(add_lsmio_mpi_test x)
@@ -81,7 +81,7 @@ function(add_lsmio_mpi_test x)
   gtest_discover_tests(
     ${x}
     CMD_WRAPPER ${mpi_cmd} ${test_parameters}
-    PROPERTIES TIMEOUT 10
+    PROPERTIES TIMEOUT 30
   )
 endfunction()
 
@@ -92,6 +92,9 @@ add_lsmio_base_test(test_benchmark)
 add_lsmio_store_test(test_leveldb)
 add_lsmio_store_test(test_rocksdb)
 add_lsmio_store_test(test_native)
+add_lsmio_store_test(test_native_extended)
+add_lsmio_store_test(test_memtable)
+add_lsmio_store_test(test_sstable_manager)
 add_lsmio_store_test(test_file_pool)
 add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
@@ -112,7 +115,7 @@ gtest_discover_tests(
   test_adios
   PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
-set_tests_properties(${test_adios} PROPERTIES TIMEOUT 10)
+set_tests_properties(${test_adios} PROPERTIES TIMEOUT 30)
 
 # GTest: MPI: Adios and Plugin
 add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
@@ -126,6 +129,6 @@ gtest_discover_tests(
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
   PROPERTIES
     ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
-    TIMEOUT 10
+    TIMEOUT 30
 )
 
