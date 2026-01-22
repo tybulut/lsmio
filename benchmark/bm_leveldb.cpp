@@ -37,7 +37,9 @@ class BMLeveldb : public BMBase {
   protected:
     lsmio::LSMIOStoreLDB *_lc = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) { return _lc->get(key, value); }
+    virtual bool doRead(const std::string key, std::string *value) {
+        return _lc->get(key, value);
+    }
 
     virtual bool doWrite(const std::string key, const std::string value) {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
@@ -51,10 +53,19 @@ class BMLeveldb : public BMBase {
 
     virtual bool doWriteFinalize() {
         _lc->writeBarrier();
+        _lc->close();
         return true;
     }
 
-    virtual int readPrepare(bool opt) { return 0; }
+    virtual int readPrepare(bool opt) {
+        if (_lc) {
+            delete _lc;
+            _lc = nullptr;
+        }
+        _lc = new lsmio::LSMIOStoreLDB(
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+        return 0;
+    }
 
     virtual int readCleanup() {
         delete _lc;

@@ -45,6 +45,18 @@ install(TARGETS bm_rocksdb
   COMPONENT ${PROJECT_NAME}
 )
 
+# Benchmark: Native
+add_executable(bm_native ${BASE_SOURCE_FILES} bm_native.cpp)
+target_include_directories(bm_native PRIVATE ${LSMIO_INCLUDE_DIR})
+target_link_libraries(bm_native
+  PRIVATE lsmio::store
+  PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
+)
+install(TARGETS bm_native
+  DESTINATION bin
+  COMPONENT ${PROJECT_NAME}
+)
+
 # Benchmark: Manager
 add_executable(bm_manager ${BASE_SOURCE_FILES} bm_manager.cpp)
 target_include_directories(bm_manager PRIVATE ${LSMIO_INCLUDE_DIR})
@@ -63,7 +75,7 @@ target_include_directories(bm_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_adios
   PRIVATE lsmio_base
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
-    adios2::cxx11 adios2::cxx11_mpi
+    adios2::cxx adios2::cxx_mpi
     glog::glog
 )
 install(TARGETS bm_adios

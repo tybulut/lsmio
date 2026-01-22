@@ -69,12 +69,20 @@ void defaultLSMIOLogging();
 /**
  * Enum representing the types of MPI aggregation.
  */
-enum class MPIAggType { Shared, Entire, EntireSerial, Split };
+enum class MPIAggType {
+    Shared,
+    Entire,
+    EntireSerial,
+    Split
+};
 
 /**
  * Enum representing the storage types supported by LSMIO.
  */
-enum class StorageType { LevelDB, RocksDB };
+enum class StorageType {
+    LevelDB,
+    RocksDB
+};
 
 /**
  * Configuration class for LSMIO settings.
@@ -121,6 +129,10 @@ class LSMIOConfig {
     int writeBufferSize = 32 * 1024 * 1024;
     /// @brief Default write file size.
     int writeFileSize = 8 * writeBufferSize;
+    /// @brief Flag to enable file pre-allocation (uses writeBufferSize).
+    bool preAllocate = false;
+    /// @brief Number of files to keep pre-allocated in the pool.
+    int filePoolSize = 4;
 };
 
 /// Global configuration instance for LSMIO.

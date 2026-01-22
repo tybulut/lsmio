@@ -43,7 +43,9 @@ LSMIOClientAdios::LSMIOClientAdios(adios2::helper::Comm *comm) : LSMIOClient() {
               << " rank/size: " << _rank << "/" << _size << std::endl;
 }
 
-void LSMIOClientAdios::_barrier() { _comm->Barrier("LSMIOClientAdios::_barrier"); }
+void LSMIOClientAdios::_barrier() {
+    _comm->Barrier("LSMIOClientAdios::_barrier");
+}
 
 char **LSMIOClientAdios::_recvToBuffer(int *bufSizes) {
     const std::string hint = "LSMIOClientADIO::_recvToBuffer";

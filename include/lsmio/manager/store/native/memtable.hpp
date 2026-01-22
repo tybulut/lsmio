@@ -28,54 +28,48 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_STORE_RDB_HPP_
-#define _LSMIO_STORE_RDB_HPP_
+#ifndef _LSMIO_MEMTABLE_HPP_
+#define _LSMIO_MEMTABLE_HPP_
 
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-
+#include <map>
+#include <set>
 #include <string>
-
-#include "store.hpp"
+#include <vector>
 
 namespace lsmio {
 
-class LSMIOStoreRDB : public LSMIOStore {
-  private:
-    rocksdb::WriteOptions _wOptions;
-    rocksdb::ReadOptions _rOptions;
-    rocksdb::Options _options;
-    rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
+// Define the tombstone value constant to be shared
+const std::string MEMTABLE_TOMBSTONE = "__LSM_TOMBSTONE_v1__";
 
-    /// start / stop batching
-    /// @return bool success
-    bool startBatch() override;
-    bool stopBatch() override;
-
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush) override;
-
-    /// cleanup the ENTIRE store
-    /// @return bool success
-    bool dbCleanup() override;
-
+class Memtable {
   public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB() override;
+    Memtable();
+    ~Memtable() = default;
 
-    void close() override;
+    // Add a key-value pair. If value is MEMTABLE_TOMBSTONE, it represents a deletion.
+    void add(const std::string& key, const std::string& value);
 
-    /// get value given a key
-    /// @return bool success
-    bool get(const std::string key, std::string *value) override;
-    bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>> *values) override;
+    // Look up a key. Returns true if found (even if it's a tombstone).
+    // The value is populated if found.
+    bool get(const std::string& key, std::string& value) const;
 
-    /// sync batching
-    /// @return bool success
-    bool readBarrier() override;
-    bool writeBarrier() override;
+    // Scan for keys with a specific prefix.
+    // Results are added to the map. Tombstones are added to deleted_keys.
+    void scan(const std::string& prefix, std::map<std::string, std::string>& results,
+              std::set<std::string>& deleted_keys) const;
+
+    // Current estimated size in bytes
+    size_t sizeBytes() const;
+
+    bool empty() const;
+    size_t count() const;
+
+    // Access to underlying data for flushing
+    const std::vector<std::pair<std::string, std::string>>& getData() const;
+
+  private:
+    std::vector<std::pair<std::string, std::string>> _data;
+    size_t _size_bytes;
 };
 
 }  // namespace lsmio

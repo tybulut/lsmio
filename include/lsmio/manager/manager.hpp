@@ -145,6 +145,11 @@ class LSMIOManager {
      */
     ~LSMIOManager();
 
+    /**
+     * @brief Close the manager and its underlying store.
+     */
+    void close();
+
     /// callback for collective I/O
     void callbackForCollectiveIO(int rank, const std::string &command, const std::string &key,
                                  std::string *gValue, std::string pValue);
@@ -192,8 +197,9 @@ class LSMIOManager {
      * @param flush Whether to flush after appending.
      * @return Returns true if the operation is successful, false otherwise.
      */
-    bool metaGet(const std::string &key, std::string* value);
-    bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix = "");
+    bool metaGet(const std::string &key, std::string *value);
+    bool metaGetAll(std::vector<std::tuple<std::string, std::string>> *values,
+                    std::string inFix = "");
     bool metaPut(const std::string &key, const std::string &value, bool flush);
 
     /// read and write barrier for async operations

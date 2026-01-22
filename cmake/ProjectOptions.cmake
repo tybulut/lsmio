@@ -24,11 +24,13 @@ endfunction()
 macro(lsmio_setup_options)
   option(LSMIO_BUILD_BENCHMARKS "Build LSMIO benchmarks" ON)
   option(LSMIO_BUILD_TESTS "Compile LSMIO tests" ON)
+  option(LSMIO_ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
   if(NOT PROJECT_IS_TOP_LEVEL)
     mark_as_advanced(
       LSMIO_BUILD_BENCHMARKS
       LSMIO_BUILD_TESTS
+      LSMIO_ENABLE_COVERAGE
     )
   endif()
 
@@ -56,6 +58,7 @@ macro(lsmio_print_build_config)
   message("    Library Type: ${LIB_TYPE}")
   message("    Build LSMIO benchmarks: ${LSMIO_BUILD_BENCHMARKS}")
   message("    Compile LSMIO tests: ${LSMIO_BUILD_TESTS}")
+  message("    Enable coverage: ${LSMIO_ENABLE_COVERAGE}")
   message("  --")
   message("")
   message("")

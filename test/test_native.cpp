@@ -32,11 +32,11 @@
 
 #include <iostream>
 #include <lsmio/manager/manager.hpp>
-#include <lsmio/manager/store/store_rdb.hpp>
+#include <lsmio/manager/store/native/store_native.hpp>
 
-std::string TEST_DIR_RDB = "";
+std::string TEST_DIR_NATIVE = "";  // Changed from TEST_DIR_RDB
 
-TEST(lsmioRocksDB, Flush) {
+TEST(lsmioNative, Flush) {  // Changed from lsmioRocksDB
     bool success = true;
     std::string value;
 
@@ -45,10 +45,11 @@ TEST(lsmioRocksDB, Flush) {
     std::string value1 = "alpino";
     std::string value2 = "teomos";
 
-    std::string dbName = "test-rdb-store-flush.db";
-    std::string dbPath = TEST_DIR_RDB.empty() ? dbName : TEST_DIR_RDB + "/" + dbName;
+    std::string dbName = "test-native-store-flush.db";  // Changed db name
+    std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
 
-    lsmio::LSMIOStoreRDB lc(dbPath);
+    lsmio::LSMIOStoreNative lc(
+        dbPath, true);  // Use LSMIOStoreNative and set overWrite to true for clean test env
     LOG(INFO) << "Created a test database called: " << dbPath << std::endl;
 
     success = lc.put(key1, value1);
@@ -90,9 +91,12 @@ TEST(lsmioRocksDB, Flush) {
 
     success = lc.del(key2, false);
     EXPECT_EQ(success, true);
+
+    // Give some time for background flushes to complete for delete operations
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
-TEST(lsmioRocksDB, Deferred) {
+TEST(lsmioNative, Deferred) {  // Changed from lsmioRocksDB
     bool success = true;
     std::string value;
 
@@ -101,10 +105,10 @@ TEST(lsmioRocksDB, Deferred) {
     std::string value1 = "alpino";
     std::string value2 = "teomos";
 
-    std::string dbName = "test-rdb-store-deferred.db";
-    std::string dbPath = TEST_DIR_RDB.empty() ? dbName : TEST_DIR_RDB + "/" + dbName;
+    std::string dbName = "test-native-store-deferred.db";  // Changed db name
+    std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
 
-    lsmio::LSMIOStoreRDB lc(dbPath);
+    lsmio::LSMIOStoreNative lc(dbPath, true);  // Use LSMIOStoreNative and set overWrite to true
     LOG(INFO) << "Created a test database called: " << dbPath << std::endl;
 
     success = lc.put(key1, value1, false);
@@ -113,6 +117,7 @@ TEST(lsmioRocksDB, Deferred) {
     success = lc.put(key2, value2, false);
     EXPECT_EQ(success, true);
 
+    // Values are in memtable, should be directly retrievable
     success = lc.get(key1, &value);
     EXPECT_EQ(success, true);
 
@@ -149,6 +154,9 @@ TEST(lsmioRocksDB, Deferred) {
 
     success = lc.writeBarrier();
     EXPECT_EQ(success, true);
+
+    // Give some time for background flushes to complete for delete operations
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 int main(int argc, char** argv) {

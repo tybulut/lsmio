@@ -28,52 +28,67 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_STORE_RDB_HPP_
-#define _LSMIO_STORE_RDB_HPP_
+#ifndef _LSMIO_STORE_NATIVE_HPP_
+#define _LSMIO_STORE_NATIVE_HPP_
 
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <lsmio/manager/store/store.hpp>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
-#include "store.hpp"
+#include "file_closer.hpp"
+#include "file_pool.hpp"
+#include "memtable.hpp"
+#include "sstable_manager.hpp"
 
 namespace lsmio {
 
-class LSMIOStoreRDB : public LSMIOStore {
+class LSMIOStoreNative : public LSMIOStore {
   private:
-    rocksdb::WriteOptions _wOptions;
-    rocksdb::ReadOptions _rOptions;
-    rocksdb::Options _options;
-    rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
+    // LSMTree Logic
+    size_t _memtable_max_size_bytes;
+    size_t _max_immutable_memtables;
 
-    /// start / stop batching
-    /// @return bool success
+    std::unique_ptr<Memtable> _active_memtable;
+    std::deque<std::unique_ptr<Memtable>> _immutable_memtables;
+
+    std::unique_ptr<SSTableManager> _sstable_manager;
+
+    std::mutex _state_mutex;
+    std::vector<char> _flush_buffer;
+    std::thread _flush_thread;
+    std::condition_variable _flush_cv;
+    std::condition_variable _backpressure_cv;
+    std::condition_variable _barrier_cv;
+    std::atomic<bool> _shutting_down{false};
+    std::atomic<bool> _flush_in_progress{false};
+
+    void FlushWorkLoop();
+    void FlushMemtableToL0(std::unique_ptr<Memtable> memtable);
+
+    // LSMIOStore Overrides
     bool startBatch() override;
     bool stopBatch() override;
-
     bool _batchMutation(MutationType mType, const std::string key, const std::string value,
                         bool flush) override;
-
-    /// cleanup the ENTIRE store
-    /// @return bool success
     bool dbCleanup() override;
 
   public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB() override;
+    LSMIOStoreNative(const std::string& dbPath, const bool overWrite = false);
+    ~LSMIOStoreNative() override;
 
     void close() override;
 
-    /// get value given a key
-    /// @return bool success
-    bool get(const std::string key, std::string *value) override;
+    bool get(const std::string key, std::string* value) override;
     bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>> *values) override;
+                   std::vector<std::tuple<std::string, std::string>>* values) override;
 
-    /// sync batching
-    /// @return bool success
     bool readBarrier() override;
     bool writeBarrier() override;
 };

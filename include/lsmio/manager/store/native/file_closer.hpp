@@ -28,54 +28,35 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_STORE_RDB_HPP_
-#define _LSMIO_STORE_RDB_HPP_
+#ifndef _LSMIO_FILE_CLOSER_HPP_
+#define _LSMIO_FILE_CLOSER_HPP_
 
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-
-#include <string>
-
-#include "store.hpp"
+#include <atomic>
+#include <condition_variable>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace lsmio {
 
-class LSMIOStoreRDB : public LSMIOStore {
-  private:
-    rocksdb::WriteOptions _wOptions;
-    rocksdb::ReadOptions _rOptions;
-    rocksdb::Options _options;
-    rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
-
-    /// start / stop batching
-    /// @return bool success
-    bool startBatch() override;
-    bool stopBatch() override;
-
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush) override;
-
-    /// cleanup the ENTIRE store
-    /// @return bool success
-    bool dbCleanup() override;
-
+class FileCloser {
   public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB() override;
+    FileCloser(size_t batchSize);
+    ~FileCloser();
 
-    void close() override;
+    void scheduleClose(std::unique_ptr<std::ofstream> file);
 
-    /// get value given a key
-    /// @return bool success
-    bool get(const std::string key, std::string *value) override;
-    bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>> *values) override;
+  private:
+    size_t _batchSize;
+    std::vector<std::unique_ptr<std::ofstream>> _pending;
+    std::mutex _mutex;
+    std::thread _worker;
+    std::condition_variable _cv;
+    std::atomic<bool> _shutdown{false};
 
-    /// sync batching
-    /// @return bool success
-    bool readBarrier() override;
-    bool writeBarrier() override;
+    void workerLoop();
 };
 
 }  // namespace lsmio

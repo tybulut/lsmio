@@ -28,56 +28,57 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_STORE_RDB_HPP_
-#define _LSMIO_STORE_RDB_HPP_
-
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-
-#include <string>
-
-#include "store.hpp"
+#include <iostream>
+#include <lsmio/manager/store/native/file_closer.hpp>
 
 namespace lsmio {
 
-class LSMIOStoreRDB : public LSMIOStore {
-  private:
-    rocksdb::WriteOptions _wOptions;
-    rocksdb::ReadOptions _rOptions;
-    rocksdb::Options _options;
-    rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
+FileCloser::FileCloser(size_t batchSize) : _batchSize(batchSize) {
+    _worker = std::thread(&FileCloser::workerLoop, this);
+}
 
-    /// start / stop batching
-    /// @return bool success
-    bool startBatch() override;
-    bool stopBatch() override;
+FileCloser::~FileCloser() {
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _shutdown = true;
+    }
+    _cv.notify_one();
+    if (_worker.joinable()) {
+        _worker.join();
+    }
+    // Close remaining
+    for (auto& f : _pending) {
+        if (f && f->is_open()) f->close();
+    }
+}
 
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush) override;
+void FileCloser::scheduleClose(std::unique_ptr<std::ofstream> file) {
+    std::unique_lock<std::mutex> lock(_mutex);
+    _pending.push_back(std::move(file));
+    if (_pending.size() >= _batchSize || _shutdown) {
+        _cv.notify_one();
+    }
+}
 
-    /// cleanup the ENTIRE store
-    /// @return bool success
-    bool dbCleanup() override;
+void FileCloser::workerLoop() {
+    while (true) {
+        std::vector<std::unique_ptr<std::ofstream>> to_close;
 
-  public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB() override;
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+            _cv.wait(lock, [this] { return _pending.size() >= _batchSize || _shutdown; });
 
-    void close() override;
+            if (_shutdown && _pending.empty()) return;
 
-    /// get value given a key
-    /// @return bool success
-    bool get(const std::string key, std::string *value) override;
-    bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>> *values) override;
+            to_close.swap(_pending);
+        }
 
-    /// sync batching
-    /// @return bool success
-    bool readBarrier() override;
-    bool writeBarrier() override;
-};
+        for (auto& f : to_close) {
+            if (f && f->is_open()) {
+                f->close();
+            }
+        }
+    }
+}
 
 }  // namespace lsmio
-
-#endif

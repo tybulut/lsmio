@@ -37,17 +37,21 @@ include(CMakeParseArguments)
 
 function(add_lsmio_base_test x)
   message("Adding LSMIO base testing for ${x}.cpp")
+
   add_executable(${x} "${x}.cpp")
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main
     PRIVATE lsmio::base
   )
-  gtest_add_tests(TARGET ${x})
+
+  gtest_add_tests(TARGET ${x} TEST_LIST tests)
+  set_tests_properties(${tests} PROPERTIES TIMEOUT 30)
 endfunction()
 
 function(add_lsmio_store_test x)
   message("Adding LSMIO store testing for ${x}.cpp")
+
   add_executable(${x} "${x}.cpp")
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
@@ -55,24 +59,29 @@ function(add_lsmio_store_test x)
     PRIVATE lsmio::store
     PRIVATE lsmio::posix
   )
-  gtest_add_tests(TARGET ${x})
+
+  gtest_add_tests(TARGET ${x} TEST_LIST tests)
+  set_tests_properties(${tests} PROPERTIES TIMEOUT 30)
 endfunction()
 
 function(add_lsmio_mpi_test x)
   message("Adding LSMIO MPI testing for ${x}.cpp")
+
   add_executable(${x}
     "${x}.cpp"
     test_mpi_utils.cpp
   )
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
-    PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+    PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
     PRIVATE lsmio_base
     PRIVATE lsmio::store
   )
+
   gtest_discover_tests(
     ${x}
     CMD_WRAPPER ${mpi_cmd} ${test_parameters}
+    PROPERTIES TIMEOUT 30
   )
 endfunction()
 
@@ -82,6 +91,12 @@ add_lsmio_base_test(test_benchmark)
 # GTest: Manager, LevelDB and RocksDB
 add_lsmio_store_test(test_leveldb)
 add_lsmio_store_test(test_rocksdb)
+add_lsmio_store_test(test_native)
+add_lsmio_store_test(test_native_extended)
+add_lsmio_store_test(test_memtable)
+add_lsmio_store_test(test_sstable_manager)
+add_lsmio_store_test(test_file_pool)
+add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
 add_lsmio_store_test(test_posix)
 
@@ -93,23 +108,27 @@ add_lsmio_mpi_test(test_mpi_manager)
 add_executable(test_adios test_adios.cpp test_plugin.cpp)
 target_include_directories(test_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_adios
-  PUBLIC GTest::GTest GTest::Main adios2::cxx11 adios2::core
+  PUBLIC GTest::GTest GTest::Main adios2::cxx adios2::core
   PRIVATE lsmio_base
 )
 gtest_discover_tests(
   test_adios
   PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
 )
+set_tests_properties(${test_adios} PROPERTIES TIMEOUT 30)
 
 # GTest: MPI: Adios and Plugin
 add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
 target_include_directories(test_mpi_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_mpi_adios
-  PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+  PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
   PRIVATE lsmio_base
 )
 gtest_discover_tests(
   test_mpi_adios
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
-  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+  PROPERTIES
+    ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+    TIMEOUT 30
 )
+

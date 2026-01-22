@@ -125,9 +125,10 @@ void LsmioPlugin::Init() {
         std::vector<std::tuple<std::string, std::string>> values;
         bool success = _lm->metaGetAll(&values);
 
-        LOG(INFO) << "LsmioPlugin::Init: variableStoreKey success: [" << success << "]" << std::endl;
+        LOG(INFO) << "LsmioPlugin::Init: variableStoreKey success: [" << success << "]"
+                  << std::endl;
 
-        for (const auto& [key, value] : values) {
+        for (const auto &[key, value] : values) {
             std::string name, typeStr, shapeStr, startStr, countStr;
 
             std::stringstream sStream(value);
@@ -165,7 +166,9 @@ StepStatus LsmioPlugin::BeginStep(StepMode mode, const float timeoutSeconds) {
     return StepStatus::OK;
 }
 
-void LsmioPlugin::PerformGets() { LOG(INFO) << "LsmioPlugin::PerformGets(): " << std::endl; }
+void LsmioPlugin::PerformGets() {
+    LOG(INFO) << "LsmioPlugin::PerformGets(): " << std::endl;
+}
 
 size_t LsmioPlugin::CurrentStep() const {
     LOG(INFO) << "LsmioPlugin::CurrentStep(): " << std::endl;
@@ -185,6 +188,7 @@ void LsmioPlugin::EndStep() {
 void LsmioPlugin::DoClose(const int transportIndex) {
     LOG(INFO) << "LsmioPlugin::DoClose(): " << std::endl;
     PerformPuts();
+    if (_lm) _lm->close();
 }
 
 #define declare(T)                                                                  \

@@ -28,54 +28,50 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_STORE_RDB_HPP_
-#define _LSMIO_STORE_RDB_HPP_
+#ifndef _LSMIO_FILE_POOL_HPP_
+#define _LSMIO_FILE_POOL_HPP_
 
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
-
-#include "store.hpp"
+#include <thread>
+#include <utility>
 
 namespace lsmio {
 
-class LSMIOStoreRDB : public LSMIOStore {
-  private:
-    rocksdb::WriteOptions _wOptions;
-    rocksdb::ReadOptions _rOptions;
-    rocksdb::Options _options;
-    rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
-
-    /// start / stop batching
-    /// @return bool success
-    bool startBatch() override;
-    bool stopBatch() override;
-
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush) override;
-
-    /// cleanup the ENTIRE store
-    /// @return bool success
-    bool dbCleanup() override;
-
+class FilePool {
   public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB() override;
+    FilePool(const std::string& directory, const std::string& prefix, const std::string& suffix,
+             size_t poolSize, uint64_t startId, size_t preAllocationSize = 0);
+    ~FilePool();
 
-    void close() override;
+    // Returns a pair of {file_path, file_stream}
+    // The stream is open and ready for writing.
+    // If the pool is empty, this blocks until a file is available.
+    std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
 
-    /// get value given a key
-    /// @return bool success
-    bool get(const std::string key, std::string *value) override;
-    bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>> *values) override;
+  private:
+    std::string _directory;
+    std::string _prefix;
+    std::string _suffix;
+    size_t _poolSize;
+    size_t _preAllocationSize;
 
-    /// sync batching
-    /// @return bool success
-    bool readBarrier() override;
-    bool writeBarrier() override;
+    // Pool stores pairs of {path, stream}
+    std::deque<std::pair<std::string, std::unique_ptr<std::ofstream>>> _pool;
+
+    std::mutex _mutex;
+    std::thread _worker;
+    std::condition_variable _cv;
+    std::condition_variable _cv_wait;  // Wait for item in pool
+    std::atomic<bool> _shutdown{false};
+    std::atomic<uint64_t> _next_id;
+
+    void replenish();
 };
 
 }  // namespace lsmio

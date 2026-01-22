@@ -29,61 +29,48 @@
  */
 
 #include <iostream>
-#include <lsmio/manager/manager.hpp>
+#include <lsmio/manager/store/native/store_native.hpp>
 
 #include "bm_base.hpp"
 
-class BMManager : public BMBase {
+class BMNative : public BMBase {
   protected:
-    lsmio::LSMIOManager *_lm = nullptr;
+    lsmio::LSMIOStoreNative *_lc = nullptr;
 
     virtual bool doRead(const std::string key, std::string *value) {
-        return _lm->get(key, value);
+        return _lc->get(key, value);
     }
 
     virtual bool doWrite(const std::string key, const std::string value) {
-        return _lm->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
+        return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
     }
 
     virtual int writePrepare(bool opt) {
-        if (gConfigBM.enableCollectiveIO)
-            _lm = new lsmio::LSMIOManager(
-                genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), "",
-                true, MPI_COMM_WORLD);
-        else
-            _lm = new lsmio::LSMIOManager(
-                genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), "",
-                true);
+        // Note: Native might not use BloomFilter, but we keep the path generation consistent
+        _lc = new lsmio::LSMIOStoreNative(
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), true);
         return 0;
     }
 
     virtual bool doWriteFinalize() {
-        _lm->writeBarrier();
-        _lm->close();
+        _lc->writeBarrier();
+        _lc->close();
         return true;
     }
 
-    virtual int writeCleanup() {
-        delete _lm;
-        _lm = nullptr;
-        return 0;
-    }
-
     virtual int readPrepare(bool opt) {
-        if (gConfigBM.enableCollectiveIO)
-            _lm = new lsmio::LSMIOManager(
-                genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), "",
-                false, MPI_COMM_WORLD);
-        else
-            _lm = new lsmio::LSMIOManager(
-                genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), "",
-                false);
+        if (_lc) {
+            delete _lc;
+            _lc = nullptr;
+        }
+        _lc = new lsmio::LSMIOStoreNative(
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
         return 0;
     }
 
     virtual int readCleanup() {
-        delete _lm;
-        _lm = nullptr;
+        delete _lc;
+        _lc = nullptr;
         return 0;
     }
 };
@@ -91,11 +78,12 @@ class BMManager : public BMBase {
 int main(int argc, char **argv) {
     int exitCode = 0;
     bool alwaysFlush[2] = {false, true};
+    // Native doesn't implement Bloom Filters, so this is ignored but simulation ran twice
     bool bloomFilters[2] = {false, true};
 
     exitCode += BMBase::beginMain(argc, argv);
 
-    BMManager bm;
+    BMNative bm;
 
     for (int j = 0; j < 2; j++) {
         for (int k = 0; k < 2; k++) {
@@ -105,7 +93,7 @@ int main(int argc, char **argv) {
             }
 
             std::string bmPrefix =
-                std::string("LsmioMr Flush: ") +
+                std::string("Native Flush: ") +
                 (lsmio::gConfigLSMIO.alwaysFlush ? "true " : "false") +
                 " BLF: " + (lsmio::gConfigLSMIO.useBloomFilter ? "true " : "false");
             LOG(INFO) << "Testing: " << bmPrefix << std::endl;
@@ -123,7 +111,7 @@ int main(int argc, char **argv) {
     exitCode += BMBase::endMain();
 
     if (exitCode) {
-        LOG(WARNING) << "BMManager exitCode: " << exitCode << std::endl;
+        LOG(WARNING) << "BMNative exitCode: " << exitCode << std::endl;
     }
 
     return exitCode;

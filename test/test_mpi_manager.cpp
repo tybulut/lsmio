@@ -119,13 +119,11 @@ TEST_P(managerMPITests, Flush) {
 }
 
 
-auto managerTV = ::testing::Values(
-                     std::make_tuple(UseComm::CommSelf, MPIWorld::Shared),
-                     std::make_tuple(UseComm::CommWorld, MPIWorld::Shared),
-                     std::make_tuple(UseComm::CommWorld, MPIWorld::Entire),
-                     std::make_tuple(UseComm::CommWorld, MPIWorld::EntireSerial),
-                     std::make_tuple(UseComm::CommWorld, MPIWorld::Split)
-                 );
+auto managerTV = ::testing::Values(std::make_tuple(UseComm::CommSelf, MPIWorld::Shared),
+                                   std::make_tuple(UseComm::CommWorld, MPIWorld::Shared),
+                                   std::make_tuple(UseComm::CommWorld, MPIWorld::Entire),
+                                   std::make_tuple(UseComm::CommWorld, MPIWorld::EntireSerial),
+                                   std::make_tuple(UseComm::CommWorld, MPIWorld::Split));
 
 INSTANTIATE_TEST_SUITE_P(lsmioTest, managerMPITests, managerTV);
 

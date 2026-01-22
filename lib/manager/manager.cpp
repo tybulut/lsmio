@@ -30,14 +30,13 @@
 
 #include <filesystem>
 #include <iostream>
+#include <lsmio/manager/client/client_adios.hpp>
+#include <lsmio/manager/client/client_mpi.hpp>
+#include <lsmio/manager/manager.hpp>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
-
-#include <lsmio/manager/client/client_adios.hpp>
-#include <lsmio/manager/client/client_mpi.hpp>
-#include <lsmio/manager/manager.hpp>
 
 namespace lsmio {
 
@@ -47,7 +46,8 @@ std::atomic<int> LSMIOManager::_lmInitializing = 0;
 std::atomic<int> LSMIOManager::_lmCleaning = 0;
 
 
-void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values, std::string &value) {
+void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values,
+                          std::string& value) {
     std::stringstream ss;
     for (const auto& tup : values) {
         ss << std::get<0>(tup) << "|" << std::get<1>(tup) << "\n";
@@ -55,7 +55,8 @@ void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>
     value = ss.str();
 }
 
-void vectorTupleDeserialize(const std::string& serialized_data, std::vector<std::tuple<std::string, std::string>> &values) {
+void vectorTupleDeserialize(const std::string& serialized_data,
+                            std::vector<std::tuple<std::string, std::string>>& values) {
     std::stringstream ss(serialized_data);
     std::string line;
 
@@ -183,21 +184,36 @@ void LSMIOManager::_init() {
 }
 
 LSMIOManager::~LSMIOManager() {
-    LOG(INFO) << "LSMIOManager::~LSMIOManager(): rank: " << _aggRank << std::endl;
-    // Delete MPI first because its cleanup might require RDB being open
-    if (_isServeLocal()) {
-        _lcMPI->stopCollectiveIOServer();
-    } else if (_isOpenRemote()) {
-        _lcMPI->stopCollectiveIOClient(AGGREGATION_RANK);
-    }
-
-    delete _lcMPI;
-    delete _lcStore;
+    close();
 }
 
-bool LSMIOManager::_isOpenLocal() const { return (!_isShared || _aggRank == AGGREGATION_RANK); }
+void LSMIOManager::close() {
+    LOG(INFO) << "LSMIOManager::close(): rank: " << _aggRank << std::endl;
+    // Delete MPI first because its cleanup might require RDB being open
+    if (_lcMPI) {
+        if (_isServeLocal()) {
+            _lcMPI->stopCollectiveIOServer();
+        } else if (_isOpenRemote()) {
+            _lcMPI->stopCollectiveIOClient(AGGREGATION_RANK);
+        }
+        delete _lcMPI;
+        _lcMPI = nullptr;
+    }
 
-bool LSMIOManager::_isOpenRemote() const { return (_isShared && _aggRank != AGGREGATION_RANK); }
+    if (_lcStore) {
+        _lcStore->close();
+        delete _lcStore;
+        _lcStore = nullptr;
+    }
+}
+
+bool LSMIOManager::_isOpenLocal() const {
+    return (!_isShared || _aggRank == AGGREGATION_RANK);
+}
+
+bool LSMIOManager::_isOpenRemote() const {
+    return (_isShared && _aggRank != AGGREGATION_RANK);
+}
 
 bool LSMIOManager::_isServeLocal() const {
     return (_isShared && _aggRank == AGGREGATION_RANK && _aggSize > 1);
@@ -211,7 +227,9 @@ std::string LSMIOManager::_rankedKey(const std::string& key) const {
     return _rankedKey(_aggRank, key);
 }
 
-std::string LSMIOManager::getDbPath() const { return _dbPath; }
+std::string LSMIOManager::getDbPath() const {
+    return _dbPath;
+}
 
 bool LSMIOManager::get(const std::string& key, std::string* value) {
     bool retValue = true;
@@ -341,7 +359,8 @@ bool LSMIOManager::metaGet(const std::string& key, std::string* value) {
     return retValue;
 }
 
-bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix) {
+bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values,
+                              std::string inFix) {
     bool retValue = true;
 
     LOG(INFO) << "LSMIOManager::metaGetAll: for rank: " << _aggRank << std::endl;
@@ -364,7 +383,8 @@ bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>*
 
         LOG(INFO) << "LSMIOManager::metaGetAll: waiting for REMOTE." << std::endl;
         retValue &= _lcMPI->recvCommand(AGGREGATION_RANK, &cCommand, &cKey, &value);
-        LOG(INFO) << "LSMIOManager::metaGetAll: REMOTE response received len: " << value.length() << std::endl;
+        LOG(INFO) << "LSMIOManager::metaGetAll: REMOTE response received len: " << value.length()
+                  << std::endl;
 
         _counterReadBytes += value.length();
         _counterReadOps++;
@@ -471,7 +491,7 @@ void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
         retValue &= _lcStore->metaGet(_rankedKey(rank, key), gValue);
     } else if (command == KV_CMD::META_GET_ALL) {
         std::vector<std::tuple<std::string, std::string>> values;
-        std::string inFix = std::to_string(rank) + "::"; // _rankedKey
+        std::string inFix = std::to_string(rank) + "::";  // _rankedKey
         retValue &= _lcStore->metaGetAll(&values, inFix);
         lsmio::vectorTupleSerialize(values, *gValue);
     } else if (command == KV_CMD::META_PUT) {
@@ -484,7 +504,8 @@ void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
         retValue = false;
     }
 
-    LOG(INFO) << "LSMIOManager::callbackForCollectiveIO: " << command << ": COMPLETED." << std::endl;
+    LOG(INFO) << "LSMIOManager::callbackForCollectiveIO: " << command << ": COMPLETED."
+              << std::endl;
 }
 
 void LSMIOManager::resetCounters() {

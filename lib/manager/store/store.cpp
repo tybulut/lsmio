@@ -29,7 +29,7 @@
  */
 
 #include <iostream>
-#include <lsmio/manager/store/store_rdb.hpp>
+#include <lsmio/manager/store/store.hpp>
 
 namespace lsmio {
 
@@ -61,7 +61,8 @@ bool LSMIOStore::metaGet(const std::string key, std::string* value) {
     return get(_metaPrefix + key, value);
 }
 
-bool LSMIOStore::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix) {
+bool LSMIOStore::metaGetAll(std::vector<std::tuple<std::string, std::string>>* values,
+                            std::string inFix) {
     LOG(INFO) << "LSMIOStore::metaGetAll: " << std::endl;
     std::string prefix = _metaPrefix + (inFix.empty() ? "" : inFix);
     return getPrefix(prefix, values);
@@ -73,7 +74,6 @@ bool LSMIOStore::metaPut(const std::string key, const std::string value, bool fl
 }
 
 bool LSMIOStore::put(const std::string key, const std::string value, bool flush) {
-    rocksdb::Status s;
     bool retValue;
 
     LOG(INFO) << "LSMIOStore::put: key: " << key << " flush: " << flush << " size: " << value.size()
@@ -83,7 +83,6 @@ bool LSMIOStore::put(const std::string key, const std::string value, bool flush)
 }
 
 bool LSMIOStore::del(const std::string key, bool flush) {
-    rocksdb::Status s;
     bool retValue;
 
     LOG(INFO) << "LSMIOStore::del: key: " << key << " flush: " << flush << std::endl;

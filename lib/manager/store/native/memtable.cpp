@@ -28,56 +28,58 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_STORE_RDB_HPP_
-#define _LSMIO_STORE_RDB_HPP_
-
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-
-#include <string>
-
-#include "store.hpp"
+#include <lsmio/manager/store/native/memtable.hpp>
 
 namespace lsmio {
 
-class LSMIOStoreRDB : public LSMIOStore {
-  private:
-    rocksdb::WriteOptions _wOptions;
-    rocksdb::ReadOptions _rOptions;
-    rocksdb::Options _options;
-    rocksdb::DB *_db;
-    rocksdb::WriteBatch *_batch;
+Memtable::Memtable() : _size_bytes(0) {}
 
-    /// start / stop batching
-    /// @return bool success
-    bool startBatch() override;
-    bool stopBatch() override;
+void Memtable::add(const std::string& key, const std::string& value) {
+    _data.emplace_back(key, value);
+    _size_bytes += key.size() + value.size();
+}
 
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush) override;
+bool Memtable::get(const std::string& key, std::string& value) const {
+    // Reverse scan (newest first)
+    for (auto it = _data.rbegin(); it != _data.rend(); ++it) {
+        if (it->first == key) {
+            value = it->second;
+            return true;
+        }
+    }
+    return false;
+}
 
-    /// cleanup the ENTIRE store
-    /// @return bool success
-    bool dbCleanup() override;
+void Memtable::scan(const std::string& prefix, std::map<std::string, std::string>& results,
+                    std::set<std::string>& deleted_keys) const {
+    // Linear scan
+    for (const auto& entry : _data) {
+        if (entry.first.compare(0, prefix.size(), prefix) == 0) {
+            if (entry.second == MEMTABLE_TOMBSTONE) {
+                deleted_keys.insert(entry.first);
+                results.erase(entry.first);
+            } else {
+                results[entry.first] = entry.second;
+                deleted_keys.erase(entry.first);
+            }
+        }
+    }
+}
 
-  public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
-    ~LSMIOStoreRDB() override;
+size_t Memtable::sizeBytes() const {
+    return _size_bytes;
+}
 
-    void close() override;
+bool Memtable::empty() const {
+    return _data.empty();
+}
 
-    /// get value given a key
-    /// @return bool success
-    bool get(const std::string key, std::string *value) override;
-    bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>> *values) override;
+size_t Memtable::count() const {
+    return _data.size();
+}
 
-    /// sync batching
-    /// @return bool success
-    bool readBarrier() override;
-    bool writeBarrier() override;
-};
+const std::vector<std::pair<std::string, std::string>>& Memtable::getData() const {
+    return _data;
+}
 
 }  // namespace lsmio
-
-#endif

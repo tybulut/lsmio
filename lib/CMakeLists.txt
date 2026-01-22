@@ -51,6 +51,11 @@ set(LIB_STORE_CPP_FILES
   ${LIB_SOURCE_DIR}/manager/store/store.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_ldb.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_rdb.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/store_native.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/memtable.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/sstable_manager.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/file_pool.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/file_closer.cpp
 )
 set(LIB_ADIOS_CPP_FILES
   ${LIB_STORE_CPP_FILES}
@@ -68,6 +73,15 @@ macro(lsmio_add_props MY_TARGET)
   #set_property(TARGET ${MY_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
   target_include_directories(${MY_TARGET} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_compile_definitions(${MY_TARGET} PRIVATE LSMIO_VERSION="${PROJECT_VERSION}")
+  if(LSMIO_ENABLE_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(${MY_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+      target_link_libraries(${MY_TARGET} PUBLIC -fprofile-instr-generate)
+    else()
+      target_compile_options(${MY_TARGET} PRIVATE -fprofile-arcs -ftest-coverage)
+      target_link_libraries(${MY_TARGET} PUBLIC --coverage)
+    endif()
+  endif()
 endmacro()
 
 
@@ -86,7 +100,7 @@ target_link_libraries(lsmio_store
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
-    adios2::cxx11_mpi adios2::core_mpi
+    adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_store)
 
@@ -97,7 +111,7 @@ target_link_libraries(lsmio_adios
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
-    adios2::cxx11_mpi adios2::core_mpi
+    adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_adios)
 
@@ -109,7 +123,7 @@ target_link_libraries(lsmio_posix
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     lsmio_store
     MPI::MPI_CXX Threads::Threads
-    adios2::cxx11_mpi adios2::core_mpi
+    adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_posix)
 

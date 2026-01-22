@@ -49,7 +49,9 @@ Benchmark::Benchmark() {
     _iterations = {};
 }
 
-Benchmark::~Benchmark() { clearIterations(); }
+Benchmark::~Benchmark() {
+    clearIterations();
+}
 
 void Benchmark::start() {
     if (_isStarted) {
@@ -195,6 +197,8 @@ std::string Benchmark::formatSummary(const std::string& name, const std::string&
     return output;
 }
 
-void Benchmark::clearIterations() { _iterations.clear(); }
+void Benchmark::clearIterations() {
+    _iterations.clear();
+}
 
 }  // namespace lsmio

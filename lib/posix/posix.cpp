@@ -116,17 +116,29 @@ LSMIOStream& LSMIOStream::seekp(std::streamoff off, std::ios::seekdir way) {
     return *this;
 }
 
-std::streampos LSMIOStream::tellp() { return _fileMap[_filePath]; }
+std::streampos LSMIOStream::tellp() {
+    return _fileMap[_filePath];
+}
 
-std::streambuf* LSMIOStream::rdbuf() const { return _buf.rdbuf(); }
+std::streambuf* LSMIOStream::rdbuf() const {
+    return _buf.rdbuf();
+}
 
-bool LSMIOStream::good() const { return (_lsmioInitialized == 1); }
+bool LSMIOStream::good() const {
+    return (_lsmioInitialized == 1);
+}
 
-bool LSMIOStream::fail() const { return (_lsmioInitialized != 1); }
+bool LSMIOStream::fail() const {
+    return (_lsmioInitialized != 1);
+}
 
-LSMIOStream& LSMIOStream::flush() { return *this; }
+LSMIOStream& LSMIOStream::flush() {
+    return *this;
+}
 
-void LSMIOStream::close() { _fileMap[_filePath] = 0; }
+void LSMIOStream::close() {
+    _fileMap[_filePath] = 0;
+}
 
 bool LSMIOStream::initialize(const std::string& dbName, const std::string& dbDir) {
     if (_lsmioInitialized) {

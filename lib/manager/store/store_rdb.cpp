@@ -79,7 +79,7 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     _options.max_write_batch_group_size_bytes = gConfigLSMIO.asyncBatchBytes;
 
     _options.compaction_style = rocksdb::kCompactionStyleNone;
-    _options.level0_file_num_compaction_trigger = 1024;  // >> default (4)
+    _options.level0_file_num_compaction_trigger = 1024;
     /* TODO(tybulut): Further tunables:
      * _options.min_write_buffer_number_to_merge = 1;
      * _options.max_background_jobs = std::clamp(gConfigLSMIO.writeBufferNumber, 2, 8);
@@ -91,6 +91,7 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
 
     _options.allow_mmap_writes = gConfigLSMIO.enableMMAP;
     _options.allow_mmap_reads = gConfigLSMIO.enableMMAP;
+    _options.allow_fallocate = gConfigLSMIO.preAllocate;
     // _options.unordered_write = true;  // false
 
     _options.max_successive_merges = 4096;
@@ -136,9 +137,17 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
 }
 
 LSMIOStoreRDB::~LSMIOStoreRDB() {
-    LOG(INFO) << "LSMIOStoreRDB::~LSMIOStoreRDB(): cleaning up." << std::endl;
-    writeBarrier();
-    delete _db;
+    close();
+}
+
+void LSMIOStoreRDB::close() {
+    LOG(INFO) << "LSMIOStoreRDB::close(): cleaning up." << std::endl;
+    if (_db) {
+        writeBarrier();
+        _db->Close();
+        delete _db;
+        _db = nullptr;
+    }
 }
 
 bool LSMIOStoreRDB::get(const std::string key, std::string* value) {
@@ -149,7 +158,8 @@ bool LSMIOStoreRDB::get(const std::string key, std::string* value) {
     return s.ok();
 }
 
-bool LSMIOStoreRDB::getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) {
+bool LSMIOStoreRDB::getPrefix(const std::string key,
+                              std::vector<std::tuple<std::string, std::string>>* values) {
     rocksdb::Status s;
 
     LOG(INFO) << "LSMIOStoreRDB::getPrefix(): key: " << key << std::endl;
@@ -219,7 +229,9 @@ bool LSMIOStoreRDB::dbCleanup() {
     return s.ok();
 }
 
-bool LSMIOStoreRDB::readBarrier() { return true; }
+bool LSMIOStoreRDB::readBarrier() {
+    return true;
+}
 
 bool LSMIOStoreRDB::writeBarrier() {
     rocksdb::Status s;
