@@ -69,7 +69,8 @@ class LSMIOStoreLDB : public LSMIOStore {
     /// get value given a key
     /// @return bool success
     bool get(const std::string key, std::string* value) override;
-    bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) override;
+    bool getPrefix(const std::string key,
+                   std::vector<std::tuple<std::string, std::string>>* values) override;
 
     /// sync batching
     /// @return bool success

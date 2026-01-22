@@ -67,7 +67,7 @@ class FilePool {
     std::mutex _mutex;
     std::thread _worker;
     std::condition_variable _cv;
-    std::condition_variable _cv_wait; // Wait for item in pool
+    std::condition_variable _cv_wait;  // Wait for item in pool
     std::atomic<bool> _shutdown{false};
     std::atomic<uint64_t> _next_id;
 

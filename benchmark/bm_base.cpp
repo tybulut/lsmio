@@ -29,7 +29,6 @@
  */
 
 #include "bm_base.hpp"
-#include <lsmio/lsmio.hpp>
 
 #include <fmt/format.h>
 #include <signal.h>
@@ -65,13 +64,21 @@ std::string BMBase::genDBPath(bool opt1, bool opt2) {
     return _lsmioBMPath + ":" + std::to_string(opt1) + ":" + std::to_string(opt2);
 }
 
-bool BMBase::doReadFinalize() { return true; }
+bool BMBase::doReadFinalize() {
+    return true;
+}
 
-bool BMBase::doWriteFinalize() { return true; }
+bool BMBase::doWriteFinalize() {
+    return true;
+}
 
-int BMBase::readCleanup() { return 0; }
+int BMBase::readCleanup() {
+    return 0;
+}
 
-int BMBase::writeCleanup() { return 0; }
+int BMBase::writeCleanup() {
+    return 0;
+}
 
 int BMBase::benchWrite(long long *duration) {
     int count;
@@ -226,8 +233,8 @@ std::string genOptionsToString() {
               << "\n\n useBloomFilter: " << lsmio::gConfigLSMIO.useBloomFilter
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
-              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP
-              << "\n useLevelDB: " << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
+              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
+              << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
               << "\n compression: " << lsmio::gConfigLSMIO.compression
               << "\n blockSize: " << lsmio::gConfigLSMIO.blockSize
               << "\n transferSize: " << lsmio::gConfigLSMIO.transferSize
@@ -251,16 +258,16 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_flag("-v,--verbose", gConfigBM.verbose, "verbose mode (default: not-verbose)");
         app.add_flag("-g,--debug", gConfigBM.debug, "debug mode (default: no)");
         app.add_flag("-m,--mpi-barrier", gConfigBM.useMPIBarrier,
-                       "use mpi-barrier to start and stop the benchmark");
+                     "use mpi-barrier to start and stop the benchmark");
         app.add_flag("-c,--collective-io", gConfigBM.enableCollectiveIO,
-                       "use collective-io while benchmarking");
+                     "use collective-io while benchmarking");
         bool flag_mpi_io_world = false;
         app.add_flag("-w,--mpi-io-world", flag_mpi_io_world,
-                       "use MPI world in collective-io (default: host level grouping)");
+                     "use MPI world in collective-io (default: host level grouping)");
 
         app.add_option("-i,--iterations", gConfigBM.iterations, "terations (default: 1)");
         app.add_flag("-l,--loop-all", gConfigBM.loopAll,
-                       "loop all options (default: only specified run)");
+                     "loop all options (default: only specified run)");
         app.add_flag("-e,--sync", lsmio::gConfigLSMIO.useSync, "use sync API (default: false)");
         app.add_option("-k,--key-count", gConfigBM.keyCount, "number of keys (default: 1024)");
         app.add_option("-z,--value-size", gConfigBM.valueSize,
@@ -269,26 +276,26 @@ int BMBase::beginMain(int argc, char **argv) {
                        "segment count (default: 1024)");
 
         app.add_flag("--lsmio-plugin", gConfigBM.useLSMIOPlugin,
-                       "use lsmio plugin for adios benchmark (default: no plugin)");
+                     "use lsmio plugin for adios benchmark (default: no plugin)");
         app.add_flag("--lsmio-bfilter", lsmio::gConfigLSMIO.useBloomFilter,
-                       "use bloom filter (default: no bloom filter)");
+                     "use bloom filter (default: no bloom filter)");
         app.add_flag("--lsmio-wal", lsmio::gConfigLSMIO.enableWAL,
-                       "use write-ahead log (default: no WAL)");
+                     "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
-                       "use MMAP read/write (default: no MMAP)");
+                     "use MMAP read/write (default: no MMAP)");
 
         bool flag_use_leveldb = false;
         app.add_flag("--lsmio-use-leveldb", flag_use_leveldb,
-                       "use LevelDB instead (default: use RocksDB)");
+                     "use LevelDB instead (default: use RocksDB)");
         app.add_flag("--lsmio-compress", lsmio::gConfigLSMIO.compression,
-                       "enable compression (default: no)");
+                     "enable compression (default: no)");
         app.add_option("--lsmio-bs", lsmio::gConfigLSMIO.blockSize, "block size (default: 64K)");
         app.add_option("--lsmio-ts", lsmio::gConfigLSMIO.transferSize,
                        "transfer size (default: 64K)");
 
         app.add_flag("--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
-                       "disable batching and makes read available immediately after "
-                       "write (default: no)");
+                     "disable batching and makes read available immediately after "
+                     "write (default: no)");
         app.add_option("--lsmio-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
                        "batch size (default: 512)");
         app.add_option("--lsmio-batch-bytes", lsmio::gConfigLSMIO.asyncBatchBytes,
@@ -301,7 +308,7 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-fsize", lsmio::gConfigLSMIO.writeFileSize,
                        "first-level file size (default: 32M)");
         app.add_flag("--lsmio-prealloc", lsmio::gConfigLSMIO.preAllocate,
-                       "enable file pre-allocation (uses write buffer size)");
+                     "enable file pre-allocation (uses write buffer size)");
         app.add_option("--lsmio-pool", lsmio::gConfigLSMIO.filePoolSize,
                        "number of pre-allocated files (default: 4)");
 
@@ -309,7 +316,7 @@ int BMBase::beginMain(int argc, char **argv) {
 
         lsmio::gConfigLSMIO.mpiAggType =
             flag_mpi_io_world ? lsmio::MPIAggType::Entire : lsmio::MPIAggType::Shared;
-        lsmio::gConfigLSMIO.storageType = 
+        lsmio::gConfigLSMIO.storageType =
             flag_use_leveldb ? lsmio::StorageType::LevelDB : lsmio::StorageType::RocksDB;
 
         if (gConfigBM.fileName.empty()) {

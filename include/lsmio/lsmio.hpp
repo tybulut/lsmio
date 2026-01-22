@@ -69,12 +69,20 @@ void defaultLSMIOLogging();
 /**
  * Enum representing the types of MPI aggregation.
  */
-enum class MPIAggType { Shared, Entire, EntireSerial, Split };
+enum class MPIAggType {
+    Shared,
+    Entire,
+    EntireSerial,
+    Split
+};
 
 /**
  * Enum representing the storage types supported by LSMIO.
  */
-enum class StorageType { LevelDB, RocksDB };
+enum class StorageType {
+    LevelDB,
+    RocksDB
+};
 
 /**
  * Configuration class for LSMIO settings.

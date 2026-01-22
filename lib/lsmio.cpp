@@ -69,9 +69,13 @@ void initLSMIODebug(char *name) {
     FLAGS_minloglevel = google::INFO;
 }
 
-void increaseLSMIOLogging() { FLAGS_minloglevel = google::INFO; }
+void increaseLSMIOLogging() {
+    FLAGS_minloglevel = google::INFO;
+}
 
-void decreaseLSMIOLogging() { FLAGS_minloglevel = google::WARNING; }
+void decreaseLSMIOLogging() {
+    FLAGS_minloglevel = google::WARNING;
+}
 
 void defaultLSMIOLogging() {
     if (defaultLogDebug) {

@@ -28,15 +28,15 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <cstring>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <lsmio/manager/store/native/file_pool.hpp>
 #include <sstream>
-#include <cstring>
-
-#include <fcntl.h>
-#include <unistd.h>
 
 namespace lsmio {
 
@@ -107,7 +107,8 @@ void FilePool::replenish() {
                 int fd = ::open(full_path.c_str(), O_WRONLY | O_CREAT, 0644);
                 if (fd >= 0) {
 #ifdef __APPLE__
-                    fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, (off_t)_preAllocationSize};
+                    fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0,
+                                      (off_t)_preAllocationSize};
                     if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
                         store.fst_flags = F_ALLOCATEALL;
                         fcntl(fd, F_PREALLOCATE, &store);
@@ -118,7 +119,8 @@ void FilePool::replenish() {
 #endif
                     ::close(fd);
                 } else {
-                     std::cerr << "[FilePool] Pre-alloc open failed: " << full_path << " " << strerror(errno) << std::endl;
+                    std::cerr << "[FilePool] Pre-alloc open failed: " << full_path << " "
+                              << strerror(errno) << std::endl;
                 }
             }
 
@@ -129,7 +131,7 @@ void FilePool::replenish() {
 
             auto ofs = std::make_unique<std::ofstream>(full_path, mode);
             if (!ofs || !ofs->is_open()) {
-                std::cerr << "[FilePool] Failed to open " << full_path << " Mode: " << mode 
+                std::cerr << "[FilePool] Failed to open " << full_path << " Mode: " << mode
                           << " Errno: " << errno << " (" << strerror(errno) << ")" << std::endl;
                 // Sleep briefly to avoid busy loop if FS is bad
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -137,13 +139,13 @@ void FilePool::replenish() {
             }
 
             if (_preAllocationSize > 0) {
-                ofs->seekp(0); // Ensure we start writing from beginning
+                ofs->seekp(0);  // Ensure we start writing from beginning
             }
 
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 if (_shutdown) {
-                    ofs->close(); // Cleanup
+                    ofs->close();  // Cleanup
                     return;
                 }
                 _pool.push_back({full_path, std::move(ofs)});

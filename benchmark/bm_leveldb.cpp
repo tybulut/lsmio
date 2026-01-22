@@ -37,7 +37,9 @@ class BMLeveldb : public BMBase {
   protected:
     lsmio::LSMIOStoreLDB *_lc = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) { return _lc->get(key, value); }
+    virtual bool doRead(const std::string key, std::string *value) {
+        return _lc->get(key, value);
+    }
 
     virtual bool doWrite(const std::string key, const std::string value) {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);

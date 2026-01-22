@@ -56,7 +56,9 @@ LSMIOClientMPI::LSMIOClientMPI(MPI_Comm &comm) : LSMIOClient() {
               << _size << std::endl;
 }
 
-void LSMIOClientMPI::_barrier() { MPI_Barrier(*_mpiComm); }
+void LSMIOClientMPI::_barrier() {
+    MPI_Barrier(*_mpiComm);
+}
 
 char **LSMIOClientMPI::_recvToBuffer(int *bufSizes) {
     MPI_Request reqs[_size - 1];

@@ -65,7 +65,9 @@ LSMIOStoreLDB::LSMIOStoreLDB(const std::string &dbPath, const bool overWrite)
     // Standard LevelDB does not support disabling mmap via Options.
     // It defaults to using mmap for reading SSTables.
     if (!gConfigLSMIO.enableMMAP) {
-        LOG(WARNING) << "LSMIOStoreLDB: enableMMAP=false requested, but standard LevelDB ignores this and uses mmap by default." << std::endl;
+        LOG(WARNING) << "LSMIOStoreLDB: enableMMAP=false requested, but standard LevelDB ignores "
+                        "this and uses mmap by default."
+                     << std::endl;
     }
 
     _options.block_size = gConfigLSMIO.blockSize;
@@ -77,11 +79,11 @@ LSMIOStoreLDB::LSMIOStoreLDB(const std::string &dbPath, const bool overWrite)
     // Increasing write_buffer_size helps delay memtable compaction, and increasing
     // max_open_files or similar doesn't directly stop L0->L1 compaction.
     // However, we can't easily force "kCompactionStyleNone" in standard LevelDB.
-    // We will rely on the benchmark being short enough that massive compaction storms might not occur,
-    // or accept that LevelDB will still compact to some degree.
-    // For strict equivalence, we would need a modded LevelDB.
-    // We will assume this request implies "do best effort to minimize compaction overhead".
-    
+    // We will rely on the benchmark being short enough that massive compaction storms might not
+    // occur, or accept that LevelDB will still compact to some degree. For strict equivalence, we
+    // would need a modded LevelDB. We will assume this request implies "do best effort to minimize
+    // compaction overhead".
+
     if (overWrite) {
         LOG(INFO) << "LSMIOStoreLDB::LSMIOStoreLDB: overWrite is set for the  database: " << _dbPath
                   << std::endl;
@@ -127,11 +129,12 @@ bool LSMIOStoreLDB::get(const std::string key, std::string *value) {
     return s.ok();
 }
 
-bool LSMIOStoreLDB::getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) {
+bool LSMIOStoreLDB::getPrefix(const std::string key,
+                              std::vector<std::tuple<std::string, std::string>> *values) {
     leveldb::Status s;
 
     LOG(INFO) << "LSMIOStoreLDB::getPrefix(): key: " << key << std::endl;
-    leveldb::Iterator* it = _db->NewIterator(_rOptions);
+    leveldb::Iterator *it = _db->NewIterator(_rOptions);
 
     it->Seek(key);
     while (it->Valid() && it->key().starts_with(key)) {

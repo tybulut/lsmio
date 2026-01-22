@@ -158,7 +158,8 @@ bool LSMIOStoreRDB::get(const std::string key, std::string* value) {
     return s.ok();
 }
 
-bool LSMIOStoreRDB::getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) {
+bool LSMIOStoreRDB::getPrefix(const std::string key,
+                              std::vector<std::tuple<std::string, std::string>>* values) {
     rocksdb::Status s;
 
     LOG(INFO) << "LSMIOStoreRDB::getPrefix(): key: " << key << std::endl;
@@ -228,7 +229,9 @@ bool LSMIOStoreRDB::dbCleanup() {
     return s.ok();
 }
 
-bool LSMIOStoreRDB::readBarrier() { return true; }
+bool LSMIOStoreRDB::readBarrier() {
+    return true;
+}
 
 bool LSMIOStoreRDB::writeBarrier() {
     rocksdb::Status s;

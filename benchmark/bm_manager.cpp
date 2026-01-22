@@ -37,7 +37,9 @@ class BMManager : public BMBase {
   protected:
     lsmio::LSMIOManager *_lm = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) { return _lm->get(key, value); }
+    virtual bool doRead(const std::string key, std::string *value) {
+        return _lm->get(key, value);
+    }
 
     virtual bool doWrite(const std::string key, const std::string value) {
         return _lm->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);

@@ -37,7 +37,9 @@ class BMNative : public BMBase {
   protected:
     lsmio::LSMIOStoreNative *_lc = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) { return _lc->get(key, value); }
+    virtual bool doRead(const std::string key, std::string *value) {
+        return _lc->get(key, value);
+    }
 
     virtual bool doWrite(const std::string key, const std::string value) {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
@@ -76,11 +78,7 @@ class BMNative : public BMBase {
 int main(int argc, char **argv) {
     int exitCode = 0;
     bool alwaysFlush[2] = {false, true};
-    // Native doesn't implement Bloom Filters, so we just iterate once or ignore the effect of this flag
-    // but we keep the loop structure for consistency with other benchmarks if desired.
-    // However, to avoid misleading output, maybe we should just loop once for bloom=false if it's irrelevant?
-    // The original code iterates both. I will iterate both to match the "equivalent" instruction strictly
-    // and ensure BMBase config is populated as expected by the framework.
+    // Native doesn't implement Bloom Filters, so this is ignored but simulation ran twice
     bool bloomFilters[2] = {false, true};
 
     exitCode += BMBase::beginMain(argc, argv);

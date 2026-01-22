@@ -38,7 +38,10 @@
 
 namespace lsmio {
 
-enum class MutationType { Put, Del };
+enum class MutationType {
+    Put,
+    Del
+};
 
 std::string getMutationType(MutationType mType);
 
@@ -77,7 +80,8 @@ class LSMIOStore {
     /// get value given a key
     /// @return bool success
     virtual bool get(const std::string key, std::string* value) = 0;
-    virtual bool getPrefix(const std::string key, std::vector<std::tuple<std::string, std::string>>* values) = 0;
+    virtual bool getPrefix(const std::string key,
+                           std::vector<std::tuple<std::string, std::string>>* values) = 0;
 
     /// put value given a key
     /// @return bool success
@@ -90,7 +94,8 @@ class LSMIOStore {
     /// meta operations
     /// @return bool success
     virtual bool metaGet(const std::string key, std::string* value);
-    virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values, std::string inFix = "");
+    virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values,
+                            std::string inFix = "");
     virtual bool metaPut(const std::string key, const std::string value, bool flush = true);
 
     /// sync barriers

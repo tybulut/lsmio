@@ -21,7 +21,7 @@
  * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
  * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
@@ -34,9 +34,9 @@
 #include <lsmio/manager/manager.hpp>
 #include <lsmio/manager/store/native/store_native.hpp>
 
-std::string TEST_DIR_NATIVE = ""; // Changed from TEST_DIR_RDB
+std::string TEST_DIR_NATIVE = "";  // Changed from TEST_DIR_RDB
 
-TEST(lsmioNative, Flush) { // Changed from lsmioRocksDB
+TEST(lsmioNative, Flush) {  // Changed from lsmioRocksDB
     bool success = true;
     std::string value;
 
@@ -45,10 +45,11 @@ TEST(lsmioNative, Flush) { // Changed from lsmioRocksDB
     std::string value1 = "alpino";
     std::string value2 = "teomos";
 
-    std::string dbName = "test-native-store-flush.db"; // Changed db name
+    std::string dbName = "test-native-store-flush.db";  // Changed db name
     std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
 
-    lsmio::LSMIOStoreNative lc(dbPath, true); // Use LSMIOStoreNative and set overWrite to true for clean test env
+    lsmio::LSMIOStoreNative lc(
+        dbPath, true);  // Use LSMIOStoreNative and set overWrite to true for clean test env
     LOG(INFO) << "Created a test database called: " << dbPath << std::endl;
 
     success = lc.put(key1, value1);
@@ -95,7 +96,7 @@ TEST(lsmioNative, Flush) { // Changed from lsmioRocksDB
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
-TEST(lsmioNative, Deferred) { // Changed from lsmioRocksDB
+TEST(lsmioNative, Deferred) {  // Changed from lsmioRocksDB
     bool success = true;
     std::string value;
 
@@ -104,10 +105,10 @@ TEST(lsmioNative, Deferred) { // Changed from lsmioRocksDB
     std::string value1 = "alpino";
     std::string value2 = "teomos";
 
-    std::string dbName = "test-native-store-deferred.db"; // Changed db name
+    std::string dbName = "test-native-store-deferred.db";  // Changed db name
     std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
 
-    lsmio::LSMIOStoreNative lc(dbPath, true); // Use LSMIOStoreNative and set overWrite to true
+    lsmio::LSMIOStoreNative lc(dbPath, true);  // Use LSMIOStoreNative and set overWrite to true
     LOG(INFO) << "Created a test database called: " << dbPath << std::endl;
 
     success = lc.put(key1, value1, false);
@@ -158,7 +159,7 @@ TEST(lsmioNative, Deferred) { // Changed from lsmioRocksDB
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     lsmio::initLSMIODebug(argv[0]);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
