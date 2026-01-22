@@ -100,7 +100,7 @@ target_link_libraries(lsmio_store
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
-    adios2::cxx11_mpi adios2::core_mpi
+    adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_store)
 
@@ -111,7 +111,7 @@ target_link_libraries(lsmio_adios
   PUBLIC fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
-    adios2::cxx11_mpi adios2::core_mpi
+    adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_adios)
 
@@ -123,7 +123,7 @@ target_link_libraries(lsmio_posix
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     lsmio_store
     MPI::MPI_CXX Threads::Threads
-    adios2::cxx11_mpi adios2::core_mpi
+    adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_posix)
 

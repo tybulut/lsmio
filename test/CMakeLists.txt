@@ -73,7 +73,7 @@ function(add_lsmio_mpi_test x)
   )
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
-    PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+    PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
     PRIVATE lsmio_base
     PRIVATE lsmio::store
   )
@@ -108,7 +108,7 @@ add_lsmio_mpi_test(test_mpi_manager)
 add_executable(test_adios test_adios.cpp test_plugin.cpp)
 target_include_directories(test_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_adios
-  PUBLIC GTest::GTest GTest::Main adios2::cxx11 adios2::core
+  PUBLIC GTest::GTest GTest::Main adios2::cxx adios2::core
   PRIVATE lsmio_base
 )
 gtest_discover_tests(
@@ -121,7 +121,7 @@ set_tests_properties(${test_adios} PROPERTIES TIMEOUT 30)
 add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
 target_include_directories(test_mpi_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_mpi_adios
-  PUBLIC GTest::GTest GTest::Main adios2::cxx11_mpi MPI::MPI_CXX
+  PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
   PRIVATE lsmio_base
 )
 gtest_discover_tests(

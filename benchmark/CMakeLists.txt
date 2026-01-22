@@ -75,7 +75,7 @@ target_include_directories(bm_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_adios
   PRIVATE lsmio_base
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
-    adios2::cxx11 adios2::cxx11_mpi
+    adios2::cxx adios2::cxx_mpi
     glog::glog
 )
 install(TARGETS bm_adios

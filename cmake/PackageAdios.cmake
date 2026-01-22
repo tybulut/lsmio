@@ -1,3 +1,5 @@
+include_guard(GLOBAL)
+
 # Packages
 find_package(MPI REQUIRED GLOBAL)
 find_package(Threads REQUIRED GLOBAL)
