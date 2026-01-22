@@ -6,6 +6,15 @@ find_package(Threads REQUIRED GLOBAL)
 
 # ADIOS2
 find_package(ADIOS2 QUIET GLOBAL)
+if (ADIOS2_FOUND)
+  if (TARGET adios2::cxx11 AND NOT TARGET adios2::cxx)
+    add_library(adios2::cxx ALIAS adios2::cxx11)
+  endif()
+  if (TARGET adios2::cxx11_mpi AND NOT TARGET adios2::cxx_mpi)
+    add_library(adios2::cxx_mpi ALIAS adios2::cxx11_mpi)
+  endif()
+endif()
+
 if (NOT ADIOS2_FOUND AND NOT TARGET ADIOS2)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
@@ -34,4 +43,3 @@ if (NOT ADIOS2_FOUND AND NOT TARGET ADIOS2)
     add_library(adios2::core_mpi ALIAS adios2_core_mpi)
   endblock()
 endif()
-
