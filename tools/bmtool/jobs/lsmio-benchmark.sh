@@ -1,7 +1,8 @@
 #!/bin/sh -x
 
 # No spaces allowed in BM_SETUP
-BM_SETUP="ADIOS-M"
+BM_SETUP="NATIVE-M"
+#BM_SETUP="ADIOS-M"
 #BM_SETUP="PLUGIN-M"
 #BM_SETUP="ROCKSDB-M"
 #BM_SETUP="ADIOS"
@@ -50,6 +51,11 @@ if [ "$BM_SETUP" = "ADIOS-M" ]; then
 elif [ "$BM_SETUP" = "PLUGIN-M" ]; then
   $SB_BIN/bm_adios -m -g \
     --lsmio-plugin \
+    -i 10 -o $OUT_FILE \
+    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
+    2>&1 | tee $LOG_FILE
+elif [ "$BM_SETUP" = "NATIVE-M" ]; then
+  $SB_BIN/bm_native -m -g \
     -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE
