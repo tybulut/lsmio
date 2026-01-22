@@ -42,6 +42,10 @@ class SSTableManagerTest : public ::testing::Test {
     std::unique_ptr<SSTableManager> mgr;
 
     void SetUp() override {
+        const testing::TestInfo* const test_info =
+            testing::UnitTest::GetInstance()->current_test_info();
+        dbPath = std::string("test_sstable_mgr_db_") + test_info->name();
+
         if (std::filesystem::exists(dbPath)) {
             std::filesystem::remove_all(dbPath);
         }
