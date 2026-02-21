@@ -5,6 +5,7 @@ BM_SETUP="NATIVE-M"
 #BM_SETUP="ADIOS-M"
 #BM_SETUP="PLUGIN-M"
 #BM_SETUP="ROCKSDB-M"
+#BM_SETUP="LEVELDB-M"
 #BM_SETUP="ADIOS"
 #BM_SETUP="PLUGIN"
 #BM_SETUP="ROCKSDB"
@@ -61,6 +62,11 @@ elif [ "$BM_SETUP" = "NATIVE-M" ]; then
     2>&1 | tee $LOG_FILE
 elif [ "$BM_SETUP" = "ROCKSDB-M" ]; then
   $SB_BIN/bm_rocksdb -m -g \
+    -i 10 -o $OUT_FILE \
+    --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
+    2>&1 | tee $LOG_FILE
+elif [ "$BM_SETUP" = "LEVELDB-M" ]; then
+  $SB_BIN/bm_leveldb -m -g \
     -i 10 -o $OUT_FILE \
     --lsmio-ts $bsb --lsmio-bs $bsb --key-count $sg \
     2>&1 | tee $LOG_FILE

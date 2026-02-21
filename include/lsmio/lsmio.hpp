@@ -80,6 +80,7 @@ enum class MPIAggType {
  * Enum representing the storage types supported by LSMIO.
  */
 enum class StorageType {
+    NativeDB,
     LevelDB,
     RocksDB
 };
@@ -90,7 +91,7 @@ enum class StorageType {
 class LSMIOConfig {
   public:
     /// @brief Default storage type.
-    StorageType storageType = StorageType::RocksDB;
+    StorageType storageType = StorageType::NativeDB;
     /// @brief Default MPI aggregation type.
     MPIAggType mpiAggType = MPIAggType::Shared;
 

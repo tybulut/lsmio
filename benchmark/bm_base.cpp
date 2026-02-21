@@ -285,8 +285,11 @@ int BMBase::beginMain(int argc, char **argv) {
                      "use MMAP read/write (default: no MMAP)");
 
         bool flag_use_leveldb = false;
+        bool flag_use_rocksdb = false;
         app.add_flag("--lsmio-use-leveldb", flag_use_leveldb,
-                     "use LevelDB instead (default: use RocksDB)");
+                     "use LevelDB instead (default: use NativeDB)");
+        app.add_flag("--lsmio-use-rocksdb", flag_use_rocksdb,
+                     "use RocksDB instead (default: use NativeDB)");
         app.add_flag("--lsmio-compress", lsmio::gConfigLSMIO.compression,
                      "enable compression (default: no)");
         app.add_option("--lsmio-bs", lsmio::gConfigLSMIO.blockSize, "block size (default: 64K)");
@@ -316,8 +319,12 @@ int BMBase::beginMain(int argc, char **argv) {
 
         lsmio::gConfigLSMIO.mpiAggType =
             flag_mpi_io_world ? lsmio::MPIAggType::Entire : lsmio::MPIAggType::Shared;
-        lsmio::gConfigLSMIO.storageType =
-            flag_use_leveldb ? lsmio::StorageType::LevelDB : lsmio::StorageType::RocksDB;
+
+        lsmio::gConfigLSMIO.storageType = lsmio::StorageType::NativeDB;
+        if (flag_use_leveldb) 
+            lsmio::gConfigLSMIO.storageType = lsmio::StorageType::LevelDB;
+        if (flag_use_rocksdb) 
+            lsmio::gConfigLSMIO.storageType = lsmio::StorageType::RocksDB;
 
         if (gConfigBM.fileName.empty()) {
             throw std::runtime_error("ERROR: Output file is required.");
