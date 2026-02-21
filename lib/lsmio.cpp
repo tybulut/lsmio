@@ -145,6 +145,9 @@ std::string to_string(const StorageType v) {
     std::string sVal;
 
     switch (v) {
+        case StorageType::NativeDB:
+            sVal = "NativeDB";
+            break;
         case StorageType::LevelDB:
             sVal = "LevelDB";
             break;
