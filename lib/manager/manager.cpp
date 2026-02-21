@@ -151,19 +151,19 @@ void LSMIOManager::_init() {
 
     // Startup: RDB first and MPI afterwards to ensure DB available before MPI messages are received
     if (_isOpenLocal()) {
-        if (gConfigLSMIO.storageType == StorageType::NativeDB) {
-            LOG(INFO) << "LSMIOManager::_init: setting up Native backend." << std::endl;
-            _lcStore = new LSMIOStoreNative(_dbPath, _isOverWrite);
-        } else if (gConfigLSMIO.storageType == StorageType::RocksDB) {
-            LOG(INFO) << "LSMIOManager::_init: setting up RocksDB backend." << std::endl;
-            _lcStore = new LSMIOStoreRDB(_dbPath, _isOverWrite);
-        } else if (gConfigLSMIO.storageType == StorageType::LevelDB) {
-            LOG(INFO) << "LSMIOManager::_init: setting up LevelDB backend." << std::endl;
-            _lcStore = new LSMIOStoreLDB(_dbPath, _isOverWrite);
-        } else {
-            LOG(ERROR) << "LSMIOManager::_init: unknown gConfigLSMIO.storageType: "
-                       << to_string(gConfigLSMIO.storageType) << std::endl;
-            throw std::invalid_argument("ERROR: LSMIOManager: Unknown gConfigLSMIO.storageType.");
+        switch (gConfigLSMIO.storageType) {
+            case StorageType::NativeDB:
+                LOG(INFO) << "LSMIOManager::_init: setting up Native backend." << std::endl;
+                _lcStore = new LSMIOStoreNative(_dbPath, _isOverWrite);
+                break;
+            case StorageType::RocksDB:
+                LOG(INFO) << "LSMIOManager::_init: setting up RocksDB backend." << std::endl;
+                _lcStore = new LSMIOStoreRDB(_dbPath, _isOverWrite);
+                break;
+            case StorageType::LevelDB:
+                LOG(INFO) << "LSMIOManager::_init: setting up LevelDB backend." << std::endl;
+                _lcStore = new LSMIOStoreLDB(_dbPath, _isOverWrite);
+                break;
         }
     }
 
