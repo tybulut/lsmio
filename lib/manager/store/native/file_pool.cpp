@@ -109,7 +109,7 @@ void FilePool::replenish() {
             std::filesystem::path path = std::filesystem::path(_directory) / filename;
             std::string full_path = path.string();
 
-            int fd = ::open(full_path.c_str(), O_RDWR | O_CREAT, 0644);
+            int fd = ::open(full_path.c_str(), O_WRONLY | O_CREAT, 0644);
             if (fd < 0) {
                 LOG(ERROR) << "[FilePool] Failed to open " << full_path << " Errno: " << errno
                           << " (" << strerror(errno) << ")";
