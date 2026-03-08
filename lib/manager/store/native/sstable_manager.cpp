@@ -29,8 +29,8 @@
  */
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -62,7 +62,7 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
 
     if (fd < 0) {
         LOG(ERROR) << "[SSTableManager] ERROR: Failed to acquire SSTable file: " << sstable_path
-                  << std::endl;
+                   << std::endl;
         return false;
     }
 
@@ -70,13 +70,15 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
     new_index.path = sstable_path;
     new_index.offsets.reserve(memtable.count());
 
-    // Serialize entire memtable into the buffer
     buffer.clear();
+    uint64_t total_written_bytes = 0;
+    size_t write_threshold = std::max(static_cast<size_t>(gConfigLSMIO.transferSize),
+                                      static_cast<size_t>(1024 * 1024));
 
     const auto& data = memtable.getData();
     for (const auto& [key, value] : data) {
-        uint64_t current_offset = buffer.size();
-        new_index.offsets.emplace_back(key, current_offset);
+        uint64_t current_entry_offset = total_written_bytes + buffer.size();
+        new_index.offsets.emplace_back(key, current_entry_offset);
 
         uint32_t key_len = static_cast<uint32_t>(key.size());
         uint32_t val_len = static_cast<uint32_t>(value.size());
@@ -88,15 +90,34 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
         const char* val_len_ptr = reinterpret_cast<const char*>(&val_len);
         buffer.insert(buffer.end(), val_len_ptr, val_len_ptr + sizeof(val_len));
         buffer.insert(buffer.end(), value.begin(), value.end());
+
+        // Incremental write to restore pipelining
+        if (buffer.size() >= write_threshold) {
+            ssize_t written = ::write(fd, buffer.data(), buffer.size());
+            if (written != static_cast<ssize_t>(buffer.size())) {
+                LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable chunk: "
+                           << sstable_path << " Written: " << written
+                           << " Expected: " << buffer.size() << std::endl;
+                ::close(fd);
+                return false;
+            }
+            total_written_bytes += written;
+            buffer.clear();
+        }
     }
 
-    // Single shot write
-    ssize_t written = ::write(fd, buffer.data(), buffer.size());
-    if (written != static_cast<ssize_t>(buffer.size())) {
-        LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable: " << sstable_path
-                  << " Written: " << written << " Expected: " << buffer.size() << std::endl;
-        ::close(fd);
-        return false;
+    // Final write for remaining data
+    if (!buffer.empty()) {
+        ssize_t written = ::write(fd, buffer.data(), buffer.size());
+        if (written != static_cast<ssize_t>(buffer.size())) {
+            LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable final chunk: "
+                       << sstable_path << " Written: " << written << " Expected: " << buffer.size()
+                       << std::endl;
+            ::close(fd);
+            return false;
+        }
+        total_written_bytes += written;
+        buffer.clear();
     }
 
     if (gConfigLSMIO.useSync) {
@@ -207,7 +228,7 @@ bool SSTableManager::readValueAt(const std::string& sstable_path, uint64_t offse
 
     if (key_from_file != key) {
         LOG(ERROR) << "ERROR: Index mismatch! Expected " << key << " found " << key_from_file
-                  << std::endl;
+                   << std::endl;
         ::close(fd);
         return false;
     }
