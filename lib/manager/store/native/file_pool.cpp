@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <lsmio/lsmio.hpp>
 #include <lsmio/manager/store/native/file_pool.hpp>
 #include <sstream>
 
@@ -110,8 +111,8 @@ void FilePool::replenish() {
 
             int fd = ::open(full_path.c_str(), O_RDWR | O_CREAT, 0644);
             if (fd < 0) {
-                std::cerr << "[FilePool] Failed to open " << full_path << " Errno: " << errno
-                          << " (" << strerror(errno) << ")" << std::endl;
+                LOG(ERROR) << "[FilePool] Failed to open " << full_path << " Errno: " << errno
+                          << " (" << strerror(errno) << ")";
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }

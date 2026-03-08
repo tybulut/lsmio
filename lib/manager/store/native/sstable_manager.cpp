@@ -34,7 +34,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <iostream>
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/store/native/sstable_manager.hpp>
 
@@ -62,7 +61,7 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
     auto [sstable_path, fd] = _filePool->acquire();
 
     if (fd < 0) {
-        std::cerr << "[SSTableManager] ERROR: Failed to acquire SSTable file: " << sstable_path
+        LOG(ERROR) << "[SSTableManager] ERROR: Failed to acquire SSTable file: " << sstable_path
                   << std::endl;
         return false;
     }
@@ -94,7 +93,7 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
     // Single shot write
     ssize_t written = ::write(fd, buffer.data(), buffer.size());
     if (written != static_cast<ssize_t>(buffer.size())) {
-        std::cerr << "[SSTableManager] ERROR: Failed to write SSTable: " << sstable_path
+        LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable: " << sstable_path
                   << " Written: " << written << " Expected: " << buffer.size() << std::endl;
         ::close(fd);
         return false;
@@ -189,7 +188,7 @@ bool SSTableManager::readValueAt(const std::string& sstable_path, uint64_t offse
                                  const std::string& key, std::string& out_value) {
     int fd = ::open(sstable_path.c_str(), O_RDONLY);
     if (fd < 0) {
-        std::cerr << "ERROR: Failed to open SSTable for read: " << sstable_path << std::endl;
+        LOG(ERROR) << "ERROR: Failed to open SSTable for read: " << sstable_path << std::endl;
         return false;
     }
 
@@ -207,7 +206,7 @@ bool SSTableManager::readValueAt(const std::string& sstable_path, uint64_t offse
     }
 
     if (key_from_file != key) {
-        std::cerr << "ERROR: Index mismatch! Expected " << key << " found " << key_from_file
+        LOG(ERROR) << "ERROR: Index mismatch! Expected " << key << " found " << key_from_file
                   << std::endl;
         ::close(fd);
         return false;
@@ -251,7 +250,7 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
 
         // Sort files by ID (Oldest to Newest)
         std::sort(found_files.begin(), found_files.end());
-        std::cout << "[NATIVE] Recovering state. Indexing " << found_files.size() << " SSTables..."
+        LOG(INFO) << "[NATIVE] Recovering state. Indexing " << found_files.size() << " SSTables..."
                   << std::endl;
 
         for (const auto& [id, path] : found_files) {
@@ -306,7 +305,7 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
             newNode->next = _head.load(std::memory_order_relaxed);
             _head.store(newNode, std::memory_order_relaxed);
         }
-        std::cout << "[NATIVE] Recovery complete." << std::endl;
+        LOG(INFO) << "[NATIVE] Recovery complete." << std::endl;
     }
 
     _filePool =

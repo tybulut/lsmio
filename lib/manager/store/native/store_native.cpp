@@ -34,9 +34,9 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <lsmio/lsmio.hpp>
 #include <lsmio/manager/store/native/store_native.hpp>
 #include <map>
 #include <mutex>
@@ -146,9 +146,9 @@ void LSMIOStoreNative::FlushWorkLoop() {
             try {
                 FlushMemtableToL0(std::move(memtable_to_flush));
             } catch (const std::exception& e) {
-                std::cerr << "[NATIVE] ERROR in FlushWorkLoop: " << e.what() << std::endl;
+                LOG(ERROR) << "[NATIVE] ERROR in FlushWorkLoop: " << e.what();
             } catch (...) {
-                std::cerr << "[NATIVE] UNKNOWN ERROR in FlushWorkLoop" << std::endl;
+                LOG(ERROR) << "[NATIVE] UNKNOWN ERROR in FlushWorkLoop";
             }
 
             {
