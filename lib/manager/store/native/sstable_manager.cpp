@@ -100,7 +100,9 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
         return false;
     }
 
-    ::fdatasync(fd);
+    if (gConfigLSMIO.useSync) {
+        ::fdatasync(fd);
+    }
     _fileCloser->scheduleClose(fd);
 
     std::sort(
