@@ -28,10 +28,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
+#include <lsmio/lsmio.hpp>
 #include <lsmio/manager/store/native/sstable_manager.hpp>
 
 namespace lsmio {
@@ -55,14 +59,9 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
         return true;
     }
 
-    auto [sstable_path, sst_file_ptr] = _filePool->acquire();
-    std::ofstream& sst_file = *sst_file_ptr;
+    auto [sstable_path, fd] = _filePool->acquire();
 
-    if (!buffer.empty()) {
-        sst_file.rdbuf()->pubsetbuf(buffer.data(), buffer.size());
-    }
-
-    if (!sst_file) {
+    if (fd < 0) {
         std::cerr << "[SSTableManager] ERROR: Failed to acquire SSTable file: " << sstable_path
                   << std::endl;
         return false;
@@ -72,28 +71,37 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
     new_index.path = sstable_path;
     new_index.offsets.reserve(memtable.count());
 
-    std::string serialization_buffer;
-    serialization_buffer.reserve(1024 * 64);
+    // Serialize entire memtable into the buffer
+    buffer.clear();
 
     const auto& data = memtable.getData();
     for (const auto& [key, value] : data) {
-        uint64_t current_offset = sst_file.tellp();
+        uint64_t current_offset = buffer.size();
         new_index.offsets.emplace_back(key, current_offset);
 
         uint32_t key_len = static_cast<uint32_t>(key.size());
         uint32_t val_len = static_cast<uint32_t>(value.size());
 
-        serialization_buffer.clear();
-        serialization_buffer.append(reinterpret_cast<const char*>(&key_len), sizeof(key_len));
-        serialization_buffer.append(key.data(), key_len);
-        serialization_buffer.append(reinterpret_cast<const char*>(&val_len), sizeof(val_len));
-        serialization_buffer.append(value.data(), val_len);
+        const char* key_len_ptr = reinterpret_cast<const char*>(&key_len);
+        buffer.insert(buffer.end(), key_len_ptr, key_len_ptr + sizeof(key_len));
+        buffer.insert(buffer.end(), key.begin(), key.end());
 
-        sst_file.write(serialization_buffer.data(), serialization_buffer.size());
+        const char* val_len_ptr = reinterpret_cast<const char*>(&val_len);
+        buffer.insert(buffer.end(), val_len_ptr, val_len_ptr + sizeof(val_len));
+        buffer.insert(buffer.end(), value.begin(), value.end());
     }
 
-    sst_file.flush();
-    _fileCloser->scheduleClose(std::move(sst_file_ptr));
+    // Single shot write
+    ssize_t written = ::write(fd, buffer.data(), buffer.size());
+    if (written != static_cast<ssize_t>(buffer.size())) {
+        std::cerr << "[SSTableManager] ERROR: Failed to write SSTable: " << sstable_path
+                  << " Written: " << written << " Expected: " << buffer.size() << std::endl;
+        ::close(fd);
+        return false;
+    }
+
+    ::fdatasync(fd);
+    _fileCloser->scheduleClose(fd);
 
     std::sort(
         new_index.offsets.begin(), new_index.offsets.end(),
@@ -177,38 +185,48 @@ bool SSTableManager::scan(const std::string& prefix, std::map<std::string, std::
 
 bool SSTableManager::readValueAt(const std::string& sstable_path, uint64_t offset,
                                  const std::string& key, std::string& out_value) {
-    std::ifstream sst_file(sstable_path, std::ios::binary);
-    if (!sst_file) {
+    int fd = ::open(sstable_path.c_str(), O_RDONLY);
+    if (fd < 0) {
         std::cerr << "ERROR: Failed to open SSTable for read: " << sstable_path << std::endl;
         return false;
     }
 
-    sst_file.seekg(offset);
-    if (sst_file.fail()) return false;
-
     uint32_t key_len;
-    sst_file.read(reinterpret_cast<char*>(&key_len), sizeof(key_len));
-    if (sst_file.fail()) return false;
+    if (::pread(fd, &key_len, sizeof(key_len), offset) != sizeof(key_len)) {
+        ::close(fd);
+        return false;
+    }
 
     std::string key_from_file(key_len, '\0');
-    sst_file.read(&key_from_file[0], key_len);
-    if (sst_file.fail()) return false;
+    if (::pread(fd, &key_from_file[0], key_len, offset + sizeof(key_len)) !=
+        static_cast<ssize_t>(key_len)) {
+        ::close(fd);
+        return false;
+    }
 
     if (key_from_file != key) {
         std::cerr << "ERROR: Index mismatch! Expected " << key << " found " << key_from_file
                   << std::endl;
+        ::close(fd);
         return false;
     }
 
     uint32_t val_len;
-    sst_file.read(reinterpret_cast<char*>(&val_len), sizeof(val_len));
-    if (sst_file.fail()) return false;
+    uint64_t val_len_offset = offset + sizeof(key_len) + key_len;
+    if (::pread(fd, &val_len, sizeof(val_len), val_len_offset) != sizeof(val_len)) {
+        ::close(fd);
+        return false;
+    }
 
     std::string val_from_file(val_len, '\0');
-    sst_file.read(&val_from_file[0], val_len);
-    if (sst_file.fail()) return false;
+    uint64_t val_offset = val_len_offset + sizeof(val_len);
+    if (::pread(fd, &val_from_file[0], val_len, val_offset) != static_cast<ssize_t>(val_len)) {
+        ::close(fd);
+        return false;
+    }
 
     out_value = val_from_file;
+    ::close(fd);
     return true;
 }
 
@@ -238,27 +256,35 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
             L0Index new_index;
             new_index.path = path;
 
-            std::ifstream sst_file(path, std::ios::binary);
-            if (sst_file) {
-                while (sst_file.peek() != EOF) {
-                    uint64_t current_offset = sst_file.tellg();
+            int fd = ::open(path.c_str(), O_RDONLY);
+            if (fd >= 0) {
+                off_t current_pos = 0;
+                struct stat st;
+                if (fstat(fd, &st) == 0) {
+                    while (current_pos < st.st_size) {
+                        uint64_t entry_offset = current_pos;
 
-                    uint32_t key_len;
-                    sst_file.read(reinterpret_cast<char*>(&key_len), sizeof(key_len));
-                    if (sst_file.fail()) break;
+                        uint32_t key_len;
+                        if (::pread(fd, &key_len, sizeof(key_len), current_pos) != sizeof(key_len))
+                            break;
+                        current_pos += sizeof(key_len);
 
-                    std::string key(key_len, '\0');
-                    sst_file.read(&key[0], key_len);
-                    if (sst_file.fail()) break;
+                        std::string key(key_len, '\0');
+                        if (::pread(fd, &key[0], key_len, current_pos) !=
+                            static_cast<ssize_t>(key_len))
+                            break;
+                        current_pos += key_len;
 
-                    uint32_t val_len;
-                    sst_file.read(reinterpret_cast<char*>(&val_len), sizeof(val_len));
-                    if (sst_file.fail()) break;
+                        uint32_t val_len;
+                        if (::pread(fd, &val_len, sizeof(val_len), current_pos) != sizeof(val_len))
+                            break;
+                        current_pos += sizeof(val_len);
+                        current_pos += val_len;  // Skip value
 
-                    sst_file.seekg(val_len, std::ios::cur);  // Skip value
-
-                    new_index.offsets.emplace_back(key, current_offset);
+                        new_index.offsets.emplace_back(key, entry_offset);
+                    }
                 }
+                ::close(fd);
             }
 
             std::sort(new_index.offsets.begin(), new_index.offsets.end(),
@@ -274,9 +300,6 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
                    const std::pair<std::string, uint64_t>& b) { return a.first == b.first; });
             new_index.offsets.erase(last, new_index.offsets.end());
 
-            // Prepend during recovery to maintain newest-to-oldest order
-            // Since we iterate found_files Oldest -> Newest, prepending each results in Newest at
-            // head.
             IndexNode* newNode = new IndexNode(std::move(new_index));
             newNode->next = _head.load(std::memory_order_relaxed);
             _head.store(newNode, std::memory_order_relaxed);

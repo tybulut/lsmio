@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <filesystem>
-#include <fstream>
 #include <lsmio/manager/store/native/file_closer.hpp>
 #include <thread>
 
@@ -21,13 +23,15 @@ TEST_F(FileCloserTest, BatchClose) {
     lsmio::FileCloser closer(2);
 
     std::string p1 = test_dir + "/f1.txt";
-    auto f1 = std::make_unique<std::ofstream>(p1);
+    int f1 = ::open(p1.c_str(), O_WRONLY | O_CREAT, 0644);
+    ASSERT_GE(f1, 0);
 
     std::string p2 = test_dir + "/f2.txt";
-    auto f2 = std::make_unique<std::ofstream>(p2);
+    int f2 = ::open(p2.c_str(), O_WRONLY | O_CREAT, 0644);
+    ASSERT_GE(f2, 0);
 
-    closer.scheduleClose(std::move(f1));
-    closer.scheduleClose(std::move(f2));  // Should trigger close
+    closer.scheduleClose(f1);
+    closer.scheduleClose(f2);  // Should trigger close
 
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 

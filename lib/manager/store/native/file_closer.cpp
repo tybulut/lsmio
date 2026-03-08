@@ -28,6 +28,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <unistd.h>
+
 #include <iostream>
 #include <lsmio/manager/store/native/file_closer.hpp>
 
@@ -47,14 +49,14 @@ FileCloser::~FileCloser() {
         _worker.join();
     }
     // Close remaining
-    for (auto& f : _pending) {
-        if (f && f->is_open()) f->close();
+    for (int fd : _pending) {
+        if (fd >= 0) ::close(fd);
     }
 }
 
-void FileCloser::scheduleClose(std::unique_ptr<std::ofstream> file) {
+void FileCloser::scheduleClose(int fd) {
     std::unique_lock<std::mutex> lock(_mutex);
-    _pending.push_back(std::move(file));
+    _pending.push_back(fd);
     if (_pending.size() >= _batchSize || _shutdown) {
         _cv.notify_one();
     }
@@ -62,7 +64,7 @@ void FileCloser::scheduleClose(std::unique_ptr<std::ofstream> file) {
 
 void FileCloser::workerLoop() {
     while (true) {
-        std::vector<std::unique_ptr<std::ofstream>> to_close;
+        std::vector<int> to_close;
 
         {
             std::unique_lock<std::mutex> lock(_mutex);
@@ -73,9 +75,9 @@ void FileCloser::workerLoop() {
             to_close.swap(_pending);
         }
 
-        for (auto& f : to_close) {
-            if (f && f->is_open()) {
-                f->close();
+        for (int fd : to_close) {
+            if (fd >= 0) {
+                ::close(fd);
             }
         }
     }

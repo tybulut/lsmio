@@ -49,10 +49,10 @@ class FilePool {
              size_t poolSize, uint64_t startId, size_t preAllocationSize = 0);
     ~FilePool();
 
-    // Returns a pair of {file_path, file_stream}
-    // The stream is open and ready for writing.
+    // Returns a pair of {file_path, file_descriptor}
+    // The descriptor is open and ready for writing.
     // If the pool is empty, this blocks until a file is available.
-    std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
+    std::pair<std::string, int> acquire();
 
   private:
     std::string _directory;
@@ -61,8 +61,8 @@ class FilePool {
     size_t _poolSize;
     size_t _preAllocationSize;
 
-    // Pool stores pairs of {path, stream}
-    std::deque<std::pair<std::string, std::unique_ptr<std::ofstream>>> _pool;
+    // Pool stores pairs of {path, fd}
+    std::deque<std::pair<std::string, int>> _pool;
 
     std::mutex _mutex;
     std::thread _worker;

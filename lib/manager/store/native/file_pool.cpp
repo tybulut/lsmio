@@ -61,14 +61,19 @@ FilePool::~FilePool() {
     if (_worker.joinable()) {
         _worker.join();
     }
+    // Clean up remaining files in pool
+    for (auto& p : _pool) {
+        if (p.second >= 0) {
+            ::close(p.second);
+        }
+    }
 }
 
-std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
+std::pair<std::string, int> FilePool::acquire() {
     std::unique_lock<std::mutex> lock(_mutex);
     _cv_wait.wait(lock, [this] { return !_pool.empty() || _shutdown; });
 
     if (_shutdown && _pool.empty()) {
-        // Fallback or throw? Throwing seems safer to indicate state.
         throw std::runtime_error("FilePool is shutting down");
     }
 
@@ -103,52 +108,34 @@ void FilePool::replenish() {
             std::filesystem::path path = std::filesystem::path(_directory) / filename;
             std::string full_path = path.string();
 
-            if (_preAllocationSize > 0) {
-                int fd = ::open(full_path.c_str(), O_WRONLY | O_CREAT, 0644);
-                if (fd >= 0) {
-#ifdef __APPLE__
-                    fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0,
-                                      (off_t)_preAllocationSize};
-                    if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
-                        store.fst_flags = F_ALLOCATEALL;
-                        fcntl(fd, F_PREALLOCATE, &store);
-                    }
-                    ftruncate(fd, _preAllocationSize);
-#else
-                    posix_fallocate(fd, 0, _preAllocationSize);
-#endif
-                    ::close(fd);
-                } else {
-                    std::cerr << "[FilePool] Pre-alloc open failed: " << full_path << " "
-                              << strerror(errno) << std::endl;
-                }
-            }
-
-            auto mode = std::ios::binary | std::ios::out;
-            if (_preAllocationSize > 0) {
-                mode |= std::ios::in;
-            }
-
-            auto ofs = std::make_unique<std::ofstream>(full_path, mode);
-            if (!ofs || !ofs->is_open()) {
-                std::cerr << "[FilePool] Failed to open " << full_path << " Mode: " << mode
-                          << " Errno: " << errno << " (" << strerror(errno) << ")" << std::endl;
-                // Sleep briefly to avoid busy loop if FS is bad
+            int fd = ::open(full_path.c_str(), O_RDWR | O_CREAT, 0644);
+            if (fd < 0) {
+                std::cerr << "[FilePool] Failed to open " << full_path << " Errno: " << errno
+                          << " (" << strerror(errno) << ")" << std::endl;
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
 
             if (_preAllocationSize > 0) {
-                ofs->seekp(0);  // Ensure we start writing from beginning
+#ifdef __APPLE__
+                fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, (off_t)_preAllocationSize};
+                if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
+                    store.fst_flags = F_ALLOCATEALL;
+                    fcntl(fd, F_PREALLOCATE, &store);
+                }
+                ftruncate(fd, _preAllocationSize);
+#else
+                posix_fallocate(fd, 0, _preAllocationSize);
+#endif
             }
 
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 if (_shutdown) {
-                    ofs->close();  // Cleanup
+                    ::close(fd);
                     return;
                 }
-                _pool.push_back({full_path, std::move(ofs)});
+                _pool.push_back({full_path, fd});
                 _cv_wait.notify_one();
             }
         }

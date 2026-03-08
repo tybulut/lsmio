@@ -55,12 +55,20 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
       _max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
                                                                   : 2),  // Default 2
       _active_memtable(std::make_unique<Memtable>()),
-      _flush_buffer(1024 * 1024) {
+      _flush_buffer() {
     // Ensure database directory exists
     if (overWrite) {
         std::filesystem::remove_all(_dbPath);
     }
     std::filesystem::create_directories(_dbPath);
+
+    size_t flush_buffer_size = gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
+                                                                : 32 * 1024 * 1024;
+    // Align buffer size to blockSize
+    if (gConfigLSMIO.blockSize > 0) {
+        flush_buffer_size = ((flush_buffer_size + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) * gConfigLSMIO.blockSize;
+    }
+    _flush_buffer.reserve(flush_buffer_size);
 
     size_t pre_alloc_bytes = 0;
     if (gConfigLSMIO.preAllocate) {

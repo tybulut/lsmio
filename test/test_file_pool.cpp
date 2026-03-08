@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <filesystem>
-#include <fstream>
 #include <lsmio/manager/store/native/file_pool.hpp>
 #include <thread>
 
@@ -36,19 +38,19 @@ TEST_F(FilePoolTest, BasicAcquire) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     auto file1 = pool.acquire();
-    EXPECT_TRUE(file1.second->is_open());
+    EXPECT_GE(file1.second, 0);
     // Check suffix
     std::string suffix1 = "L0-000001.sst";
     EXPECT_EQ(
         file1.first.compare(file1.first.length() - suffix1.length(), suffix1.length(), suffix1), 0);
-    file1.second->close();
+    ::close(file1.second);
 
     auto file2 = pool.acquire();
-    EXPECT_TRUE(file2.second->is_open());
+    EXPECT_GE(file2.second, 0);
     std::string suffix2 = "L0-000002.sst";
     EXPECT_EQ(
         file2.first.compare(file2.first.length() - suffix2.length(), suffix2.length(), suffix2), 0);
-    file2.second->close();
+    ::close(file2.second);
 }
 
 TEST_F(FilePoolTest, PoolReplenish) {
@@ -59,9 +61,13 @@ TEST_F(FilePoolTest, PoolReplenish) {
     auto f2 = pool.acquire();
     auto f3 = pool.acquire();  // Should wait for replenish
 
-    EXPECT_TRUE(f1.second->is_open());
-    EXPECT_TRUE(f2.second->is_open());
-    EXPECT_TRUE(f3.second->is_open());
+    EXPECT_GE(f1.second, 0);
+    EXPECT_GE(f2.second, 0);
+    EXPECT_GE(f3.second, 0);
+
+    ::close(f1.second);
+    ::close(f2.second);
+    ::close(f3.second);
 }
 
 TEST_F(FilePoolTest, PreAllocation) {
@@ -72,7 +78,7 @@ TEST_F(FilePoolTest, PreAllocation) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     auto f1 = pool.acquire();
-    f1.second->close();
+    ::close(f1.second);
 
     auto fsize = std::filesystem::file_size(f1.first);
     EXPECT_EQ(fsize, size);

@@ -33,7 +33,6 @@
 
 #include <atomic>
 #include <condition_variable>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -46,11 +45,11 @@ class FileCloser {
     FileCloser(size_t batchSize);
     ~FileCloser();
 
-    void scheduleClose(std::unique_ptr<std::ofstream> file);
+    void scheduleClose(int fd);
 
   private:
     size_t _batchSize;
-    std::vector<std::unique_ptr<std::ofstream>> _pending;
+    std::vector<int> _pending;
     std::mutex _mutex;
     std::thread _worker;
     std::condition_variable _cv;
