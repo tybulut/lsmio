@@ -51,7 +51,7 @@ class SSTableManager {
 
     // Flush a memtable to disk as a new SSTable
     // Uses the provided buffer for I/O buffering
-    bool flushMemtable(const Memtable& memtable, std::vector<char>& buffer);
+    bool flushMemtable(const Memtable& memtable, char* buffer, size_t capacity);
 
     // Read a value from disk
     // Returns true if found (populates value).

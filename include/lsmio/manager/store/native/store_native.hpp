@@ -61,7 +61,8 @@ class LSMIOStoreNative : public LSMIOStore {
     std::unique_ptr<SSTableManager> _sstable_manager;
 
     std::mutex _state_mutex;
-    std::vector<char> _flush_buffer;
+    char* _flush_buffer{nullptr};
+    size_t _flush_buffer_capacity{0};
     std::thread _flush_thread;
     std::condition_variable _flush_cv;
     std::condition_variable _backpressure_cv;

@@ -45,6 +45,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdlib>
 
 namespace lsmio {
 
@@ -54,21 +55,24 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
                                                                 : 1024 * 1024),
       _max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
                                                                   : 2),  // Default 2
-      _active_memtable(std::make_unique<Memtable>()),
-      _flush_buffer() {
+      _active_memtable(std::make_unique<Memtable>()) {
     // Ensure database directory exists
     if (overWrite) {
         std::filesystem::remove_all(_dbPath);
     }
     std::filesystem::create_directories(_dbPath);
 
-    size_t flush_buffer_size = gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
+    _flush_buffer_capacity = gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
                                                                 : 32 * 1024 * 1024;
-    // Align buffer size to blockSize
+    // Align capacity to blockSize
     if (gConfigLSMIO.blockSize > 0) {
-        flush_buffer_size = ((flush_buffer_size + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) * gConfigLSMIO.blockSize;
+        _flush_buffer_capacity = ((_flush_buffer_capacity + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) * gConfigLSMIO.blockSize;
     }
-    _flush_buffer.reserve(flush_buffer_size);
+
+    // Allocate aligned buffer
+    if (::posix_memalign(reinterpret_cast<void**>(&_flush_buffer), 4096, _flush_buffer_capacity) != 0) {
+        throw std::runtime_error("Failed to allocate aligned flush buffer");
+    }
 
     size_t pre_alloc_bytes = 0;
     if (gConfigLSMIO.preAllocate) {
@@ -86,6 +90,10 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
 
 LSMIOStoreNative::~LSMIOStoreNative() {
     close();
+    if (_flush_buffer) {
+        std::free(_flush_buffer);
+        _flush_buffer = nullptr;
+    }
 }
 
 void LSMIOStoreNative::close() {
@@ -166,8 +174,7 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable) {
     }
 
     // Delegate to SSTableManager
-    // We pass _flush_buffer for reuse
-    _sstable_manager->flushMemtable(*memtable, _flush_buffer);
+    _sstable_manager->flushMemtable(*memtable, _flush_buffer, _flush_buffer_capacity);
 }
 
 bool LSMIOStoreNative::startBatch() {

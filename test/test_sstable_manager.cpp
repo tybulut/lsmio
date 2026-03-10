@@ -31,94 +31,79 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <lsmio/manager/store/native/memtable.hpp>
 #include <lsmio/manager/store/native/sstable_manager.hpp>
-
-using namespace lsmio;
+#include <cstdlib>
 
 class SSTableManagerTest : public ::testing::Test {
   protected:
-    std::string dbPath = "test_sstable_mgr_db";
-    std::unique_ptr<SSTableManager> mgr;
+    std::string test_dir = "test_sstable_mgr_dir";
+    char* buf{nullptr};
+    size_t buf_capacity = 1024 * 1024;
 
     void SetUp() override {
-        const testing::TestInfo* const test_info =
-            testing::UnitTest::GetInstance()->current_test_info();
-        dbPath = std::string("test_sstable_mgr_db_") + test_info->name();
-
-        if (std::filesystem::exists(dbPath)) {
-            std::filesystem::remove_all(dbPath);
+        if (std::filesystem::exists(test_dir)) std::filesystem::remove_all(test_dir);
+        std::filesystem::create_directory(test_dir);
+        if (::posix_memalign(reinterpret_cast<void**>(&buf), 4096, buf_capacity) != 0) {
+            throw std::runtime_error("posix_memalign failed in test setup");
         }
-        std::filesystem::create_directories(dbPath);
-
-        mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
     }
-
     void TearDown() override {
-        mgr.reset();
-        if (std::filesystem::exists(dbPath)) {
-            std::filesystem::remove_all(dbPath);
-        }
+        if (std::filesystem::exists(test_dir)) std::filesystem::remove_all(test_dir);
+        if (buf) std::free(buf);
     }
 };
 
 TEST_F(SSTableManagerTest, FlushAndGet) {
-    Memtable m;
-    m.add("key1", "val1");
-    m.add("key2", "val2");
+    auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
+    lsmio::Memtable m;
+    m.add("key1", "value1");
+    m.add("key2", "value2");
 
-    std::vector<char> buf(1024);
-    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+    ASSERT_TRUE(mgr->flushMemtable(m, buf, buf_capacity));
 
     std::string val;
     EXPECT_TRUE(mgr->get("key1", val));
-    EXPECT_EQ(val, "val1");
-
+    EXPECT_EQ(val, "value1");
     EXPECT_TRUE(mgr->get("key2", val));
-    EXPECT_EQ(val, "val2");
-
+    EXPECT_EQ(val, "value2");
     EXPECT_FALSE(mgr->get("key3", val));
 }
 
 TEST_F(SSTableManagerTest, Recovery) {
     {
-        Memtable m;
-        m.add("key1", "val1");
-        std::vector<char> buf(1024);
-        mgr->flushMemtable(m, buf);
+        auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
+        lsmio::Memtable m;
+        m.add("a", "1");
+        mgr->flushMemtable(m, buf, buf_capacity);
     }
 
-    // Simulate restart
-    mgr.reset();  // Destroy old manager
-
-    // Create new manager (triggers recovery in constructor)
-    auto newMgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
-
+    // New manager should recover
+    auto mgr2 = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
     std::string val;
-    EXPECT_TRUE(newMgr->get("key1", val));
-    EXPECT_EQ(val, "val1");
+    EXPECT_TRUE(mgr2->get("a", val));
+    EXPECT_EQ(val, "1");
 }
 
 TEST_F(SSTableManagerTest, Tombstone) {
-    Memtable m;
-    m.add("key1", MEMTABLE_TOMBSTONE);
-    std::vector<char> buf(1024);
-    mgr->flushMemtable(m, buf);
+    auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
+    lsmio::Memtable m;
+    m.add("deleted", lsmio::MEMTABLE_TOMBSTONE);
+    mgr->flushMemtable(m, buf, buf_capacity);
 
     std::string val;
-    EXPECT_TRUE(mgr->get("key1", val));
-    EXPECT_EQ(val, MEMTABLE_TOMBSTONE);
+    EXPECT_TRUE(mgr->get("deleted", val));
+    EXPECT_EQ(val, lsmio::MEMTABLE_TOMBSTONE);
 }
 
 TEST_F(SSTableManagerTest, Scan) {
-    Memtable m1;
+    auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
+    lsmio::Memtable m1;
     m1.add("prefix/a", "1");
-    std::vector<char> buf(1024);
-    mgr->flushMemtable(m1, buf);
+    mgr->flushMemtable(m1, buf, buf_capacity);
 
-    Memtable m2;
+    lsmio::Memtable m2;
     m2.add("prefix/b", "2");
-    mgr->flushMemtable(m2, buf);
+    mgr->flushMemtable(m2, buf, buf_capacity);
 
     std::map<std::string, std::string> results;
     std::set<std::string> deleted;

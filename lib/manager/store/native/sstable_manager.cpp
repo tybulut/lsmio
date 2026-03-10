@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/store/native/sstable_manager.hpp>
@@ -53,7 +54,7 @@ SSTableManager::~SSTableManager() {
     }
 }
 
-bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& buffer) {
+bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_t capacity) {
     if (memtable.empty()) {
         return true;
     }
@@ -70,54 +71,65 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
     new_index.path = sstable_path;
     new_index.offsets.reserve(memtable.count());
 
-    buffer.clear();
     uint64_t total_written_bytes = 0;
+    size_t current_buffer_size = 0;
     size_t write_threshold = std::max(static_cast<size_t>(gConfigLSMIO.transferSize),
                                       static_cast<size_t>(1024 * 1024));
 
     const auto& data = memtable.getData();
     for (const auto& [key, value] : data) {
-        uint64_t current_entry_offset = total_written_bytes + buffer.size();
+        uint64_t current_entry_offset = total_written_bytes + current_buffer_size;
         new_index.offsets.emplace_back(key, current_entry_offset);
 
         uint32_t key_len = static_cast<uint32_t>(key.size());
         uint32_t val_len = static_cast<uint32_t>(value.size());
+        size_t entry_needed = sizeof(key_len) + key.size() + sizeof(val_len) + value.size();
 
-        const char* key_len_ptr = reinterpret_cast<const char*>(&key_len);
-        buffer.insert(buffer.end(), key_len_ptr, key_len_ptr + sizeof(key_len));
-        buffer.insert(buffer.end(), key.begin(), key.end());
+        if (entry_needed > capacity) {
+             LOG(ERROR) << "[SSTableManager] ERROR: Entry too large for flush buffer: " << entry_needed << " > " << capacity;
+             ::close(fd);
+             return false;
+        }
 
-        const char* val_len_ptr = reinterpret_cast<const char*>(&val_len);
-        buffer.insert(buffer.end(), val_len_ptr, val_len_ptr + sizeof(val_len));
-        buffer.insert(buffer.end(), value.begin(), value.end());
-
-        // Incremental write to restore pipelining
-        if (buffer.size() >= write_threshold) {
-            ssize_t written = ::write(fd, buffer.data(), buffer.size());
-            if (written != static_cast<ssize_t>(buffer.size())) {
+        if (current_buffer_size + entry_needed > capacity || current_buffer_size >= write_threshold) {
+            ssize_t written = ::write(fd, buffer, current_buffer_size);
+            if (written != static_cast<ssize_t>(current_buffer_size)) {
                 LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable chunk: "
                            << sstable_path << " Written: " << written
-                           << " Expected: " << buffer.size() << std::endl;
+                           << " Expected: " << current_buffer_size << std::endl;
                 ::close(fd);
                 return false;
             }
             total_written_bytes += written;
-            buffer.clear();
+            current_buffer_size = 0;
+            new_index.offsets.back().second = total_written_bytes;
         }
+
+        std::memcpy(buffer + current_buffer_size, &key_len, sizeof(key_len));
+        current_buffer_size += sizeof(key_len);
+        std::memcpy(buffer + current_buffer_size, key.data(), key.size());
+        current_buffer_size += key.size();
+        std::memcpy(buffer + current_buffer_size, &val_len, sizeof(val_len));
+        current_buffer_size += sizeof(val_len);
+        std::memcpy(buffer + current_buffer_size, value.data(), value.size());
+        current_buffer_size += value.size();
     }
 
-    // Final write for remaining data
-    if (!buffer.empty()) {
-        ssize_t written = ::write(fd, buffer.data(), buffer.size());
-        if (written != static_cast<ssize_t>(buffer.size())) {
+    if (current_buffer_size > 0) {
+        ssize_t written = ::write(fd, buffer, current_buffer_size);
+        if (written != static_cast<ssize_t>(current_buffer_size)) {
             LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable final chunk: "
-                       << sstable_path << " Written: " << written << " Expected: " << buffer.size()
+                       << sstable_path << " Written: " << written << " Expected: " << current_buffer_size
                        << std::endl;
             ::close(fd);
             return false;
         }
         total_written_bytes += written;
-        buffer.clear();
+    }
+
+    // Fix: Accurate file size for recovery
+    if (::ftruncate(fd, total_written_bytes) != 0) {
+        LOG(ERROR) << "[SSTableManager] ERROR: ftruncate failed: " << sstable_path;
     }
 
     if (gConfigLSMIO.useSync) {
@@ -138,7 +150,6 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, std::vector<char>& 
                        const std::pair<std::string, uint64_t>& b) { return a.first == b.first; });
     new_index.offsets.erase(last, new_index.offsets.end());
 
-    // Lock-free prepend (LIFO)
     IndexNode* newNode = new IndexNode(std::move(new_index));
     newNode->next = _head.load(std::memory_order_relaxed);
     while (!_head.compare_exchange_weak(newNode->next, newNode, std::memory_order_release,
@@ -152,7 +163,6 @@ void SSTableManager::close() {
 }
 
 bool SSTableManager::get(const std::string& key, std::string& value) {
-    // Traverse the linked list (Newest -> Oldest)
     IndexNode* curr = _head.load(std::memory_order_acquire);
     while (curr) {
         const auto& offsets = curr->index.offsets;
@@ -269,7 +279,6 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
             }
         }
 
-        // Sort files by ID (Oldest to Newest)
         std::sort(found_files.begin(), found_files.end());
         LOG(INFO) << "[NATIVE] Recovering state. Indexing " << found_files.size() << " SSTables..."
                   << std::endl;
@@ -291,6 +300,8 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
                             break;
                         current_pos += sizeof(key_len);
 
+                        if (key_len == 0 && current_pos + sizeof(uint32_t) >= st.st_size) break; // End of actual data in preallocated file
+
                         std::string key(key_len, '\0');
                         if (::pread(fd, &key[0], key_len, current_pos) !=
                             static_cast<ssize_t>(key_len))
@@ -301,7 +312,7 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
                         if (::pread(fd, &val_len, sizeof(val_len), current_pos) != sizeof(val_len))
                             break;
                         current_pos += sizeof(val_len);
-                        current_pos += val_len;  // Skip value
+                        current_pos += val_len;
 
                         new_index.offsets.emplace_back(key, entry_offset);
                     }
