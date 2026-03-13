@@ -37,6 +37,7 @@ TEST_F(NativeTuningTest, LocalFSAlignment) {
     EXPECT_EQ(store.getFlushBufferCapacity(), 32 * 1024 * 1024);
     EXPECT_EQ(store.getMemtableMaxSize(), 32 * 1024 * 1024);
     EXPECT_EQ(store.getMaxImmutableMemtables(), 4);
+    EXPECT_EQ(store.getFlushThreadCount(), 1);
 }
 
 TEST_F(NativeTuningTest, LustreAdaptiveTuning) {
@@ -54,9 +55,11 @@ TEST_F(NativeTuningTest, LustreAdaptiveTuning) {
     // Expect:
     // 1. Buffer size increased to 32MB (to match blockSize)
     // 2. Buffer count decreased to 4 (to keep 128MB budget: 16*8 = 32*4)
+    // 3. Thread count matches max buffers (4)
     EXPECT_EQ(store.getMemtableMaxSize(), 32 * 1024 * 1024);
     EXPECT_EQ(store.getFlushBufferCapacity(), 32 * 1024 * 1024);
     EXPECT_EQ(store.getMaxImmutableMemtables(), 4);
+    EXPECT_EQ(store.getFlushThreadCount(), 4);
 
     // Verify total budget remains constant (128MB)
     EXPECT_EQ(store.getMemtableMaxSize() * store.getMaxImmutableMemtables(), 128 * 1024 * 1024);
@@ -77,8 +80,10 @@ TEST_F(NativeTuningTest, GPFSAdaptiveTuning) {
     // Expect:
     // 1. Buffer size increased to 16MB (to match blockSize)
     // 2. Buffer count decreased to 6 (100MB / 16MB = 6.25 -> 6)
+    // 3. Thread count matches max buffers (6)
     EXPECT_EQ(store.getMemtableMaxSize(), 16 * 1024 * 1024);
     EXPECT_EQ(store.getMaxImmutableMemtables(), 6);
+    EXPECT_EQ(store.getFlushThreadCount(), 6);
 
     // Verify budget is adhered to (should not exceed 100MB)
     EXPECT_LE(store.getMemtableMaxSize() * store.getMaxImmutableMemtables(), 100 * 1024 * 1024);

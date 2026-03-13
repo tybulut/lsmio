@@ -30,9 +30,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <lsmio/manager/store/native/sstable_manager.hpp>
-#include <cstdlib>
 
 class SSTableManagerTest : public ::testing::Test {
   protected:
@@ -59,7 +59,7 @@ TEST_F(SSTableManagerTest, FlushAndGet) {
     m.add("key1", "value1");
     m.add("key2", "value2");
 
-    ASSERT_TRUE(mgr->flushMemtable(m, buf, buf_capacity));
+    ASSERT_TRUE(mgr->flushMemtable(m, buf, buf_capacity, 0));
 
     std::string val;
     EXPECT_TRUE(mgr->get("key1", val));
@@ -74,7 +74,7 @@ TEST_F(SSTableManagerTest, Recovery) {
         auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
         lsmio::Memtable m;
         m.add("a", "1");
-        mgr->flushMemtable(m, buf, buf_capacity);
+        mgr->flushMemtable(m, buf, buf_capacity, 0);
     }
 
     // New manager should recover
@@ -88,7 +88,7 @@ TEST_F(SSTableManagerTest, Tombstone) {
     auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
     lsmio::Memtable m;
     m.add("deleted", lsmio::MEMTABLE_TOMBSTONE);
-    mgr->flushMemtable(m, buf, buf_capacity);
+    mgr->flushMemtable(m, buf, buf_capacity, 0);
 
     std::string val;
     EXPECT_TRUE(mgr->get("deleted", val));
@@ -99,11 +99,11 @@ TEST_F(SSTableManagerTest, Scan) {
     auto mgr = std::make_unique<lsmio::SSTableManager>(test_dir, 2, 0);
     lsmio::Memtable m1;
     m1.add("prefix/a", "1");
-    mgr->flushMemtable(m1, buf, buf_capacity);
+    mgr->flushMemtable(m1, buf, buf_capacity, 0);
 
     lsmio::Memtable m2;
     m2.add("prefix/b", "2");
-    mgr->flushMemtable(m2, buf, buf_capacity);
+    mgr->flushMemtable(m2, buf, buf_capacity, 1);
 
     std::map<std::string, std::string> results;
     std::set<std::string> deleted;

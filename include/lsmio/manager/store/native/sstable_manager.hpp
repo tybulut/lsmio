@@ -51,7 +51,8 @@ class SSTableManager {
 
     // Flush a memtable to disk as a new SSTable
     // Uses the provided buffer for I/O buffering
-    bool flushMemtable(const Memtable& memtable, char* buffer, size_t capacity);
+    // flush_id is used to ensure the index is updated in the correct order
+    bool flushMemtable(const Memtable& memtable, char* buffer, size_t capacity, uint64_t flush_id);
 
     // Read a value from disk
     // Returns true if found (populates value).
@@ -70,6 +71,11 @@ class SSTableManager {
     std::string _dbPath;
     std::unique_ptr<FilePool> _filePool;
     std::unique_ptr<FileCloser> _fileCloser;
+
+    // Commit Sequencer for parallel flushes
+    std::atomic<uint64_t> _next_commit_id{0};
+    std::mutex _commit_mutex;
+    std::condition_variable _commit_cv;
 
     struct L0Index {
         std::string path;

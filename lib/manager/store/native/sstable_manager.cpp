@@ -54,8 +54,13 @@ SSTableManager::~SSTableManager() {
     }
 }
 
-bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_t capacity) {
+bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_t capacity,
+                                   uint64_t flush_id) {
     if (memtable.empty()) {
+        std::unique_lock<std::mutex> lock(_commit_mutex);
+        _commit_cv.wait(lock, [this, flush_id] { return _next_commit_id == flush_id; });
+        _next_commit_id++;
+        _commit_cv.notify_all();
         return true;
     }
 
@@ -73,8 +78,8 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_
 
     uint64_t total_written_bytes = 0;
     size_t current_buffer_size = 0;
-    size_t write_threshold = std::max(static_cast<size_t>(gConfigLSMIO.transferSize),
-                                      static_cast<size_t>(1024 * 1024));
+    size_t write_threshold =
+        std::max(static_cast<size_t>(gConfigLSMIO.transferSize), static_cast<size_t>(1024 * 1024));
 
     const auto& data = memtable.getData();
     for (const auto& [key, value] : data) {
@@ -86,12 +91,14 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_
         size_t entry_needed = sizeof(key_len) + key.size() + sizeof(val_len) + value.size();
 
         if (entry_needed > capacity) {
-             LOG(ERROR) << "[SSTableManager] ERROR: Entry too large for flush buffer: " << entry_needed << " > " << capacity;
-             ::close(fd);
-             return false;
+            LOG(ERROR) << "[SSTableManager] ERROR: Entry too large for flush buffer: "
+                       << entry_needed << " > " << capacity;
+            ::close(fd);
+            return false;
         }
 
-        if (current_buffer_size + entry_needed > capacity || current_buffer_size >= write_threshold) {
+        if (current_buffer_size + entry_needed > capacity ||
+            current_buffer_size >= write_threshold) {
             ssize_t written = ::write(fd, buffer, current_buffer_size);
             if (written != static_cast<ssize_t>(current_buffer_size)) {
                 LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable chunk: "
@@ -119,8 +126,8 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_
         ssize_t written = ::write(fd, buffer, current_buffer_size);
         if (written != static_cast<ssize_t>(current_buffer_size)) {
             LOG(ERROR) << "[SSTableManager] ERROR: Failed to write SSTable final chunk: "
-                       << sstable_path << " Written: " << written << " Expected: " << current_buffer_size
-                       << std::endl;
+                       << sstable_path << " Written: " << written
+                       << " Expected: " << current_buffer_size << std::endl;
             ::close(fd);
             return false;
         }
@@ -151,9 +158,22 @@ bool SSTableManager::flushMemtable(const Memtable& memtable, char* buffer, size_
     new_index.offsets.erase(last, new_index.offsets.end());
 
     IndexNode* newNode = new IndexNode(std::move(new_index));
-    newNode->next = _head.load(std::memory_order_relaxed);
-    while (!_head.compare_exchange_weak(newNode->next, newNode, std::memory_order_release,
-                                        std::memory_order_relaxed));
+
+    {
+        std::unique_lock<std::mutex> lock(_commit_mutex);
+        // Wait for our turn to commit to the index
+        _commit_cv.wait(lock, [this, flush_id] { return _next_commit_id == flush_id; });
+
+        newNode->next = _head.load(std::memory_order_relaxed);
+        while (!_head.compare_exchange_weak(newNode->next, newNode, std::memory_order_release,
+                                            std::memory_order_relaxed)) {
+            // Loop in case of concurrent updates
+        }
+
+        _next_commit_id++;
+        _commit_cv.notify_all();
+    }
+
     return true;
 }
 
@@ -300,7 +320,8 @@ void SSTableManager::recoverState(size_t filePoolSize, size_t preAllocBytes) {
                             break;
                         current_pos += sizeof(key_len);
 
-                        if (key_len == 0 && current_pos + sizeof(uint32_t) >= st.st_size) break; // End of actual data in preallocated file
+                        if (key_len == 0 && current_pos + sizeof(uint32_t) >= st.st_size)
+                            break;  // End of actual data in preallocated file
 
                         std::string key(key_len, '\0');
                         if (::pread(fd, &key[0], key_len, current_pos) !=

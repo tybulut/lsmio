@@ -61,17 +61,20 @@ class LSMIOStoreNative : public LSMIOStore {
     std::unique_ptr<SSTableManager> _sstable_manager;
 
     std::mutex _state_mutex;
-    char* _flush_buffer{nullptr};
+    std::vector<char*> _flush_buffers;
     size_t _flush_buffer_capacity{0};
-    std::thread _flush_thread;
+    std::vector<std::thread> _flush_threads;
+    size_t _flush_thread_count{1};
+    std::atomic<uint64_t> _next_flush_id{0};
+
     std::condition_variable _flush_cv;
     std::condition_variable _backpressure_cv;
     std::condition_variable _barrier_cv;
     std::atomic<bool> _shutting_down{false};
-    std::atomic<bool> _flush_in_progress{false};
+    std::atomic<size_t> _active_flush_count{0};
 
-    void FlushWorkLoop();
-    void FlushMemtableToL0(std::unique_ptr<Memtable> memtable);
+    void FlushWorkLoop(size_t thread_id);
+    void FlushMemtableToL0(std::unique_ptr<Memtable> memtable, size_t thread_id, uint64_t flush_id);
 
     // LSMIOStore Overrides
     bool startBatch() override;
@@ -105,7 +108,11 @@ class LSMIOStoreNative : public LSMIOStore {
     size_t getFlushBufferCapacity() const {
         return _flush_buffer_capacity;
     }
+    size_t getFlushThreadCount() const {
+        return _flush_thread_count;
+    }
 };
+
 
 }  // namespace lsmio
 

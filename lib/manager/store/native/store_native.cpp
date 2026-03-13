@@ -80,10 +80,13 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     }
     tuneParameters(fs_magic);
 
-    // 2. Allocate aligned buffer (after tuning)
-    if (::posix_memalign(reinterpret_cast<void**>(&_flush_buffer), 4096, _flush_buffer_capacity) !=
-        0) {
-        throw std::runtime_error("Failed to allocate aligned flush buffer");
+    // 2. Allocate aligned buffer pool (after tuning)
+    _flush_buffers.resize(_flush_thread_count);
+    for (size_t i = 0; i < _flush_thread_count; ++i) {
+        if (::posix_memalign(reinterpret_cast<void**>(&_flush_buffers[i]), 4096,
+                             _flush_buffer_capacity) != 0) {
+            throw std::runtime_error("Failed to allocate aligned flush buffer");
+        }
     }
 
     size_t pre_alloc_bytes = 0;
@@ -95,9 +98,11 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     _sstable_manager =
         std::make_unique<SSTableManager>(_dbPath, gConfigLSMIO.filePoolSize, pre_alloc_bytes);
 
-    // Start the background flush thread
+    // Start the background flush thread pool
     _shutting_down = false;
-    _flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
+    for (size_t i = 0; i < _flush_thread_count; ++i) {
+        _flush_threads.emplace_back(&LSMIOStoreNative::FlushWorkLoop, this, i);
+    }
 }
 
 void LSMIOStoreNative::tuneParameters(uint64_t fs_magic) {
@@ -112,61 +117,78 @@ void LSMIOStoreNative::tuneParameters(uint64_t fs_magic) {
         is_parallel_fs = true;
     }
 
-    LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type 
-              << " (Magic: 0x" << std::hex << fs_magic << std::dec << ")";
+    LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
+              << std::hex << fs_magic << std::dec << ")";
 
     // Establish baseline from config
-    _memtable_max_size_bytes = gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize : 32 * 1024 * 1024;
-    _max_immutable_memtables = gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber : 4;
+    _memtable_max_size_bytes =
+        gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize : 32 * 1024 * 1024;
+    _max_immutable_memtables =
+        gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber : 4;
 
-    size_t total_memory_budget = static_cast<size_t>(_memtable_max_size_bytes) * _max_immutable_memtables;
+    size_t total_memory_budget =
+        static_cast<size_t>(_memtable_max_size_bytes) * _max_immutable_memtables;
     _flush_buffer_capacity = _memtable_max_size_bytes;
+    _flush_thread_count = 1;  // Default
 
-    LOG(INFO) << "[NATIVE] Initial Config: writeBufferSize=" << (_memtable_max_size_bytes / 1024 / 1024) 
-              << "MB, writeBufferNumber=" << _max_immutable_memtables 
+    LOG(INFO) << "[NATIVE] Initial Config: writeBufferSize="
+              << (_memtable_max_size_bytes / 1024 / 1024)
+              << "MB, writeBufferNumber=" << _max_immutable_memtables
               << ", Total Budget=" << (total_memory_budget / 1024 / 1024) << "MB";
 
     if (is_parallel_fs && gConfigLSMIO.blockSize > 0) {
         // Align and potentially increase buffer size to match filesystem stripe/block size
-        size_t stripe_multiple = 4 * 1024 * 1024; // Default 4MB for parallel FS if blockSize is small
+        size_t stripe_multiple =
+            4 * 1024 * 1024;  // Default 4MB for parallel FS if blockSize is small
         if (gConfigLSMIO.blockSize > static_cast<int>(stripe_multiple)) {
             stripe_multiple = gConfigLSMIO.blockSize;
         }
 
-        LOG(INFO) << "[NATIVE] Parallel FS detected. Aligning to stripe multiple: " << (stripe_multiple / 1024) << "KB";
+        LOG(INFO) << "[NATIVE] Parallel FS detected. Aligning to stripe multiple: "
+                  << (stripe_multiple / 1024) << "KB";
 
         // Align _flush_buffer_capacity to stripe_multiple
-        _flush_buffer_capacity = ((_flush_buffer_capacity + stripe_multiple - 1) / stripe_multiple) * stripe_multiple;
+        _flush_buffer_capacity =
+            ((_flush_buffer_capacity + stripe_multiple - 1) / stripe_multiple) * stripe_multiple;
 
         // If capacity increased, decrease number of buffers to keep total memory constant
         if (_flush_buffer_capacity > _memtable_max_size_bytes) {
-             _memtable_max_size_bytes = _flush_buffer_capacity;
-             _max_immutable_memtables = total_memory_budget / _memtable_max_size_bytes;
-             if (_max_immutable_memtables < 1) _max_immutable_memtables = 1;
-             LOG(INFO) << "[NATIVE] Applied Parallel FS Optimization: Increased writeBufferSize to "
-                       << (_memtable_max_size_bytes / 1024 / 1024) << "MB, Decreased writeBufferNumber to "
-                       << _max_immutable_memtables;
+            _memtable_max_size_bytes = _flush_buffer_capacity;
+            _max_immutable_memtables = total_memory_budget / _memtable_max_size_bytes;
+            if (_max_immutable_memtables < 1) _max_immutable_memtables = 1;
+            LOG(INFO) << "[NATIVE] Applied Parallel FS Optimization: Increased writeBufferSize to "
+                      << (_memtable_max_size_bytes / 1024 / 1024)
+                      << "MB, Decreased writeBufferNumber to " << _max_immutable_memtables;
         }
+
+        // Option 2: Full Concurrency for Parallel FS
+        _flush_thread_count = _max_immutable_memtables;
     } else if (gConfigLSMIO.blockSize > 0) {
         // Basic alignment for local FS
         size_t old_cap = _flush_buffer_capacity;
-        _flush_buffer_capacity = ((_flush_buffer_capacity + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) * gConfigLSMIO.blockSize;
+        _flush_buffer_capacity =
+            ((_flush_buffer_capacity + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) *
+            gConfigLSMIO.blockSize;
         _memtable_max_size_bytes = _flush_buffer_capacity;
         if (_flush_buffer_capacity != old_cap) {
-            LOG(INFO) << "[NATIVE] Aligned buffer to blockSize: " << (_flush_buffer_capacity / 1024) << "KB";
+            LOG(INFO) << "[NATIVE] Aligned buffer to blockSize: " << (_flush_buffer_capacity / 1024)
+                      << "KB";
         }
     }
 
-    LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize=" << (_memtable_max_size_bytes / 1024 / 1024) 
-              << "MB, writeBufferNumber=" << _max_immutable_memtables 
-              << ", FlushBufferCapacity=" << (_flush_buffer_capacity / 1024 / 1024) << "MB";
+    LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
+              << (_memtable_max_size_bytes / 1024 / 1024)
+              << "MB, writeBufferNumber=" << _max_immutable_memtables
+              << ", FlushBufferCapacity=" << (_flush_buffer_capacity / 1024 / 1024) << "MB"
+              << ", ParallelFlushThreads=" << _flush_thread_count;
 }
+
 LSMIOStoreNative::~LSMIOStoreNative() {
     close();
-    if (_flush_buffer) {
-        std::free(_flush_buffer);
-        _flush_buffer = nullptr;
+    for (char* ptr : _flush_buffers) {
+        if (ptr) std::free(ptr);
     }
+    _flush_buffers.clear();
 }
 
 void LSMIOStoreNative::close() {
@@ -176,9 +198,11 @@ void LSMIOStoreNative::close() {
         return;
     }
 
-    _flush_cv.notify_one();  // Wake up the flush thread
-    if (_flush_thread.joinable()) {
-        _flush_thread.join();
+    _flush_cv.notify_all();  // Wake up all flush threads
+    for (auto& t : _flush_threads) {
+        if (t.joinable()) {
+            t.join();
+        }
     }
 
     std::unique_lock<std::mutex> lock(_state_mutex);
@@ -189,9 +213,11 @@ void LSMIOStoreNative::close() {
     while (!_immutable_memtables.empty()) {
         auto memtable_to_flush = std::move(_immutable_memtables.front());
         _immutable_memtables.pop_front();
+        uint64_t flush_id = _next_flush_id++;
 
         lock.unlock();
-        FlushMemtableToL0(std::move(memtable_to_flush));
+        // Use the first buffer for the final sequential flushes
+        FlushMemtableToL0(std::move(memtable_to_flush), 0, flush_id);
         lock.lock();
     }
 
@@ -201,9 +227,10 @@ void LSMIOStoreNative::close() {
     }
 }
 
-void LSMIOStoreNative::FlushWorkLoop() {
+void LSMIOStoreNative::FlushWorkLoop(size_t thread_id) {
     while (true) {
         std::unique_ptr<Memtable> memtable_to_flush;
+        uint64_t flush_id = 0;
 
         {
             std::unique_lock<std::mutex> lock(_state_mutex);
@@ -217,7 +244,8 @@ void LSMIOStoreNative::FlushWorkLoop() {
             if (!_immutable_memtables.empty()) {
                 memtable_to_flush = std::move(_immutable_memtables.front());
                 _immutable_memtables.pop_front();
-                _flush_in_progress = true;
+                flush_id = _next_flush_id++;
+                _active_flush_count++;
             }
         }  // Release lock
 
@@ -225,7 +253,7 @@ void LSMIOStoreNative::FlushWorkLoop() {
 
         if (memtable_to_flush) {
             try {
-                FlushMemtableToL0(std::move(memtable_to_flush));
+                FlushMemtableToL0(std::move(memtable_to_flush), thread_id, flush_id);
             } catch (const std::exception& e) {
                 LOG(ERROR) << "[NATIVE] ERROR in FlushWorkLoop: " << e.what();
             } catch (...) {
@@ -234,20 +262,22 @@ void LSMIOStoreNative::FlushWorkLoop() {
 
             {
                 std::unique_lock<std::mutex> lock(_state_mutex);
-                _flush_in_progress = false;
+                _active_flush_count--;
             }
             _barrier_cv.notify_all();
         }
     }
 }
 
-void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable) {
-    if (!memtable || memtable->empty()) {
+void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<Memtable> memtable, size_t thread_id,
+                                         uint64_t flush_id) {
+    if (!memtable) {
         return;
     }
 
     // Delegate to SSTableManager
-    _sstable_manager->flushMemtable(*memtable, _flush_buffer, _flush_buffer_capacity);
+    _sstable_manager->flushMemtable(*memtable, _flush_buffers[thread_id], _flush_buffer_capacity,
+                                    flush_id);
 }
 
 bool LSMIOStoreNative::startBatch() {
@@ -385,7 +415,8 @@ bool LSMIOStoreNative::writeBarrier() {
         _flush_cv.notify_one();
     }
 
-    _barrier_cv.wait(lock, [this] { return _immutable_memtables.empty() && !_flush_in_progress; });
+    _barrier_cv.wait(lock,
+                     [this] { return _immutable_memtables.empty() && _active_flush_count == 0; });
 
     return true;
 }
