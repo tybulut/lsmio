@@ -83,6 +83,8 @@ class LSMIOStoreNative : public LSMIOStore {
     LSMIOStoreNative(const std::string& dbPath, const bool overWrite = false);
     ~LSMIOStoreNative() override;
 
+    void autoTuneParameters(uint64_t fs_magic);
+
     void close() override;
 
     bool get(const std::string key, std::string* value) override;
@@ -91,6 +93,14 @@ class LSMIOStoreNative : public LSMIOStore {
 
     bool readBarrier() override;
     bool writeBarrier() override;
+
+    // Accessors for testing
+    size_t getMemtableMaxSize() const {
+        return _memtable_max_size_bytes;
+    }
+    size_t getMaxImmutableMemtables() const {
+        return _max_immutable_memtables;
+    }
 };
 
 }  // namespace lsmio

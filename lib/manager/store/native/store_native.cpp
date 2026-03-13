@@ -28,10 +28,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/vfs.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -46,21 +49,35 @@
 #include <thread>
 #include <vector>
 
+#ifndef LUSTRE_SUPER_MAGIC
+#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
+#endif
+
+#ifndef GPFS_SUPER_MAGIC
+#define GPFS_SUPER_MAGIC 0x47504653
+#endif
+
 namespace lsmio {
 
 LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWrite)
     : LSMIOStore(dbPath, overWrite),
       _memtable_max_size_bytes(gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
-                                                                : 1024 * 1024),
+                                                                : 32 * 1024 * 1024),
       _max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
-                                                                  : 2),  // Default 2
-      _active_memtable(std::make_unique<Memtable>()),
-      _flush_buffer(1024 * 1024) {
+                                                                  : 4),  // Default 4
+      _active_memtable(std::make_unique<Memtable>()) {
     // Ensure database directory exists
     if (overWrite) {
         std::filesystem::remove_all(_dbPath);
     }
     std::filesystem::create_directories(_dbPath);
+
+    struct statfs fs_info;
+    uint64_t fs_magic = 0;
+    if (statfs(_dbPath.c_str(), &fs_info) == 0) {
+        fs_magic = fs_info.f_type;
+    }
+    autoTuneParameters(fs_magic);
 
     size_t pre_alloc_bytes = 0;
     if (gConfigLSMIO.preAllocate) {
@@ -76,8 +93,36 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     _flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
 }
 
+void LSMIOStoreNative::autoTuneParameters(uint64_t fs_magic) {
+    std::string fs_type = "Unknown/Local";
+    bool is_parallel_fs = false;
+
+    if (fs_magic == LUSTRE_SUPER_MAGIC) {
+        fs_type = "Lustre";
+        is_parallel_fs = true;
+    } else if (fs_magic == GPFS_SUPER_MAGIC) {
+        fs_type = "GPFS";
+        is_parallel_fs = true;
+    }
+
+    LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
+              << std::hex << fs_magic << std::dec << ")";
+
+    if (s_parallel_fs) {
+        // TODO(tybulut): Adjust writer thread pool size
+    }
+
+    LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
+              << (_memtable_max_size_bytes / 1024 / 1024)
+              << "MB, writeBufferNumber=" << _max_immutable_memtables;
+}
+
 LSMIOStoreNative::~LSMIOStoreNative() {
     close();
+    if (_flush_buffer) {
+        std::free(_flush_buffer);
+        _flush_buffer = nullptr;
+    }
 }
 
 void LSMIOStoreNative::close() {
