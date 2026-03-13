@@ -28,10 +28,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/vfs.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <iomanip>
@@ -45,16 +48,23 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <cstdlib>
+
+#ifndef LUSTRE_SUPER_MAGIC
+#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
+#endif
+
+#ifndef GPFS_SUPER_MAGIC
+#define GPFS_SUPER_MAGIC 0x47504653
+#endif
 
 namespace lsmio {
 
 LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWrite)
     : LSMIOStore(dbPath, overWrite),
       _memtable_max_size_bytes(gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
-                                                                : 1024 * 1024),
+                                                                : 32 * 1024 * 1024),
       _max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
-                                                                  : 2),  // Default 2
+                                                                  : 4),  // Default 4
       _active_memtable(std::make_unique<Memtable>()) {
     // Ensure database directory exists
     if (overWrite) {
@@ -62,15 +72,17 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     }
     std::filesystem::create_directories(_dbPath);
 
-    _flush_buffer_capacity = gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
-                                                                : 32 * 1024 * 1024;
-    // Align capacity to blockSize
-    if (gConfigLSMIO.blockSize > 0) {
-        _flush_buffer_capacity = ((_flush_buffer_capacity + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) * gConfigLSMIO.blockSize;
+    // 1. Detect Filesystem and Tune Parameters
+    struct statfs fs_info;
+    uint64_t fs_magic = 0;
+    if (statfs(_dbPath.c_str(), &fs_info) == 0) {
+        fs_magic = fs_info.f_type;
     }
+    tuneParameters(fs_magic);
 
-    // Allocate aligned buffer
-    if (::posix_memalign(reinterpret_cast<void**>(&_flush_buffer), 4096, _flush_buffer_capacity) != 0) {
+    // 2. Allocate aligned buffer (after tuning)
+    if (::posix_memalign(reinterpret_cast<void**>(&_flush_buffer), 4096, _flush_buffer_capacity) !=
+        0) {
         throw std::runtime_error("Failed to allocate aligned flush buffer");
     }
 
@@ -88,6 +100,67 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     _flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
 }
 
+void LSMIOStoreNative::tuneParameters(uint64_t fs_magic) {
+    std::string fs_type = "Unknown/Local";
+    bool is_parallel_fs = false;
+
+    if (fs_magic == LUSTRE_SUPER_MAGIC) {
+        fs_type = "Lustre";
+        is_parallel_fs = true;
+    } else if (fs_magic == GPFS_SUPER_MAGIC) {
+        fs_type = "GPFS";
+        is_parallel_fs = true;
+    }
+
+    LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type 
+              << " (Magic: 0x" << std::hex << fs_magic << std::dec << ")";
+
+    // Establish baseline from config
+    _memtable_max_size_bytes = gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize : 32 * 1024 * 1024;
+    _max_immutable_memtables = gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber : 4;
+
+    size_t total_memory_budget = static_cast<size_t>(_memtable_max_size_bytes) * _max_immutable_memtables;
+    _flush_buffer_capacity = _memtable_max_size_bytes;
+
+    LOG(INFO) << "[NATIVE] Initial Config: writeBufferSize=" << (_memtable_max_size_bytes / 1024 / 1024) 
+              << "MB, writeBufferNumber=" << _max_immutable_memtables 
+              << ", Total Budget=" << (total_memory_budget / 1024 / 1024) << "MB";
+
+    if (is_parallel_fs && gConfigLSMIO.blockSize > 0) {
+        // Align and potentially increase buffer size to match filesystem stripe/block size
+        size_t stripe_multiple = 4 * 1024 * 1024; // Default 4MB for parallel FS if blockSize is small
+        if (gConfigLSMIO.blockSize > static_cast<int>(stripe_multiple)) {
+            stripe_multiple = gConfigLSMIO.blockSize;
+        }
+
+        LOG(INFO) << "[NATIVE] Parallel FS detected. Aligning to stripe multiple: " << (stripe_multiple / 1024) << "KB";
+
+        // Align _flush_buffer_capacity to stripe_multiple
+        _flush_buffer_capacity = ((_flush_buffer_capacity + stripe_multiple - 1) / stripe_multiple) * stripe_multiple;
+
+        // If capacity increased, decrease number of buffers to keep total memory constant
+        if (_flush_buffer_capacity > _memtable_max_size_bytes) {
+             _memtable_max_size_bytes = _flush_buffer_capacity;
+             _max_immutable_memtables = total_memory_budget / _memtable_max_size_bytes;
+             if (_max_immutable_memtables < 1) _max_immutable_memtables = 1;
+             LOG(INFO) << "[NATIVE] Applied Parallel FS Optimization: Increased writeBufferSize to "
+                       << (_memtable_max_size_bytes / 1024 / 1024) << "MB, Decreased writeBufferNumber to "
+                       << _max_immutable_memtables;
+        }
+    } else if (gConfigLSMIO.blockSize > 0) {
+        // Basic alignment for local FS
+        size_t old_cap = _flush_buffer_capacity;
+        _flush_buffer_capacity = ((_flush_buffer_capacity + gConfigLSMIO.blockSize - 1) / gConfigLSMIO.blockSize) * gConfigLSMIO.blockSize;
+        _memtable_max_size_bytes = _flush_buffer_capacity;
+        if (_flush_buffer_capacity != old_cap) {
+            LOG(INFO) << "[NATIVE] Aligned buffer to blockSize: " << (_flush_buffer_capacity / 1024) << "KB";
+        }
+    }
+
+    LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize=" << (_memtable_max_size_bytes / 1024 / 1024) 
+              << "MB, writeBufferNumber=" << _max_immutable_memtables 
+              << ", FlushBufferCapacity=" << (_flush_buffer_capacity / 1024 / 1024) << "MB";
+}
 LSMIOStoreNative::~LSMIOStoreNative() {
     close();
     if (_flush_buffer) {
