@@ -59,7 +59,8 @@
 
 namespace lsmio {
 
-LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWrite)
+LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWrite,
+                                   int num_parallel_processes)
     : LSMIOStore(dbPath, overWrite),
       _memtable_max_size_bytes(gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
                                                                 : 32 * 1024 * 1024),
@@ -78,7 +79,7 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     if (statfs(_dbPath.c_str(), &fs_info) == 0) {
         fs_magic = fs_info.f_type;
     }
-    tuneParameters(fs_magic);
+    tuneParameters(fs_magic, num_parallel_processes);
 
     // 2. Allocate aligned buffer pool (after tuning)
     _flush_buffers.resize(_flush_thread_count);
@@ -105,7 +106,7 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
     }
 }
 
-void LSMIOStoreNative::tuneParameters(uint64_t fs_magic) {
+void LSMIOStoreNative::tuneParameters(uint64_t fs_magic, int num_parallel_processes) {
     std::string fs_type = "Unknown/Local";
     bool is_parallel_fs = false;
 
@@ -118,7 +119,8 @@ void LSMIOStoreNative::tuneParameters(uint64_t fs_magic) {
     }
 
     LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
-              << std::hex << fs_magic << std::dec << ")";
+              << std::hex << fs_magic << std::dec << ")"
+              << ", Parallel Processes: " << num_parallel_processes;
 
     // Establish baseline from config
     _memtable_max_size_bytes =
@@ -161,8 +163,14 @@ void LSMIOStoreNative::tuneParameters(uint64_t fs_magic) {
                       << "MB, Decreased writeBufferNumber to " << _max_immutable_memtables;
         }
 
-        // Option 2: Full Concurrency for Parallel FS
-        _flush_thread_count = _max_immutable_memtables;
+        // Refined Thread Count Logic:
+        // Use max(1, 4 / num_parallel_processes) to avoid over-subscribing the 4 OSTs
+        _flush_thread_count = 4 / num_parallel_processes;
+        if (_flush_thread_count < 1) _flush_thread_count = 1;
+        // Also don't use more threads than we have memtable slots
+        if (_flush_thread_count > _max_immutable_memtables)
+            _flush_thread_count = _max_immutable_memtables;
+
     } else if (gConfigLSMIO.blockSize > 0) {
         // Basic alignment for local FS
         size_t old_cap = _flush_buffer_capacity;

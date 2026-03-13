@@ -84,10 +84,11 @@ class LSMIOStoreNative : public LSMIOStore {
     bool dbCleanup() override;
 
   public:
-    LSMIOStoreNative(const std::string& dbPath, const bool overWrite = false);
+    LSMIOStoreNative(const std::string& dbPath, const bool overWrite = false,
+                     int num_parallel_processes = 1);
     ~LSMIOStoreNative() override;
 
-    void tuneParameters(uint64_t fs_magic);
+    void tuneParameters(uint64_t fs_magic, int num_parallel_processes = 1);
 
     void close() override;
 

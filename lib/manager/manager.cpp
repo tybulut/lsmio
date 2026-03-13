@@ -151,10 +151,12 @@ void LSMIOManager::_init() {
 
     // Startup: RDB first and MPI afterwards to ensure DB available before MPI messages are received
     if (_isOpenLocal()) {
+        int parallel_count = (_aggComm != 0) ? _aggSize : _worldSize;
         switch (gConfigLSMIO.storageType) {
             case StorageType::NativeDB:
-                LOG(INFO) << "LSMIOManager::_init: setting up Native backend." << std::endl;
-                _lcStore = new LSMIOStoreNative(_dbPath, _isOverWrite);
+                LOG(INFO) << "LSMIOManager::_init: setting up Native backend with parallel_count="
+                          << parallel_count << std::endl;
+                _lcStore = new LSMIOStoreNative(_dbPath, _isOverWrite, parallel_count);
                 break;
             case StorageType::RocksDB:
                 LOG(INFO) << "LSMIOManager::_init: setting up RocksDB backend." << std::endl;
@@ -271,8 +273,8 @@ bool LSMIOManager::put(const std::string& key, const std::string& value, bool fl
     bool retValue = true;
 
     LOG(INFO) << "LSMIOManager::put:flush: rank: " << _aggRank << " key: " << key << "("
-              << key.length() << ")"
-              << " value.len: " << value.length() << " flush: " << flush << std::endl;
+              << key.length() << ")" << " value.len: " << value.length() << " flush: " << flush
+              << std::endl;
 
     _counterWriteBytes += value.length();
     _counterWriteOps++;
@@ -408,8 +410,8 @@ bool LSMIOManager::metaPut(const std::string& key, const std::string& value, boo
     bool retValue = true;
 
     LOG(INFO) << "LSMIOManager::metaPut: rank: " << _aggRank << " key: " << key << "("
-              << key.length() << ")"
-              << " value.len: " << value.length() << " flush: " << flush << std::endl;
+              << key.length() << ")" << " value.len: " << value.length() << " flush: " << flush
+              << std::endl;
 
     _counterWriteBytes += value.length();
     _counterWriteOps++;
