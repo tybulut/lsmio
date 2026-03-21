@@ -74,38 +74,40 @@ make -j8 install || exit 1
 
 if [ "$RUN_ADIOS" = true ]; then
     echo "Running ADIOS benchmark..."
-    ~/src/usr/bin/bm_adios \
-        --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER" \
-        -v -g -o ${BM_DIR}/lsmio-adios.db
+    ~/src/usr/bin/bm_adios -o ${BM_DIR}/lsmio-adios.db \
+        -v -g -i "$ITER" \
+        --lsmio-ts 1024 --lsmio-bs 1024 \
+        --value-size 262140 --key-count 2048
 fi
 
 if [ "$RUN_PLUGIN" = true ]; then
     echo "Running ADIOS Plugin benchmark..."
-    ~/src/usr/bin/bm_adios \
-        --lsmio-plugin \
-        -v -g -o ${BM_DIR}/lsmio-adios-plugin.db \
-        --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
+    ~/src/usr/bin/bm_adios -o ${BM_DIR}/lsmio-adios-plugin.db \
+        -v -g -i "$ITER" \
+        --lsmio-ts 1024 --lsmio-bs 1024 \
+        --value-size 262140 --key-count 2048
 fi
 
 if [ "$RUN_ROCKSDB" = true ]; then
     echo "Running RocksDB benchmark..."
-    ~/src/usr/bin/bm_rocksdb \
-        -v -g -o ${BM_DIR}/lsmio-rocksdb-m.db \
-        --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
-#        --lsmio-batch-size 1 \
+    ~/src/usr/bin/bm_rocksdb -o ${BM_DIR}/lsmio-rocksdb.db \
+        -v -g -i "$ITER" \
+        --lsmio-ts 1024 --lsmio-bs 1024 \
+        --value-size 262140 --key-count 2048
 fi
 
 if [ "$RUN_LEVELDB" = true ]; then
     echo "Running LevelDB benchmark..."
-    ~/src/usr/bin/bm_leveldb \
-        -v -g -o ${BM_DIR}/lsmio-leveldb-m.db \
-        --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
-#        --lsmio-batch-size 1 \
+    ~/src/usr/bin/bm_leveldb -o ${BM_DIR}/lsmio-leveldb.db \
+        -v -g -i "$ITER" \
+        --lsmio-ts 1024 --lsmio-bs 1024 \
+        --value-size 262140 --key-count 2048
 fi
 
 if [ "$RUN_NATIVE" = true ]; then
     echo "Running Native benchmark..."
-    ~/src/usr/bin/bm_native \
-        -v -g -o ${BM_DIR}/lsmio-native-m.db \
-        --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
+    ~/src/usr/bin/bm_native -o ${BM_DIR}/lsmio-native.db \
+        -v -g -i "$ITER" \
+        --lsmio-ts 1024 --lsmio-bs 1024 \
+        --value-size 262140 --key-count 2048
 fi

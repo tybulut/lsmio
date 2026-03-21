@@ -229,12 +229,14 @@ std::string genOptionsToString() {
                                                                               : "host-group")
               << "\n iterations: " << gConfigBM.iterations
               << "\n segmentCount: " << gConfigBM.segmentCount
-              << "\n keyCount: " << gConfigBM.keyCount << "\n valueSize: " << gConfigBM.valueSize
+              << "\n keyCount: " << gConfigBM.keyCount
+              << "\n valueSize: " << gConfigBM.valueSize
               << "\n\n useBloomFilter: " << lsmio::gConfigLSMIO.useBloomFilter
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
-              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
-              << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
+              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP
+              << "\n useLevelDB: "
+                  << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
               << "\n compression: " << lsmio::gConfigLSMIO.compression
               << "\n blockSize: " << lsmio::gConfigLSMIO.blockSize
               << "\n transferSize: " << lsmio::gConfigLSMIO.transferSize
