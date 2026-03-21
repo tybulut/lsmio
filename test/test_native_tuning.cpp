@@ -19,7 +19,7 @@ class NativeTuningTest : public ::testing::Test {
   protected:
     std::string test_dir;
     void SetUp() override {
-        test_dir = "test_db_tuning_" + std::to_string(getpid()) + "_" + 
+        test_dir = "test_db_tuning_" + std::to_string(getpid()) + "_" +
                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         std::filesystem::create_directories(test_dir);
     }
@@ -164,6 +164,21 @@ TEST_F(NativeTuningTest, MinimumBuffers) {
     // Budget would suggest 0.5 buffers, but must stay at 1
     EXPECT_EQ(store.getMaxImmutableMemtables(), 1);
     EXPECT_EQ(store.getMemtableMaxSize(), 64 * 1024 * 1024);
+}
+
+TEST_F(NativeTuningTest, ParallelFSPreAllocateEnable) {
+    gConfigLSMIO.preAllocate = false;
+    gConfigLSMIO.writeBufferSize = 32 * 1024 * 1024;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.blockSize = 1024 * 1024;
+
+    LSMIOStoreNative store(test_dir, true);
+
+    // 1 process on Lustre should result in 4 threads, which should trigger preAllocate
+    store.tuneParameters(LUSTRE_SUPER_MAGIC, 1);
+
+    EXPECT_EQ(store.getFlushThreadCount(), 4);
+    EXPECT_TRUE(gConfigLSMIO.preAllocate);
 }
 
 }  // namespace lsmio

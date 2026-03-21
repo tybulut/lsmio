@@ -171,6 +171,14 @@ void LSMIOStoreNative::tuneParameters(uint64_t fs_magic, int num_parallel_proces
         if (_flush_thread_count > _max_immutable_memtables)
             _flush_thread_count = _max_immutable_memtables;
 
+        if (_flush_thread_count > 1) {
+            if (!gConfigLSMIO.preAllocate) {
+                LOG(INFO) << "[NATIVE] Parallel FS and multiple flush threads detected. "
+                          << "Enabling file pre-allocation.";
+                gConfigLSMIO.preAllocate = true;
+                gConfigLSMIO.filePoolSize = _flush_thread_count;
+            }
+        }
     } else if (gConfigLSMIO.blockSize > 0) {
         // Basic alignment for local FS
         size_t old_cap = _flush_buffer_capacity;
