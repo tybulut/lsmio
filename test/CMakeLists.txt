@@ -33,10 +33,12 @@ if(NOT mpi_cmd)
 else()
   message(STATUS "Test module: MPI command found=${mpi_cmd}")
 
+  set(LSMIO_MPI_TEST_FLAGS "" CACHE STRING "Extra flags for MPI test execution (e.g. -p partition_name for srun)")
+
   if(mpi_cmd MATCHES "aprun" OR mpi_cmd MATCHES "srun")
-    set (test_parameters -n ${mpi_processes})
+    set (test_parameters ${LSMIO_MPI_TEST_FLAGS} -n ${mpi_processes})
   else()
-    set (test_parameters -tag-output -np ${mpi_processes})
+    set (test_parameters ${LSMIO_MPI_TEST_FLAGS} -tag-output -np ${mpi_processes})
   endif()
 endif()
 
