@@ -19,7 +19,18 @@ batch_run() {
   wallhour=`echo "2 + ($nodes / 3)" | bc`
   export BM_NUM_TASKS=$concurrency
 
-  if [ "$QSUBMIT" = "sbatch" ]; then
+  if [ "$QSUBMIT" = "sbatch" -a "$HPC_ENV" = "archer2" ]; then
+    sbatch \
+      --partition=standard \
+      --export=ALL \
+      --ntasks=$concurrency \
+      --nodes=$nodes \
+      --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
+      --time=$wallhour:00:00 \
+      --account="$SB_ACCOUNT" \
+      --mail-user="$SB_EMAIL" \
+      ${job_script}.sbatch
+  elif [ "$QSUBMIT" = "sbatch" ]; then
     sbatch \
       --export=ALL \
       --ntasks=$concurrency \
