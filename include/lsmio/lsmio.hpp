@@ -134,6 +134,8 @@ class LSMIOConfig {
     bool preAllocate = false;
     /// @brief Number of files to keep pre-allocated in the pool.
     int filePoolSize = 4;
+    /// @brief Flag to enable auto-tuning of parameters based on the filesystem.
+    bool autoTuneParameters = false;
 };
 
 /// Global configuration instance for LSMIO.

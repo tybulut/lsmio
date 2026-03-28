@@ -28,7 +28,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifdef __linux__
 #include <sys/vfs.h>
+#else
+#include <sys/mount.h>
+#include <sys/param.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -65,19 +70,22 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& dbPath, const bool overWri
                                                                 : 32 * 1024 * 1024),
       _max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
                                                                   : 4),  // Default 4
-      _active_memtable(std::make_unique<Memtable>()) {
+      _active_memtable(std::make_unique<Memtable>()),
+      _flush_buffer(_memtable_max_size_bytes) {
     // Ensure database directory exists
     if (overWrite) {
         std::filesystem::remove_all(_dbPath);
     }
     std::filesystem::create_directories(_dbPath);
 
-    struct statfs fs_info;
-    uint64_t fs_magic = 0;
-    if (statfs(_dbPath.c_str(), &fs_info) == 0) {
-        fs_magic = fs_info.f_type;
+    if (gConfigLSMIO.autoTuneParameters) {
+        struct statfs fs_info;
+        uint64_t fs_magic = 0;
+        if (statfs(_dbPath.c_str(), &fs_info) == 0) {
+            fs_magic = fs_info.f_type;
+        }
+        autoTuneParameters(fs_magic);
     }
-    autoTuneParameters(fs_magic);
 
     size_t pre_alloc_bytes = 0;
     if (gConfigLSMIO.preAllocate) {
@@ -108,7 +116,7 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t fs_magic) {
     LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
               << std::hex << fs_magic << std::dec << ")";
 
-    if (s_parallel_fs) {
+    if (is_parallel_fs) {
         // TODO(tybulut): Adjust writer thread pool size
     }
 
@@ -119,10 +127,6 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t fs_magic) {
 
 LSMIOStoreNative::~LSMIOStoreNative() {
     close();
-    if (_flush_buffer) {
-        std::free(_flush_buffer);
-        _flush_buffer = nullptr;
-    }
 }
 
 void LSMIOStoreNative::close() {
