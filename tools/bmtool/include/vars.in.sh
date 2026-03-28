@@ -25,7 +25,7 @@ elif [ `hostname | grep -w viking` ]; then
 elif [ `hostname | grep -w viking2` ]; then
   HPC_ENV="viking2"
   HPC_MANAGER="slurm"
-elif [ `hostname | grep -w viking2` ]; then
+elif [ `hostname | grep -w archer2` ]; then
   HPC_ENV="archer2"
   HPC_MANAGER="slurm"
 else
@@ -34,14 +34,17 @@ fi
 
 ### LUSTRE
 if [ "$HPC_ENV" = "isambard" ]; then
-  export LUSTRE_HDD_PATH=/projects/external/ri-sbulut
-  export LUSTRE_SSD_PATH=/scratch
+  export LUSTRE_HDD_PATH=/projects/external/$USER
+  export LUSTRE_SSD_PATH=/scratch/$USER
 elif [ "$HPC_ENV" = "viking" ]; then
-  export LUSTRE_HDD_PATH=/mnt/lustre
-  export LUSTRE_SSD_PATH=/mnt/bb/tmp
+  export LUSTRE_HDD_PATH=/mnt/lustre/users/$USER
+  export LUSTRE_SSD_PATH=/mnt/bb/tmp/users/$USER
 elif [ "$HPC_ENV" = "viking2" ]; then
-  export LUSTRE_HDD_PATH=/mnt/scratch
-  export LUSTRE_SSD_PATH=/mnt/scratch
+  export LUSTRE_HDD_PATH=/mnt/scratch/users/$USER
+  export LUSTRE_SSD_PATH=/mnt/scratch/users/$USER
+elif [ "$HPC_ENV" = "archer2" ]; then
+  export LUSTRE_HDD_PATH=/work/e281/e281/$USER
+  export LUSTRE_SSD_PATH=/scratch-nvme/e281/e281/$USER
 else
   unknown_hpc_environment
 fi
@@ -54,5 +57,5 @@ else
 fi
 
 #
-export BM_PATH=$LUSTRE_PATH/users/$USER/benchmark
+export BM_PATH=$LUSTRE_PATH/benchmark
 
