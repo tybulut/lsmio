@@ -3,7 +3,7 @@ message(STATUS "Benchmark module: LSMIO_INCLUDE_DIR=${LSMIO_INCLUDE_DIR}")
 message(STATUS "Benchmark module: CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR}")
 
 # Find packages
-find_package(MPI REQUIRED)
+include(PackageMPI)
 # continues
 include(PackageAdios)
 include(PackageCLI11)

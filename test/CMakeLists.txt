@@ -4,7 +4,7 @@ message(STATUS "Test module: CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR}")
 message(STATUS "Test module: Checking CMAKE_BUILD_PARALLEL_LEVEL: ${CMAKE_BUILD_PARALLEL_LEVEL}")
 
 # Find packages
-find_package(MPI REQUIRED)
+include(PackageMPI)
 # continues
 include(PackageAdios)
 include(PackageGoogleLog)

@@ -25,6 +25,9 @@ elif [ `hostname | grep -w viking` ]; then
 elif [ `hostname | grep -w viking2` ]; then
   HPC_ENV="viking2"
   HPC_MANAGER="slurm"
+elif [ `hostname | grep -w viking2` ]; then
+  HPC_ENV="archer2"
+  HPC_MANAGER="slurm"
 else
   unknown_hpc_environment
 fi

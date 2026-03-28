@@ -88,6 +88,21 @@ gdb4hpc/4.10.6
   load_modules "$MODULES"
 }
 
+load_modules_archer2() {
+  MODULES="
+PrgEnv-gnu
+extra-compilers
+gcc/11.2.0
+cmake/3.29.4
+cray-mpich/8.1.27
+cray-fftw/3.3.10.5
+darshan/3.3.1
+darshan-util/3.3.1
+cray-hdf5-parallel/1.12.2.7
+"
+  load_modules "$MODULES"
+}
+
 list_modules() {
   module list
 }
@@ -106,6 +121,8 @@ elif [ "$HPC_ENV" = "viking" ]; then
   load_modules_viking
 elif [ "$HPC_ENV" = "viking2" ]; then
   load_modules_viking2
+elif [ "$HPC_ENV" = "archer2" ]; then
+  load_modules_archer2
 else
   unknown_hpc_environment
 fi
