@@ -8,22 +8,18 @@ unknown_hpc_environment() {
 }
 
 ### HPC ENV
-if hostname | egrep '^xci|^nid'; then
-  HPC_ENV="isambard"
-  HPC_MANAGER="pbs"
-  export PROJECT_DIR=$HOME/src
-elif hostname | grep -w viking; then
+HPC_MANAGER="slurm"
+export PROJECT_DIR=$HOME/src
+if hostname | grep -w viking; then
   HPC_ENV="viking"
-  HPC_MANAGER="slurm"
-  export PROJECT_DIR=$HOME/src
 elif hostname | grep -w viking2; then
   HPC_ENV="viking2"
-  HPC_MANAGER="slurm"
-  export PROJECT_DIR=$HOME/src
 elif groups | grep -w archer2; then
   HPC_ENV="archer2"
-  HPC_MANAGER="slurm"
   export PROJECT_DIR=/work/e281/e281/$USER/usr
+elif hostname | egrep '^xci|^nid'; then
+  HPC_ENV="isambard"
+  HPC_MANAGER="pbs"
 else
   unknown_hpc_environment
 fi
