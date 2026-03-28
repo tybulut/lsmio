@@ -20,6 +20,8 @@ batch_run() {
   export BM_NUM_TASKS=$concurrency
 
   if [ "$QSUBMIT" = "sbatch" -a "$HPC_ENV" = "archer2" ]; then
+#    export DARSHAN_LOGPATH=$HOME/scratch/darshan
+#    LD_PRELOAD=$HOME/src/usr/lib/libdarshan.so \
     sbatch \
       --partition=standard \
       --qos=standard \
@@ -32,6 +34,8 @@ batch_run() {
       --mail-user="$SB_EMAIL" \
       ${job_script}.sbatch
   elif [ "$QSUBMIT" = "sbatch" ]; then
+#    export DARSHAN_LOGPATH=$HOME/scratch/darshan
+#    LD_PRELOAD=$HOME/src/usr/lib/libdarshan.so \
     sbatch \
       --export=ALL \
       --ntasks=$concurrency \
