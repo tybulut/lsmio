@@ -22,6 +22,7 @@ batch_run() {
   if [ "$QSUBMIT" = "sbatch" -a "$HPC_ENV" = "archer2" ]; then
     sbatch \
       --partition=standard \
+      --qos=standard \
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
@@ -35,6 +36,7 @@ batch_run() {
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
+      --mem=8gb \
       --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
       --time=$wallhour:00:00 \
       --account="$SB_ACCOUNT" \
