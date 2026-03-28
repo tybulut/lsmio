@@ -35,7 +35,11 @@ do
     fi
 
     if [ "$HPC_MANAGER" = "slurm" ]; then
-      srun ${JOB_BIN} $rf $bs --export=ALL
+      if [ "$HPC_ENV" = "archer2" ]; then
+        srun ${JOB_BIN} $rf $bs -p standard --export=ALL
+      else
+        srun ${JOB_BIN} $rf $bs --export=ALL
+      fi
     elif [ "$HPC_MANAGER" = "pbs" ]; then
       aprun -n $BM_NUM_TASKS -N $BM_NUM_CORES ${JOB_BIN} $rf $bs
     else
