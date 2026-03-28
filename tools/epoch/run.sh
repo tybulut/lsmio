@@ -60,10 +60,10 @@ sbatch \
   --cpus-per-task=1 \
   --job-name=SERDAR-EPOC2D-4 \
   --time=4:00:00 \
-  --mail-user="sb2984@york.ac.uk" \
+  --mail-user="$SB_EMAIL" \
   benchmark.sbatch
 
-#  --account="cs-cshpc-2019" \
+#  --account="$SB_ACCOUNT" \
 set +x
 
 sleep 1
@@ -87,6 +87,6 @@ ls -la output/ > $OUTDIR/files.txt
 /usr/bin/cp -f output/epoch2d.dat $OUTDIR/
 /usr/bin/cp -f output/input.deck $OUTDIR/
 /usr/bin/cp -f logs/sbatch-*.log $OUTDIR/
-/usr/bin/mv  $DARSHAN_LOGPATH/sb2984_epoch2d_*.darshan $OUTDIR/
+/usr/bin/mv  $DARSHAN_LOGPATH/${USER}_epoch2d_*.darshan $OUTDIR/
 
 
