@@ -1,13 +1,5 @@
 ### BASE
 export DS=`date +"%F"`
-#
-export SB_BIN=$HOME/src/usr/bin
-#
-export PROJECT_DIR=$HOME/src
-if [ -z `echo $LD_LIBRARY_PATH | grep $PROJECT_DIR` ]; then
-  export LD_LIBRARY_PATH=$PROJECT_DIR/usr/lib:$PROJECT_DIR/usr/lib64:$LD_LIBRARY_PATH
-fi
-export ADIOS2_PLUGIN_PATH=$PROJECT_DIR/usr/lib
 
 unknown_hpc_environment() {
   echo "############################################"
@@ -19,18 +11,29 @@ unknown_hpc_environment() {
 if hostname | egrep '^xci|^nid'; then
   HPC_ENV="isambard"
   HPC_MANAGER="pbs"
+  export PROJECT_DIR=$HOME/src
 elif hostname | grep -w viking; then
   HPC_ENV="viking"
   HPC_MANAGER="slurm"
+  export PROJECT_DIR=$HOME/src
 elif hostname | grep -w viking2; then
   HPC_ENV="viking2"
   HPC_MANAGER="slurm"
+  export PROJECT_DIR=$HOME/src
 elif groups | grep -w archer2; then
   HPC_ENV="archer2"
   HPC_MANAGER="slurm"
+  export PROJECT_DIR=/work/e281/e281/$USER/usr
 else
   unknown_hpc_environment
 fi
+
+#
+export SB_BIN=$PROJECT_DIR/bin
+if [ -z `echo $LD_LIBRARY_PATH | grep $PROJECT_DIR` ]; then
+  export LD_LIBRARY_PATH=$PROJECT_DIR/lib:$PROJECT_DIR/lib64:$LD_LIBRARY_PATH
+fi
+export ADIOS2_PLUGIN_PATH=$PROJECT_DIR/lib
 
 ### LUSTRE
 if [ "$HPC_ENV" = "isambard" ]; then
