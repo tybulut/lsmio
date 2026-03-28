@@ -23,22 +23,16 @@ if(NOT mpi_cmd)
 endif()
 
 if(NOT mpi_cmd)
-  find_program (mpi_cmd mpiexec)
-endif()
-
-if(NOT mpi_cmd)
-  message(WARNING "MPI execution command (mpirun, aprun, srun, mpiexec) not found! Defaulting to 'true'.")
-  set(mpi_cmd "true")
-  set(test_parameters "")
+  message(FATAL_ERROR "MPI command (mpirun, aprun, srun) not found!")
 else()
   message(STATUS "Test module: MPI command found=${mpi_cmd}")
 
-  set(LSMIO_MPI_TEST_FLAGS "" CACHE STRING "Extra flags for MPI test execution (e.g. -p partition_name for srun)")
-
-  if(mpi_cmd MATCHES "aprun" OR mpi_cmd MATCHES "srun")
-    set (test_parameters ${LSMIO_MPI_TEST_FLAGS} -n ${mpi_processes})
+  if(mpi_cmd MATCHES "aprun")
+    set (test_parameters -n ${mpi_processes})
+  elseif(mpi_cmd MATCHES "srun")
+    set (test_parameters -n ${mpi_processes} -p standard)
   else()
-    set (test_parameters ${LSMIO_MPI_TEST_FLAGS} -tag-output -np ${mpi_processes})
+    set (test_parameters -tag-output -np ${mpi_processes})
   endif()
 endif()
 
