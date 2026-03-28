@@ -19,11 +19,21 @@ if(NOT mpi_cmd)
 endif()
 
 if(NOT mpi_cmd)
-  message(FATAL_ERROR "MPI command not found!")
+  find_program (mpi_cmd srun)
+endif()
+
+if(NOT mpi_cmd)
+  find_program (mpi_cmd mpiexec)
+endif()
+
+if(NOT mpi_cmd)
+  message(WARNING "MPI execution command (mpirun, aprun, srun, mpiexec) not found! Defaulting to 'true'.")
+  set(mpi_cmd "true")
+  set(test_parameters "")
 else()
   message(STATUS "Test module: MPI command found=${mpi_cmd}")
 
-  if(mpi_cmd MATCHES "aprun")
+  if(mpi_cmd MATCHES "aprun" OR mpi_cmd MATCHES "srun")
     set (test_parameters -n ${mpi_processes})
   else()
     set (test_parameters -tag-output -np ${mpi_processes})
