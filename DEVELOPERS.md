@@ -1,7 +1,3 @@
-## General guidelines
-* Never commit git
-* Parallel compile (make -j8) and parallel test (ctest -j8)
-
 ## Coding style
 * When applicable, separate the header and source files for CPP code
 * Use camel-case method names
@@ -10,9 +6,6 @@
 * Use snake-case for member variables and function arguments / variables
 * For class member variables use  m_ prefix.
 * For function and method argument variables use f_ prefix.
-
-## Project specifics
-* **MEMORY.md**: Long-term world improvement plan and active task tracking
 
 ## Build System
 The project uses CMake and provides a `build.sh` helper script for common tasks.
