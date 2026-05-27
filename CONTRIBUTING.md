@@ -1,7 +1,6 @@
 # Developers Guide
 
 
-
 ## Getting Started
 
 Set up your environment as explained in the [README](README.md) file. Also install the optional packages.
