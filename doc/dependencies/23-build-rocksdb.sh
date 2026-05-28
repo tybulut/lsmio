@@ -25,6 +25,7 @@ cmake \
   -DJNI=Off \
   -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr \
   -DCMAKE_INSTALL_LIBDIR=lib \
+  -DFAIL_ON_WARNINGS=OFF \
   ../rocksdb
 
 make -j16 \
@@ -35,6 +36,4 @@ make -j16 \
 
 #DEBUG_LEVEL=0 make -j8 static_lib
 #DEBUG_LEVEL=0 make install-shared
-
-#make -j8 all
 
