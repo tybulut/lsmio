@@ -91,14 +91,21 @@ gdb4hpc/4.10.6
 load_modules_archer2() {
   MODULES="
 PrgEnv-gnu
+load-epcc-module
 extra-compilers
 gcc/11.2.0
 cmake/3.29.4
 cray-mpich/8.1.27
-cray-fftw/3.3.10.5
 darshan/3.3.1
 darshan-util/3.3.1
 cray-hdf5-parallel/1.12.2.7
+craype-x86-genoa
+craype-x86-milan
+craype-x86-milan-x
+craype-x86-rome
+craype-x86-spr
+craype-x86-trento
+cray-fftw/3.3.10.5
 "
   load_modules "$MODULES"
 }
