@@ -7,6 +7,7 @@ include(PackageMPI)
 find_package(Threads REQUIRED)
 # continues
 include(PackageAdios)
+include(PackageFMT)
 include(PackageGoogleLog)
 include(PackageLevelDB)
 include(PackageRocksDB)
