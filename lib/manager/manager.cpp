@@ -137,7 +137,7 @@ void LSMIOManager::_init() {
         }
     }
 
-    if (_isShared && _isSharedSplit) {
+    if (_isShared && _isSharedSplit && !gConfigLSMIO.disableAggDirStructure) {
         std::filesystem::path pathDBDir(_dbDir);
         pathDBDir /= AGGREGATION_DIR_INFIX;
         pathDBDir /= std::to_string(_worldRank);

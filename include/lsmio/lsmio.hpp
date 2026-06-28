@@ -96,6 +96,8 @@ class LSMIOConfig {
     MPIAggType mpiAggType = MPIAggType::Shared;
 
     // General settings
+    /// @brief Flag to disable creating agg/<rank> subdirectory structure.
+    bool disableAggDirStructure = false;
     /// @brief Flag to use Bloom Filter.
     bool useBloomFilter = false;
     /// @brief Flag for synchronous operations.
