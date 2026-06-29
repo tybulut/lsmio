@@ -137,6 +137,11 @@ void LSMIOManager::_init() {
         }
     }
 
+    LOG(INFO) << "LSMIOManager::_init: disableAggDirStructure="
+              << gConfigLSMIO.disableAggDirStructure
+              << ", mpiAggType=" << (int)gConfigLSMIO.mpiAggType
+              << ", _dbPath=" << (_dbDir.empty() ? _dbName : _dbDir + "/" + _dbName);
+
     if (_isShared && _isSharedSplit && !gConfigLSMIO.disableAggDirStructure) {
         std::filesystem::path pathDBDir(_dbDir);
         pathDBDir /= AGGREGATION_DIR_INFIX;
