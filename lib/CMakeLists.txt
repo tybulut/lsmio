@@ -8,6 +8,7 @@ include_directories(${MPI_INCLUDE_DIR})
 find_package(Threads REQUIRED)
 # continues
 include(PackageAdios)
+include(PackageFMT)
 include(PackageGoogleLog)
 include(PackageLevelDB)
 include(PackageRocksDB)

@@ -245,6 +245,7 @@ std::string genOptionsToString() {
               << "\n writeBufferSize: " << lsmio::gConfigLSMIO.writeBufferSize
               << "\n writeFileSize: " << lsmio::gConfigLSMIO.writeFileSize
               << "\n preAllocate: " << lsmio::gConfigLSMIO.preAllocate
+              << "\n disableAggDirStructure: " << lsmio::gConfigLSMIO.disableAggDirStructure
               << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize << "\n";
 
     return optStream.str();
@@ -311,6 +312,8 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-fsize", lsmio::gConfigLSMIO.writeFileSize,
                        "first-level file size (default: 32M)");
         app.add_flag("--lsmio-prealloc", lsmio::gConfigLSMIO.preAllocate,
+                     "enable file pre-allocation (uses write buffer size)");
+        app.add_flag("--lsmio-disable-agg-dir-structure", lsmio::gConfigLSMIO.disableAggDirStructure,
                      "enable file pre-allocation (uses write buffer size)");
         app.add_option("--lsmio-pool", lsmio::gConfigLSMIO.filePoolSize,
                        "number of pre-allocated files (default: 4)");
