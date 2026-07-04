@@ -98,7 +98,10 @@ LSMIOStream& LSMIOStream::write(const std::string& s) {
         throw std::invalid_argument("ERROR: LSMIOStream::write called without initializing");
     }
 
-    _lm->put(_genKey(), s);
+    if (!_lm->put(_genKey(), s)) {
+        throw std::ios_base::failure("ERROR: LSMIOStream::write failed to persist " +
+                                     std::to_string(s.size()) + " bytes to " + _filePath);
+    }
     _fileMap[_filePath] = _fileMap[_filePath] + s.size();
 
     return *this;

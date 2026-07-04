@@ -39,6 +39,7 @@ lsmio_setup_options()
 
 # Defines
 add_subdirectory(include)
+include(PackageTLX)
 
 # Sub directories
 add_subdirectory(lib)

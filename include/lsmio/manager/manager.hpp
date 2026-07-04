@@ -38,7 +38,7 @@
 
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/client/client.hpp>
-#include <lsmio/manager/store/native/store_native.hpp>
+#include <lsmio/manager/store/native/StoreNative.hpp>
 #include <lsmio/manager/store/store_ldb.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
 #include <string>

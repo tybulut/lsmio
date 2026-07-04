@@ -31,8 +31,11 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <lsmio/manager/store/native/memtable.hpp>
-#include <lsmio/manager/store/native/sstable_manager.hpp>
+#include <fstream>
+#include <lsmio/manager/store/native/MemtableVectorNoSort.hpp>
+#include <lsmio/manager/store/native/SSTableManager.hpp>
+#include <lsmio/manager/store/native/StoreNative.hpp>
+#include <stdexcept>
 
 using namespace lsmio;
 
@@ -40,8 +43,10 @@ class SSTableManagerTest : public ::testing::Test {
   protected:
     std::string dbPath = "test_sstable_mgr_db";
     std::unique_ptr<SSTableManager> mgr;
+    LSMIOConfig m_backup_config;
 
     void SetUp() override {
+        m_backup_config = gConfigLSMIO;
         const testing::TestInfo* const test_info =
             testing::UnitTest::GetInstance()->current_test_info();
         dbPath = std::string("test_sstable_mgr_db_") + test_info->name();
@@ -55,6 +60,7 @@ class SSTableManagerTest : public ::testing::Test {
     }
 
     void TearDown() override {
+        gConfigLSMIO = m_backup_config;
         mgr.reset();
         if (std::filesystem::exists(dbPath)) {
             std::filesystem::remove_all(dbPath);
@@ -63,7 +69,7 @@ class SSTableManagerTest : public ::testing::Test {
 };
 
 TEST_F(SSTableManagerTest, FlushAndGet) {
-    Memtable m;
+    MemtableVectorNoSort m;
     m.add("key1", "val1");
     m.add("key2", "val2");
 
@@ -82,7 +88,7 @@ TEST_F(SSTableManagerTest, FlushAndGet) {
 
 TEST_F(SSTableManagerTest, Recovery) {
     {
-        Memtable m;
+        MemtableVectorNoSort m;
         m.add("key1", "val1");
         std::vector<char> buf(1024);
         mgr->flushMemtable(m, buf);
@@ -92,15 +98,15 @@ TEST_F(SSTableManagerTest, Recovery) {
     mgr.reset();  // Destroy old manager
 
     // Create new manager (triggers recovery in constructor)
-    auto newMgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
 
     std::string val;
-    EXPECT_TRUE(newMgr->get("key1", val));
+    EXPECT_TRUE(new_mgr->get("key1", val));
     EXPECT_EQ(val, "val1");
 }
 
 TEST_F(SSTableManagerTest, Tombstone) {
-    Memtable m;
+    MemtableVectorNoSort m;
     m.add("key1", MEMTABLE_TOMBSTONE);
     std::vector<char> buf(1024);
     mgr->flushMemtable(m, buf);
@@ -111,12 +117,12 @@ TEST_F(SSTableManagerTest, Tombstone) {
 }
 
 TEST_F(SSTableManagerTest, Scan) {
-    Memtable m1;
+    MemtableVectorNoSort m1;
     m1.add("prefix/a", "1");
     std::vector<char> buf(1024);
     mgr->flushMemtable(m1, buf);
 
-    Memtable m2;
+    MemtableVectorNoSort m2;
     m2.add("prefix/b", "2");
     mgr->flushMemtable(m2, buf);
 
@@ -127,4 +133,95 @@ TEST_F(SSTableManagerTest, Scan) {
     EXPECT_EQ(results.size(), 2);
     EXPECT_EQ(results["prefix/a"], "1");
     EXPECT_EQ(results["prefix/b"], "2");
+}
+
+TEST_F(SSTableManagerTest, FooterIndexWithManualOffset) {
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.manualOffset = true;
+
+    {
+        MemtableVectorNoSort m;
+        m.add("key1", "val1");
+        std::vector<char> buf(1024);
+        mgr->flushMemtable(m, buf);
+    }
+
+    mgr.reset();
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    std::string val;
+    EXPECT_TRUE(new_mgr->get("key1", val));
+    EXPECT_EQ(val, "val1");
+}
+
+TEST_F(SSTableManagerTest, CorruptedFooterFallback) {
+    gConfigLSMIO.footerIndex = true;
+    {
+        MemtableVectorNoSort m;
+        m.add("key1", "val1");
+        std::vector<char> buf(1024);
+        mgr->flushMemtable(m, buf);
+    }
+    mgr.reset();
+
+    // Corrupt the footer manually
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        if (entry.path().extension() == ".sst") {
+            std::fstream f(entry.path(), std::ios::in | std::ios::out | std::ios::binary);
+            f.seekp(0, std::ios::end);
+            f.seekp(-4, std::ios::cur);
+            char bad_magic[4] = {'B', 'A', 'D', '0'};
+            f.write(bad_magic, 4);
+            f.close();
+            break;
+        }
+    }
+
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    std::string val;
+    EXPECT_TRUE(new_mgr->get("key1", val));  // Should fallback to sequential slow path
+    EXPECT_EQ(val, "val1");
+}
+
+TEST_F(SSTableManagerTest, PreallocAndFooterIndex) {
+    gConfigLSMIO.preAllocate = true;
+    gConfigLSMIO.footerIndex = true;
+
+    // The fixture manager was built without preallocation; recreate it with a
+    // real preallocation size so the .sst is ftruncated large and the flush
+    // must trim it back for the footer magic to land at physical EOF.
+    constexpr size_t pre_alloc_bytes = 64 * 1024;
+    mgr = std::make_unique<SSTableManager>(dbPath, 10, pre_alloc_bytes);
+    {
+        MemtableVectorNoSort m;
+        m.add("key1", "val1");
+        std::vector<char> buf(1024);
+        ASSERT_TRUE(mgr->flushMemtable(m, buf));
+    }
+    mgr.reset();
+
+    // The flushed SSTable must have been resized down from the preallocated
+    // size, leaving the footer magic at physical EOF. Untouched pool files may
+    // remain at the full preallocated size, so look for at least one trimmed file.
+    bool found_trimmed_sst = false;
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        auto size = std::filesystem::file_size(entry.path());
+        if (entry.path().extension() == ".sst" && size > 0 && size < pre_alloc_bytes) {
+            found_trimmed_sst = true;
+        }
+    }
+    EXPECT_TRUE(found_trimmed_sst);
+
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    std::string val;
+    EXPECT_TRUE(new_mgr->get("key1", val));
+    EXPECT_EQ(val, "val1");
+}
+
+TEST_F(SSTableManagerTest, CreateMemtableThrowsOnUnknown) {
+    gConfigLSMIO.memtable = "invalid_string";
+    // The library builds with -fno-rtti, so an exception thrown inside the
+    // lsmio dylib cannot be matched by type across the library boundary on
+    // macOS; only a catch-all sees it. The throw site is
+    // LSMIOStoreNative::createMemtable (std::invalid_argument).
+    EXPECT_ANY_THROW(LSMIOStoreNative(dbPath, true));
 }

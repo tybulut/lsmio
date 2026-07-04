@@ -308,15 +308,27 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-cache", lsmio::gConfigLSMIO.cacheSize,
                        "LRU cache size (default: 0)");
         app.add_option("--lsmio-wbuffer", lsmio::gConfigLSMIO.writeBufferSize,
-                       "write buffer size (default: 32M)");
+                       "write buffer size (default: 128M)");
         app.add_option("--lsmio-fsize", lsmio::gConfigLSMIO.writeFileSize,
-                       "first-level file size (default: 32M)");
+                       "first-level file size (default: 8x write buffer size)");
         app.add_flag("--lsmio-prealloc", lsmio::gConfigLSMIO.preAllocate,
                      "enable file pre-allocation (uses write buffer size)");
-        app.add_flag("--lsmio-disable-agg-dir-structure", lsmio::gConfigLSMIO.disableAggDirStructure,
-                     "enable file pre-allocation (uses write buffer size)");
+        app.add_flag("--lsmio-disable-agg-dir-structure",
+                     lsmio::gConfigLSMIO.disableAggDirStructure,
+                     "disable the per-rank aggregation directory structure");
         app.add_option("--lsmio-pool", lsmio::gConfigLSMIO.filePoolSize,
                        "number of pre-allocated files (default: 4)");
+
+        app.add_option("--lsmio-memtable", lsmio::gConfigLSMIO.memtable,
+                       "memtable implementation to use: vector-no-sort, vector-sort, map, btree "
+                       "(default: vector-no-sort)")
+            ->check(CLI::IsMember({"vector-no-sort", "vector-sort", "map", "btree"}));
+        app.add_option("--lsmio-max-key", lsmio::gConfigLSMIO.maxKeyLen,
+                       "maximum accepted key length in bytes (default: 256K)");
+        app.add_flag("--lsmio-manual-offset", lsmio::gConfigLSMIO.manualOffset,
+                     "bypass tellp() and manually track offsets (default: false)");
+        app.add_flag("--lsmio-footer-index", lsmio::gConfigLSMIO.footerIndex,
+                     "append the Dense Index Footer to the SSTable (default: false)");
 
         app.parse(argc, argv);
 
@@ -324,10 +336,8 @@ int BMBase::beginMain(int argc, char **argv) {
             flag_mpi_io_world ? lsmio::MPIAggType::Entire : lsmio::MPIAggType::Shared;
 
         lsmio::gConfigLSMIO.storageType = lsmio::StorageType::NativeDB;
-        if (flag_use_leveldb) 
-            lsmio::gConfigLSMIO.storageType = lsmio::StorageType::LevelDB;
-        if (flag_use_rocksdb) 
-            lsmio::gConfigLSMIO.storageType = lsmio::StorageType::RocksDB;
+        if (flag_use_leveldb) lsmio::gConfigLSMIO.storageType = lsmio::StorageType::LevelDB;
+        if (flag_use_rocksdb) lsmio::gConfigLSMIO.storageType = lsmio::StorageType::RocksDB;
 
         if (gConfigBM.fileName.empty()) {
             throw std::runtime_error("ERROR: Output file is required.");
@@ -337,6 +347,11 @@ int BMBase::beginMain(int argc, char **argv) {
         }
         if (lsmio::gConfigLSMIO.transferSize < lsmio::gConfigLSMIO.blockSize) {
             throw std::runtime_error("ERROR: Transfer-size has to be >= block-size.");
+        }
+        if (lsmio::gConfigLSMIO.getMaxValueLen() == 0) {
+            throw std::runtime_error(
+                "ERROR: --lsmio-wbuffer is too small: it must exceed --lsmio-max-key plus 1M of "
+                "record overhead.");
         }
     } catch (const CLI::CallForHelp &e) {
         exit(app.exit(e));

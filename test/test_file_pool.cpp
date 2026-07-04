@@ -2,7 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
-#include <lsmio/manager/store/native/file_pool.hpp>
+#include <lsmio/manager/store/native/FilePool.hpp>
 #include <thread>
 
 class FilePoolTest : public ::testing::Test {

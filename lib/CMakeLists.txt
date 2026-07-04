@@ -51,11 +51,12 @@ set(LIB_STORE_CPP_FILES
   ${LIB_SOURCE_DIR}/manager/store/store.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_ldb.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_rdb.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/store_native.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/memtable.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/sstable_manager.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/file_pool.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/file_closer.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/StoreNative.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/MemtableVectorNoSort.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/MemtableVectorSort.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/SSTableManager.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/FilePool.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/FileCloser.cpp
 )
 set(LIB_ADIOS_CPP_FILES
   ${LIB_SOURCE_DIR}/adios-plugin/lsmio_plugin.cpp

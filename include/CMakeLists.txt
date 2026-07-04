@@ -19,9 +19,12 @@ set(INC_STORE_HPP_FILES
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store_ldb.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/store_rdb.hpp
-  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/store_native.hpp
-  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/memtable.hpp
-  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/sstable_manager.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/StoreNative.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/IMemtable.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/MemtableVectorNoSort.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/MemtableVectorSort.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/MemtableOrdered.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/manager/store/native/SSTableManager.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/client/client.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/client/client_mpi.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/manager/client/client_adios.hpp

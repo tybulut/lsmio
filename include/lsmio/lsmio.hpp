@@ -129,15 +129,36 @@ class LSMIOConfig {
     /// @brief Default cache size.
     int cacheSize = 0;
     /// @brief Default write buffer size.
-    int writeBufferSize = 32 * 1024 * 1024;
-    /// @brief Default write file size.
-    int writeFileSize = 8 * writeBufferSize;
+    int writeBufferSize = 128 * 1024 * 1024;
+
+    /// @brief Maximum accepted key length for puts (bytes).
+    size_t maxKeyLen = 256 * 1024;
+    /// @brief Maximum accepted value length for puts: one record (key + value +
+    /// framing) must fit in the write buffer with 1MB reserved for framing and
+    /// index overhead. Returns 0 when writeBufferSize is too small to hold any value.
+    size_t getMaxValueLen() const {
+        if (writeBufferSize <= 0) return 0;
+        size_t overhead = maxKeyLen + (1 * 1024 * 1024);
+        size_t buffer = static_cast<size_t>(writeBufferSize);
+        return buffer > overhead ? buffer - overhead : 0;
+    }
+    /// @brief Default write file size. 64-bit: 8 * writeBufferSize overflows int
+    /// once writeBufferSize exceeds 256MB.
+    long long writeFileSize = 8LL * writeBufferSize;
     /// @brief Flag to enable file pre-allocation (uses writeBufferSize).
     bool preAllocate = false;
     /// @brief Number of files to keep pre-allocated in the pool.
     int filePoolSize = 4;
     /// @brief Flag to enable auto-tuning of parameters based on the filesystem.
     bool autoTuneParameters = false;
+
+    // NativeStore specific settings
+    /// @brief Memtable implementation to use (vector-no-sort, vector-sort, map, btree)
+    std::string memtable = "vector-no-sort";
+    /// @brief Flag to bypass tellp() and manually track offsets
+    bool manualOffset = false;
+    /// @brief Flag to write Dense Index Footer to the SSTable
+    bool footerIndex = false;
 };
 
 /// Global configuration instance for LSMIO.

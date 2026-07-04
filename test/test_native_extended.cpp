@@ -31,12 +31,24 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <lsmio/manager/store/native/store_native.hpp>
+#include <lsmio/manager/store/native/StoreNative.hpp>
 
 using namespace lsmio;
 
 class NativeStoreExtendedTest : public ::testing::Test {
   protected:
+    LSMIOConfig m_backup_config;
+
+    // TearDown runs even when a test body exits early via FAIL(), so config
+    // mutations can never leak into later tests.
+    void SetUp() override {
+        m_backup_config = gConfigLSMIO;
+    }
+
+    void TearDown() override {
+        gConfigLSMIO = m_backup_config;
+    }
+
     void CleanDir(const std::string& path) {
         std::error_code ec;
         if (std::filesystem::exists(path, ec)) {
@@ -116,29 +128,29 @@ TEST_F(NativeStoreExtendedTest, LargeWriteFlush) {
     std::string dbPath = "test_native_large";
     CleanDir(dbPath);
 
-    size_t originalSize = gConfigLSMIO.writeBufferSize;
-    size_t originalPool = gConfigLSMIO.filePoolSize;
-
-    gConfigLSMIO.writeBufferSize = 1024;
+    // Config is restored by the fixture's TearDown, even if the test fails.
+    gConfigLSMIO.writeBufferSize = 2 * 1024 * 1024;
+    gConfigLSMIO.maxKeyLen = 256;
     gConfigLSMIO.filePoolSize = 1;  // Force immediate close in FileCloser
 
-    {
+    try {
         LSMIOStoreNative store(dbPath, true);
-        std::string largeVal(512, 'a');
+        std::string large_val(512 * 1024, 'a');
 
         for (int i = 0; i < 10; ++i) {
-            store.put("key" + std::to_string(i), largeVal);
+            store.put("key" + std::to_string(i), large_val);
         }
-        store.writeBarrier();
+        EXPECT_TRUE(store.writeBarrier());
 
         std::string val;
         for (int i = 0; i < 10; ++i) {
             EXPECT_TRUE(store.get("key" + std::to_string(i), &val)) << "Key " << i << " not found";
-            EXPECT_EQ(val, largeVal);
+            EXPECT_EQ(val, large_val);
         }
+    } catch (const std::exception& e) {
+        std::cerr << "EXCEPTION: " << e.what() << std::endl;
+        FAIL() << "Exception thrown";
     }
 
-    gConfigLSMIO.writeBufferSize = originalSize;
-    gConfigLSMIO.filePoolSize = originalPool;
     CleanDir(dbPath);
 }
