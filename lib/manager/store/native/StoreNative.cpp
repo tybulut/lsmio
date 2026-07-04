@@ -66,11 +66,13 @@
 namespace lsmio {
 
 std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
-    if (gConfigLSMIO.memtable == "vector-sort") return std::make_unique<MemtableVectorSort>();
-    if (gConfigLSMIO.memtable == "map") return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
-    if (gConfigLSMIO.memtable == "btree") return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
-    if (gConfigLSMIO.memtable == "vector-no-sort" || gConfigLSMIO.memtable.empty()) return std::make_unique<MemtableVectorNoSort>();
-    throw std::invalid_argument("Unknown memtable type: " + gConfigLSMIO.memtable);
+    switch (gConfigLSMIO.memtable) {
+        case MemtableType::VectorSort: return std::make_unique<MemtableVectorSort>();
+        case MemtableType::Map: return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
+        case MemtableType::BTree: return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
+        case MemtableType::VectorNoSort: return std::make_unique<MemtableVectorNoSort>();
+        default: throw std::invalid_argument("Unknown MemtableType");
+    }
 }
 
 LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write)

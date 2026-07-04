@@ -218,7 +218,7 @@ TEST_F(SSTableManagerTest, PreallocAndFooterIndex) {
 }
 
 TEST_F(SSTableManagerTest, CreateMemtableThrowsOnUnknown) {
-    gConfigLSMIO.memtable = "invalid_string";
+    gConfigLSMIO.memtable = static_cast<lsmio::MemtableType>(999);
     // The library builds with -fno-rtti, so an exception thrown inside the
     // lsmio dylib cannot be matched by type across the library boundary on
     // macOS; only a catch-all sees it. The throw site is

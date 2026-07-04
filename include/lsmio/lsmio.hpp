@@ -86,6 +86,16 @@ enum class StorageType {
 };
 
 /**
+ * Enum representing the memtable types supported by LSMIO NativeStore.
+ */
+enum class MemtableType {
+    VectorNoSort,
+    VectorSort,
+    Map,
+    BTree
+};
+
+/**
  * Configuration class for LSMIO settings.
  */
 class LSMIOConfig {
@@ -154,7 +164,7 @@ class LSMIOConfig {
 
     // NativeStore specific settings
     /// @brief Memtable implementation to use (vector-no-sort, vector-sort, map, btree)
-    std::string memtable = "vector-no-sort";
+    MemtableType memtable = MemtableType::VectorNoSort;
     /// @brief Flag to bypass tellp() and manually track offsets
     bool manualOffset = false;
     /// @brief Flag to write Dense Index Footer to the SSTable

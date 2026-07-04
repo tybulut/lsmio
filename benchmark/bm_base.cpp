@@ -319,10 +319,16 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-pool", lsmio::gConfigLSMIO.filePoolSize,
                        "number of pre-allocated files (default: 4)");
 
+        std::map<std::string, lsmio::MemtableType> memtableMap{
+            {"vector-no-sort", lsmio::MemtableType::VectorNoSort},
+            {"vector-sort", lsmio::MemtableType::VectorSort},
+            {"map", lsmio::MemtableType::Map},
+            {"btree", lsmio::MemtableType::BTree}};
+
         app.add_option("--lsmio-memtable", lsmio::gConfigLSMIO.memtable,
                        "memtable implementation to use: vector-no-sort, vector-sort, map, btree "
                        "(default: vector-no-sort)")
-            ->check(CLI::IsMember({"vector-no-sort", "vector-sort", "map", "btree"}));
+            ->transform(CLI::CheckedTransformer(memtableMap, CLI::ignore_case));
         app.add_option("--lsmio-max-key", lsmio::gConfigLSMIO.maxKeyLen,
                        "maximum accepted key length in bytes (default: 256K)");
         app.add_flag("--lsmio-manual-offset", lsmio::gConfigLSMIO.manualOffset,
