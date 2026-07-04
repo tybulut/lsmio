@@ -30,12 +30,12 @@
 
 #include <gtest/gtest.h>
 
-#include <lsmio/manager/store/native/memtable.hpp>
+#include <lsmio/manager/store/native/MemtableVectorNoSort.hpp>
 
 using namespace lsmio;
 
 TEST(MemtableTest, BasicAddGet) {
-    Memtable m;
+    MemtableVectorNoSort m;
     m.add("key1", "value1");
     m.add("key2", "value2");
 
@@ -48,7 +48,7 @@ TEST(MemtableTest, BasicAddGet) {
 }
 
 TEST(MemtableTest, Overwrite) {
-    Memtable m;
+    MemtableVectorNoSort m;
     m.add("key1", "value1");
     m.add("key1", "value2");
 
@@ -58,7 +58,7 @@ TEST(MemtableTest, Overwrite) {
 }
 
 TEST(MemtableTest, Tombstone) {
-    Memtable m;
+    MemtableVectorNoSort m;
     m.add("key1", "value1");
     m.add("key1", MEMTABLE_TOMBSTONE);  // logical delete
 
@@ -68,7 +68,7 @@ TEST(MemtableTest, Tombstone) {
 }
 
 TEST(MemtableTest, ScanPrefix) {
-    Memtable m;
+    MemtableVectorNoSort m;
     m.add("prefix/a", "1");
     m.add("prefix/b", "2");
     m.add("other/c", "3");
@@ -89,7 +89,7 @@ TEST(MemtableTest, ScanPrefix) {
 }
 
 TEST(MemtableTest, SizeTracking) {
-    Memtable m;
+    MemtableVectorNoSort m;
     EXPECT_EQ(m.sizeBytes(), 0);
 
     m.add("k", "v");

@@ -38,38 +38,40 @@
 #include <string>
 #include <vector>
 
-#include "file_closer.hpp"
-#include "file_pool.hpp"
-#include "memtable.hpp"
+#include "FileCloser.hpp"
+#include "FilePool.hpp"
+#include "IMemtable.hpp"
 
 namespace lsmio {
 
 class SSTableManager {
   public:
-    SSTableManager(const std::string& dbPath, size_t filePoolSize, size_t preAllocBytes);
+    static constexpr uint32_t FOOTER_MAGIC = 0x4C534D49;
+
+    SSTableManager(const std::string& f_db_path, size_t f_file_pool_size, size_t f_pre_alloc_bytes);
     ~SSTableManager();
 
     // Flush a memtable to disk as a new SSTable
     // Uses the provided buffer for I/O buffering
-    bool flushMemtable(const Memtable& memtable, std::vector<char>& buffer);
+    bool flushMemtable(const IMemtable& f_memtable, std::vector<char>& f_buffer);
 
     // Read a value from disk
     // Returns true if found (populates value).
     // If found and value is TOMBSTONE, returns true and value is MEMTABLE_TOMBSTONE.
-    bool get(const std::string& key, std::string& value);
+    bool get(const std::string& f_key, std::string& f_value);
 
     // Scan for prefix
     // Populates results and deleted_keys
     // Returns true if any keys were found (including deleted ones)
-    bool scan(const std::string& prefix, std::map<std::string, std::string>& results,
-              std::set<std::string>& deleted_keys);
+    bool scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
+              std::set<std::string>& f_deleted_keys);
 
     void close();
 
   private:
-    std::string _dbPath;
-    std::unique_ptr<FilePool> _filePool;
-    std::unique_ptr<FileCloser> _fileCloser;
+    std::string m_db_path;
+    std::unique_ptr<FilePool> m_file_pool;
+    std::unique_ptr<FileCloser> m_file_closer;
 
     struct L0Index {
         std::string path;
@@ -83,14 +85,14 @@ class SSTableManager {
         IndexNode(L0Index&& idx) : index(std::move(idx)), next(nullptr) {}
     };
 
-    std::atomic<IndexNode*> _head{nullptr};
+    std::atomic<IndexNode*> m_head{nullptr};
 
     // Helper to read from specific file/offset
-    bool readValueAt(const std::string& path, uint64_t offset, const std::string& key,
-                     std::string& out_value);
+    bool readValueAt(const std::string& f_path, uint64_t f_offset, const std::string& f_key,
+                     std::string& f_out_value);
 
     // Internal recovery
-    void recoverState(size_t filePoolSize, size_t preAllocBytes);
+    void recoverState(size_t f_file_pool_size, size_t f_pre_alloc_bytes);
 };
 
 }  // namespace lsmio
