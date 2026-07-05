@@ -14,7 +14,12 @@ if (NOT tlx_FOUND AND NOT TARGET tlx)
     GIT_PROGRESS   TRUE
   )
 
+  # tlx v0.6.1 declares a cmake_minimum_required below 3.5, which CMake 4+
+  # refuses to configure. This override lets its configure proceed and is
+  # ignored by older CMake versions.
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
   FetchContent_MakeAvailable(tlx)
+  unset(CMAKE_POLICY_VERSION_MINIMUM)
   include_directories(${tlx_SOURCE_DIR})
 endif()
 
