@@ -28,50 +28,37 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_FILE_POOL_HPP_
-#define _LSMIO_FILE_POOL_HPP_
+#ifndef _LSMIO_MEMTABLE_VECTOR_NOSORT_HPP_
+#define _LSMIO_MEMTABLE_VECTOR_NOSORT_HPP_
 
-#include <atomic>
-#include <condition_variable>
-#include <deque>
-#include <fstream>
-#include <memory>
-#include <mutex>
+#include <functional>
+#include <map>
+#include <set>
 #include <string>
-#include <thread>
-#include <utility>
+#include <vector>
+
+#include "IMemtable.hpp"
 
 namespace lsmio {
 
-class FilePool {
+class MemtableVectorNoSort : public IMemtable {
   public:
-    FilePool(const std::string& directory, const std::string& prefix, const std::string& suffix,
-             size_t poolSize, uint64_t startId, size_t preAllocationSize = 0);
-    ~FilePool();
+    MemtableVectorNoSort();
+    ~MemtableVectorNoSort() override = default;
 
-    // Returns a pair of {file_path, file_stream}
-    // The stream is open and ready for writing.
-    // If the pool is empty, this blocks until a file is available.
-    std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
+    void add(const std::string& f_key, const std::string& f_value) override;
+    bool get(const std::string& f_key, std::string& f_value) const override;
+    void scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
+              std::set<std::string>& f_deleted_keys) const override;
+    size_t sizeBytes() const override;
+    bool empty() const override;
+    size_t count() const override;
+    void forEach(std::function<void(const std::string& f_key, const std::string& f_value)>
+                     f_callback) const override;
 
   private:
-    std::string _directory;
-    std::string _prefix;
-    std::string _suffix;
-    size_t _poolSize;
-    size_t _preAllocationSize;
-
-    // Pool stores pairs of {path, stream}
-    std::deque<std::pair<std::string, std::unique_ptr<std::ofstream>>> _pool;
-
-    std::mutex _mutex;
-    std::thread _worker;
-    std::condition_variable _cv;
-    std::condition_variable _cv_wait;  // Wait for item in pool
-    std::atomic<bool> _shutdown{false};
-    std::atomic<uint64_t> _next_id;
-
-    void replenish();
+    std::vector<std::pair<std::string, std::string>> m_data;
+    size_t m_size_bytes;
 };
 
 }  // namespace lsmio

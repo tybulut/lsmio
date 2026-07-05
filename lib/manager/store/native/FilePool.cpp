@@ -35,48 +35,48 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
-#include <lsmio/manager/store/native/file_pool.hpp>
+#include <lsmio/manager/store/native/FilePool.hpp>
 #include <sstream>
 
 namespace lsmio {
 
-FilePool::FilePool(const std::string& directory, const std::string& prefix,
-                   const std::string& suffix, size_t poolSize, uint64_t startId,
-                   size_t preAllocationSize)
-    : _directory(directory),
-      _prefix(prefix),
-      _suffix(suffix),
-      _poolSize(poolSize),
-      _next_id(startId),
-      _preAllocationSize(preAllocationSize) {
-    _worker = std::thread(&FilePool::replenish, this);
+FilePool::FilePool(const std::string& f_directory, const std::string& f_prefix,
+                   const std::string& f_suffix, size_t f_pool_size, uint64_t f_start_id,
+                   size_t f_pre_allocation_size)
+    : m_directory(f_directory),
+      m_prefix(f_prefix),
+      m_suffix(f_suffix),
+      m_pool_size(f_pool_size),
+      m_next_id(f_start_id),
+      m_pre_allocation_size(f_pre_allocation_size) {
+    m_worker = std::thread(&FilePool::replenish, this);
 }
 
 FilePool::~FilePool() {
     {
-        std::unique_lock<std::mutex> lock(_mutex);
-        _shutdown = true;
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_shutdown = true;
     }
-    _cv.notify_all();
-    if (_worker.joinable()) {
-        _worker.join();
+    m_cv.notify_all();
+    if (m_worker.joinable()) {
+        m_worker.join();
     }
 }
 
 std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
-    std::unique_lock<std::mutex> lock(_mutex);
-    _cv_wait.wait(lock, [this] { return !_pool.empty() || _shutdown; });
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cv_wait.wait(lock, [this] { return !m_pool.empty() || m_shutdown; });
 
-    if (_shutdown && _pool.empty()) {
+    if (m_shutdown && m_pool.empty()) {
         // Fallback or throw? Throwing seems safer to indicate state.
         throw std::runtime_error("FilePool is shutting down");
     }
 
-    auto result = std::move(_pool.front());
-    _pool.pop_front();
+    auto result = std::move(m_pool.front());
+    m_pool.pop_front();
 
     // Wake up worker to replenish
-    _cv.notify_one();
+    m_cv.notify_one();
 
     return result;
 }
@@ -86,36 +86,36 @@ void FilePool::replenish() {
         bool needed = false;
 
         {
-            std::unique_lock<std::mutex> lock(_mutex);
-            _cv.wait(lock, [this] { return _pool.size() < _poolSize || _shutdown; });
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_cv.wait(lock, [this] { return m_pool.size() < m_pool_size || m_shutdown; });
 
-            if (_shutdown) return;
+            if (m_shutdown) return;
             needed = true;
         }
 
         if (needed) {
             // Generate file outside lock (mostly)
-            uint64_t id = _next_id.fetch_add(1);
+            uint64_t id = m_next_id.fetch_add(1);
 
             std::ostringstream oss;
-            oss << _prefix << std::setw(6) << std::setfill('0') << id << _suffix;
+            oss << m_prefix << std::setw(6) << std::setfill('0') << id << m_suffix;
             std::string filename = oss.str();
-            std::filesystem::path path = std::filesystem::path(_directory) / filename;
+            std::filesystem::path path = std::filesystem::path(m_directory) / filename;
             std::string full_path = path.string();
 
-            if (_preAllocationSize > 0) {
+            if (m_pre_allocation_size > 0) {
                 int fd = ::open(full_path.c_str(), O_WRONLY | O_CREAT, 0644);
                 if (fd >= 0) {
 #ifdef __APPLE__
                     fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0,
-                                      (off_t)_preAllocationSize};
+                                      (off_t)m_pre_allocation_size};
                     if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
                         store.fst_flags = F_ALLOCATEALL;
                         fcntl(fd, F_PREALLOCATE, &store);
                     }
-                    ftruncate(fd, _preAllocationSize);
+                    ftruncate(fd, m_pre_allocation_size);
 #else
-                    posix_fallocate(fd, 0, _preAllocationSize);
+                    posix_fallocate(fd, 0, m_pre_allocation_size);
 #endif
                     ::close(fd);
                 } else {
@@ -125,7 +125,7 @@ void FilePool::replenish() {
             }
 
             auto mode = std::ios::binary | std::ios::out;
-            if (_preAllocationSize > 0) {
+            if (m_pre_allocation_size > 0) {
                 mode |= std::ios::in;
             }
 
@@ -138,18 +138,18 @@ void FilePool::replenish() {
                 continue;
             }
 
-            if (_preAllocationSize > 0) {
+            if (m_pre_allocation_size > 0) {
                 ofs->seekp(0);  // Ensure we start writing from beginning
             }
 
             {
-                std::unique_lock<std::mutex> lock(_mutex);
-                if (_shutdown) {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                if (m_shutdown) {
                     ofs->close();  // Cleanup
                     return;
                 }
-                _pool.push_back({full_path, std::move(ofs)});
-                _cv_wait.notify_one();
+                m_pool.push_back({full_path, std::move(ofs)});
+                m_cv_wait.notify_one();
             }
         }
     }

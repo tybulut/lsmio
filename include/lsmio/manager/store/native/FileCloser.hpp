@@ -28,57 +28,37 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <iostream>
-#include <lsmio/manager/store/native/file_closer.hpp>
+#ifndef _LSMIO_FILE_CLOSER_HPP_
+#define _LSMIO_FILE_CLOSER_HPP_
+
+#include <atomic>
+#include <condition_variable>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace lsmio {
 
-FileCloser::FileCloser(size_t batchSize) : _batchSize(batchSize) {
-    _worker = std::thread(&FileCloser::workerLoop, this);
-}
+class FileCloser {
+  public:
+    FileCloser(size_t f_batch_size);
+    ~FileCloser();
 
-FileCloser::~FileCloser() {
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        _shutdown = true;
-    }
-    _cv.notify_one();
-    if (_worker.joinable()) {
-        _worker.join();
-    }
-    // Close remaining
-    for (auto& f : _pending) {
-        if (f && f->is_open()) f->close();
-    }
-}
+    void scheduleClose(std::unique_ptr<std::ofstream> file);
 
-void FileCloser::scheduleClose(std::unique_ptr<std::ofstream> file) {
-    std::unique_lock<std::mutex> lock(_mutex);
-    _pending.push_back(std::move(file));
-    if (_pending.size() >= _batchSize || _shutdown) {
-        _cv.notify_one();
-    }
-}
+  private:
+    size_t m_batch_size;
+    std::vector<std::unique_ptr<std::ofstream>> m_pending;
+    std::mutex m_mutex;
+    std::thread m_worker;
+    std::condition_variable m_cv;
+    std::atomic<bool> m_shutdown{false};
 
-void FileCloser::workerLoop() {
-    while (true) {
-        std::vector<std::unique_ptr<std::ofstream>> to_close;
-
-        {
-            std::unique_lock<std::mutex> lock(_mutex);
-            _cv.wait(lock, [this] { return _pending.size() >= _batchSize || _shutdown; });
-
-            if (_shutdown && _pending.empty()) return;
-
-            to_close.swap(_pending);
-        }
-
-        for (auto& f : to_close) {
-            if (f && f->is_open()) {
-                f->close();
-            }
-        }
-    }
-}
+    void workerLoop();
+};
 
 }  // namespace lsmio
+
+#endif

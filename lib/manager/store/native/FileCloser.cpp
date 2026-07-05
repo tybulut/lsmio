@@ -28,50 +28,57 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_MEMTABLE_HPP_
-#define _LSMIO_MEMTABLE_HPP_
-
-#include <map>
-#include <set>
-#include <string>
-#include <vector>
+#include <iostream>
+#include <lsmio/manager/store/native/FileCloser.hpp>
 
 namespace lsmio {
 
-// Define the tombstone value constant to be shared
-const std::string MEMTABLE_TOMBSTONE = "__LSM_TOMBSTONE_v1__";
+FileCloser::FileCloser(size_t f_batch_size) : m_batch_size(f_batch_size) {
+    m_worker = std::thread(&FileCloser::workerLoop, this);
+}
 
-class Memtable {
-  public:
-    Memtable();
-    ~Memtable() = default;
+FileCloser::~FileCloser() {
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_shutdown = true;
+    }
+    m_cv.notify_one();
+    if (m_worker.joinable()) {
+        m_worker.join();
+    }
+    // Close remaining
+    for (auto& f : m_pending) {
+        if (f && f->is_open()) f->close();
+    }
+}
 
-    // Add a key-value pair. If value is MEMTABLE_TOMBSTONE, it represents a deletion.
-    void add(const std::string& key, const std::string& value);
+void FileCloser::scheduleClose(std::unique_ptr<std::ofstream> file) {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_pending.push_back(std::move(file));
+    if (m_pending.size() >= m_batch_size || m_shutdown) {
+        m_cv.notify_one();
+    }
+}
 
-    // Look up a key. Returns true if found (even if it's a tombstone).
-    // The value is populated if found.
-    bool get(const std::string& key, std::string& value) const;
+void FileCloser::workerLoop() {
+    while (true) {
+        std::vector<std::unique_ptr<std::ofstream>> to_close;
 
-    // Scan for keys with a specific prefix.
-    // Results are added to the map. Tombstones are added to deleted_keys.
-    void scan(const std::string& prefix, std::map<std::string, std::string>& results,
-              std::set<std::string>& deleted_keys) const;
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_cv.wait(lock, [this] { return m_pending.size() >= m_batch_size || m_shutdown; });
 
-    // Current estimated size in bytes
-    size_t sizeBytes() const;
+            if (m_shutdown && m_pending.empty()) return;
 
-    bool empty() const;
-    size_t count() const;
+            to_close.swap(m_pending);
+        }
 
-    // Access to underlying data for flushing
-    const std::vector<std::pair<std::string, std::string>>& getData() const;
-
-  private:
-    std::vector<std::pair<std::string, std::string>> _data;
-    size_t _size_bytes;
-};
+        for (auto& f : to_close) {
+            if (f && f->is_open()) {
+                f->close();
+            }
+        }
+    }
+}
 
 }  // namespace lsmio
-
-#endif

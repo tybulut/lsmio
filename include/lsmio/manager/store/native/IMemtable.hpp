@@ -28,35 +28,47 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LSMIO_FILE_CLOSER_HPP_
-#define _LSMIO_FILE_CLOSER_HPP_
+#ifndef _LSMIO_IMEMTABLE_HPP_
+#define _LSMIO_IMEMTABLE_HPP_
 
-#include <atomic>
-#include <condition_variable>
-#include <fstream>
-#include <memory>
-#include <mutex>
-#include <thread>
-#include <vector>
+#include <functional>
+#include <map>
+#include <set>
+#include <string>
 
 namespace lsmio {
 
-class FileCloser {
+extern const std::string MEMTABLE_TOMBSTONE;
+
+/// Merges one scanned entry into the prefix-scan result sets, applying the
+/// tombstone semantics shared by every memtable implementation: a tombstone
+/// marks the key deleted (and retracts any older live value already merged),
+/// a live value re-adds the key (and retracts any older deletion).
+inline void applyScanEntry(const std::string& f_key, const std::string& f_value,
+                           std::map<std::string, std::string>& f_results,
+                           std::set<std::string>& f_deleted_keys) {
+    if (f_value == MEMTABLE_TOMBSTONE) {
+        f_deleted_keys.insert(f_key);
+        f_results.erase(f_key);
+    } else {
+        f_results[f_key] = f_value;
+        f_deleted_keys.erase(f_key);
+    }
+}
+
+class IMemtable {
   public:
-    FileCloser(size_t batchSize);
-    ~FileCloser();
+    virtual ~IMemtable() = default;
 
-    void scheduleClose(std::unique_ptr<std::ofstream> file);
-
-  private:
-    size_t _batchSize;
-    std::vector<std::unique_ptr<std::ofstream>> _pending;
-    std::mutex _mutex;
-    std::thread _worker;
-    std::condition_variable _cv;
-    std::atomic<bool> _shutdown{false};
-
-    void workerLoop();
+    virtual void add(const std::string& f_key, const std::string& f_value) = 0;
+    virtual bool get(const std::string& f_key, std::string& f_value) const = 0;
+    virtual void scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
+                      std::set<std::string>& f_deleted_keys) const = 0;
+    virtual size_t sizeBytes() const = 0;
+    virtual bool empty() const = 0;
+    virtual size_t count() const = 0;
+    virtual void forEach(std::function<void(const std::string& f_key, const std::string& f_value)>
+                             f_callback) const = 0;
 };
 
 }  // namespace lsmio

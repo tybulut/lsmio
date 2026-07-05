@@ -28,58 +28,53 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <lsmio/manager/store/native/memtable.hpp>
+#ifndef _LSMIO_FILE_POOL_HPP_
+#define _LSMIO_FILE_POOL_HPP_
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <utility>
 
 namespace lsmio {
 
-Memtable::Memtable() : _size_bytes(0) {}
+class FilePool {
+  public:
+    FilePool(const std::string& f_directory, const std::string& f_prefix,
+             const std::string& f_suffix, size_t f_pool_size, uint64_t f_start_id,
+             size_t f_pre_allocation_size = 0);
+    ~FilePool();
 
-void Memtable::add(const std::string& key, const std::string& value) {
-    _data.emplace_back(key, value);
-    _size_bytes += key.size() + value.size();
-}
+    // Returns a pair of {file_path, file_stream}
+    // The stream is open and ready for writing.
+    // If the pool is empty, this blocks until a file is available.
+    std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
 
-bool Memtable::get(const std::string& key, std::string& value) const {
-    // Reverse scan (newest first)
-    for (auto it = _data.rbegin(); it != _data.rend(); ++it) {
-        if (it->first == key) {
-            value = it->second;
-            return true;
-        }
-    }
-    return false;
-}
+  private:
+    std::string m_directory;
+    std::string m_prefix;
+    std::string m_suffix;
+    size_t m_pool_size;
+    size_t m_pre_allocation_size;
 
-void Memtable::scan(const std::string& prefix, std::map<std::string, std::string>& results,
-                    std::set<std::string>& deleted_keys) const {
-    // Linear scan
-    for (const auto& entry : _data) {
-        if (entry.first.compare(0, prefix.size(), prefix) == 0) {
-            if (entry.second == MEMTABLE_TOMBSTONE) {
-                deleted_keys.insert(entry.first);
-                results.erase(entry.first);
-            } else {
-                results[entry.first] = entry.second;
-                deleted_keys.erase(entry.first);
-            }
-        }
-    }
-}
+    // Pool stores pairs of {path, stream}
+    std::deque<std::pair<std::string, std::unique_ptr<std::ofstream>>> m_pool;
 
-size_t Memtable::sizeBytes() const {
-    return _size_bytes;
-}
+    std::mutex m_mutex;
+    std::thread m_worker;
+    std::condition_variable m_cv;
+    std::condition_variable m_cv_wait;  // Wait for item in pool
+    std::atomic<bool> m_shutdown{false};
+    std::atomic<uint64_t> m_next_id;
 
-bool Memtable::empty() const {
-    return _data.empty();
-}
-
-size_t Memtable::count() const {
-    return _data.size();
-}
-
-const std::vector<std::pair<std::string, std::string>>& Memtable::getData() const {
-    return _data;
-}
+    void replenish();
+};
 
 }  // namespace lsmio
+
+#endif

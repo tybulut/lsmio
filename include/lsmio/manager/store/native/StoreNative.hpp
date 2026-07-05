@@ -40,66 +40,76 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tlx/container/btree_map.hpp>
 #include <vector>
 
-#include "file_closer.hpp"
-#include "file_pool.hpp"
-#include "memtable.hpp"
-#include "sstable_manager.hpp"
+#include "FileCloser.hpp"
+#include "FilePool.hpp"
+#include "MemtableOrdered.hpp"
+#include "MemtableVectorNoSort.hpp"
+#include "MemtableVectorSort.hpp"
+#include "SSTableManager.hpp"
 
 namespace lsmio {
 
 class LSMIOStoreNative : public LSMIOStore {
   private:
     // LSMTree Logic
-    size_t _memtable_max_size_bytes;
-    size_t _max_immutable_memtables;
+    size_t m_memtable_max_size_bytes;
+    size_t m_max_immutable_memtables;
 
-    std::unique_ptr<Memtable> _active_memtable;
-    std::deque<std::unique_ptr<Memtable>> _immutable_memtables;
+    // Entry-size limits, snapshotted from gConfigLSMIO at construction so the
+    // hot write path neither re-derives them per put nor races config mutations.
+    size_t m_max_key_len;
+    size_t m_max_value_len;
 
-    std::unique_ptr<SSTableManager> _sstable_manager;
+    std::unique_ptr<IMemtable> m_active_memtable;
+    std::deque<std::unique_ptr<IMemtable>> m_immutable_memtables;
 
-    std::mutex _state_mutex;
-    std::vector<char> _flush_buffer;
-    std::thread _flush_thread;
-    std::condition_variable _flush_cv;
-    std::condition_variable _backpressure_cv;
-    std::condition_variable _barrier_cv;
-    std::atomic<bool> _shutting_down{false};
-    std::atomic<bool> _flush_in_progress{false};
+    std::unique_ptr<SSTableManager> m_sstable_manager;
+    std::unique_ptr<IMemtable> createMemtable() const;
+
+    std::mutex m_state_mutex;
+    std::vector<char> m_flush_buffer;
+    std::thread m_flush_thread;
+    std::condition_variable m_flush_cv;
+    std::condition_variable m_backpressure_cv;
+    std::condition_variable m_barrier_cv;
+    std::atomic<bool> m_shutting_down{false};
+    std::atomic<bool> m_flush_in_progress{false};
+    std::atomic<bool> m_bg_error{false};
 
     void FlushWorkLoop();
-    void FlushMemtableToL0(std::unique_ptr<Memtable> memtable);
+    void FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable);
 
     // LSMIOStore Overrides
     bool startBatch() override;
     bool stopBatch() override;
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                        bool flush) override;
+    bool _batchMutation(MutationType f_m_type, const std::string f_key, const std::string f_value,
+                        bool f_flush) override;
     bool dbCleanup() override;
 
   public:
-    LSMIOStoreNative(const std::string& dbPath, const bool overWrite = false);
+    LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write = false);
     ~LSMIOStoreNative() override;
 
-    void autoTuneParameters(uint64_t fs_magic);
+    void autoTuneParameters(uint64_t f_fs_magic);
 
     void close() override;
 
-    bool get(const std::string key, std::string* value) override;
-    bool getPrefix(const std::string key,
-                   std::vector<std::tuple<std::string, std::string>>* values) override;
+    bool get(const std::string f_key, std::string* f_value) override;
+    bool getPrefix(const std::string f_key,
+                   std::vector<std::tuple<std::string, std::string>>* f_values) override;
 
     bool readBarrier() override;
     bool writeBarrier() override;
 
     // Accessors for testing
     size_t getMemtableMaxSize() const {
-        return _memtable_max_size_bytes;
+        return m_memtable_max_size_bytes;
     }
     size_t getMaxImmutableMemtables() const {
-        return _max_immutable_memtables;
+        return m_max_immutable_memtables;
     }
 };
 

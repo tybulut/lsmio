@@ -7,6 +7,7 @@ include(PackageMPI)
 find_package(Threads REQUIRED)
 # continues
 include(PackageAdios)
+include(PackageFMT)
 include(PackageGoogleLog)
 include(PackageLevelDB)
 include(PackageRocksDB)
@@ -42,7 +43,6 @@ set(LIB_BASE_CPP_FILES
   ${LIB_SOURCE_DIR}/benchmark.cpp
 )
 set(LIB_STORE_CPP_FILES
-  ${LIB_BASE_CPP_FILES}
   ${LIB_SOURCE_DIR}/manager/manager.cpp
   ${LIB_SOURCE_DIR}/manager/client/client.cpp
   ${LIB_SOURCE_DIR}/manager/client/client_mpi.cpp
@@ -50,14 +50,14 @@ set(LIB_STORE_CPP_FILES
   ${LIB_SOURCE_DIR}/manager/store/store.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_ldb.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_rdb.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/store_native.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/memtable.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/sstable_manager.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/file_pool.cpp
-  ${LIB_SOURCE_DIR}/manager/store/native/file_closer.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/StoreNative.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/MemtableVectorNoSort.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/MemtableVectorSort.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/SSTableManager.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/FilePool.cpp
+  ${LIB_SOURCE_DIR}/manager/store/native/FileCloser.cpp
 )
 set(LIB_ADIOS_CPP_FILES
-  ${LIB_STORE_CPP_FILES}
   ${LIB_SOURCE_DIR}/adios-plugin/lsmio_plugin.cpp
 )
 set(LIB_POSIX_CPP_FILES
@@ -96,7 +96,7 @@ lsmio_add_props(lsmio_base)
 add_library(lsmio_store ${LIB_STORE_SOURCE_FILES})
 add_library(lsmio::store ALIAS lsmio_store)
 target_link_libraries(lsmio_store
-  PUBLIC fmt::fmt glog::glog
+  PUBLIC fmt::fmt glog::glog lsmio_base
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx_mpi adios2::core_mpi
@@ -107,7 +107,7 @@ lsmio_add_props(lsmio_store)
 add_library(lsmio_adios ${LIB_ADIOS_SOURCE_FILES})
 add_library(lsmio::adios ALIAS lsmio_adios)
 target_link_libraries(lsmio_adios
-  PUBLIC fmt::fmt glog::glog
+  PUBLIC fmt::fmt glog::glog lsmio_store
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx_mpi adios2::core_mpi

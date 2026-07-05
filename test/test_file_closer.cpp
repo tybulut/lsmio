@@ -2,7 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
-#include <lsmio/manager/store/native/file_closer.hpp>
+#include <lsmio/manager/store/native/FileCloser.hpp>
 #include <thread>
 
 class FileCloserTest : public ::testing::Test {
