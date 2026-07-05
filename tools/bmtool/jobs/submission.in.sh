@@ -20,7 +20,15 @@ batch_run() {
   export BM_NUM_TASKS=$concurrency
 
   if [ "$QSUBMIT" = "sbatch" ]; then
+    # ARCHER2's standard partition allocates whole nodes and rejects --mem;
+    # other Slurm sites need an explicit per-job memory request.
+    if [ "$HPC_ENV" = "archer2" ]; then
+      SBATCH_EXTRA="--partition=standard --qos=standard"
+    else
+      SBATCH_EXTRA="--mem=8gb"
+    fi
     sbatch \
+      $SBATCH_EXTRA \
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \

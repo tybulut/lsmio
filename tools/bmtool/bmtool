@@ -35,6 +35,7 @@ $0 <cmd> <cmd-arguments> [<cmd-optional-arguments>]
 cmds:
   run <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
   parse <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
+  dirs
   load-modules
 "
 
@@ -67,6 +68,8 @@ elif [ "$1" = "run" ]; then
   PASS_CMD="run"
 elif [ "$1" = "load-modules" ]; then
   PASS_CMD="load-modules"
+elif [ "$1" = "dirs" ]; then
+  PASS_CMD="dirs"
 elif [ -z "$1" ]; then
   fatal_error "Please pass a non-empty cmd."
 else
@@ -79,7 +82,7 @@ elif [ "$2" = "lsmio" ]; then
   JOB_TOOL="lsmio"
 elif [ "$2" = "lmp" ]; then
   JOB_TOOL="lmp"
-elif [ "$PASS_CMD" != "load-modules" ]; then
+elif [ "$PASS_CMD" != "load-modules" -a "$PASS_CMD" != "dirs" ]; then
   fatal_error "Please pass either ior, lsmio, or lmp as a first cmd argument."
 fi
 
@@ -172,6 +175,9 @@ elif [ "$BM_CMD" = "parse" ]; then
 elif [ "$BM_CMD" = "load-modules" ]; then
   . $BM_DIRNAME/include/load-modules.in.sh
   list_modules
+elif [ "$BM_CMD" = "dirs" ]; then
+  echo "Setting up directories..."
+  . $BM_DIRNAME/jobs/dirs.in.sh
 else
   fatal_error "Unknown error at cmd execution."
 fi

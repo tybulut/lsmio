@@ -3,8 +3,7 @@ message(STATUS "Lib module: LSMIO_SOURCE_DIR=${LSMIO_SOURCE_DIR}")
 message(STATUS "Lib module: LSMIO_INCLUDE_DIR=${LSMIO_INCLUDE_DIR}")
 
 # Packages
-find_package(MPI REQUIRED)
-include_directories(${MPI_INCLUDE_DIR})
+include(PackageMPI)
 find_package(Threads REQUIRED)
 # continues
 include(PackageAdios)
