@@ -12,23 +12,20 @@ include(PackageGoogleTest)
 
 # MPI settings
 set (mpi_processes 2)
-find_program (mpi_cmd mpirun)
+# Prefer mpirun; fall back through aprun/likwid-mpirun to srun (the launcher on
+# Cray systems such as ARCHER2). find_program keeps the first name it resolves.
+find_program (mpi_cmd NAMES mpirun aprun likwid-mpirun srun)
 
 if(NOT mpi_cmd)
-  find_program (mpi_cmd aprun)
-endif()
-
-if(NOT mpi_cmd)
-  find_program (mpi_cmd likwid-mpirun)
-endif()
-
-if(NOT mpi_cmd)
-  message(FATAL_ERROR "MPI command (mpirun, aprun, likwid-mpirun) not found!")
+  message(FATAL_ERROR "MPI command (mpirun, aprun, likwid-mpirun, srun) not found!")
 else()
   message(STATUS "Test module: MPI command found=${mpi_cmd}")
 
-  if(mpi_cmd MATCHES "aprun")
+  # -tag-output is OpenMPI-specific; only pass it to (OpenMPI/MPICH) mpirun.
+  if(mpi_cmd MATCHES "aprun" OR mpi_cmd MATCHES "srun")
     set (test_parameters -n ${mpi_processes})
+  elseif(mpi_cmd MATCHES "likwid-mpirun")
+    set (test_parameters -np ${mpi_processes})
   else()
     set (test_parameters -tag-output -np ${mpi_processes})
   endif()

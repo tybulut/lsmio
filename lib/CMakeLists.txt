@@ -203,7 +203,6 @@ write_basic_package_version_file(
 
 install(FILES
   "${LSMIO_SOURCE_DIR}/cmake/lsmio-config.cmake"
-  "${LSMIO_SOURCE_DIR}/cmake/PackageMPI.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/lsmio-config-version.cmake"
   DESTINATION lib/cmake/lsmio
   COMPONENT ${PROJECT_NAME}_dev

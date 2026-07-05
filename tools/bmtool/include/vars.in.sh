@@ -3,21 +3,27 @@ export DS=`date +"%F"`
 
 unknown_hpc_environment() {
   echo "############################################"
-  echo "# ERROR: Uknown HPC Environment            #"
+  echo "# ERROR: Unknown HPC Environment           #"
   echo "############################################"
+  # Fail fast when run as a script (bmtool, batch jobs); only warn when these
+  # fragments are sourced into an interactive shell, so we don't kill it.
+  case $- in
+    *i*) return 1 ;;
+    *) exit 1 ;;
+  esac
 }
 
 ### HPC ENV
 HPC_MANAGER="slurm"
-export PROJECT_DIR=$HOME/src
-if hostname | grep -w viking; then
+export PROJECT_DIR=$HOME/src/usr
+if hostname | grep -qw viking; then
   HPC_ENV="viking"
-elif hostname | grep -w viking2; then
+elif hostname | grep -qw viking2; then
   HPC_ENV="viking2"
-elif groups | grep -w archer2; then
+elif groups | grep -qw archer2; then
   HPC_ENV="archer2"
   export PROJECT_DIR=/work/e281/e281/$USER/usr
-elif hostname | egrep '^xci|^nid'; then
+elif hostname | grep -qE '^xci|^nid'; then
   HPC_ENV="isambard"
   HPC_MANAGER="pbs"
 else
@@ -26,9 +32,10 @@ fi
 
 #
 export SB_BIN=$PROJECT_DIR/bin
-if [ -z `echo $LD_LIBRARY_PATH | grep $PROJECT_DIR` ]; then
-  export LD_LIBRARY_PATH=$PROJECT_DIR/lib:$PROJECT_DIR/lib64:$LD_LIBRARY_PATH
-fi
+case ":$LD_LIBRARY_PATH:" in
+  *":$PROJECT_DIR/lib:"*) ;;
+  *) export LD_LIBRARY_PATH=$PROJECT_DIR/lib:$PROJECT_DIR/lib64:$LD_LIBRARY_PATH ;;
+esac
 export ADIOS2_PLUGIN_PATH=$PROJECT_DIR/lib
 
 ### LUSTRE

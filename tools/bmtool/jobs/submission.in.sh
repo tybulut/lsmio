@@ -19,28 +19,19 @@ batch_run() {
   wallhour=`echo "2 + ($nodes / 3)" | bc`
   export BM_NUM_TASKS=$concurrency
 
-  if [ "$QSUBMIT" = "sbatch" -a "$HPC_ENV" = "archer2" ]; then
-#    export DARSHAN_LOGPATH=$HOME/scratch/darshan
-#    LD_PRELOAD=$HOME/src/usr/lib/libdarshan.so \
+  if [ "$QSUBMIT" = "sbatch" ]; then
+    # ARCHER2's standard partition allocates whole nodes and rejects --mem;
+    # other Slurm sites need an explicit per-job memory request.
+    if [ "$HPC_ENV" = "archer2" ]; then
+      SBATCH_EXTRA="--partition=standard --qos=standard"
+    else
+      SBATCH_EXTRA="--mem=8gb"
+    fi
     sbatch \
-      --partition=standard \
-      --qos=standard \
+      $SBATCH_EXTRA \
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
-      --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
-      --time=$wallhour:00:00 \
-      --account="$SB_ACCOUNT" \
-      --mail-user="$SB_EMAIL" \
-      ${job_script}.sbatch
-  elif [ "$QSUBMIT" = "sbatch" ]; then
-#    export DARSHAN_LOGPATH=$HOME/scratch/darshan
-#    LD_PRELOAD=$HOME/src/usr/lib/libdarshan.so \
-    sbatch \
-      --export=ALL \
-      --ntasks=$concurrency \
-      --nodes=$nodes \
-      --mem=8gb \
       --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
       --time=$wallhour:00:00 \
       --account="$SB_ACCOUNT" \
