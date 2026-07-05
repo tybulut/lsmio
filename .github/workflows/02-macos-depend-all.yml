@@ -27,7 +27,7 @@ jobs:
             glog googletest gflags \
             cli11 fmt \
             leveldb rocksdb \
-            adios2
+            tlx
 
     - name: Set reusable strings - MacOS
       id: strings

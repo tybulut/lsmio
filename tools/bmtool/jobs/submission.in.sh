@@ -72,7 +72,7 @@ run_local_job() {
 }
 
 run_bake_job() {
-  for concurrency in 4
+  for concurrency in 1 2 4 8
   do
     pernode=1
     batch_run $concurrency $pernode $BM_DIRNAME/jobs/job-small
