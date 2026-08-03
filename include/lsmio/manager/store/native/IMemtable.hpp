@@ -38,7 +38,7 @@
 
 namespace lsmio {
 
-extern const std::string MEMTABLE_TOMBSTONE;
+inline const std::string MEMTABLE_TOMBSTONE = "__LSM_TOMBSTONE_v1__";
 
 /// Merges one scanned entry into the prefix-scan result sets, applying the
 /// tombstone semantics shared by every memtable implementation: a tombstone

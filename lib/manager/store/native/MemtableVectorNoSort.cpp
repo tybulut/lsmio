@@ -34,7 +34,6 @@
 
 namespace lsmio {
 
-const std::string MEMTABLE_TOMBSTONE = "__LSM_TOMBSTONE_v1__";
 
 MemtableVectorNoSort::MemtableVectorNoSort() : m_size_bytes(0) {}
 
