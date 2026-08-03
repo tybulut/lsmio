@@ -100,6 +100,7 @@ target_link_libraries(lsmio_store
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx_mpi adios2::core_mpi
+    tlx
 )
 lsmio_add_props(lsmio_store)
 
