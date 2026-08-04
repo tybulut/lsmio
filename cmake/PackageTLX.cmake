@@ -22,7 +22,9 @@ if (NOT tlx_FOUND AND NOT TARGET tlx)
   # subdirectory scope. Older CMake versions ignore it.
   set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
       "Minimum CMake policy version for third-party deps with old cmake_minimum_required")
+  set(CMAKE_POLICY_DEFAULT_CMP0048 OLD CACHE STRING "Suppress CMP0048 warning")
   FetchContent_MakeAvailable(tlx)
+  unset(CMAKE_POLICY_DEFAULT_CMP0048 CACHE)
   unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
   include_directories(${tlx_SOURCE_DIR})
 endif()

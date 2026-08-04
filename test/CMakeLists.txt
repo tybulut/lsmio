@@ -47,7 +47,10 @@ function(add_lsmio_base_test x)
   )
 
   gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES TIMEOUT 30)
+  set_tests_properties(${tests} PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  )
 endfunction()
 
 function(add_lsmio_store_test x)
@@ -62,7 +65,10 @@ function(add_lsmio_store_test x)
   )
 
   gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES TIMEOUT 30)
+  set_tests_properties(${tests} PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  )
 endfunction()
 
 function(add_lsmio_mpi_test x)
@@ -82,7 +88,9 @@ function(add_lsmio_mpi_test x)
   gtest_discover_tests(
     ${x}
     CMD_WRAPPER ${mpi_cmd} ${test_parameters}
-    PROPERTIES TIMEOUT 30
+    PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
   )
 endfunction()
 
@@ -114,9 +122,10 @@ target_link_libraries(test_adios
 )
 gtest_discover_tests(
   test_adios
-  PROPERTIES ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+  PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
 )
-set_tests_properties(${test_adios} PROPERTIES TIMEOUT 30)
 
 # GTest: MPI: Adios and Plugin
 add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
@@ -129,7 +138,7 @@ gtest_discover_tests(
   test_mpi_adios
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
   PROPERTIES
-    ENVIRONMENT ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib
+    ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
     TIMEOUT 30
 )
 
