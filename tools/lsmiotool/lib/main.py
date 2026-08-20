@@ -386,12 +386,12 @@ class ShellMain(BaseMain):
 
 
 class HpcEnvMain(BaseMain):
-    """Interactive load HPC Modules."""
+    """Output HPC Modules shell commands."""
 
     def run(self) -> None:
-        """Start an interactive Python shell with local context."""
+        """Print module shell commands to stdout."""
         hpc_modules = hpc.HpcModules()
-        hpc_modules.load(env.HPC_ENV)
+        print(hpc_modules.shell_output(env.HPC_ENV))
 
 
 class NotImplemented(BaseMain):

@@ -117,6 +117,14 @@ class HpcModules(debuggable.DebuggableObject):
                 "cray-fftw/3.3.8.10",
                 "gdb4hpc/4.10.6",
             ]
+        elif hpc_env == HpcEnv.ARCHER2:
+            modules = [
+                "PrgEnv-gnu", "load-epcc-module", "extra-compilers", "gcc/11.2.0", 
+                "cmake/3.29.4", "cray-mpich/8.1.27", "darshan/3.3.1", "darshan-util/3.3.1", 
+                "cray-hdf5-parallel/1.12.2.7", "craype-x86-genoa", "craype-x86-milan", 
+                "craype-x86-milan-x", "craype-x86-rome", "craype-x86-spr", "craype-x86-trento", 
+                "cray-fftw/3.3.10.5"
+            ]
         return modules
 
     def shell_commands(self, hpc_env: HpcEnv) -> List[str]:
@@ -138,6 +146,9 @@ class HpcModules(debuggable.DebuggableObject):
         elif hpc_env == HpcEnv.VIKING2:
             commands = ["module purge"]
             modules = self._get_modules(HpcEnv.VIKING2)
+        elif hpc_env == HpcEnv.ARCHER2:
+            commands = ["module purge"]
+            modules = self._get_modules(HpcEnv.ARCHER2)
         elif hpc_env == HpcEnv.DEV:
             commands = []
             modules = []
@@ -159,23 +170,3 @@ class HpcModules(debuggable.DebuggableObject):
         commands = self.shell_commands(hpc_env)
         script = "\n".join(commands)
         return script
-
-    def load(self, hpc_env: HpcEnv) -> None:
-        """Execute all module commands (purge and loads) for the current HPC environment.
-
-        Args:
-            hpc_env: The HPC environment to load modules for.
-        """
-        commands = self.shell_commands(hpc_env)
-        script = "\n".join(commands)
-        result = subprocess.run(
-            script,
-            shell=True,
-            executable="/bin/bash",
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-        print("Loading modules: stdout:", result.stdout)
-        print("Loading modules: stderr:", result.stderr)
