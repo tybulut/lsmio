@@ -46,6 +46,7 @@ class JobSize(Enum):
     SMALL = "SMALL"
     LARGE = "LARGE"
 
+
 def setup_job_environment_and_dirs(bm_path: str) -> Dict[str, str]:
     """
     Set up environment variables and all required directories for the benchmark.
@@ -66,10 +67,7 @@ def setup_job_environment_and_dirs(bm_path: str) -> Dict[str, str]:
 
 
 def batch_job_orchestration(
-    bm_type: str,
-    bm_path: str,
-    hpc_manager: HpcManager,
-    ds: str
+    bm_type: str, bm_path: str, hpc_manager: HpcManager, ds: str
 ) -> None:
     """
     Orchestrate batch job submission as in batch.in.sh.
@@ -92,39 +90,45 @@ def batch_job_orchestration(
                 # Use managed output directory from dirs module
                 lmp_outputs = all_dirs.get(
                     "LMP_DIR_OUTPUT",
-                    os.path.expanduser("~/scratch/benchmark/lmp/outputs")
+                    os.path.expanduser("~/scratch/benchmark/lmp/outputs"),
                 )
                 if os.path.isdir(lmp_outputs):
                     shutil.rmtree(lmp_outputs)
                 lmp_reaxff = os.path.join(bm_path, "lmp-reaxff")
                 shutil.copytree(lmp_reaxff, lmp_outputs)
             if hpc_manager == HpcManager.SLURM:
-                subprocess.run([
-                    "srun",
-                    f"{bm_path}/jobs/{bm_type}-benchmark.sh",
-                    str(rf),
-                    bs,
-                    "--export=ALL",
-                ])
+                subprocess.run(
+                    [
+                        "srun",
+                        f"{bm_path}/jobs/{bm_type}-benchmark.sh",
+                        str(rf),
+                        bs,
+                        "--export=ALL",
+                    ]
+                )
             elif hpc_manager == HpcManager.PBS:
                 num_tasks = os.environ.get("BM_NUM_TASKS", "1")
                 num_cores = os.environ.get("BM_NUM_CORES", "1")
-                subprocess.run([
-                    "aprun",
-                    "-n",
-                    str(num_tasks),
-                    "-N",
-                    str(num_cores),
-                    f"{bm_path}/jobs/{bm_type}-benchmark.sh",
-                    str(rf),
-                    bs,
-                ])
+                subprocess.run(
+                    [
+                        "aprun",
+                        "-n",
+                        str(num_tasks),
+                        "-N",
+                        str(num_cores),
+                        f"{bm_path}/jobs/{bm_type}-benchmark.sh",
+                        str(rf),
+                        bs,
+                    ]
+                )
             elif hpc_manager == HpcManager.DEV:
-                subprocess.run([
-                    f"{bm_path}/jobs/{bm_type}-benchmark.sh",
-                    str(rf),
-                    bs,
-                ])
+                subprocess.run(
+                    [
+                        f"{bm_path}/jobs/{bm_type}-benchmark.sh",
+                        str(rf),
+                        bs,
+                    ]
+                )
             else:
                 raise RuntimeError(f"Unknown HPC manager: {hpc_manager}")
             time.sleep(3)
@@ -134,13 +138,14 @@ class JobScriptGenerator(debuggable.DebuggableObject):
     """
     Generates job scripts for PBS and SBATCH schedulers.
     """
+
     @staticmethod
     def generate_pbs_script(
         queue: str = "arm",
         name: str = "LSMIO-LG",
         walltime: str = "6:00:00",
         output_dir: str = "logs",
-        batch_in_sh: str = "$BM_DIRNAME/jobs/batch.in.sh"
+        batch_in_sh: str = "$BM_DIRNAME/jobs/batch.in.sh",
     ) -> str:
         """
         Generate PBS job script.
@@ -176,7 +181,7 @@ class JobScriptGenerator(debuggable.DebuggableObject):
         distribution: str = "cyclic:cyclic",
         output: str = "logs/sbatch-lsmio-%j.log",
         error: str = "logs/sbatch-lsmio-%j.err",
-        batch_in_sh: str = "$BM_DIRNAME/jobs/batch.in.sh"
+        batch_in_sh: str = "$BM_DIRNAME/jobs/batch.in.sh",
     ) -> str:
         """
         Generate SLURM job script.
@@ -220,11 +225,11 @@ class JobScriptGenerator(debuggable.DebuggableObject):
             raise RuntimeError(f"get_unique_uid: Unknown HPC manager: {hpc_manager}")
 
 
-
 class IORBenchmark(debuggable.DebuggableObject):
     """
     Encapsulates logic for running IOR benchmarks (ported from ior-benchmark.sh).
     """
+
     bm_setup: str
     sb_bin: str
     dirs_bm_base: str
@@ -237,7 +242,7 @@ class IORBenchmark(debuggable.DebuggableObject):
         bm_setup: str = "BASE",
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
-        ior_dir_output: Optional[str] = None
+        ior_dir_output: Optional[str] = None,
     ) -> None:
         """Initialize IORBenchmark with setup and environment variables."""
         self.bm_setup = bm_setup
@@ -246,7 +251,6 @@ class IORBenchmark(debuggable.DebuggableObject):
         self.ior_dir_output = ior_dir_output or os.environ.get("IOR_DIR_OUTPUT", "")
         self.bm_unique_uid = env.BM_UNIQUE_UID
         self.ds = env.DATE_STAMP
-
 
     def run(self, rf: str, bs: str) -> subprocess.CompletedProcess:
         """Run the IOR benchmark for the given rf and bs."""
@@ -282,7 +286,7 @@ class IORBenchmark(debuggable.DebuggableObject):
             out_file,
             f"-t={bs}",
             f"-b={bs}",
-            f"-s={sg}"
+            f"-s={sg}",
         ]
         if self.bm_setup == "HDF5":
             cmd = base_cmd + ["-a", "HDF5"]
@@ -297,15 +301,20 @@ class IORBenchmark(debuggable.DebuggableObject):
         else:
             cmd = base_cmd
         hpc_env = env.HPC_ENV
-        #command = " ".join(shlex.quote(os.path.expandvars(os.path.expanduser(arg))) for arg in cmd)
+        # command = " ".join(shlex.quote(os.path.expandvars(os.path.expanduser(arg))) for arg in cmd)
         command = " ".join(cmd)
-        commands = "#!/bin/bash -x\n" \
-            + f"\n{command}"
+        commands = "#!/bin/bash -x\n" + f"\n{command}"
         log.Console.debug(f"IORBenchmark cmd: {cmd}")
         log.Console.debug(f"IORBenchmark commands: \n{commands}")
         log.Console.debug(f"IORBenchmark log file: {log_file}")
         with open(log_file, "a+") as logf:
-            result = subprocess.run(["/bin/bash", "-c", commands], stdout=logf, stderr=subprocess.STDOUT, text=True, check=True)
+            result = subprocess.run(
+                ["/bin/bash", "-c", commands],
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=True,
+            )
         return result
 
 
@@ -313,6 +322,7 @@ class LMPBenchmark(debuggable.DebuggableObject):
     """
     Encapsulates logic for running LMP benchmarks (ported from lmp-benchmark.sh).
     """
+
     bm_setup: str
     sb_bin: str
     dirs_bm_base: str
@@ -327,7 +337,7 @@ class LMPBenchmark(debuggable.DebuggableObject):
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
         lmp_dir_output: Optional[str] = None,
-        bm_num_tasks: Optional[int] = None
+        bm_num_tasks: Optional[int] = None,
     ) -> None:
         """Initialize LMPBenchmark with setup and environment variables."""
         self.bm_setup = bm_setup
@@ -351,7 +361,7 @@ class LMPBenchmark(debuggable.DebuggableObject):
             24: (12, 512),
             32: (14, 1024),
             40: (15, 1024),
-            48: (16, 1024)
+            48: (16, 1024),
         }
         REP: int
         LSMIO_BUF_MB: int
@@ -390,7 +400,7 @@ class LMPBenchmark(debuggable.DebuggableObject):
             str(REP),
             "-v",
             "z",
-            str(REP)
+            str(REP),
         ]
         if self.bm_setup == "LSMIO":
             cmd += ["-lsmio-buf-size-mb", str(LSMIO_BUF_MB)]
@@ -400,10 +410,7 @@ class LMPBenchmark(debuggable.DebuggableObject):
             cmd += ["-lsmio-fallback"]
         with open(log_file, "w") as logf:
             result = subprocess.run(
-                cmd,
-                cwd=work_dir,
-                stdout=logf,
-                stderr=subprocess.STDOUT
+                cmd, cwd=work_dir, stdout=logf, stderr=subprocess.STDOUT
             )
         return result
 
@@ -412,6 +419,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
     """
     Encapsulates logic for running LSMIO benchmarks (ported from lsmio-benchmark.sh).
     """
+
     bm_setup: str
     sb_bin: str
     dirs_bm_base: str
@@ -424,7 +432,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
         bm_setup: str = "ADIOS-M",
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
-        lsm_dir_output: Optional[str] = None
+        lsm_dir_output: Optional[str] = None,
     ) -> None:
         """Initialize LSMIOBenchmark with setup and environment variables."""
         self.bm_setup = bm_setup
@@ -454,7 +462,9 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
             bsb = "8388608"
             sg = "1024"
         infix = self.bm_setup.lower()
-        out_file = f"{self.dirs_bm_base}/c{rf}/b{bs}/lsmio-{self.bm_unique_uid}-{infix}.db"
+        out_file = (
+            f"{self.dirs_bm_base}/c{rf}/b{bs}/lsmio-{self.bm_unique_uid}-{infix}.db"
+        )
         log_file = (
             f"{self.lsm_dir_output}/out-{infix}-{rf}-{bs}-"
             f"{self.ds}-{self.bm_unique_uid}.txt"
@@ -474,7 +484,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
                 "--lsmio-bs",
                 bsb,
                 "--key-count",
-                sg
+                sg,
             ]
         elif self.bm_setup == "PLUGIN-M":
             cmd = [
@@ -490,7 +500,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
                 "--lsmio-bs",
                 bsb,
                 "--key-count",
-                sg
+                sg,
             ]
         else:
             raise NotImplementedError(
@@ -511,7 +521,7 @@ class JobsRunner(debuggable.DebuggableObject):
         sb_email: Optional[str] = None,
         bm_type: Optional[str] = None,
         bm_scale: Optional[str] = None,
-        bm_ssd: Optional[str] = None
+        bm_ssd: Optional[str] = None,
     ) -> None:
         self.hpc_manager = hpc_mgr
         self.slurm_account = sb_account
@@ -520,12 +530,7 @@ class JobsRunner(debuggable.DebuggableObject):
         self.bench_scale = bm_scale
         self.bench_ssd = bm_ssd
 
-    def run(
-        self,
-        concurrency: int,
-        pernode: int,
-        job_size: JobSize
-    ) -> None:
+    def run(self, concurrency: int, pernode: int, job_size: JobSize) -> None:
         """
         Submit a batch job using sbatch or qsub, ported from submission.in.sh.
         """
@@ -536,13 +541,13 @@ class JobsRunner(debuggable.DebuggableObject):
             args = [
                 "#SBATCH --ntasks-per-node=4",
                 "#SBATCH --ntasks-per-socket=2",
-                "#SBATCH --ntasks-per-core=1"
+                "#SBATCH --ntasks-per-core=1",
             ]
         else:
             args = [
                 "#SBATCH --ntasks-per-node=1",
                 "#SBATCH --ntasks-per-socket=1",
-                "#SBATCH --cpus-per-task=1"
+                "#SBATCH --cpus-per-task=1",
             ]
         os.chdir(".")
         if self.hpc_manager == HpcManager.SLURM:
@@ -567,9 +572,10 @@ class JobsRunner(debuggable.DebuggableObject):
                 "BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,"
                 "BM_NUM_TASKS,BM_NUM_CORES",
                 f"-l select={concurrency}:mem=32GB",
+                f"-N LSMIO-SM-{job_size.value}.pbs",
             ]
         elif self.hpc_manager == HpcManager.DEV:
-            cmd = [ "echo Hello World" ]
+            cmd = ["echo Hello World"]
         else:
             raise RuntimeError(f"Unknown HPC manager: '{self.hpc_manager}'")
         sbh = [
@@ -577,21 +583,27 @@ class JobsRunner(debuggable.DebuggableObject):
             "#SBATCH --mem=8gb",
             "#SBATCH --distribution=cyclic:cyclic",
             "#SBATCH --output=logs/sbatch-lsmio-%j.log",
-            "#SBATCH --error=logs/sbatch-lsmio-%j.err"
+            "#SBATCH --error=logs/sbatch-lsmio-%j.err",
         ] + args
         command = " ".join(cmd)
         sbatch = "\n".join(sbh)
-        commands = "#!/bin/bash -x\n" \
-            + f"\n{command} << EOF" \
-            + "\n#!/bin/sh -x" \
-            + f"\n{sbatch}" \
-            + "\n" \
-            + "\n./lsmiotool ipc command" \
+        commands = (
+            "#!/bin/bash -x\n"
+            + f"\n{command} << EOF"
+            + "\n#!/bin/sh -x"
+            + f"\n{sbatch}"
+            + "\n"
+            + "\n./lsmiotool ipc command"
             + "\nEOF"
+        )
         log.Console.debug(f"JobsRunner cmd: {cmd}")
         log.Console.debug(f"JobsRunner commands: \n{commands}")
-        result = subprocess.run(["/bin/bash", "-c", commands], stderr=subprocess.STDOUT, text=True, check=True)
-
+        result = subprocess.run(
+            ["/bin/bash", "-c", commands],
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=True,
+        )
 
     def wait_for_completion(self) -> None:
         """
@@ -604,7 +616,7 @@ class JobsRunner(debuggable.DebuggableObject):
                     "squeue",
                     "-u",
                     user,
-                    "--format=%.15i %.9P %.20j %.8u %.8T %.10M %.9l %.6D %R"
+                    "--format=%.15i %.9P %.20j %.8u %.8T %.10M %.9l %.6D %R",
                 ]
             elif self.hpc_manager == HpcManager.PBS:
                 cmd = ["qstat", "-u", user]
@@ -614,8 +626,7 @@ class JobsRunner(debuggable.DebuggableObject):
                 raise RuntimeError(f"Unknown HPC manager: {self.hpc_manager}")
             proc = subprocess.run(cmd, capture_output=True, text=True)
             lines = [
-                l for l in proc.stdout.splitlines()
-                if "JOBID" not in l and l.strip()
+                l for l in proc.stdout.splitlines() if "JOBID" not in l and l.strip()
             ]
             if not lines:
                 break
@@ -629,32 +640,19 @@ class JobsRunner(debuggable.DebuggableObject):
         """Run a bake job with moderate concurrency."""
         for concurrency in [4]:
             pernode = 1
-            self.run(
-                concurrency,
-                pernode,
-                JobSize.SMALL
-            )
+            self.run(concurrency, pernode, JobSize.SMALL)
             self.wait_for_completion()
 
     def run_small(self) -> None:
         """Run small-scale jobs with varying concurrency."""
         for concurrency in [1, 2, 4, 8, 16, 24, 32, 40, 48]:
             pernode = 1
-            self.run(
-                concurrency,
-                pernode,
-                JobSize.SMALL
-            )
+            self.run(concurrency, pernode, JobSize.SMALL)
             self.wait_for_completion()
 
     def run_large(self) -> None:
         """Run large-scale jobs with varying concurrency."""
         for concurrency in [4, 8, 16, 32, 64, 128, 192, 256]:
             pernode = 4
-            self.run(
-                concurrency,
-                pernode,
-                JobSize.LARGE
-            )
+            self.run(concurrency, pernode, JobSize.LARGE)
             self.wait_for_completion()
-

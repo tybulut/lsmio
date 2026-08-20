@@ -41,15 +41,18 @@ from lsmiotool.lib import PROGRAM
 
 LOG_FILE: str = f"/tmp/{PROGRAM}-{os.getlogin()}-{PROGRAM}.log"
 
+
 class LogLevel(IntEnum):
     """Log levels for the application."""
+
     ERROR = 0
     WARNING = 1
     DEBUG = 2
     INFO = 3
 
+
 LOG_LEVEL = LogLevel
-LOG_LEVEL_NAMES: List[str] = ['ERROR', 'WARNING', 'DEBUG', 'INFO']
+LOG_LEVEL_NAMES: List[str] = ["ERROR", "WARNING", "DEBUG", "INFO"]
 
 
 class LogOutput:
@@ -58,15 +61,14 @@ class LogOutput:
     def __init__(self, f_proc_name: str) -> None:
         """Initialize log output with process name."""
         self.log_file: str = LOG_FILE
-        self._logger: logging.Logger = logging.getLogger('LSMIOTOOL-' + f_proc_name)
+        self._logger: logging.Logger = logging.getLogger("LSMIOTOOL-" + f_proc_name)
         self._logger.setLevel(logging.DEBUG)
         self._handler: lh.RotatingFileHandler = lh.RotatingFileHandler(
-            self.log_file,
-            mode='a',
-            maxBytes=524288,
-            backupCount=0
+            self.log_file, mode="a", maxBytes=524288, backupCount=0
         )
-        self._formatter: logging.Formatter = logging.Formatter('%(asctime)s - %(message)s')
+        self._formatter: logging.Formatter = logging.Formatter(
+            "%(asctime)s - %(message)s"
+        )
         self._handler.setFormatter(self._formatter)
         self._logger.addHandler(self._handler)
 
@@ -76,18 +78,18 @@ class LogOutput:
 
     def write(self, f_msg: str) -> None:
         """Write message to log file."""
-        self._logger.debug(f_msg.rstrip('\n'))
+        self._logger.debug(f_msg.rstrip("\n"))
 
 
 class Log:
     """Main logging class with singleton pattern."""
 
-    _singleton: Optional['Log'] = None
+    _singleton: Optional["Log"] = None
     _initialized: bool = False
     prog_name: str = PROGRAM
     _debug_level: LogLevel = LogLevel.WARNING
 
-    def __new__(cls: Type['Log'], *args: Any, **kwargs: Any) -> 'Log':
+    def __new__(cls: Type["Log"], *args: Any, **kwargs: Any) -> "Log":
         """Create or return singleton instance."""
         if not cls._singleton:
             cls._singleton = object.__new__(cls)
@@ -113,7 +115,7 @@ class Log:
             return
         self = cls()
         self.currentOutput().write(
-            f'{self.prog_name}: {LOG_LEVEL_NAMES[f_level]}: {f_msg}\n'
+            f"{self.prog_name}: {LOG_LEVEL_NAMES[f_level]}: {f_msg}\n"
         )
 
     @classmethod
@@ -144,8 +146,12 @@ class Log:
     @classmethod
     def setLevel(cls, f_level: LogLevel) -> None:
         """Set log level."""
-        if not isinstance(f_level, LogLevel) or f_level < LogLevel.ERROR or f_level > LogLevel.INFO:
-            raise ValueError('Log level must be a LogLevel enum')
+        if (
+            not isinstance(f_level, LogLevel)
+            or f_level < LogLevel.ERROR
+            or f_level > LogLevel.INFO
+        ):
+            raise ValueError("Log level must be a LogLevel enum")
         Log._debug_level = f_level
 
     @classmethod
@@ -153,14 +159,14 @@ class Log:
         """Fix permissions on log file."""
         log_file = LogOutput.outputs
         if not os.path.exists(log_file):
-            open(log_file, 'a+').close()
+            open(log_file, "a+").close()
         os.chown(log_file, f_uid, f_gid)
 
 
 class Console(Log):
     """Console output handler."""
 
-    _singleton: Optional['Console'] = None
+    _singleton: Optional["Console"] = None
     _initialized: bool = False
 
     def __init__(self) -> None:
@@ -182,4 +188,4 @@ class Console(Log):
     def dump(cls, f_msg: str) -> None:
         """Dump message to console."""
         self = cls()
-        self.currentOutput().write(f'{self.prog_name}: {f_msg}\n')
+        self.currentOutput().write(f"{self.prog_name}: {f_msg}\n")

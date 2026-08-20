@@ -42,6 +42,7 @@ from lsmiotool.lib.log import Console
 
 class HpcEnv(Enum):
     """Enumeration of supported HPC environments."""
+
     ISAMBARD = "ISAMBARD"
     VIKING2 = "VIKING2"
     VIKING = "VIKING"
@@ -50,6 +51,7 @@ class HpcEnv(Enum):
 
 class HpcManager(Enum):
     """Enumeration of supported HPC job management systems."""
+
     PBS = "PBS"
     SLURM = "SLURM"
     DEV = "DEV"
@@ -57,6 +59,7 @@ class HpcManager(Enum):
 
 class IorData(TypedDict):
     """Type definition for IOR benchmark data paths."""
+
     base: str
     collective: str
     hdf5: str
@@ -65,6 +68,7 @@ class IorData(TypedDict):
 
 class LsmioData(TypedDict):
     """Type definition for LSMIO benchmark data paths."""
+
     adios: str
     plugin: str
     lsmio: str
@@ -113,13 +117,13 @@ else:
     elif "viking" in HOSTNAME:
         HPC_ENV: HpcEnv = HpcEnv.VIKING
     else:
-        Console.error(f"Unfamiliar host environment: {HOSTNAME}")
-        Console.error(UNKNOWN_HPC_ENVIRONMENT)
-        exit(1)
+        HPC_ENV: HpcEnv = HpcEnv.DEV
 
 
 # Load JSON config
-_json_path: str = os.path.join(os.path.dirname(__file__), "..", "etc", "environments.json")
+_json_path: str = os.path.join(
+    os.path.dirname(__file__), "..", "etc", "environments.json"
+)
 with open(_json_path, "r") as _f:
     _env_configs: Dict[str, Any] = json.load(_f)
 
@@ -141,18 +145,16 @@ def _deep_merge(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
     """
     result = copy.deepcopy(dict1)
     for k, v in dict2.items():
-        if (
-            k in result
-            and isinstance(result[k], dict)
-            and isinstance(v, dict)
-        ):
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
             result[k] = _deep_merge(result[k], v)
         else:
             result[k] = v
     return result
 
 
-_env: Dict[str, Any] = _deep_merge(_env_configs["DEFAULT"], _env_configs.get(HPC_ENV.value, {}))
+_env: Dict[str, Any] = _deep_merge(
+    _env_configs["DEFAULT"], _env_configs.get(HPC_ENV.value, {})
+)
 
 hpc_manager: HpcManager = HpcManager(_env["hpc_manager"])
 base_path: str = _env["base_path"]
