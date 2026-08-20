@@ -36,4 +36,6 @@ __all__ = [
     "TestOutputAggregation",
     "TestParseMain",
     "TestEndToEndParse",
+    "TestMultiBarPlot",
+    "TestCompareMain",
 ]

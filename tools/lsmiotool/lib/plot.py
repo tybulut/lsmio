@@ -35,6 +35,8 @@ import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 
+from lsmiotool.lib.log import Console
+
 
 class PlotMetaData:
     """Metadata for plot visualization, including title and axis labels."""
@@ -141,4 +143,80 @@ class MultiPlot:
         plt.grid()
         plt.legend()
         plt.savefig(file_name)
+        plt.close()
+
+
+class MultiBarPlot:
+    """Grouped bar chart plotting multiple data series with metadata."""
+
+    m_meta_data: PlotMetaData
+    m_plot_data_list: List[PlotData]
+
+    def __init__(self, f_meta_data: PlotMetaData, *f_plot_data_args: PlotData) -> None:
+        """Initialize grouped bar plot with metadata and multiple data series.
+
+        Args:
+            f_meta_data: Plot metadata (title, axis labels)
+            *f_plot_data_args: Variable number of data series to plot
+        """
+        self.m_meta_data: PlotMetaData = f_meta_data
+        self.m_plot_data_list: List[PlotData] = list(f_plot_data_args)
+
+    def plot(self, f_file_name: str) -> None:
+        """Generate and save grouped bar chart.
+
+        Args:
+            f_file_name: Path to save the plot image
+        """
+        plt.figure()
+        # Metadata
+        plt.title(self.m_meta_data.title)
+        plt.xlabel(self.m_meta_data.x_label)
+        plt.ylabel(self.m_meta_data.y_label)
+
+        if self.m_plot_data_list:
+            x_categories: List[Any] = []
+            for plot_data in self.m_plot_data_list:
+                for x in plot_data.x_series:
+                    if x not in x_categories:
+                        x_categories.append(x)
+            try:
+                x_categories.sort()
+            except TypeError:
+                pass
+
+            if x_categories:
+                n_series = len(self.m_plot_data_list)
+                total_group_width = 0.8
+                bar_width = total_group_width / n_series
+                indices = np.arange(len(x_categories))
+
+                for i, plot_data in enumerate(self.m_plot_data_list):
+                    series_map = dict(zip(plot_data.x_series, plot_data.y_series))
+                    y_values: List[float] = []
+                    for cat in x_categories:
+                        val = float(series_map.get(cat, 0.0))
+                        if val < 0.0:
+                            Console.warning(
+                                f"Negative value {val} clamped to 0.0 for {plot_data.legend}"
+                            )
+                            val = 0.0
+                        y_values.append(val)
+
+                    offset = (i - (n_series - 1) / 2.0) * bar_width
+                    plt.bar(
+                        indices + offset,
+                        y_values,
+                        width=bar_width,
+                        label=plot_data.legend,
+                    )
+
+                plt.xticks(indices, [str(cat) for cat in x_categories])
+                handles, labels = plt.gca().get_legend_handles_labels()
+                if handles:
+                    plt.legend()
+
+        # Configure and save image
+        plt.grid(True)
+        plt.savefig(f_file_name)
         plt.close()

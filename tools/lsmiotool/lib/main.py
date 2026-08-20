@@ -39,7 +39,7 @@ import numpy as np
 
 from lsmiotool import settings
 from lsmiotool.lib import jobs, dirs, env, hpc
-from lsmiotool.lib import data, debuggable, log, output
+from lsmiotool.lib import data, debuggable, log, output, plot
 
 # Catch CTRL-C
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -70,24 +70,24 @@ class ParseMain(BaseMain):
     m_mode: str
     m_is_ssd: bool
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
         """Initialize ParseMain.
 
         Command: parse <ior|lsmio|lmp> <local|bake|small|large> [--ssd]
 
         Args:
-            *args: Variable length argument list (command, mode)
-            **kwargs: Keyword arguments (ssd=True/False)
+            *f_args: Variable length argument list (command, mode)
+            **f_kwargs: Keyword arguments (ssd=True/False)
         """
         super().__init__()
-        if len(args) < 2:
+        if len(f_args) < 2:
             log.Console.error(
                 "Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>"
             )
             sys.exit(1)
-        self.m_command = args[0]
-        self.m_mode = args[1]
-        self.m_is_ssd = kwargs.get("ssd", False)
+        self.m_command = f_args[0]
+        self.m_mode = f_args[1]
+        self.m_is_ssd = f_kwargs.get("ssd", False)
 
         allowed_commands = ["ior", "lsmio", "lmp"]
         if self.m_command not in allowed_commands:
@@ -202,6 +202,105 @@ class ParseMain(BaseMain):
             self.parseLsmio(self.m_mode, self.m_is_ssd)
         elif self.m_command == "lmp":
             self.parseLmp(self.m_mode, self.m_is_ssd)
+
+
+class CompareMain(BaseMain):
+    """Compare command for generating comparison bar charts across benchmark directories."""
+
+    m_folder: str
+    m_op: str
+    m_stripes: int
+    m_bs: str
+
+    def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
+        """Initialize CompareMain.
+
+        Command: compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
+
+        Args:
+            *f_args: Variable length argument list (folder, op, [stripes], [blocksize])
+            **f_kwargs: Arbitrary keyword arguments
+        """
+        super().__init__()
+        if len(f_args) < 2:
+            log.Console.error(
+                "Compare: Needs at least two arguments: <benchmark_folder> <read|write> [<stripes>] [<blocksize>]"
+            )
+            sys.exit(1)
+
+        self.m_folder = str(f_args[0])
+        op = str(f_args[1]).lower()
+        if op not in ["read", "write"]:
+            log.Console.error("Operation has to be 'read' or 'write'")
+            sys.exit(1)
+        self.m_op = op
+
+        if len(f_args) >= 3 and f_args[2] is not None and str(f_args[2]).strip() != "":
+            try:
+                self.m_stripes = int(f_args[2])
+            except ValueError:
+                log.Console.error(f"Invalid stripes value: {f_args[2]}")
+                sys.exit(1)
+        else:
+            self.m_stripes = 4
+
+        if len(f_args) >= 4 and f_args[3] is not None and str(f_args[3]).strip() != "":
+            self.m_bs = str(f_args[3]).upper()
+        else:
+            self.m_bs = "1M"
+
+    def resolveDirectory(self, f_path: str) -> str:
+        """Resolve path handling user home (~), relative, and absolute paths.
+
+        Args:
+            f_path: Path string to resolve.
+
+        Returns:
+            Resolved absolute path.
+        """
+        expanded = os.path.expanduser(f_path)
+        return os.path.abspath(expanded)
+
+    def run(self) -> None:
+        """Scan benchmark subdirectories, extract data series, and generate comparison plot."""
+        target_dir = self.resolveDirectory(self.m_folder)
+        if not os.path.isdir(target_dir):
+            log.Console.error(f"Directory not found: {target_dir}")
+            sys.exit(1)
+
+        entries = sorted(os.listdir(target_dir))
+        plot_data_list: List[plot.PlotData] = []
+        is_read = self.m_op == "read"
+
+        for entry in entries:
+            child_path = os.path.join(target_dir, entry)
+            if os.path.isdir(child_path):
+                report_file = os.path.join(child_path, "lsm-report.csv")
+                if os.path.isfile(report_file):
+                    summary_data = data.LsmioSummaryData(report_file)
+                    x_series, y_series = summary_data.timeSeries(
+                        is_read, self.m_stripes, self.m_bs
+                    )
+                    if x_series and y_series:
+                        plot_data_list.append(plot.PlotData(entry, x_series, y_series))
+
+        if not plot_data_list:
+            log.Console.warning(
+                f"No benchmark data found in subdirectories of {target_dir} for {self.m_op}, stripes={self.m_stripes}, bs={self.m_bs}"
+            )
+            return
+
+        base_name = os.path.basename(target_dir.rstrip(os.sep))
+        title = f"Comparison: {base_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
+        meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
+
+        output_filename = os.path.join(
+            os.getcwd(),
+            f"compare-{base_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
+        )
+        bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
+        bar_plot.plot(output_filename)
+        log.Console.info(f"Comparison plot saved to {output_filename}")
 
 
 class RunMain(BaseMain):
