@@ -94,6 +94,10 @@ class DebuggableObject:
             return
         Log.error(cls._composeLog(f_dict))
 
+    _log_error = _logError
+    _log_warning = _logWarning
+    _log_debug = _logDebug
+
     @classmethod
     def _dumpConsole(cls, f_dict: Dict[str, Any] = None) -> None:
         """Dump message to console."""
@@ -105,3 +109,4 @@ class DebuggableObject:
     def __str__(cls) -> str:
         """Return class name as string."""
         return cls.__class__.__name__
+

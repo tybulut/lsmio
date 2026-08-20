@@ -31,6 +31,10 @@
 __all__ = [
     'test_log',
     'test_data',
-    'test_output'
+    'test_output',
+    'TestLmpData',
+    'TestOutputAggregation',
+    'TestParseMain',
+    'TestEndToEndParse'
 ]
 

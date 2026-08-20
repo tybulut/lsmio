@@ -83,6 +83,7 @@ options:
 
 if __name__ == '__main__':
     debug = False
+    is_ssd = False
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'dhstv',
                 ['debug', 'help', 'ssd', 'test', 'version'])
@@ -96,6 +97,8 @@ if __name__ == '__main__':
             elif opt in '--debug':
                 debug = True
                 log.Log.setLevel(log.LOG_LEVEL.DEBUG)
+            elif opt in '--ssd':
+                is_ssd = True
             else:
                 log.Console.error('Unknown option: ' + opt)
                 sys.exit(1)
@@ -118,7 +121,12 @@ if __name__ == '__main__':
     elif args[0] == 'load-modules':
         class_main = main.HpcEnvMain
     elif args[0] == 'parse':
-        class_main = main.NotImplemented
+        m_args = args[1:]
+        if len(m_args) < 2:
+            log.Console.error('Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>')
+            sys.exit(1)
+        m_kwargs['ssd'] = is_ssd
+        class_main = main.ParseMain
     elif args[0] == 'run':
         m_args = args[1:]
         if len(m_args) != 2:

@@ -567,6 +567,7 @@ class JobsRunner(debuggable.DebuggableObject):
                 "BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,"
                 "BM_NUM_TASKS,BM_NUM_CORES",
                 f"-l select={concurrency}:mem=32GB",
+                f"-N LSMIO-SM-{job_size.value}.pbs",
             ]
         elif self.hpc_manager == HpcManager.DEV:
             cmd = [ "echo Hello World" ]

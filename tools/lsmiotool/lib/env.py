@@ -113,9 +113,7 @@ else:
     elif "viking" in HOSTNAME:
         HPC_ENV: HpcEnv = HpcEnv.VIKING
     else:
-        Console.error(f"Unfamiliar host environment: {HOSTNAME}")
-        Console.error(UNKNOWN_HPC_ENVIRONMENT)
-        exit(1)
+        HPC_ENV: HpcEnv = HpcEnv.DEV
 
 
 # Load JSON config

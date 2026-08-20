@@ -39,7 +39,7 @@ import numpy as np
 
 from lsmiotool import settings
 from lsmiotool.lib import jobs, dirs, env, hpc
-from lsmiotool.lib import data, debuggable, log
+from lsmiotool.lib import data, debuggable, log, output
 
 # Catch CTRL-C
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -60,6 +60,119 @@ class TestMain(BaseMain):
         """Execute test suite and report results."""
         from lsmiotool import test
         test.run_and_report()
+
+
+class ParseMain(BaseMain):
+    """Parse command for processing benchmark output logs."""
+
+    m_command: str
+    m_mode: str
+    m_is_ssd: bool
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize ParseMain.
+
+        Command: parse <ior|lsmio|lmp> <local|bake|small|large> [--ssd]
+
+        Args:
+            *args: Variable length argument list (command, mode)
+            **kwargs: Keyword arguments (ssd=True/False)
+        """
+        super().__init__()
+        if len(args) < 2:
+            log.Console.error("Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>")
+            sys.exit(1)
+        self.m_command = args[0]
+        self.m_mode = args[1]
+        self.m_is_ssd = kwargs.get("ssd", False)
+
+        allowed_commands = ['ior', 'lsmio', 'lmp']
+        if self.m_command not in allowed_commands:
+            log.Console.error("Command to execute has to be in: " + str(allowed_commands))
+            sys.exit(1)
+        allowed_modes = ['local', 'bake', 'small', 'large']
+        if self.m_mode not in allowed_modes:
+            log.Console.error("Command mode has to be in: " + str(allowed_modes))
+            sys.exit(1)
+
+    def _getTargetDir(self, f_bench_type: str, f_mode: str, f_is_ssd: bool) -> str:
+        """Resolve root log/output directory for parsing based on environment and options.
+
+        Args:
+            f_bench_type: Benchmark type ('ior', 'lsmio', 'lmp').
+            f_mode: Execution mode ('local', 'bake', 'small', 'large').
+            f_is_ssd: Whether SSD storage path is used.
+
+        Returns:
+            Absolute path to directory to parse.
+        """
+        if f_bench_type == "ior":
+            if f_mode == "small":
+                dir_path = os.path.expanduser(os.path.join(env.base_path, *env._env.get("ior_dirs", []), env.ior_data.get("base", "ior-base")))
+                if os.path.exists(dir_path):
+                    return dir_path
+            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)['LOG'])
+        elif f_bench_type == "lsmio":
+            if f_mode == "small":
+                dir_path = os.path.expanduser(os.path.join(env.base_path, *env._env.get("lsmio_dirs", []), "lsmio-adios"))
+                if os.path.exists(dir_path):
+                    return dir_path
+                dir_path_alt = os.path.expanduser(os.path.join(env.base_path, *env._env.get("lsmio_dirs", []), env.lsmio_data.get("adios", "lsmio-adios-m")))
+                if os.path.exists(dir_path_alt):
+                    return dir_path_alt
+            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)['LOG'])
+        elif f_bench_type == "lmp":
+            if f_mode == "small":
+                dir_path = os.path.expanduser(os.path.join(env.base_path, "synthetic", "viking", "lmp-small-hdd", "lmp-reaxff"))
+                if os.path.exists(dir_path):
+                    return dir_path
+            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)['LOG'])
+        return os.path.expanduser(env.BM_DIR)
+
+    def parseIor(self, f_mode: str, f_is_ssd: bool) -> None:
+        """Parse IOR benchmark outputs and generate reports.
+
+        Args:
+            f_mode: Execution mode scale.
+            f_is_ssd: Whether SSD storage path is used.
+        """
+        target_dir = self._getTargetDir("ior", f_mode, f_is_ssd)
+        log.Console.debug(f"Parsing IOR logs from: {target_dir}")
+        agg = output.IorAggOutput(target_dir)
+        agg.generateReports(target_dir)
+
+    def parseLsmio(self, f_mode: str, f_is_ssd: bool) -> None:
+        """Parse LSMIO benchmark outputs and generate reports.
+
+        Args:
+            f_mode: Execution mode scale.
+            f_is_ssd: Whether SSD storage path is used.
+        """
+        target_dir = self._getTargetDir("lsmio", f_mode, f_is_ssd)
+        log.Console.debug(f"Parsing LSMIO logs from: {target_dir}")
+        agg = output.LsmioAggOutput(target_dir)
+        agg.generateReports(target_dir)
+
+    def parseLmp(self, f_mode: str, f_is_ssd: bool) -> None:
+        """Parse LMP benchmark outputs and generate reports.
+
+        Args:
+            f_mode: Execution mode scale.
+            f_is_ssd: Whether SSD storage path is used.
+        """
+        target_dir = self._getTargetDir("lmp", f_mode, f_is_ssd)
+        log.Console.debug(f"Parsing LMP logs from: {target_dir}")
+        agg = output.LmpAggOutput(target_dir)
+        agg.generateReports(target_dir)
+
+    def run(self) -> None:
+        """Execute parsing dispatch."""
+        if self.m_command == 'ior':
+            self.parseIor(self.m_mode, self.m_is_ssd)
+        elif self.m_command == 'lsmio':
+            self.parseLsmio(self.m_mode, self.m_is_ssd)
+        elif self.m_command == 'lmp':
+            self.parseLmp(self.m_mode, self.m_is_ssd)
 
 
 class RunMain(BaseMain):

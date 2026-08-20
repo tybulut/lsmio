@@ -60,8 +60,17 @@ class TestHpcModules(unittest.TestCase):
 
     @patch('subprocess.run')
     def test_load(self, mock_run) -> None:
+        import subprocess
         script = self.hpc_modules.shell_output(env.HpcEnv.VIKING)
         self.hpc_modules.load(env.HpcEnv.VIKING)
-        mock_run.assert_called_once_with(script, shell=True, executable='/bin/bash', check=True)
+        mock_run.assert_called_once_with(
+            script,
+            shell=True,
+            executable='/bin/bash',
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
 
 
