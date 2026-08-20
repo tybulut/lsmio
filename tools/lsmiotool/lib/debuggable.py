@@ -43,11 +43,11 @@ class DebuggableObject:
     @classmethod
     def _addTracebackToLog(cls, f_trace_back: TracebackType) -> str:
         """Add traceback information to log message."""
-        ret_value = '\n'
+        ret_value = "\n"
         records: List[Tuple[str, int, str, str]] = traceback.extract_tb(f_trace_back)
         for file_name, line_number, function, line in records:
             ret_value += f'  File  "{file_name}", line {line_number}\n'
-            ret_value += f'  {line}\n'
+            ret_value += f"  {line}\n"
         return ret_value[:-1]
 
     @classmethod
@@ -56,10 +56,10 @@ class DebuggableObject:
         frm: str = inspect.stack()[2][3]
         msg: str = f"{cls.__name__}::{frm}(): "
         parts: List[str] = []
-        trace_back_data: str = ''
+        trace_back_data: str = ""
 
         for key, value in f_dict.items():
-            if key == '_trace_back' and value:
+            if key == "_trace_back" and value:
                 trace_back_data = cls._addTracebackToLog(value)
                 continue
             parts.append(f"{key}={value}")
@@ -109,4 +109,3 @@ class DebuggableObject:
     def __str__(cls) -> str:
         """Return class name as string."""
         return cls.__class__.__name__
-

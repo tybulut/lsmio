@@ -57,10 +57,7 @@ class PlotData:
     """Data series for plotting, including legend and x/y values."""
 
     def __init__(
-        self,
-        legend: str,
-        x_series: List[Union[int, str]],
-        y_series: List[float]
+        self, legend: str, x_series: List[Union[int, str]], y_series: List[float]
     ) -> None:
         """
         Initialize plot data.
@@ -113,11 +110,7 @@ class Plot:
 class MultiPlot:
     """Multiple data series plot with metadata."""
 
-    def __init__(
-        self,
-        meta_data: PlotMetaData,
-        *plot_data_args: PlotData
-    ) -> None:
+    def __init__(self, meta_data: PlotMetaData, *plot_data_args: PlotData) -> None:
         """
         Initialize plot with metadata and multiple data series.
 
@@ -142,11 +135,7 @@ class MultiPlot:
 
         # Plot data series
         for plot_data in self.plot_data_list:
-            plt.plot(
-                plot_data.x_series,
-                plot_data.y_series,
-                label=plot_data.legend
-            )
+            plt.plot(plot_data.x_series, plot_data.y_series, label=plot_data.legend)
 
         # Configure and save image
         plt.grid()

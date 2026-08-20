@@ -33,12 +33,17 @@ import copy
 try:
     from typing import TypedDict, Final
 except ImportError:
+
     class TypedDict(dict):
         """Minimal stand-in for typing.TypedDict for Python < 3.8. Does not enforce types at runtime."""
+
         pass
+
     class _FinalMeta(type):
         def __getitem__(self, item):
             return item
+
     class Final(metaclass=_FinalMeta):
         """Minimal stand-in for typing.Final for Python < 3.8. Supports subscripting for type hints."""
+
         pass

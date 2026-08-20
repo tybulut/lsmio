@@ -128,7 +128,7 @@ class HpcModules(debuggable.DebuggableObject):
         Returns:
             List of shell commands to execute.
         """
-        Console.debug('shell_commands: ' + hpc_env.value)
+        Console.debug("shell_commands: " + hpc_env.value)
         if hpc_env == HpcEnv.ISAMBARD:
             commands: List[str] = ["module purge"]
             modules = self._get_modules(HpcEnv.ISAMBARD)
@@ -168,7 +168,14 @@ class HpcModules(debuggable.DebuggableObject):
         """
         commands = self.shell_commands(hpc_env)
         script = "\n".join(commands)
-        result = subprocess.run(script, shell=True, executable="/bin/bash", \
-                        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        result = subprocess.run(
+            script,
+            shell=True,
+            executable="/bin/bash",
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
         print("Loading modules: stdout:", result.stdout)
         print("Loading modules: stderr:", result.stderr)

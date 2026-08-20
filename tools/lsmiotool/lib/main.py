@@ -59,6 +59,7 @@ class TestMain(BaseMain):
     def run(self) -> None:
         """Execute test suite and report results."""
         from lsmiotool import test
+
         test.run_and_report()
 
 
@@ -80,17 +81,21 @@ class ParseMain(BaseMain):
         """
         super().__init__()
         if len(args) < 2:
-            log.Console.error("Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>")
+            log.Console.error(
+                "Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>"
+            )
             sys.exit(1)
         self.m_command = args[0]
         self.m_mode = args[1]
         self.m_is_ssd = kwargs.get("ssd", False)
 
-        allowed_commands = ['ior', 'lsmio', 'lmp']
+        allowed_commands = ["ior", "lsmio", "lmp"]
         if self.m_command not in allowed_commands:
-            log.Console.error("Command to execute has to be in: " + str(allowed_commands))
+            log.Console.error(
+                "Command to execute has to be in: " + str(allowed_commands)
+            )
             sys.exit(1)
-        allowed_modes = ['local', 'bake', 'small', 'large']
+        allowed_modes = ["local", "bake", "small", "large"]
         if self.m_mode not in allowed_modes:
             log.Console.error("Command mode has to be in: " + str(allowed_modes))
             sys.exit(1)
@@ -108,25 +113,49 @@ class ParseMain(BaseMain):
         """
         if f_bench_type == "ior":
             if f_mode == "small":
-                dir_path = os.path.expanduser(os.path.join(env.base_path, *env._env.get("ior_dirs", []), env.ior_data.get("base", "ior-base")))
+                dir_path = os.path.expanduser(
+                    os.path.join(
+                        env.base_path,
+                        *env._env.get("ior_dirs", []),
+                        env.ior_data.get("base", "ior-base"),
+                    )
+                )
                 if os.path.exists(dir_path):
                     return dir_path
-            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)['LOG'])
+            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)["LOG"])
         elif f_bench_type == "lsmio":
             if f_mode == "small":
-                dir_path = os.path.expanduser(os.path.join(env.base_path, *env._env.get("lsmio_dirs", []), "lsmio-adios"))
+                dir_path = os.path.expanduser(
+                    os.path.join(
+                        env.base_path, *env._env.get("lsmio_dirs", []), "lsmio-adios"
+                    )
+                )
                 if os.path.exists(dir_path):
                     return dir_path
-                dir_path_alt = os.path.expanduser(os.path.join(env.base_path, *env._env.get("lsmio_dirs", []), env.lsmio_data.get("adios", "lsmio-adios-m")))
+                dir_path_alt = os.path.expanduser(
+                    os.path.join(
+                        env.base_path,
+                        *env._env.get("lsmio_dirs", []),
+                        env.lsmio_data.get("adios", "lsmio-adios-m"),
+                    )
+                )
                 if os.path.exists(dir_path_alt):
                     return dir_path_alt
-            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)['LOG'])
+            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)["LOG"])
         elif f_bench_type == "lmp":
             if f_mode == "small":
-                dir_path = os.path.expanduser(os.path.join(env.base_path, "synthetic", "viking", "lmp-small-hdd", "lmp-reaxff"))
+                dir_path = os.path.expanduser(
+                    os.path.join(
+                        env.base_path,
+                        "synthetic",
+                        "viking",
+                        "lmp-small-hdd",
+                        "lmp-reaxff",
+                    )
+                )
                 if os.path.exists(dir_path):
                     return dir_path
-            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)['LOG'])
+            return os.path.expanduser(dirs.get_log_dir(env.BM_DIR)["LOG"])
         return os.path.expanduser(env.BM_DIR)
 
     def parseIor(self, f_mode: str, f_is_ssd: bool) -> None:
@@ -167,11 +196,11 @@ class ParseMain(BaseMain):
 
     def run(self) -> None:
         """Execute parsing dispatch."""
-        if self.m_command == 'ior':
+        if self.m_command == "ior":
             self.parseIor(self.m_mode, self.m_is_ssd)
-        elif self.m_command == 'lsmio':
+        elif self.m_command == "lsmio":
             self.parseLsmio(self.m_mode, self.m_is_ssd)
-        elif self.m_command == 'lmp':
+        elif self.m_command == "lmp":
             self.parseLmp(self.m_mode, self.m_is_ssd)
 
 
@@ -179,13 +208,12 @@ class RunMain(BaseMain):
     """Run command for executing benchmarks and tests."""
 
     _options = {
-        'ior': {
-            'bm_setup': ['BASE', 'HDF5', 'HDF5-C', 'COLLECTIVE', 'FSYNC',
-                        'REVERSE'],
-            'sb_bin': '$HOME/src/usr/bin',
-            'bs': ['64K', '1M', '8M'],
-            'dirs_bm_base': dirs.get_base_dir(env.BM_DIR)['BASE'],
-            'ior_dir_output': dirs.get_log_dir(env.BM_DIR)['LOG'],
+        "ior": {
+            "bm_setup": ["BASE", "HDF5", "HDF5-C", "COLLECTIVE", "FSYNC", "REVERSE"],
+            "sb_bin": "$HOME/src/usr/bin",
+            "bs": ["64K", "1M", "8M"],
+            "dirs_bm_base": dirs.get_base_dir(env.BM_DIR)["BASE"],
+            "ior_dir_output": dirs.get_log_dir(env.BM_DIR)["LOG"],
         }
     }
 
@@ -200,31 +228,33 @@ class RunMain(BaseMain):
         super().__init__()
         self.command: str = args[0]
         self.mode: str = args[1]
-        allowed_commands = ['ior', 'lsmio', 'lmp']
+        allowed_commands = ["ior", "lsmio", "lmp"]
         if self.command not in allowed_commands:
-            log.Console.error("Command to execute has to be in: " + str(allowed_commands))
+            log.Console.error(
+                "Command to execute has to be in: " + str(allowed_commands)
+            )
             sys.exit(1)
-        allowed_modes = ['local', 'bake', 'small', 'large']
+        allowed_modes = ["local", "bake", "small", "large"]
         if self.mode not in allowed_modes:
             log.Console.error("Command mode has to be in: " + str(allowed_modes))
             sys.exit(1)
 
     def _run_IOR(self) -> None:
-        if self.mode == 'local':
+        if self.mode == "local":
             bench = jobs.IORBenchmark(
-                bm_setup=self._options['ior']['bm_setup'][0],
-                sb_bin=self._options['ior']['sb_bin'],
-                dirs_bm_base=self._options['ior']['dirs_bm_base'],
-                ior_dir_output=self._options['ior']['ior_dir_output']
+                bm_setup=self._options["ior"]["bm_setup"][0],
+                sb_bin=self._options["ior"]["sb_bin"],
+                dirs_bm_base=self._options["ior"]["dirs_bm_base"],
+                ior_dir_output=self._options["ior"]["ior_dir_output"],
             )
-            result = bench.run('16', '64K')
-        elif self.mode == 'bake':
+            result = bench.run("16", "64K")
+        elif self.mode == "bake":
             runner = jobs.JobsRunner(env.hpc_manager)
             runner.run_bake()
-        elif self.mode == 'small':
+        elif self.mode == "small":
             log.Console.error("argument small: Not Implemented")
             sys.exit(1)
-        elif self.mode == 'large':
+        elif self.mode == "large":
             log.Console.error("argument large: Not Implemented")
             sys.exit(1)
         else:
@@ -238,11 +268,11 @@ class RunMain(BaseMain):
         pass
 
     def run(self) -> None:
-        if self.command == 'ior':
+        if self.command == "ior":
             self._run_IOR()
-        elif self.command == 'lsmio':
+        elif self.command == "lsmio":
             self._run_LSMIO()
-        elif self.command == 'lmp':
+        elif self.command == "lmp":
             self._run_LMP()
 
 
@@ -252,6 +282,7 @@ class ShellMain(BaseMain):
     def run(self) -> None:
         """Start an interactive Python shell with local context."""
         import code
+
         code.interact(local=dict(globals(), **locals()))
 
 
@@ -276,22 +307,17 @@ class NotImplemented(BaseMain):
 class DemoMain(BaseMain):
     """Demo execution mode for example plots."""
 
-
     def __init__(self):
         import plot
 
     def demoRunDummy(self) -> None:
         """Generate a dummy plot with sample data."""
         fn = "demo.png"
-        md = plot.PlotMetaData(
-            "Sports Watch Data",
-            "Average Pulse",
-            "Calorie Burnage"
-        )
+        md = plot.PlotMetaData("Sports Watch Data", "Average Pulse", "Calorie Burnage")
         pd = plot.PlotData(
             "Sample Data",
             [80, 85, 90, 95, 100, 105, 110, 115, 120, 125],
-            [240, 250, 260, 270, 280, 290, 300, 310, 320, 330]
+            [240, 250, 260, 270, 280, 290, 300, 310, 320, 330],
         )
         p = plot.Plot(md, pd)
         p.plot(fn)
@@ -374,11 +400,7 @@ class LatexMain(BaseMain):
         self.plots_dir: str = env.plots_dir
 
     def _gen_png_name(
-        self,
-        title: str,
-        is_read: bool,
-        num_stripes: int,
-        stripe_size: str
+        self, title: str, is_read: bool, num_stripes: int, stripe_size: str
     ) -> str:
         """
         Generate PNG filename from plot parameters.
@@ -409,9 +431,7 @@ class LatexMain(BaseMain):
 
     def run_step_paper41(self) -> None:
         """Generate write performance plot for paper section 4.1."""
-        ior_run = data.IorSummaryData(
-            os.path.join(self.ior_dir, "ior-report.csv")
-        )
+        ior_run = data.IorSummaryData(os.path.join(self.ior_dir, "ior-report.csv"))
         fn = self._gen_png_name("ior", False, 4, "64K")
         md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
 
@@ -434,11 +454,7 @@ class LatexMain(BaseMain):
             os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
         )
         fn = self._gen_png_name("lsmio", True, 4, "64K")
-        md = plot.PlotMetaData(
-            "HDF5 vs. ADIOS vs. LSMIO",
-            "# of Nodes",
-            "Max BW in MB"
-        )
+        md = plot.PlotMetaData("HDF5 vs. ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
 
         x_series, y_series = hdf5_run.time_series(True, 4, "64K")
         pda = plot.PlotData("hdf5-4-64k", x_series, y_series)
@@ -464,9 +480,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", False, 4, "64K")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(False, 4, "64K")
@@ -493,9 +507,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", True, 16, "64K")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(True, 16, "64K")
@@ -522,9 +534,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", False, 16, "64K")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(False, 16, "64K")
@@ -551,9 +561,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", True, 4, "1M")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(True, 4, "1M")
@@ -580,9 +588,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", False, 4, "1M")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(False, 4, "1M")
@@ -609,9 +615,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", True, 16, "1M")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(True, 16, "1M")
@@ -638,9 +642,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", False, 16, "1M")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(False, 16, "1M")
@@ -667,9 +669,7 @@ class LatexMain(BaseMain):
         )
         fn = self._gen_png_name("lsmio", True, 4, "4M")
         md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN",
-            "# of Nodes",
-            "Max BW in MB"
+            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
         )
 
         x_series, y_series = adios_run.time_series(True, 4, "4M")

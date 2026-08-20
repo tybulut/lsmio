@@ -32,45 +32,45 @@ import unittest
 from unittest.mock import patch, MagicMock
 from lsmiotool.lib import hpc, env
 
+
 class TestHpcModules(unittest.TestCase):
     def setUp(self) -> None:
         self.hpc_modules = hpc.HpcModules()
 
     def testshell_commands_viking(self) -> None:
         cmds = self.hpc_modules.shell_commands(env.HpcEnv.VIKING)
-        self.assertIn('module purge', cmds)
-        self.assertIn('module load data/HDF5/1.10.7-gompi-2020b', cmds)
-        self.assertTrue(any(cmd.startswith('module load') for cmd in cmds))
+        self.assertIn("module purge", cmds)
+        self.assertIn("module load data/HDF5/1.10.7-gompi-2020b", cmds)
+        self.assertTrue(any(cmd.startswith("module load") for cmd in cmds))
 
     def testshell_commands_viking2(self) -> None:
         cmds = self.hpc_modules.shell_commands(env.HpcEnv.VIKING2)
-        self.assertIn('module purge', cmds)
-        self.assertIn('module load GCCcore/13.2.0', cmds)
+        self.assertIn("module purge", cmds)
+        self.assertIn("module load GCCcore/13.2.0", cmds)
 
     def testshell_commands_isambard(self) -> None:
         cmds = self.hpc_modules.shell_commands(env.HpcEnv.ISAMBARD)
-        self.assertIn('module purge', cmds)
-        self.assertIn('module load modules/3.2.11.4', cmds)
+        self.assertIn("module purge", cmds)
+        self.assertIn("module load modules/3.2.11.4", cmds)
 
-    @patch('builtins.print')
+    @patch("builtins.print")
     def test_shell_output(self, mock_print) -> None:
         script = self.hpc_modules.shell_output(env.HpcEnv.VIKING)
-        self.assertIn('module purge', script)
-        self.assertIn('module load data/HDF5/1.10.7-gompi-2020b', script)
+        self.assertIn("module purge", script)
+        self.assertIn("module load data/HDF5/1.10.7-gompi-2020b", script)
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_load(self, mock_run) -> None:
         import subprocess
+
         script = self.hpc_modules.shell_output(env.HpcEnv.VIKING)
         self.hpc_modules.load(env.HpcEnv.VIKING)
         mock_run.assert_called_once_with(
             script,
             shell=True,
-            executable='/bin/bash',
+            executable="/bin/bash",
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True
+            universal_newlines=True,
         )
-
-

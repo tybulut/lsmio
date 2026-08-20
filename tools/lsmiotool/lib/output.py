@@ -43,22 +43,26 @@ from lsmiotool.lib import data
 
 class MissingDataError(Exception):
     """Exception raised when actual file counts mismatch expected counts."""
+
     pass
 
 
 class FileMetadata(TypedDict):
     """Type definition for file metadata."""
+
     size: int  # File size in bytes
     path: str  # Absolute path to file
 
 
 class DirMap(TypedDict):
     """Type definition for directory structure mapping."""
-    size: Union[int, Dict[str, 'DirMap']]  # Size in bytes or nested directory
+
+    size: Union[int, Dict[str, "DirMap"]]  # Size in bytes or nested directory
 
 
 class MetricData(TypedDict):
     """Type definition for I/O performance metrics."""
+
     max_mib_per_s: float  # Maximum throughput in MiB/s
     min_mib_per_s: float  # Minimum throughput in MiB/s
     mean_mib_per_s: float  # Mean throughput in MiB/s
@@ -69,15 +73,17 @@ class MetricData(TypedDict):
 
 class AccessData(TypedDict):
     """Type definition for read/write access metrics."""
+
     read: MetricData  # Read performance metrics
     write: MetricData  # Write performance metrics
 
 
 class AggData(TypedDict):
     """Type definition for aggregated performance data."""
+
     size: Union[
         Dict[str, Dict[str, Dict[str, AccessData]]],  # Nested performance data
-        None  # No data available
+        None,  # No data available
     ]
 
 
@@ -126,9 +132,7 @@ class TraverseDir(DebuggableObject):
 
             # Process subdirectories
             for dir_name in dirs:
-                folder_dict[str(dir_name)] = self._gather(
-                    os.path.join(root, dir_name)
-                )
+                folder_dict[str(dir_name)] = self._gather(os.path.join(root, dir_name))
             break
         return folder_dict
 
@@ -207,7 +211,7 @@ class IorOutputDir(TraverseDir):
                     key_dir_list = [field_size, date_dir, key]
                     meta_dict[field_size][stripe_count][stripe_size][key] = {
                         "size": val,
-                        "path": os.path.join(self.m_root_dir, *key_dir_list)
+                        "path": os.path.join(self.m_root_dir, *key_dir_list),
                     }
 
         return meta_dict
@@ -217,6 +221,7 @@ class IorOutputDir(TraverseDir):
 
 class LsmioOutputDir(IorOutputDir):
     """Directory traversal specialized for LSMIO output files."""
+
     pass
 
 
@@ -266,7 +271,7 @@ class LmpOutputDir(IorOutputDir):
                     key_dir_list = [field_size, date_dir, key]
                     meta_dict[field_size][stripe_count][stripe_size][key] = {
                         "size": val,
-                        "path": os.path.join(self.m_root_dir, *key_dir_list)
+                        "path": os.path.join(self.m_root_dir, *key_dir_list),
                     }
 
         return meta_dict
@@ -278,12 +283,10 @@ class IorAggOutput(DebuggableObject):
     """Aggregate IOR output data processor."""
 
     # Configuration constants
-    _operations: List[str] = ['read', 'write']
-    _stripe_counts: List[str] = ['4', '16']
-    _stripe_sizes: List[str] = ['64K', '1M', '8M']
-    _node_counts: List[str] = [
-        '1', '2', '4', '8', '16', '24', '32', '40', '48'
-    ]
+    _operations: List[str] = ["read", "write"]
+    _stripe_counts: List[str] = ["4", "16"]
+    _stripe_sizes: List[str] = ["64K", "1M", "8M"]
+    _node_counts: List[str] = ["1", "2", "4", "8", "16", "24", "32", "40", "48"]
 
     m_out_dir: str
     m_agg_data: AggData
@@ -314,31 +317,29 @@ class IorAggOutput(DebuggableObject):
 
                     # Validate directory structure
                     if n_count not in dir_map:
-                        self._log_error({
-                            n_count: 'node count not found in output directory'
-                        })
+                        self._log_error(
+                            {n_count: "node count not found in output directory"}
+                        )
                         continue
                     if s_count not in dir_map[n_count]:
-                        self._log_error({
-                            s_count: 'stripe count not found in output directory'
-                        })
+                        self._log_error(
+                            {s_count: "stripe count not found in output directory"}
+                        )
                         continue
                     if s_size not in dir_map[n_count][s_count]:
-                        self._log_error({
-                            s_count: 'stripe size not found in output directory'
-                        })
+                        self._log_error(
+                            {s_count: "stripe size not found in output directory"}
+                        )
                         continue
                     if len(dir_map[n_count][s_count][s_size]) != int(n_count):
-                        self._log_error({
-                            0: 'number of files does not match node count'
-                        })
+                        self._log_error(
+                            {0: "number of files does not match node count"}
+                        )
 
                     # Process aggregated files
-                    self.m_agg_data[n_count][s_count][s_size] = \
-                        self._processAggFiles(
-                            dir_map[n_count][s_count][s_size],
-                            n_count
-                        )
+                    self.m_agg_data[n_count][s_count][s_size] = self._processAggFiles(
+                        dir_map[n_count][s_count][s_size], n_count
+                    )
 
     @property
     def out_dir(self) -> str:
@@ -349,9 +350,7 @@ class IorAggOutput(DebuggableObject):
         return self.m_agg_data
 
     def _processAggFiles(
-        self,
-        f_files: Dict[str, FileMetadata],
-        f_count: str
+        self, f_files: Dict[str, FileMetadata], f_count: str
     ) -> AccessData:
         """Process aggregated IOR output files.
 
@@ -377,9 +376,7 @@ class IorAggOutput(DebuggableObject):
 
         # Validate data
         if len(sim_data) != 1 and len(sim_data) != int(f_count):
-            self._log_error({
-                0: 'number of simulation data does not match node count'
-            })
+            self._log_error({0: "number of simulation data does not match node count"})
 
         return sim_data[0] if sim_data else {}
 
@@ -403,7 +400,7 @@ class IorAggOutput(DebuggableObject):
             f_out_file: Target CSV file path.
         """
         os.makedirs(os.path.dirname(os.path.abspath(f_out_file)), exist_ok=True)
-        with open(f_out_file, 'w', newline='') as f:
+        with open(f_out_file, "w", newline="") as f:
             if isinstance(f_agg_data, list):
                 writer = csv.writer(f)
                 for row in f_agg_data:
@@ -426,11 +423,13 @@ class IorAggOutput(DebuggableObject):
         dir_map = ior_dir.getMap()
         rows: List[str] = []
 
-        for n_count in sorted(dir_map.keys(), key=lambda x: int(x) if x.isdigit() else 0):
-            for s_count in ['16', '4']:
+        for n_count in sorted(
+            dir_map.keys(), key=lambda x: int(x) if x.isdigit() else 0
+        ):
+            for s_count in ["16", "4"]:
                 if s_count not in dir_map[n_count]:
                     continue
-                for s_size in ['1M', '64K', '8M']:
+                for s_size in ["1M", "64K", "8M"]:
                     if s_size not in dir_map[n_count][s_count]:
                         continue
                     files_dict = dir_map[n_count][s_count][s_size]
@@ -440,19 +439,46 @@ class IorAggOutput(DebuggableObject):
                             continue
                         sr = data.IorSingleRunData(f_path)
                         r_map = sr.getMap()
-                        node_str = f"{int(n_count):02d}" if n_count.isdigit() else n_count
-                        for op in ['write', 'read']:
+                        node_str = (
+                            f"{int(n_count):02d}" if n_count.isdigit() else n_count
+                        )
+                        for op in ["write", "read"]:
                             if op in r_map and r_map[op]:
-                                vals = [str(r_map[op].get(k, '')) for k in [
-                                    "Max(MiB)", "Min(MiB)", "Mean(MiB)", "StdDev",
-                                    "Max(OPs)", "Min(OPs)", "Mean(OPs)", "StdDev",
-                                    "Mean(s)", "Stonewall(s)", "Stonewall(MiB)",
-                                    "Test#", "#Tasks", "tPN", "reps", "fPP",
-                                    "reord", "reordoff", "reordrand", "seed",
-                                    "segcnt", "blksiz", "xsize", "aggs(MiB)",
-                                    "API", "RefNum"
-                                ]]
-                                row_str = f"{node_str},{s_count},{s_size},{op}," + ",".join(vals)
+                                vals = [
+                                    str(r_map[op].get(k, ""))
+                                    for k in [
+                                        "Max(MiB)",
+                                        "Min(MiB)",
+                                        "Mean(MiB)",
+                                        "StdDev",
+                                        "Max(OPs)",
+                                        "Min(OPs)",
+                                        "Mean(OPs)",
+                                        "StdDev",
+                                        "Mean(s)",
+                                        "Stonewall(s)",
+                                        "Stonewall(MiB)",
+                                        "Test#",
+                                        "#Tasks",
+                                        "tPN",
+                                        "reps",
+                                        "fPP",
+                                        "reord",
+                                        "reordoff",
+                                        "reordrand",
+                                        "seed",
+                                        "segcnt",
+                                        "blksiz",
+                                        "xsize",
+                                        "aggs(MiB)",
+                                        "API",
+                                        "RefNum",
+                                    ]
+                                ]
+                                row_str = (
+                                    f"{node_str},{s_count},{s_size},{op},"
+                                    + ",".join(vals)
+                                )
                                 rows.append(row_str)
 
         self.exportCsv(rows, report_file)
@@ -463,9 +489,7 @@ class LsmioAggOutput(IorAggOutput):
     """Aggregate LSMIO output data processor."""
 
     def _processAggFiles(
-        self,
-        f_files: Dict[str, FileMetadata],
-        f_count: str
+        self, f_files: Dict[str, FileMetadata], f_count: str
     ) -> AccessData:
         """Process aggregated LSMIO output files using math.fsum for numerical stability.
 
@@ -487,31 +511,29 @@ class LsmioAggOutput(IorAggOutput):
 
         # Validate data
         if len(sim_data) != int(f_count):
-            self._log_error({
-                0: 'number of simulation data does not match node count'
-            })
+            self._log_error({0: "number of simulation data does not match node count"})
             raise MissingDataError(
                 f"Number of simulation data files ({len(sim_data)}) does not match expected node count ({f_count})"
             )
 
         # Initialize aggregated metrics
         agg_map: AccessData = {
-            'read': {
-                'max(MiB)/s': float(0.00),
-                'min(MiB/s)': float(0.00),
-                'mean(MiB/s)': float(0.00),
-                'total(MiB)': float(0),
-                'total(Ops)': float(0),
-                'iteration': int(0)
+            "read": {
+                "max(MiB)/s": float(0.00),
+                "min(MiB/s)": float(0.00),
+                "mean(MiB/s)": float(0.00),
+                "total(MiB)": float(0),
+                "total(Ops)": float(0),
+                "iteration": int(0),
             },
-            'write': {
-                'max(MiB)/s': float(0.00),
-                'min(MiB/s)': float(0.00),
-                'mean(MiB/s)': float(0.00),
-                'total(MiB)': float(0),
-                'total(Ops)': float(0),
-                'iteration': int(0)
-            }
+            "write": {
+                "max(MiB)/s": float(0.00),
+                "min(MiB/s)": float(0.00),
+                "mean(MiB/s)": float(0.00),
+                "total(MiB)": float(0),
+                "total(Ops)": float(0),
+                "iteration": int(0),
+            },
         }
 
         # Aggregate metrics from all files using math.fsum
@@ -528,33 +550,91 @@ class LsmioAggOutput(IorAggOutput):
         write_ops_list: List[float] = []
 
         for sim in sim_data:
-            if 'read' in sim and sim['read']:
-                read_max_list.append(data.parseFloat(sim['read'].get('max(MiB)/s', sim['read'].get('bw(MiB/s)', 0.0))))
-                read_min_list.append(data.parseFloat(sim['read'].get('min(MiB/s)', sim['read'].get('Latency(ms)', 0.0))))
-                read_mean_list.append(data.parseFloat(sim['read'].get('mean(MiB/s)', 0.0)))
-                read_total_list.append(data.parseFloat(sim['read'].get('total(MiB)', sim['read'].get('block(KiB)', 0.0))))
-                read_ops_list.append(data.parseFloat(sim['read'].get('total(Ops)', sim['read'].get('xfer(KiB)', 0.0))))
-                agg_map['read']['iteration'] = max(agg_map['read']['iteration'], data.parseInt(sim['read'].get('iteration', sim['read'].get('iter', 0))))
+            if "read" in sim and sim["read"]:
+                read_max_list.append(
+                    data.parseFloat(
+                        sim["read"].get("max(MiB)/s", sim["read"].get("bw(MiB/s)", 0.0))
+                    )
+                )
+                read_min_list.append(
+                    data.parseFloat(
+                        sim["read"].get(
+                            "min(MiB/s)", sim["read"].get("Latency(ms)", 0.0)
+                        )
+                    )
+                )
+                read_mean_list.append(
+                    data.parseFloat(sim["read"].get("mean(MiB/s)", 0.0))
+                )
+                read_total_list.append(
+                    data.parseFloat(
+                        sim["read"].get(
+                            "total(MiB)", sim["read"].get("block(KiB)", 0.0)
+                        )
+                    )
+                )
+                read_ops_list.append(
+                    data.parseFloat(
+                        sim["read"].get("total(Ops)", sim["read"].get("xfer(KiB)", 0.0))
+                    )
+                )
+                agg_map["read"]["iteration"] = max(
+                    agg_map["read"]["iteration"],
+                    data.parseInt(
+                        sim["read"].get("iteration", sim["read"].get("iter", 0))
+                    ),
+                )
 
-            if 'write' in sim and sim['write']:
-                write_max_list.append(data.parseFloat(sim['write'].get('max(MiB)/s', sim['write'].get('bw(MiB/s)', 0.0))))
-                write_min_list.append(data.parseFloat(sim['write'].get('min(MiB/s)', sim['write'].get('Latency(ms)', 0.0))))
-                write_mean_list.append(data.parseFloat(sim['write'].get('mean(MiB/s)', 0.0)))
-                write_total_list.append(data.parseFloat(sim['write'].get('total(MiB)', sim['write'].get('block(KiB)', 0.0))))
-                write_ops_list.append(data.parseFloat(sim['write'].get('total(Ops)', sim['write'].get('xfer(KiB)', 0.0))))
-                agg_map['write']['iteration'] = max(agg_map['write']['iteration'], data.parseInt(sim['write'].get('iteration', sim['write'].get('iter', 0))))
+            if "write" in sim and sim["write"]:
+                write_max_list.append(
+                    data.parseFloat(
+                        sim["write"].get(
+                            "max(MiB)/s", sim["write"].get("bw(MiB/s)", 0.0)
+                        )
+                    )
+                )
+                write_min_list.append(
+                    data.parseFloat(
+                        sim["write"].get(
+                            "min(MiB/s)", sim["write"].get("Latency(ms)", 0.0)
+                        )
+                    )
+                )
+                write_mean_list.append(
+                    data.parseFloat(sim["write"].get("mean(MiB/s)", 0.0))
+                )
+                write_total_list.append(
+                    data.parseFloat(
+                        sim["write"].get(
+                            "total(MiB)", sim["write"].get("block(KiB)", 0.0)
+                        )
+                    )
+                )
+                write_ops_list.append(
+                    data.parseFloat(
+                        sim["write"].get(
+                            "total(Ops)", sim["write"].get("xfer(KiB)", 0.0)
+                        )
+                    )
+                )
+                agg_map["write"]["iteration"] = max(
+                    agg_map["write"]["iteration"],
+                    data.parseInt(
+                        sim["write"].get("iteration", sim["write"].get("iter", 0))
+                    ),
+                )
 
-        agg_map['read']['max(MiB)/s'] = math.fsum(read_max_list)
-        agg_map['read']['min(MiB/s)'] = math.fsum(read_min_list)
-        agg_map['read']['mean(MiB/s)'] = math.fsum(read_mean_list)
-        agg_map['read']['total(MiB)'] = math.fsum(read_total_list)
-        agg_map['read']['total(Ops)'] = math.fsum(read_ops_list)
+        agg_map["read"]["max(MiB)/s"] = math.fsum(read_max_list)
+        agg_map["read"]["min(MiB/s)"] = math.fsum(read_min_list)
+        agg_map["read"]["mean(MiB/s)"] = math.fsum(read_mean_list)
+        agg_map["read"]["total(MiB)"] = math.fsum(read_total_list)
+        agg_map["read"]["total(Ops)"] = math.fsum(read_ops_list)
 
-        agg_map['write']['max(MiB)/s'] = math.fsum(write_max_list)
-        agg_map['write']['min(MiB/s)'] = math.fsum(write_min_list)
-        agg_map['write']['mean(MiB/s)'] = math.fsum(write_mean_list)
-        agg_map['write']['total(MiB)'] = math.fsum(write_total_list)
-        agg_map['write']['total(Ops)'] = math.fsum(write_ops_list)
+        agg_map["write"]["max(MiB)/s"] = math.fsum(write_max_list)
+        agg_map["write"]["min(MiB/s)"] = math.fsum(write_min_list)
+        agg_map["write"]["mean(MiB/s)"] = math.fsum(write_mean_list)
+        agg_map["write"]["total(MiB)"] = math.fsum(write_total_list)
+        agg_map["write"]["total(Ops)"] = math.fsum(write_ops_list)
 
         return agg_map
 
@@ -585,7 +665,9 @@ class LsmioAggOutput(IorAggOutput):
 
                     first_w_line = ""
                     first_r_line = ""
-                    header_line = "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter"
+                    header_line = (
+                        "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter"
+                    )
 
                     w_iters: List[float] = []
                     r_iters: List[float] = []
@@ -602,9 +684,14 @@ class LsmioAggOutput(IorAggOutput):
                                 with open(f_meta["path"], "r") as inf:
                                     for line in inf:
                                         l_s = line.strip()
-                                        if l_s.startswith("write,") and not first_w_line:
+                                        if (
+                                            l_s.startswith("write,")
+                                            and not first_w_line
+                                        ):
                                             first_w_line = l_s
-                                        elif l_s.startswith("read,") and not first_r_line:
+                                        elif (
+                                            l_s.startswith("read,") and not first_r_line
+                                        ):
                                             first_r_line = l_s
                             except (IOError, OSError):
                                 pass
@@ -631,7 +718,7 @@ class LsmioAggOutput(IorAggOutput):
                     agg_out_lines = [
                         header_line,
                         f"{first_w_line},{max_w:.2f},{min_w:.2f},{mean_w:.6g}",
-                        f"{first_r_line},{max_r:.2f},{min_r:.2f},{mean_r:.6g}"
+                        f"{first_r_line},{max_r:.2f},{min_r:.2f},{mean_r:.6g}",
                     ]
 
                     agg_file_path = os.path.join(
@@ -645,7 +732,7 @@ class LsmioAggOutput(IorAggOutput):
 
         agg_files = sorted(
             glob.glob(os.path.join(target_dir, "*", "agg-*-report.csv")),
-            key=lambda p: re.sub(r'[^a-zA-Z0-9]', '', os.path.relpath(p, target_dir))
+            key=lambda p: re.sub(r"[^a-zA-Z0-9]", "", os.path.relpath(p, target_dir)),
         )
         for agg_file in agg_files:
             rel = os.path.relpath(agg_file, target_dir)
@@ -695,18 +782,18 @@ class LmpAggOutput(IorAggOutput):
                 self.m_agg_data[n_count][s_count] = {}
                 for s_size in self._stripe_sizes:
                     self.m_agg_data[n_count][s_count][s_size] = []
-                    if n_count not in dir_map or s_count not in dir_map[n_count] or s_size not in dir_map[n_count][s_count]:
+                    if (
+                        n_count not in dir_map
+                        or s_count not in dir_map[n_count]
+                        or s_size not in dir_map[n_count][s_count]
+                    ):
                         continue
-                    self.m_agg_data[n_count][s_count][s_size] = \
-                        self._processAggFiles(
-                            dir_map[n_count][s_count][s_size],
-                            n_count
-                        )
+                    self.m_agg_data[n_count][s_count][s_size] = self._processAggFiles(
+                        dir_map[n_count][s_count][s_size], n_count
+                    )
 
     def _processAggFiles(
-        self,
-        f_files: Dict[str, FileMetadata],
-        f_count: str
+        self, f_files: Dict[str, FileMetadata], f_count: str
     ) -> AccessData:
         """Process aggregated LMP output files.
 
@@ -725,35 +812,33 @@ class LmpAggOutput(IorAggOutput):
             sim_data.append(sr_data.getMap())
 
         if len(sim_data) != int(f_count):
-            self._log_error({
-                0: 'number of simulation data does not match node count'
-            })
+            self._log_error({0: "number of simulation data does not match node count"})
             raise MissingDataError(
                 f"Number of simulation data files ({len(sim_data)}) does not match expected node count ({f_count})"
             )
 
         tp_list: List[float] = [
-            data.parseFloat(s['write'].get('throughput', 0.0)) for s in sim_data
+            data.parseFloat(s["write"].get("throughput", 0.0)) for s in sim_data
         ]
         sum_tp = math.fsum(tp_list)
 
         agg_map: AccessData = {
-            'read': {
-                'max(MiB)/s': 0.0,
-                'min(MiB/s)': 0.0,
-                'mean(MiB/s)': 0.0,
-                'total(MiB)': 0.0,
-                'total(Ops)': 0.0,
-                'iteration': 0
+            "read": {
+                "max(MiB)/s": 0.0,
+                "min(MiB/s)": 0.0,
+                "mean(MiB/s)": 0.0,
+                "total(MiB)": 0.0,
+                "total(Ops)": 0.0,
+                "iteration": 0,
             },
-            'write': {
-                'max(MiB)/s': sum_tp,
-                'min(MiB/s)': sum_tp,
-                'mean(MiB/s)': sum_tp,
-                'total(MiB)': sum_tp,
-                'total(Ops)': 0.0,
-                'iteration': 0
-            }
+            "write": {
+                "max(MiB)/s": sum_tp,
+                "min(MiB/s)": sum_tp,
+                "mean(MiB/s)": sum_tp,
+                "total(MiB)": sum_tp,
+                "total(Ops)": 0.0,
+                "iteration": 0,
+            },
         }
         return agg_map
 
@@ -805,10 +890,7 @@ class IorFullOutput(IorAggOutput):
     get_map = getMap
 
     def timeSeries(
-        self,
-        f_read: bool,
-        f_stripe_count: int,
-        f_stripe_size: str
+        self, f_read: bool, f_stripe_count: int, f_stripe_size: str
     ) -> Tuple[List[str], List[float]]:
         """Get time series data for a specific stripe configuration.
 
@@ -821,11 +903,15 @@ class IorFullOutput(IorAggOutput):
             Time series data for the specified stripe configuration
         """
         sum_data = self.getMap()
-        access = 'read' if f_read else 'write'
+        access = "read" if f_read else "write"
         x_series = self._node_counts
         y_series: List[float] = []
         for n_count in x_series:
-            y_series.append(sum_data[n_count][str(f_stripe_count)][f_stripe_size][access]['Max(MiB)'])
+            y_series.append(
+                sum_data[n_count][str(f_stripe_count)][f_stripe_size][access][
+                    "Max(MiB)"
+                ]
+            )
         return (x_series, y_series)
 
     time_series = timeSeries
@@ -845,10 +931,7 @@ class LsmioFullOutput(LsmioAggOutput):
     get_map = getMap
 
     def timeSeries(
-        self,
-        f_read: bool,
-        f_stripe_count: int,
-        f_stripe_size: str
+        self, f_read: bool, f_stripe_count: int, f_stripe_size: str
     ) -> Tuple[List[str], List[float]]:
         """Get time series data for a specific stripe configuration.
 
@@ -861,11 +944,15 @@ class LsmioFullOutput(LsmioAggOutput):
             Time series data for the specified stripe configuration
         """
         sum_data = self.getMap()
-        access = 'read' if f_read else 'write'
+        access = "read" if f_read else "write"
         x_series = self._node_counts
         y_series: List[float] = []
         for n_count in x_series:
-            y_series.append(sum_data[n_count][str(f_stripe_count)][f_stripe_size][access]['max(MiB)/s'])
+            y_series.append(
+                sum_data[n_count][str(f_stripe_count)][f_stripe_size][access][
+                    "max(MiB)/s"
+                ]
+            )
         return (x_series, y_series)
 
     time_series = timeSeries
@@ -885,10 +972,7 @@ class LmpFullOutput(LmpAggOutput):
     get_map = getMap
 
     def timeSeries(
-        self,
-        f_read: bool,
-        f_stripe_count: int,
-        f_stripe_size: str
+        self, f_read: bool, f_stripe_count: int, f_stripe_size: str
     ) -> Tuple[List[str], List[float]]:
         """Get time series data for a specific stripe configuration.
 
@@ -901,11 +985,15 @@ class LmpFullOutput(LmpAggOutput):
             Time series data for the specified stripe configuration
         """
         sum_data = self.getMap()
-        access = 'read' if f_read else 'write'
+        access = "read" if f_read else "write"
         x_series = self._node_counts
         y_series: List[float] = []
         for n_count in x_series:
-            y_series.append(sum_data[n_count][str(f_stripe_count)][f_stripe_size][access]['max(MiB)/s'])
+            y_series.append(
+                sum_data[n_count][str(f_stripe_count)][f_stripe_size][access][
+                    "max(MiB)/s"
+                ]
+            )
         return (x_series, y_series)
 
     time_series = timeSeries

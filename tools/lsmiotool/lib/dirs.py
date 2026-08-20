@@ -40,7 +40,7 @@ def get_base_dir(bm_path: str) -> Dict[str, str]:
     Return the base directory path as a dict
     """
     return {
-        'BASE': os.path.join(bm_path, 'data'),
+        "BASE": os.path.join(bm_path, "data"),
     }
 
 
@@ -49,17 +49,17 @@ def get_data_dirs(bm_path: str) -> Dict[str, str]:
     Return dictionary of data directory paths.
     """
     return {
-        'DATA': {
-            '4': {
-                '64K': os.path.join(bm_path, 'data', '4', '64K'),
-                '1M': os.path.join(bm_path, 'data', '4', '1M'),
-                '8M': os.path.join(bm_path, 'data', '4', '8M'),
+        "DATA": {
+            "4": {
+                "64K": os.path.join(bm_path, "data", "4", "64K"),
+                "1M": os.path.join(bm_path, "data", "4", "1M"),
+                "8M": os.path.join(bm_path, "data", "4", "8M"),
             },
-            '16': {
-                '64K': os.path.join(bm_path, 'data', '16', '64K'),
-                '1M': os.path.join(bm_path, 'data', '16', '1M'),
-                '8M': os.path.join(bm_path, 'data', '16', '8M'),
-            }
+            "16": {
+                "64K": os.path.join(bm_path, "data", "16", "64K"),
+                "1M": os.path.join(bm_path, "data", "16", "1M"),
+                "8M": os.path.join(bm_path, "data", "16", "8M"),
+            },
         }
     }
 
@@ -68,20 +68,14 @@ def get_log_dir(bm_path: str) -> Dict[str, str]:
     """
     Return the log directory path as a dict
     """
-    return {
-        'LOG':  os.path.join(bm_path, 'logs', 'jobs')
-    }
+    return {"LOG": os.path.join(bm_path, "logs", "jobs")}
 
 
 def get_dirs(bm_path: str) -> Dict[str, str]:
     """
     Return a dictionary of all managed directories (base, data, log).
     """
-    return {
-        **get_base_dir(bm_path),
-        **get_data_dirs(bm_path),
-        **get_log_dir(bm_path)
-    }
+    return {**get_base_dir(bm_path), **get_data_dirs(bm_path), **get_log_dir(bm_path)}
 
 
 def setup_data_dirs(bm_path: str) -> None:
@@ -90,12 +84,12 @@ def setup_data_dirs(bm_path: str) -> None:
     Args:
         bm_path: Base path for benchmark directories.
     """
-    dirs = get_data_dirs(bm_path)['DATA']
+    dirs = get_data_dirs(bm_path)["DATA"]
     for core_dict in dirs.values():
         for d in core_dict.values():
             os.makedirs(d, exist_ok=True)
     # Ensure log dir exists
-    log_dir = get_log_dir(bm_path)['LOG']
+    log_dir = get_log_dir(bm_path)["LOG"]
     os.makedirs(log_dir, exist_ok=True)
 
 
@@ -105,7 +99,7 @@ def cleanup_data_dirs(bm_path: str) -> None:
     Args:
         bm_path: Base path for benchmark directories.
     """
-    dirs = get_data_dirs(bm_path)['DATA']
+    dirs = get_data_dirs(bm_path)["DATA"]
     # Flatten all paths from nested dict
     all_paths = []
     for core_dict in dirs.values():
@@ -133,21 +127,20 @@ def config_data_dirs(bm_path: str) -> None:
         bm_path: Base path for benchmark directories.
     """
     dirs = get_data_dirs(bm_path)
-    lfs_path = shutil.which('lfs')
+    lfs_path = shutil.which("lfs")
     if not lfs_path:
-        print('Warning: lfs not found, skipping setstripe configuration.')
+        print("Warning: lfs not found, skipping setstripe configuration.")
         return
     setstripe_cmds: List[List[str]] = [
-        ['lfs', 'setstripe', '-S', '64K', '-c', '4', dirs['4']['64K']],
-        ['lfs', 'setstripe', '-S', '64K', '-c', '16', dirs['16']['64K']],
-        ['lfs', 'setstripe', '-S', '1M', '-c', '4', dirs['4']['1M']],
-        ['lfs', 'setstripe', '-S', '1M', '-c', '16', dirs['16']['1M']],
-        ['lfs', 'setstripe', '-S', '8M', '-c', '4', dirs['4']['8M']],
-        ['lfs', 'setstripe', '-S', '8M', '-c', '16', dirs['16']['8M']],
+        ["lfs", "setstripe", "-S", "64K", "-c", "4", dirs["4"]["64K"]],
+        ["lfs", "setstripe", "-S", "64K", "-c", "16", dirs["16"]["64K"]],
+        ["lfs", "setstripe", "-S", "1M", "-c", "4", dirs["4"]["1M"]],
+        ["lfs", "setstripe", "-S", "1M", "-c", "16", dirs["16"]["1M"]],
+        ["lfs", "setstripe", "-S", "8M", "-c", "4", dirs["4"]["8M"]],
+        ["lfs", "setstripe", "-S", "8M", "-c", "16", dirs["16"]["8M"]],
     ]
     for cmd in setstripe_cmds:
         try:
             subprocess.run(cmd, check=True)
         except Exception as e:
-            print(f'Warning: Failed to run {" ".join(cmd)}: {e}')
-
+            print(f"Warning: Failed to run {' '.join(cmd)}: {e}")

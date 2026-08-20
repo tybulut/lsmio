@@ -3,18 +3,18 @@
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -26,7 +26,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+#
 
 import os
 from typing import Dict, List, Optional, Any
@@ -52,7 +52,7 @@ class MockLogGenerator:
         f_stripe_count: int = 4,
         f_stripe_size: str = "64K",
         f_write_max: float = 1200.5,
-        f_read_max: float = 4500.2
+        f_read_max: float = 4500.2,
     ) -> str:
         """Generate a mock IOR output log file.
 
@@ -88,7 +88,7 @@ Finished
         f_write_bw: float = 167.46,
         f_read_bw: float = 320.78,
         f_write_iters: Optional[List[float]] = None,
-        f_read_iters: Optional[List[float]] = None
+        f_read_iters: Optional[List[float]] = None,
     ) -> str:
         """Generate a mock LSMIO output log file with iterations and summaries.
 
@@ -109,8 +109,18 @@ Finished
         w_iters = f_write_iters or [150.0 + i * 2.0 for i in range(10)]
         r_iters = f_read_iters or [300.0 + i * 3.0 for i in range(10)]
 
-        w_iter_lines = "\n".join([f"iwrite,{bw:.2f},1.500,1048576,1048576,{i}" for i, bw in enumerate(w_iters)])
-        r_iter_lines = "\n".join([f"iread,{bw:.2f},0.800,1048576,1048576,{i}" for i, bw in enumerate(r_iters)])
+        w_iter_lines = "\n".join(
+            [
+                f"iwrite,{bw:.2f},1.500,1048576,1048576,{i}"
+                for i, bw in enumerate(w_iters)
+            ]
+        )
+        r_iter_lines = "\n".join(
+            [
+                f"iread,{bw:.2f},0.800,1048576,1048576,{i}"
+                for i, bw in enumerate(r_iters)
+            ]
+        )
 
         content = f"""BENCHMARK PARAMETERS: 
  fileName: /tmp/mock.bp
@@ -147,7 +157,7 @@ read,{f_read_bw:.2f},0.798,1048576,1048576,10
         f_node_count: int = 1,
         f_stripe_count: int = 4,
         f_stripe_size: str = "64K",
-        f_throughput: float = 123.45
+        f_throughput: float = 123.45,
     ) -> str:
         """Generate a mock LMP output log file.
 
@@ -176,7 +186,7 @@ write,{f_stripe_size},{f_throughput:.2f}
         f_nodes: Optional[List[str]] = None,
         f_stripes: Optional[List[str]] = None,
         f_sizes: Optional[List[str]] = None,
-        f_date: str = "2023-07-01"
+        f_date: str = "2023-07-01",
     ) -> str:
         """Generate a full directory structure with mock logs for testing.
 
@@ -210,7 +220,9 @@ write,{f_stripe_size},{f_throughput:.2f}
                             self.generateLmpFile(file_path, n_int, int(rf), bs)
         return f_base_dir
 
-    def generateMockFile(self, f_file_name: str, f_bench_type: str = "lsmio", **kwargs: Any) -> str:
+    def generateMockFile(
+        self, f_file_name: str, f_bench_type: str = "lsmio", **kwargs: Any
+    ) -> str:
         """Generate a single mock file based on benchmark type.
 
         Args:

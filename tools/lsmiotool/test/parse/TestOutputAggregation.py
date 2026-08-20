@@ -3,18 +3,18 @@
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -26,7 +26,7 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+#
 
 import math
 import os
@@ -39,12 +39,14 @@ from lsmiotool.test.fixtures.MockLogGenerator import MockLogGenerator
 
 class MockTwoNodeLsmioAggOutput(output.LsmioAggOutput):
     """Subclass configured for 1 and 2 node testing."""
-    _node_counts: List[str] = ['1', '2']
+
+    _node_counts: List[str] = ["1", "2"]
 
 
 class MockTwoNodeLmpAggOutput(output.LmpAggOutput):
     """Subclass configured for 1 and 2 node testing."""
-    _node_counts: List[str] = ['1', '2']
+
+    _node_counts: List[str] = ["1", "2"]
 
 
 class TestOutputAggregation(TestCase):
@@ -68,16 +70,16 @@ class TestOutputAggregation(TestCase):
             f_bench_type="lsmio",
             f_nodes=["1", "2"],
             f_stripes=["4", "16"],
-            f_sizes=["64K", "1M", "8M"]
+            f_sizes=["64K", "1M", "8M"],
         )
 
         lsm_agg = MockTwoNodeLsmioAggOutput(self.m_temp_dir.name)
         agg_map = lsm_agg.getMap()
 
-        self.assertIn('1', agg_map)
-        self.assertIn('2', agg_map)
+        self.assertIn("1", agg_map)
+        self.assertIn("2", agg_map)
         # Node 2 write total should be exactly 2 * 167.46 = 334.92
-        node2_write_max = agg_map['2']['4']['64K']['write']['max(MiB)/s']
+        node2_write_max = agg_map["2"]["4"]["64K"]["write"]["max(MiB)/s"]
         self.assertAlmostEqual(node2_write_max, 334.92, places=5)
 
     def testMissingDataErrorOnIncompleteFiles(self) -> None:
@@ -101,7 +103,7 @@ class TestOutputAggregation(TestCase):
             f_bench_type="lmp",
             f_nodes=["1", "2"],
             f_stripes=["4", "16"],
-            f_sizes=["64K", "1M", "8M"]
+            f_sizes=["64K", "1M", "8M"],
         )
 
         lmp_dir = output.LmpOutputDir(self.m_temp_dir.name)
@@ -125,7 +127,7 @@ class TestOutputAggregation(TestCase):
             f_bench_type="lsmio",
             f_nodes=["1", "2"],
             f_stripes=["4", "16"],
-            f_sizes=["64K", "1M", "8M"]
+            f_sizes=["64K", "1M", "8M"],
         )
 
         lsm_agg = MockTwoNodeLsmioAggOutput(self.m_temp_dir.name)
