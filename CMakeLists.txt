@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.12)
-project(lsmio VERSION 0.2.0)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tools/lsmiotool/VERSION" LSMIO_VERSION)
+string(STRIP "${LSMIO_VERSION}" LSMIO_VERSION)
+
+project(lsmio VERSION ${LSMIO_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +53,9 @@ if(LSMIO_BUILD_BENCHMARKS)
   add_subdirectory(benchmark)
 endif()
 
+# tools
+add_subdirectory(tools/lsmiotool)
+
 # Last step
 include(DebianPkg)
 
@@ -56,6 +63,19 @@ include(DebianPkg)
 if(LSMIO_BUILD_TESTS)
   # Include dependencies
   include(CTest)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  if(LSMIO_ENABLE_COVERAGE)
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" -c "import coverage"
+      RESULT_VARIABLE _coverage_status
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(NOT _coverage_status EQUAL 0)
+      message(FATAL_ERROR "LSMIO_ENABLE_COVERAGE is ON, but Python 'coverage' module is not available on '${Python3_EXECUTABLE}'. Please install coverage (e.g. '${Python3_EXECUTABLE} -m pip install coverage') and re-run CMake.")
+    endif()
+  endif()
 
   enable_testing()
   add_subdirectory(test)

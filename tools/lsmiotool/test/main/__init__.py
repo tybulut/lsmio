@@ -28,4 +28,4 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-__all__ = ["test_dirs", "test_hpc", "test_jobs"]
+# Test modules are discovered recursively by ``lsmiotool.test``.

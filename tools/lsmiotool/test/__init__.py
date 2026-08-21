@@ -28,60 +28,77 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-import sys, unittest
-import lsmiotool
-
-try:
-    import coverage
-
-    _HAS_COVERAGE = True
-except ImportError:
-    _HAS_COVERAGE = False
+import fnmatch
+import importlib
+import pkgutil
+import unittest
 
 
-_LSMIOTOOL_TEST_MODULES = ["lsmiotool.test.main", "lsmiotool.test.parse"]
+_TEST_FILENAME_PATTERNS = ("test*.py", "*Test.py", "Test*.py")
+_EXCLUDED_PATH_COMPONENTS = frozenset(("example", "fixtures"))
 
-# The modules needs to be loaded to be queried
-for _n in _LSMIOTOOL_TEST_MODULES:
-    exec("from %s import *" % _n)
-modules = list(globals().keys())
-lsmiotool_tests = []
-for m in modules:
-    if m.startswith("_"):
-        continue
-    module = globals()[m]
-    if not module.__name__.startswith("lsmiotool.test."):
-        continue
-    if module.__name__ in _LSMIOTOOL_TEST_MODULES:
-        continue
-    print(module.__name__)
-    lsmiotool_tests.append(module)
+
+def _matchingTestPatterns(f_module_name):
+    filename = f_module_name.rsplit(".", 1)[-1] + ".py"
+    return tuple(
+        pattern
+        for pattern in _TEST_FILENAME_PATTERNS
+        if fnmatch.fnmatchcase(filename, pattern)
+    )
+
+
+def _isDiscoverableTestModule(f_module_name, f_is_package):
+    components = f_module_name.split(".")
+    if f_is_package or components[-1] == "__init__":
+        return False
+    if _EXCLUDED_PATH_COMPONENTS.intersection(components):
+        return False
+    return bool(_matchingTestPatterns(f_module_name))
+
+
+def _discoverTestModuleNames(
+    f_paths=None,
+    f_prefix=None,
+    f_walk_packages=pkgutil.walk_packages,
+):
+    paths = __path__ if f_paths is None else f_paths
+    prefix = __name__ + "." if f_prefix is None else f_prefix
+    module_names = {
+        module_info.name
+        for module_info in f_walk_packages(paths, prefix)
+        if _isDiscoverableTestModule(module_info.name, module_info.ispkg)
+    }
+    if not module_names:
+        raise RuntimeError("No lsmiotool test modules were discovered")
+    return tuple(sorted(module_names))
+
+
+def _importTestModules(f_module_names, f_import_module=importlib.import_module):
+    return tuple(f_import_module(module_name) for module_name in f_module_names)
+
+
+def _buildTestSuite(f_modules):
+    if not f_modules:
+        raise RuntimeError("No lsmiotool test modules were imported")
+
+    test_suite = unittest.TestSuite()
+    loader = unittest.TestLoader()
+    for module in f_modules:
+        test_suite.addTests(loader.loadTestsFromModule(module))
+    if test_suite.countTestCases() == 0:
+        raise RuntimeError("No lsmiotool tests were loaded")
+    return test_suite
+
+
+lsmiotool_test_module_names = _discoverTestModuleNames()
+lsmiotool_tests = _importTestModules(lsmiotool_test_module_names)
 
 
 def suite():
-    suite = unittest.TestSuite()
-    tests = []
-    for test in lsmiotool_tests:
-        tl = unittest.TestLoader().loadTestsFromModule(test)
-        tests += tl._tests
-    suite._tests = tests
-    return suite
+    return _buildTestSuite(lsmiotool_tests)
 
 
-def run_and_report():
-    if _HAS_COVERAGE:
-        cov = coverage.Coverage()
-        cov.erase()
-        cov.start()
+def run_and_report() -> int:
     tr = unittest.TextTestRunner(verbosity=2)
-    tr.run(suite())
-    if _HAS_COVERAGE:
-        cov.stop()
-        cov.analysis(lsmiotool.lib)
-
-    mc = []
-    for m in sys.modules.values():
-        if m and m.__name__.startswith("lsmiotool.lib"):
-            mc.append(m)
-    if _HAS_COVERAGE:
-        cov.report(mc, ignore_errors=1, show_missing=0)
+    result = tr.run(suite())
+    return 0 if result.wasSuccessful() else 1

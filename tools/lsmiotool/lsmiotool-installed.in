@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 #
-# Copyright 2023 Serdar Bulut
+# Copyright 2026 Serdar Bulut
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
-# 
+#
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 
+#
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -27,7 +27,9 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
-# 
+#
+
+"""Installed public entry point wrapper for lsmiotool."""
 
 import getopt
 import os
@@ -36,17 +38,26 @@ import sys
 if next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None) == "test":
     os.environ.setdefault("MPLBACKEND", "Agg")
 
-# Calculate server path
-srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-if srv_path not in sys.path:
-    sys.path.insert(0, srv_path)
+REL_BIN_TO_PYTHON = "@REL_BIN_TO_PYTHON@"
+REL_BIN_TO_LIBEXEC_WORKER = "@REL_BIN_TO_LIBEXEC_WORKER@"
+REL_BIN_TO_PROFILE = "@REL_BIN_TO_PROFILE@"
+REL_BIN_TO_ETC = "@REL_BIN_TO_ETC@"
+REL_BIN_TO_ASSETS = "@REL_BIN_TO_ASSETS@"
+REL_BIN_TO_VERSION = "@REL_BIN_TO_VERSION@"
+
+self_path = os.path.abspath(__file__)
+anchor_dir = os.path.dirname(self_path)
+python_root = os.path.normpath(os.path.join(anchor_dir, REL_BIN_TO_PYTHON))
+if python_root not in sys.path:
+    sys.path.insert(0, python_root)
 
 from lsmiotool.lib.cli import (
+    InstalledPackageValidator,
     PackageValidationError,
     RunCliParseError,
-    SourcePackageValidator,
     parseRunArguments,
 )
+from lsmiotool.lib.resources import InstallRelativeLayout, ResourceLocator
 from lsmiotool.lib.version import getVersion
 
 LSMIOTOOL_HELP = """How to run
@@ -72,12 +83,21 @@ options:
 """
 
 if __name__ == '__main__':
-    package_root = os.path.dirname(os.path.abspath(__file__))
+    pkg_root = os.path.normpath(os.path.join(python_root, "lsmiotool"))
     try:
-        SourcePackageValidator.validate(package_root)
+        InstalledPackageValidator.validate(pkg_root)
     except PackageValidationError as err:
         sys.stderr.write(f"Package validation error: {err}\n")
         sys.exit(1)
+
+    rel_layout = InstallRelativeLayout(
+        f_package_root=REL_BIN_TO_PYTHON,
+        f_profile_file=REL_BIN_TO_PROFILE,
+        f_asset_root=REL_BIN_TO_ASSETS,
+        f_worker_executable=REL_BIN_TO_LIBEXEC_WORKER,
+        f_version_file=REL_BIN_TO_VERSION,
+    )
+    runtime_layout = ResourceLocator.forInstalled(self_path, rel_layout)
 
     debug = False
     is_ssd = False
@@ -92,7 +112,7 @@ if __name__ == '__main__':
                 print(LSMIOTOOL_HELP.rstrip())
                 sys.exit(0)
             elif opt in ('-v', '--version'):
-                print('version: ' + getVersion())
+                print('version: ' + getVersion(runtime_layout.version_file))
                 sys.exit(0)
             elif opt in ('-d', '--debug'):
                 debug = True
@@ -154,7 +174,10 @@ if __name__ == '__main__':
         except RunCliParseError as err:
             sys.stderr.write(f"{err}\n")
             sys.exit(1)
-        inst_main = main.RunMain(f_request=run_request)
+        inst_main = main.RunMain(
+            f_request=run_request,
+            f_runtime_layout=runtime_layout,
+        )
     elif cmd == 'shell':
         from lsmiotool.lib import main
         inst_main = main.ShellMain()

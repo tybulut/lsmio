@@ -8,6 +8,8 @@ BUILD_TYPE="RELEASE"
 DO_CLEAN=false
 DO_MAKE=false
 DO_TEST=false
+DO_XTEST=false
+DO_PTEST=false
 DO_INSTALL=false
 DO_COVERAGE=false
 
@@ -25,6 +27,12 @@ for arg in "$@"; do
       ;;
     test)
       DO_TEST=true
+      ;;
+    xtest)
+      DO_XTEST=true
+      ;;
+    ptest)
+      DO_PTEST=true
       ;;
     install)
       DO_INSTALL=true
@@ -55,11 +63,21 @@ if [ "$DO_MAKE" = true ] || [ "$DO_TEST" = true ] || [ "$DO_INSTALL" = true ]; t
   make -j8 || exit 1
 fi
 
+CTEST_FAILED=0
 if [ "$DO_TEST" = true ]; then
   if [ "$DO_COVERAGE" = true ]; then
     export LLVM_PROFILE_FILE="coverage-%p.profraw"
   fi
-  ctest -j8 || exit 1
+  ctest -j8 || CTEST_FAILED=1
+fi
+
+if [ "$DO_XTEST" = true ]; then
+  ctest -j8 --output-on-failure -Q --timeout 120 || exit 1
+fi
+
+if [ "$DO_PTEST" = true ]; then
+  pushd "$BS_DIRNAME/tools/lsmiotool" && ./lsmiotool test || exit 1
+  popd
 fi
 
 if [ "$DO_INSTALL" = true ]; then
@@ -67,6 +85,9 @@ if [ "$DO_INSTALL" = true ]; then
 fi
 
 if [ "$DO_COVERAGE" = true ]; then
+  echo "Generating lsmiotool Python coverage report..."
+  cmake --build . --target lsmiotool_python_coverage_report || exit 1
+
   echo "Generating coverage report..."
   
   if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -106,6 +127,10 @@ if [ "$DO_COVERAGE" = true ]; then
     genhtml coverage.filtered.info --output-directory coverage_report
     echo "Coverage report generated at build/coverage_report/index.html"
   fi
+fi
+
+if [ "$CTEST_FAILED" -ne 0 ]; then
+  exit 1
 fi
 
 popd

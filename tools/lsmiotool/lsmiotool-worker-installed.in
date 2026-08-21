@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+#
+# Copyright 2026 Serdar Bulut
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+
+"""Private worker executable for lsmiotool run allocation and rank tasks in installed layout."""
+
+import os
+import sys
+from typing import List, Optional, Sequence
+
+REL_LIBEXEC_TO_PYTHON = "@REL_LIBEXEC_TO_PYTHON@"
+REL_LIBEXEC_TO_PROFILE = "@REL_LIBEXEC_TO_PROFILE@"
+REL_LIBEXEC_TO_ETC = "@REL_LIBEXEC_TO_ETC@"
+REL_LIBEXEC_TO_ASSETS = "@REL_LIBEXEC_TO_ASSETS@"
+REL_LIBEXEC_TO_WORKER = "@REL_LIBEXEC_TO_WORKER@"
+REL_LIBEXEC_TO_VERSION = "@REL_LIBEXEC_TO_VERSION@"
+
+self_path = os.path.abspath(__file__)
+anchor_dir = os.path.dirname(self_path)
+python_root = os.path.normpath(os.path.join(anchor_dir, REL_LIBEXEC_TO_PYTHON))
+if python_root not in sys.path:
+    sys.path.insert(0, python_root)
+
+
+def main(f_argv: Optional[Sequence[str]] = None) -> int:
+    """Execute private worker entry point for allocation or rank modes.
+
+    Args:
+        f_argv: Argument sequence (defaults to sys.argv[1:]).
+
+    Returns:
+        Integer exit code.
+    """
+    from lsmiotool.lib.cli import (
+        InstalledPackageValidator,
+        PackageValidationError,
+    )
+    from lsmiotool.lib.resources import InstallRelativeLayout, ResourceLocator
+
+    pkg_root = os.path.normpath(os.path.join(python_root, "lsmiotool"))
+    try:
+        InstalledPackageValidator.validate(pkg_root)
+    except PackageValidationError as err:
+        sys.stderr.write(f"Package validation error: {err}\n")
+        return 1
+
+    if f_argv is None:
+        f_tokens: List[str] = sys.argv[1:]
+    else:
+        f_tokens = list(f_argv)
+
+    if not f_tokens:
+        sys.stderr.write("Usage: lsmiotool-worker <allocation|rank> <args...>\n")
+        return 1
+
+    mode = f_tokens[0].strip().lower()
+
+    rel_layout = InstallRelativeLayout(
+        f_package_root=REL_LIBEXEC_TO_PYTHON,
+        f_profile_file=REL_LIBEXEC_TO_PROFILE,
+        f_asset_root=REL_LIBEXEC_TO_ASSETS,
+        f_worker_executable=REL_LIBEXEC_TO_WORKER,
+        f_version_file=REL_LIBEXEC_TO_VERSION,
+    )
+    runtime_layout = ResourceLocator.forInstalled(self_path, rel_layout)
+
+    if mode == "allocation":
+        if len(f_tokens) != 3:
+            sys.stderr.write(
+                "Usage: lsmiotool-worker allocation <manifest_path> <point_id>\n"
+            )
+            return 2
+
+        manifest_path = f_tokens[1]
+        point_id = f_tokens[2]
+
+        from lsmiotool.lib.worker import (
+            AllocationController,
+            AllocationControllerError,
+        )
+
+        worker_exe = self_path
+
+        try:
+            controller = AllocationController(
+                f_worker_executable=worker_exe,
+                f_asset_source=runtime_layout.asset_root,
+                f_layout=runtime_layout,
+            )
+            return controller.run(
+                f_manifest_path=manifest_path,
+                f_point_id=point_id,
+            )
+        except AllocationControllerError as err:
+            sys.stderr.write(f"AllocationController error: {err}\n")
+            return 1
+        except Exception as err:
+            sys.stderr.write(f"Worker error: {err}\n")
+            return 1
+
+    elif mode == "rank":
+        if len(f_tokens) != 4:
+            sys.stderr.write(
+                "Usage: lsmiotool-worker rank <manifest_path> <point_id> <combination_desc>\n"
+            )
+            return 2
+
+        manifest_path = f_tokens[1]
+        point_id = f_tokens[2]
+        combination_desc = f_tokens[3]
+
+        from lsmiotool.lib.worker import (
+            RankWorker,
+            RankWorkerError,
+        )
+
+        try:
+            worker = RankWorker()
+            return worker.run(
+                f_manifest_path=manifest_path,
+                f_point_id=point_id,
+                f_combination_desc=combination_desc,
+            )
+        except RankWorkerError as err:
+            sys.stderr.write(f"RankWorker error: {err}\n")
+            return 1
+        except Exception as err:
+            sys.stderr.write(f"Worker error: {err}\n")
+            return 1
+
+    else:
+        sys.stderr.write(f"Unknown worker mode: {mode!r}\n")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

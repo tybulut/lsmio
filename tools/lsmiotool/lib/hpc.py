@@ -28,145 +28,158 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+
+import os
 import subprocess
 import sys
-from typing import List, Any
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
-from lsmiotool.lib import env, debuggable
+from lsmiotool.lib import debuggable, env
 from lsmiotool.lib.env import HpcEnv
 from lsmiotool.lib.log import Console
+from lsmiotool.lib.profile import ProfileDocument, ProfileLoader, ProfileRecord, ProfileSchemaError
+from lsmiotool.lib.site import EnvironmentResolver, SiteProfile, SiteResolutionError
 
 
 class HpcModules(debuggable.DebuggableObject):
-    """A class to manage HPC environment."""
+    """A class to manage HPC environment modules via authoritative site profile."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *f_args: Any,
+        f_profile_path: Optional[str] = None,
+        **f_kwargs: Any,
+    ) -> None:
         """Initialize the HpcModules class.
 
         Args:
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
+            *f_args: Variable length argument list.
+            f_profile_path: Optional path to environments.json configuration file.
+            **f_kwargs: Arbitrary keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__(*f_args, **f_kwargs)
+        self.m_profile_path = f_profile_path
 
-    def _get_modules(self, hpc_env: HpcEnv) -> List[str]:
-        """Get the list of modules for a given HPC environment.
+    def _resolveSiteProfile(
+        self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]
+    ) -> SiteProfile:
+        """Resolve any HPC environment identifier or record to a typed SiteProfile.
 
         Args:
-            hpc_env: The HPC environment to get modules for.
+            f_hpc_env: HpcEnv enum, SiteProfile, ProfileRecord, or site name string.
 
         Returns:
-            List of module names to load.
+            Resolved SiteProfile instance.
         """
-        modules: List[str] = []
-        if hpc_env == HpcEnv.VIKING:
-            modules = [
-                "data/HDF5/1.10.7-gompi-2020b",
-                "compiler/GCC/11.3.0",
-                "devel/CMake/3.24.3-GCCcore-11.3.0",
-                "mpi/OpenMPI/4.1.4-GCC-11.3.0",
-                "lib/zlib/1.2.12-GCCcore-11.3.0",
-                "lib/lz4/1.9.3-GCCcore-11.3.0",
-                "lib/libunwind/1.6.2-GCCcore-11.3.0",
-                "lib/OpenJPEG/2.5.0-GCCcore-11.3.0",
-                "numlib/FFTW/3.3.10-GCC-11.3.0",
-            ]
-        elif hpc_env == HpcEnv.VIKING2:
-            modules = [
-                "GCCcore/13.2.0",
-                "CMake/3.27.6-GCCcore-13.2.0",
-                "OpenMPI/4.1.6-GCC-13.2.0",
-                "zlib/1.2.13-GCCcore-13.2.0",
-                "lz4/1.9.4-GCCcore-13.2.0",
-                "libunwind/1.6.2-GCCcore-13.2.0",
-                "OpenJPEG/2.5.0-GCCcore-13.2.0",
-                "FFTW/3.3.10-GCC-13.2.0",
-                "gflags/2.2.2-GCCcore-12.3.0",
-                "bzip2/1.0.8-GCCcore-13.2.0",
-                "HDF5/1.14.3-gompi-2023b",
-                "SciPy-bundle/2023.11-gfbf-2023b",
-                "matplotlib/3.8.2-gfbf-2023b",
-            ]
-        elif hpc_env == HpcEnv.ISAMBARD:
-            modules = [
-                "modules/3.2.11.4",
-                "system-config/3.6.3070-7.0.2.1_7.3__g40f385a9.ari",
-                "craype-network-aries",
-                "Base-opts/2.4.142-7.0.2.1_2.69__g8f27585.ari",
-                "alps/6.6.59-7.0.2.1_3.62__g872a8d62.ari",
-                "nodestat/2.3.89-7.0.2.1_2.53__g8645157.ari",
-                "craype/2.6.2",
-                "sdb/3.3.812-7.0.2.1_2.74__gd6c4e58.ari",
-                "cray-libsci/20.09.1",
-                "udreg/2.3.2-7.0.2.1_2.24__g8175d3d.ari",
-                "pmi/5.0.17",
-                "ugni/6.0.14.0-7.0.2.1_3.24__ge78e5b0.ari",
-                "atp/3.11.7",
-                "gni-headers/5.0.12.0-7.0.2.1_2.27__g3b1768f.ari",
-                "rca/2.2.20-7.0.2.1_2.76__g8e3fb5b.ari",
-                "dmapp/7.1.1-7.0.2.1_2.75__g38cf134.ari",
-                "perftools-base/21.05.0",
-                "xpmem/2.2.20-7.0.2.1_2.61__g87eb960.ari",
-                "llm/21.4.629-7.0.2.1_2.53__g8cae6ef.ari",
-                "cray-mpich/7.7.17",
-                "gcc/10.3.0",
-                "tools/cmake/3.24.2",
-                "PrgEnv-gnu/6.0.9",
-                "cray-mpich-abi/7.7.17",
-                "cray-hdf5-parallel/1.12.0.4",
-                "cray-fftw/3.3.8.10",
-                "gdb4hpc/4.10.6",
-            ]
-        elif hpc_env == HpcEnv.ARCHER2:
-            modules = [
-                "PrgEnv-gnu", "load-epcc-module", "extra-compilers", "gcc/11.2.0", 
-                "cmake/3.29.4", "cray-mpich/8.1.27", "darshan/3.3.1", "darshan-util/3.3.1", 
-                "cray-hdf5-parallel/1.12.2.7", "craype-x86-genoa", "craype-x86-milan", 
-                "craype-x86-milan-x", "craype-x86-rome", "craype-x86-spr", "craype-x86-trento", 
-                "cray-fftw/3.3.10.5"
-            ]
-        return modules
+        if isinstance(f_hpc_env, SiteProfile):
+            return f_hpc_env
 
-    def shell_commands(self, hpc_env: HpcEnv) -> List[str]:
+        f_user = os.environ.get("USER") or "user"
+        f_home = os.environ.get("HOME") or "/tmp"
+
+        if isinstance(f_hpc_env, ProfileRecord):
+            return EnvironmentResolver.resolveProfile(
+                f_hpc_env, f_user=f_user, f_home=f_home
+            )
+
+        if isinstance(f_hpc_env, HpcEnv):
+            f_site_name = f_hpc_env.name
+        elif isinstance(f_hpc_env, str):
+            f_site_name = f_hpc_env.strip().upper()
+        elif hasattr(f_hpc_env, "name") and isinstance(f_hpc_env.name, str):
+            f_site_name = f_hpc_env.name.strip().upper()
+        else:
+            raise SiteResolutionError(
+                f"Unsupported HPC environment identifier: {f_hpc_env!r}"
+            )
+
+        f_profile_path = (
+            self.m_profile_path or EnvironmentResolver.getDefaultProfilePath()
+        )
+        return EnvironmentResolver.resolveProfile(
+            f_site_name,
+            f_user=f_user,
+            f_home=f_home,
+            f_env_file=f_profile_path,
+        )
+
+    def getModules(
+        self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]
+    ) -> Tuple[str, ...]:
+        """Get the authoritative tuple of modules for a given HPC environment.
+
+        Args:
+            f_hpc_env: The HPC environment to get modules for.
+
+        Returns:
+            Tuple of module names to load in declared order.
+        """
+        f_profile = self._resolveSiteProfile(f_hpc_env)
+        return f_profile.modules
+
+    _get_modules = getModules
+    get_modules = getModules
+
+    def shellCommands(
+        self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]
+    ) -> List[str]:
         """Get the list of shell commands for a given HPC environment.
 
         Args:
-            hpc_env: The HPC environment to get commands for.
+            f_hpc_env: The HPC environment to get commands for.
 
         Returns:
             List of shell commands to execute.
         """
-        Console.debug("shell_commands: " + hpc_env.value)
-        if hpc_env == HpcEnv.ISAMBARD:
-            commands: List[str] = ["module purge"]
-            modules = self._get_modules(HpcEnv.ISAMBARD)
-        elif hpc_env == HpcEnv.VIKING:
-            commands = ["module purge"]
-            modules = self._get_modules(HpcEnv.VIKING)
-        elif hpc_env == HpcEnv.VIKING2:
-            commands = ["module purge"]
-            modules = self._get_modules(HpcEnv.VIKING2)
-        elif hpc_env == HpcEnv.ARCHER2:
-            commands = ["module purge"]
-            modules = self._get_modules(HpcEnv.ARCHER2)
-        elif hpc_env == HpcEnv.DEV:
-            commands = []
-            modules = []
-        else:
-            Console.error(env.UNKNOWN_HPC_ENVIRONMENT)
-            sys.exit(1)
-        commands += [f"module load {mod}" for mod in modules]
-        return commands
+        f_profile = self._resolveSiteProfile(f_hpc_env)
+        Console.debug(f"shell_commands: {f_profile.name}")
+        if not f_profile.modules:
+            return []
+        f_commands: List[str] = ["module purge"]
+        f_commands.extend([f"module load {f_mod}" for f_mod in f_profile.modules])
+        return f_commands
 
-    def shell_output(self, hpc_env: HpcEnv) -> str:
+    shell_commands = shellCommands
+
+    def shellOutput(
+        self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]
+    ) -> str:
         """Print all module commands (purge and loads) for the current HPC environment.
 
         Args:
-            hpc_env: The HPC environment to get commands for.
+            f_hpc_env: The HPC environment to get commands for.
 
         Returns:
-            String containing all module commands.
+            String containing all module commands separated by newlines.
         """
-        commands = self.shell_commands(hpc_env)
-        script = "\n".join(commands)
-        return script
+        f_commands = self.shellCommands(f_hpc_env)
+        return "\n".join(f_commands)
+
+    shell_output = shellOutput
+
+    def load(
+        self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]
+    ) -> None:
+        """Execute all module commands for the requested HPC environment.
+
+        Executes module purge and module loads in one checked Bash invocation,
+        stopping at the first failure.
+
+        Args:
+            f_hpc_env: The HPC environment to load modules for.
+        """
+        f_commands = self.shellCommands(f_hpc_env)
+        if not f_commands:
+            return
+        f_script = "\n".join(["set -e"] + f_commands)
+        f_result = subprocess.run(
+            f_script,
+            shell=True,
+            executable="/bin/bash",
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        print("Loading modules: stdout:", f_result.stdout)
+        print("Loading modules: stderr:", f_result.stderr)

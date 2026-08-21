@@ -33,13 +33,9 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-import numpy as np
-
-from lsmiotool import settings
-from lsmiotool.lib import jobs, dirs, env, hpc
-from lsmiotool.lib import data, debuggable, log, output, plot
+from lsmiotool.lib import debuggable, log
 
 # Catch CTRL-C
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -56,11 +52,11 @@ class BaseMain(debuggable.DebuggableObject):
 class TestMain(BaseMain):
     """Test execution mode for running unit tests."""
 
-    def run(self) -> None:
+    def run(self) -> int:
         """Execute test suite and report results."""
         from lsmiotool import test
 
-        test.run_and_report()
+        return test.run_and_report()
 
 
 class ParseMain(BaseMain):
@@ -111,6 +107,8 @@ class ParseMain(BaseMain):
         Returns:
             Absolute path to directory to parse.
         """
+        from lsmiotool.lib import dirs, env
+
         if f_bench_type == "ior":
             if f_mode == "small":
                 dir_path = os.path.expanduser(
@@ -165,6 +163,8 @@ class ParseMain(BaseMain):
             f_mode: Execution mode scale.
             f_is_ssd: Whether SSD storage path is used.
         """
+        from lsmiotool.lib import output
+
         target_dir = self._getTargetDir("ior", f_mode, f_is_ssd)
         log.Console.debug(f"Parsing IOR logs from: {target_dir}")
         agg = output.IorAggOutput(target_dir)
@@ -177,6 +177,8 @@ class ParseMain(BaseMain):
             f_mode: Execution mode scale.
             f_is_ssd: Whether SSD storage path is used.
         """
+        from lsmiotool.lib import output
+
         target_dir = self._getTargetDir("lsmio", f_mode, f_is_ssd)
         log.Console.debug(f"Parsing LSMIO logs from: {target_dir}")
         agg = output.LsmioAggOutput(target_dir)
@@ -189,6 +191,8 @@ class ParseMain(BaseMain):
             f_mode: Execution mode scale.
             f_is_ssd: Whether SSD storage path is used.
         """
+        from lsmiotool.lib import output
+
         target_dir = self._getTargetDir("lmp", f_mode, f_is_ssd)
         log.Console.debug(f"Parsing LMP logs from: {target_dir}")
         agg = output.LmpAggOutput(target_dir)
@@ -263,6 +267,8 @@ class CompareMain(BaseMain):
 
     def run(self) -> None:
         """Scan benchmark subdirectories, extract data series, and generate comparison plot."""
+        from lsmiotool.lib import data, plot
+
         target_dir = self.resolveDirectory(self.m_folder)
         if not os.path.isdir(target_dir):
             log.Console.error(f"Directory not found: {target_dir}")
@@ -304,75 +310,146 @@ class CompareMain(BaseMain):
 
 
 class RunMain(BaseMain):
-    """Run command for executing benchmarks and tests."""
+    """Run command for executing benchmarks via RunOrchestrator."""
 
-    _options = {
-        "ior": {
-            "bm_setup": ["BASE", "HDF5", "HDF5-C", "COLLECTIVE", "FSYNC", "REVERSE"],
-            "sb_bin": "$HOME/src/usr/bin",
-            "bs": ["64K", "1M", "8M"],
-            "dirs_bm_base": dirs.get_base_dir(env.BM_DIR)["BASE"],
-            "ior_dir_output": dirs.get_log_dir(env.BM_DIR)["LOG"],
-        }
-    }
+    m_request: Any
+    m_orchestrator_factory: Optional[Callable[..., Any]]
+    m_worker_validator: Optional[Any]
+    m_site: Optional[Union[str, Any]]
+    m_runtime_layout: Optional[Any]
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Command: run <ior|lsmio|lmp> <local|bake|small|large>
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[Any] = None,
+        f_orchestrator_factory: Optional[Callable[..., Any]] = None,
+        f_worker_validator: Optional[Any] = None,
+        f_site: Optional[Union[str, Any]] = None,
+        f_runtime_layout: Optional[Any] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        """Initialize RunMain.
+
+        Command: run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
 
         Args:
-            *args: Variable length argument list
-            **kwargs: Arbitrary keyword arguments
+            *f_args: Positional argument list (can be [target, scale] or [RunRequest]).
+            f_request: Optional parsed canonical RunRequest.
+            f_orchestrator_factory: Optional injected factory callable returning a RunOrchestrator.
+            f_worker_validator: Optional injected worker validator for preflight checks.
+            f_site: Optional explicit site or profile.
+            f_runtime_layout: Optional runtime layout.
+            **f_kwargs: Additional keyword arguments (e.g. ssd=True, setup="...").
         """
         super().__init__()
-        self.command: str = args[0]
-        self.mode: str = args[1]
-        allowed_commands = ["ior", "lsmio", "lmp"]
-        if self.command not in allowed_commands:
-            log.Console.error(
-                "Command to execute has to be in: " + str(allowed_commands)
-            )
-            sys.exit(1)
-        allowed_modes = ["local", "bake", "small", "large"]
-        if self.mode not in allowed_modes:
-            log.Console.error("Command mode has to be in: " + str(allowed_modes))
-            sys.exit(1)
+        from lsmiotool.lib.cli import parseRunArguments
+        from lsmiotool.lib.run import RunRequest
 
-    def _run_IOR(self) -> None:
-        if self.mode == "local":
-            bench = jobs.IORBenchmark(
-                bm_setup=self._options["ior"]["bm_setup"][0],
-                sb_bin=self._options["ior"]["sb_bin"],
-                dirs_bm_base=self._options["ior"]["dirs_bm_base"],
-                ior_dir_output=self._options["ior"]["ior_dir_output"],
+        if f_request is not None:
+            if not isinstance(f_request, RunRequest):
+                raise ValueError(
+                    f"f_request must be RunRequest, got: {type(f_request).__name__}"
+                )
+            self.m_request = f_request
+        elif len(f_args) == 1 and isinstance(f_args[0], RunRequest):
+            self.m_request = f_args[0]
+        elif len(f_args) >= 2:
+            f_argv: List[str] = [str(a) for a in f_args]
+            if (
+                "setup" in f_kwargs
+                and f_kwargs["setup"] is not None
+                and "--setup" not in f_argv
+            ):
+                f_argv.extend(["--setup", str(f_kwargs["setup"])])
+            self.m_request = parseRunArguments(
+                f_argv, f_global_ssd=bool(f_kwargs.get("ssd", False))
             )
-            result = bench.run("16", "64K")
-        elif self.mode == "bake":
-            runner = jobs.JobsRunner(env.hpc_manager)
-            runner.run_bake()
-        elif self.mode == "small":
-            log.Console.error("argument small: Not Implemented")
-            sys.exit(1)
-        elif self.mode == "large":
-            log.Console.error("argument large: Not Implemented")
-            sys.exit(1)
+        elif len(f_args) == 1 and isinstance(f_args[0], (list, tuple)):
+            self.m_request = parseRunArguments(
+                list(f_args[0]), f_global_ssd=bool(f_kwargs.get("ssd", False))
+            )
         else:
-            log.Console.error("Mode [" + self.mode + "] unimplemented.")
-            sys.exit(1)
+            raise ValueError(
+                "RunMain requires either a RunRequest or positional benchmark and scale arguments."
+            )
 
-    def _run_LSMIO(self) -> None:
-        pass
+        self.m_orchestrator_factory = f_orchestrator_factory
+        self.m_worker_validator = f_worker_validator
+        self.m_site = f_site
+        self.m_runtime_layout = f_runtime_layout
 
-    def _run_LMP(self) -> None:
-        pass
+    @property
+    def request(self) -> Any:
+        return self.m_request
 
-    def run(self) -> None:
-        if self.command == "ior":
-            self._run_IOR()
-        elif self.command == "lsmio":
-            self._run_LSMIO()
-        elif self.command == "lmp":
-            self._run_LMP()
+    @property
+    def orchestratorFactory(self) -> Optional[Callable[..., Any]]:
+        return self.m_orchestrator_factory
+
+    @property
+    def orchestrator_factory(self) -> Optional[Callable[..., Any]]:
+        return self.m_orchestrator_factory
+
+    @property
+    def workerValidator(self) -> Optional[Any]:
+        return self.m_worker_validator
+
+    @property
+    def worker_validator(self) -> Optional[Any]:
+        return self.m_worker_validator
+
+    @property
+    def site(self) -> Optional[Union[str, Any]]:
+        return self.m_site
+
+    @property
+    def runtimeLayout(self) -> Optional[Any]:
+        return self.m_runtime_layout
+
+    @property
+    def runtime_layout(self) -> Optional[Any]:
+        return self.m_runtime_layout
+
+    def run(self) -> int:
+        """Execute benchmark run orchestration and return integer exit status."""
+        from lsmiotool.lib.cli import WorkerExecutableValidator
+        from lsmiotool.lib.run import (
+            OrchestrationError,
+            PreflightError,
+            RunOrchestrator,
+        )
+
+        f_validator = (
+            self.m_worker_validator
+            if self.m_worker_validator is not None
+            else WorkerExecutableValidator
+        )
+
+        if self.m_orchestrator_factory is not None:
+            try:
+                f_orch = self.m_orchestrator_factory(
+                    f_worker_validator=f_validator
+                )
+            except TypeError:
+                f_orch = self.m_orchestrator_factory()
+        else:
+            f_orch = RunOrchestrator(
+                f_worker_validator=f_validator
+            )
+
+        try:
+            f_view = f_orch.execute(
+                f_request=self.m_request,
+                f_site=self.m_site,
+                f_runtime_layout=self.m_runtime_layout,
+            )
+            return f_orch.exitCode
+        except (PreflightError, OrchestrationError) as f_err:
+            sys.stderr.write(f"Error: {f_err}\n")
+            return 1
+        except Exception as f_err:
+            sys.stderr.write(f"Unexpected error: {f_err}\n")
+            return 1
 
 
 class ShellMain(BaseMain):
@@ -390,6 +467,8 @@ class HpcEnvMain(BaseMain):
 
     def run(self) -> None:
         """Print module shell commands to stdout."""
+        from lsmiotool.lib import env, hpc
+
         hpc_modules = hpc.HpcModules()
         print(hpc_modules.shell_output(env.HPC_ENV))
 
@@ -406,11 +485,13 @@ class NotImplemented(BaseMain):
 class DemoMain(BaseMain):
     """Demo execution mode for example plots."""
 
-    def __init__(self):
-        import plot
+    def __init__(self) -> None:
+        super().__init__()
 
     def demoRunDummy(self) -> None:
         """Generate a dummy plot with sample data."""
+        from lsmiotool.lib import plot
+
         fn = "demo.png"
         md = plot.PlotMetaData("Sports Watch Data", "Average Pulse", "Calorie Burnage")
         pd = plot.PlotData(
@@ -424,6 +505,8 @@ class DemoMain(BaseMain):
 
     def demoRunSingle(self) -> None:
         """Generate a single IOR benchmark plot."""
+        from lsmiotool.lib import data, plot
+
         ior_run = data.IorSummaryData(
             "/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv"
         )
@@ -437,6 +520,8 @@ class DemoMain(BaseMain):
 
     def demoRunMulti(self) -> None:
         """Generate multiple IOR benchmark plots."""
+        from lsmiotool.lib import data, plot
+
         ior_run = data.IorSummaryData(
             "/home/sbulut/src/archive.ISAMBARD/ior-base/outputs/ior-report.csv"
         )
@@ -461,8 +546,7 @@ class LatexMain(BaseMain):
     """LaTeX document generation mode for paper plots."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Initialize with HPC environment selection.
+        """Initialize with HPC environment selection.
 
         Args:
             *args: Variable length argument list
@@ -479,6 +563,8 @@ class LatexMain(BaseMain):
 
     def _results_from_viking(self) -> None:
         """Set up paths for Viking HPC environment."""
+        from lsmiotool.lib import env
+
         self.ior_data: str = env.ior_data
         self.lsmio_dir: str = env.lsmio_dir
         self.lsmio_data: str = env.lsmio_data
@@ -486,6 +572,8 @@ class LatexMain(BaseMain):
 
     def _results_from_viking2(self) -> None:
         """Set up paths for Viking2 HPC environment."""
+        from lsmiotool.lib import env
+
         self.ior_data: str = env.ior_data
         self.lsmio_dir: str = env.lsmio_dir
         self.lsmio_data: str = env.lsmio_data
@@ -493,6 +581,8 @@ class LatexMain(BaseMain):
 
     def _results_from_isambard(self) -> None:
         """Set up paths for Isambard HPC environment."""
+        from lsmiotool.lib import env
+
         self.ior_data: str = env.ior_data
         self.lsmio_dir: str = env.lsmio_dir
         self.lsmio_data: str = env.lsmio_data
@@ -530,6 +620,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper41(self) -> None:
         """Generate write performance plot for paper section 4.1."""
+        from lsmiotool.lib import data, plot
+
         ior_run = data.IorSummaryData(os.path.join(self.ior_dir, "ior-report.csv"))
         fn = self._gen_png_name("ior", False, 4, "64K")
         md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
@@ -543,6 +635,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper42(self) -> None:
         """Generate read performance plot for paper section 4.2."""
+        from lsmiotool.lib import data, plot
+
         hdf5_run = data.IorSummaryData(
             os.path.join(self.ior_dir, "hdf5", "ior-report.csv")
         )
@@ -568,6 +662,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper43(self) -> None:
         """Generate write performance plot for paper section 4.3."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -595,6 +691,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper44(self) -> None:
         """Generate read performance plot for paper section 4.4."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -622,6 +720,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper45(self) -> None:
         """Generate write performance plot for paper section 4.5."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -649,6 +749,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper46(self) -> None:
         """Generate read performance plot for paper section 4.6."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -676,6 +778,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper91(self) -> None:
         """Generate write performance plot for paper section 9.1."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -703,6 +807,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper92(self) -> None:
         """Generate read performance plot for paper section 9.2."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -730,6 +836,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper93(self) -> None:
         """Generate write performance plot for paper section 9.3."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
@@ -757,6 +865,8 @@ class LatexMain(BaseMain):
 
     def run_step_paper95(self) -> None:
         """Generate read performance plot for paper section 9.5."""
+        from lsmiotool.lib import data, plot
+
         adios_run = data.LsmioSummaryData(
             os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
         )
