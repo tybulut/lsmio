@@ -29,6 +29,7 @@
 #
 
 import copy
+import json
 import os
 import shlex
 import sys
@@ -39,6 +40,7 @@ from unittest.mock import MagicMock, patch
 
 from lsmiotool.lib.artifacts import ArtifactLayout
 from lsmiotool.lib.evidence import (
+    EvidenceCollisionError,
     EvidenceError,
     EvidenceKind,
     EvidenceRecord,
@@ -61,13 +63,16 @@ from lsmiotool.lib.run import (
 from lsmiotool.lib.scheduler import (
     JobResult,
     JobSpec,
+    PbsSchedulerAdapter,
     SchedulerAdapter,
     SchedulerCommandRunner,
     SchedulerError,
     SchedulerScriptError,
     SchedulerScriptRenderer,
+    SlurmSchedulerAdapter,
     SubmissionDispatchError,
     WorkerExecutableValidator,
+    validateTimeout,
 )
 from lsmiotool.lib.site import (
     EnvironmentResolver,
@@ -98,11 +103,13 @@ class MockProcessRunner:
         f_stdout: str = "",
         f_stderr: str = "",
         f_exception_to_raise: Optional[Exception] = None,
+        f_custom_handler: Optional[Callable[[Sequence[str]], ProcessResult]] = None,
     ) -> None:
         self.m_returncode = f_returncode
         self.m_stdout = f_stdout
         self.m_stderr = f_stderr
         self.m_exception_to_raise = f_exception_to_raise
+        self.m_custom_handler = f_custom_handler
         self.m_invoked_argv: List[List[str]] = []
         self.m_invoked_kwargs: List[Dict[str, Any]] = []
 
@@ -113,6 +120,8 @@ class MockProcessRunner:
     ) -> ProcessResult:
         self.m_invoked_argv.append(list(f_argv))
         self.m_invoked_kwargs.append(dict(f_kwargs))
+        if self.m_custom_handler is not None:
+            return self.m_custom_handler(f_argv)
         if self.m_exception_to_raise is not None:
             raise self.m_exception_to_raise
         return ProcessResult(
@@ -299,7 +308,7 @@ class SchedulerRendererTest(unittest.TestCase):
         )
 
     def testDispatchEvidenceOrder(self) -> None:
-        """Validates strict order of SUBMISSION_REQUESTED -> submit -> SUBMISSION_DISPATCHED -> SUBMISSION_RECORDED."""
+        """Validates strict order of SUBMISSION_REQUESTED -> SUBMISSION_DISPATCHED -> submit -> SUBMISSION_RECORDED."""
         f_mock_runner = MockProcessRunner(f_returncode=0, f_stdout="123456\n")
         f_cmd_runner = SchedulerCommandRunner(f_process_runner=f_mock_runner)
         f_adapter = SchedulerAdapter(
@@ -356,14 +365,338 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(f_disp.evidence_kind, EvidenceKind.SUBMISSION_DISPATCHED)
         self.assertEqual(f_rec.evidence_kind, EvidenceKind.SUBMISSION_RECORDED)
 
+        # Verify dispatched payload: contains pre-spawn metadata only (NO post-return result)
+        self.assertEqual(f_disp.payload["argv"], ["sbatch", "--parsable", f_script_path])
+        self.assertEqual(f_disp.payload["job_name"], self.m_token)
+        self.assertEqual(f_disp.payload["correlation_token"], self.m_token)
+        self.assertEqual(f_disp.payload["script_path"], f_script_path)
+        self.assertEqual(f_disp.payload["working_dir"], self.m_temp_dir.name)
+        self.assertNotIn("returncode", f_disp.payload)
+        self.assertNotIn("stdout", f_disp.payload)
+        self.assertNotIn("stderr", f_disp.payload)
+        self.assertNotIn("timed_out", f_disp.payload)
+
         # Verify recorded payload
         self.assertEqual(f_rec.payload["handle"]["backend"], "slurm")
         self.assertEqual(f_rec.payload["handle"]["job_id"], "123456")
         self.assertEqual(f_rec.payload["job_name"], self.m_token)
+        self.assertEqual(f_rec.payload["raw_output"], "123456")
 
         # Verify runner was invoked with exact submit command
         self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
         self.assertEqual(f_mock_runner.m_invoked_argv[0], ["sbatch", "--parsable", f_script_path])
+
+    def testDispatchEvidenceExistsAtRunnerEntry(self) -> None:
+        """Validates that submission_dispatched exists in evidence store at the exact instant the process runner is entered."""
+        f_evidence_at_entry: Dict[str, Any] = {}
+
+        def entry_handler(f_argv: Sequence[str]) -> ProcessResult:
+            # Inspect evidence store at runner entry
+            f_recs = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+            f_evidence_at_entry["requested"] = f_recs.get("submission_requested")
+            f_evidence_at_entry["dispatched"] = f_recs.get("submission_dispatched")
+            f_evidence_at_entry["recorded"] = f_recs.get("submission_recorded")
+            return ProcessResult(f_returncode=0, f_stdout="998877\n", f_stderr="", f_elapsed_seconds=0.01)
+
+        f_mock_runner = MockProcessRunner(f_custom_handler=entry_handler)
+        f_adapter = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_process_runner=f_mock_runner),
+            f_evidence_store=self.m_evidence_store,
+        )
+
+        f_script_path = os.path.join(self.m_temp_dir.name, "job.sh")
+        with open(f_script_path, "w") as f_f:
+            f_f.write("#!/bin/bash\n")
+
+        f_spec = JobSpec(
+            f_point_id=self.m_point,
+            f_script_path=f_script_path,
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name=self.m_token,
+        )
+
+        f_res = f_adapter.dispatchSubmission(
+            f_point=self.m_point,
+            f_spec=f_spec,
+            f_writer_id="control",
+            f_ordinal=0,
+        )
+
+        # Assert evidence state at the exact moment runner was called:
+        self.assertIsNotNone(f_evidence_at_entry.get("requested"), "submission_requested must exist at runner entry")
+        self.assertIsNotNone(f_evidence_at_entry.get("dispatched"), "submission_dispatched must exist at runner entry")
+        self.assertIsNone(f_evidence_at_entry.get("recorded"), "submission_recorded must NOT exist before runner completes")
+
+        f_disp_entry = f_evidence_at_entry["dispatched"]
+        self.assertEqual(f_disp_entry.sequence_number, 2)
+        self.assertEqual(f_disp_entry.payload["argv"], ["sbatch", "--parsable", f_script_path])
+        self.assertEqual(f_disp_entry.payload["job_name"], self.m_token)
+        self.assertEqual(f_disp_entry.payload["correlation_token"], self.m_token)
+        self.assertNotIn("returncode", f_disp_entry.payload)
+        self.assertNotIn("stdout", f_disp_entry.payload)
+
+        # Assert post-run evidence state:
+        f_post_recs = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+        self.assertIsNotNone(f_post_recs.get("submission_recorded"))
+        self.assertEqual(f_post_recs["submission_recorded"].sequence_number, 3)
+        self.assertEqual(f_post_recs["submission_recorded"].payload["handle"]["job_id"], "998877")
+        self.assertEqual(f_res.job_handle.job_id, "998877")
+
+    def testCrashBeforeRequestBeforeDispatchAfterDispatchAfterAcceptanceAfterHandle(self) -> None:
+        """Verifies submit counts and recovery behavior across all 5 lifecycle crash points."""
+        f_scale_points = self.m_plan.scale_points
+
+        # Crash Point 1: Before Request (empty state) -> submits once
+        f_point_1 = f_scale_points[0]
+        f_runner_1 = MockProcessRunner(f_returncode=0, f_stdout="100001\n")
+        f_adapter_1 = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_1),
+            f_evidence_store=self.m_evidence_store,
+        )
+        f_spec_1 = JobSpec(f_point_id=f_point_1, f_script_path="/tmp/job1.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000001")
+        f_res_1 = f_adapter_1.dispatchSubmission(f_point_1, f_spec_1, f_ordinal=0)
+        self.assertEqual(f_res_1.job_handle.job_id, "100001")
+        self.assertEqual(len(f_runner_1.m_invoked_argv), 1, "Crash point 1: expected exactly 1 submit invocation")
+        f_recs_1 = self.m_evidence_store.readSubmissionRecords(f_point_1, f_ordinal=0)
+        self.assertIsNotNone(f_recs_1["submission_requested"])
+        self.assertIsNotNone(f_recs_1["submission_dispatched"])
+        self.assertIsNotNone(f_recs_1["submission_recorded"])
+
+        # Crash Point 2: After Request, Before Dispatch (only requested exists) -> submits once
+        f_point_2 = f_scale_points[1]
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_point_2,
+            f_writer_id="control",
+            f_payload={"script_path": "/tmp/job2.sh", "job_name": "lm-000000000000000000000002"},
+            f_ordinal=1,
+        )
+        f_runner_2 = MockProcessRunner(f_returncode=0, f_stdout="100002\n")
+        f_adapter_2 = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_2),
+            f_evidence_store=self.m_evidence_store,
+        )
+        f_spec_2 = JobSpec(f_point_id=f_point_2, f_script_path="/tmp/job2.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000002")
+        f_res_2 = f_adapter_2.dispatchSubmission(f_point_2, f_spec_2, f_ordinal=1)
+        self.assertEqual(f_res_2.job_handle.job_id, "100002")
+        self.assertEqual(len(f_runner_2.m_invoked_argv), 1, "Crash point 2: expected exactly 1 submit invocation")
+        f_recs_2 = self.m_evidence_store.readSubmissionRecords(f_point_2, f_ordinal=1)
+        self.assertIsNotNone(f_recs_2["submission_dispatched"])
+        self.assertIsNotNone(f_recs_2["submission_recorded"])
+
+        # Crash Point 3: After Dispatch, Before Acceptance (dispatched exists, scheduler has 0 jobs) -> fails closed, 0 submits
+        f_point_3 = f_scale_points[2]
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_point_3,
+            f_writer_id="control",
+            f_payload={"script_path": "/tmp/job3.sh", "job_name": "lm-000000000000000000000003"},
+            f_ordinal=2,
+        )
+        self.m_evidence_store.recordSubmissionDispatched(
+            f_point=f_point_3,
+            f_writer_id="control",
+            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job3.sh"], "job_name": "lm-000000000000000000000003"},
+            f_ordinal=2,
+        )
+        f_runner_3 = MockProcessRunner(f_returncode=0, f_stdout="NEVER_CALLED")
+        f_adapter_3 = FakeRecoverableAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_3),
+            f_evidence_store=self.m_evidence_store,
+            f_mock_candidates=[],  # 0 jobs in scheduler
+        )
+        f_spec_3 = JobSpec(f_point_id=f_point_3, f_script_path="/tmp/job3.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000003")
+        with self.assertRaises(SubmissionDispatchError):
+            f_adapter_3.dispatchSubmission(f_point_3, f_spec_3, f_ordinal=2)
+        self.assertEqual(len(f_runner_3.m_invoked_argv), 0, "Crash point 3: expected 0 submit invocations")
+
+        # Crash Point 4: After Dispatch, After Acceptance, Before Recorded Handle (dispatched exists, scheduler has 1 job) -> adopts handle, 0 submits
+        f_point_4 = f_scale_points[3]
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_point_4,
+            f_writer_id="control",
+            f_payload={"script_path": "/tmp/job4.sh", "job_name": "lm-000000000000000000000004"},
+            f_ordinal=3,
+        )
+        self.m_evidence_store.recordSubmissionDispatched(
+            f_point=f_point_4,
+            f_writer_id="control",
+            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job4.sh"], "job_name": "lm-000000000000000000000004"},
+            f_ordinal=3,
+        )
+        f_runner_4 = MockProcessRunner(f_returncode=0, f_stdout="NEVER_CALLED")
+        f_adapter_4 = FakeRecoverableAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_4),
+            f_evidence_store=self.m_evidence_store,
+            f_mock_candidates=["100004"],  # 1 job accepted by scheduler
+        )
+        f_spec_4 = JobSpec(f_point_id=f_point_4, f_script_path="/tmp/job4.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000004")
+        f_res_4 = f_adapter_4.dispatchSubmission(f_point_4, f_spec_4, f_ordinal=3)
+        self.assertEqual(f_res_4.job_handle.job_id, "100004")
+        self.assertEqual(len(f_runner_4.m_invoked_argv), 0, "Crash point 4: expected 0 submit invocations")
+        f_recs_4 = self.m_evidence_store.readSubmissionRecords(f_point_4, f_ordinal=3)
+        self.assertIsNotNone(f_recs_4["submission_recorded"])
+        self.assertEqual(f_recs_4["submission_recorded"].payload["handle"]["job_id"], "100004")
+
+        # Crash Point 5: After Recorded Handle (recorded exists) -> returns handle directly, 0 submits
+        f_point_5 = f_scale_points[4]
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_point_5,
+            f_writer_id="control",
+            f_payload={"script_path": "/tmp/job5.sh", "job_name": "lm-000000000000000000000005"},
+            f_ordinal=4,
+        )
+        self.m_evidence_store.recordSubmissionDispatched(
+            f_point=f_point_5,
+            f_writer_id="control",
+            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job5.sh"], "job_name": "lm-000000000000000000000005"},
+            f_ordinal=4,
+        )
+        self.m_evidence_store.recordSubmissionRecorded(
+            f_point=f_point_5,
+            f_writer_id="control",
+            f_handle=JobHandle("slurm", "100005"),
+            f_payload={"raw_output": "100005", "job_name": "lm-000000000000000000000005"},
+            f_ordinal=4,
+        )
+        f_runner_5 = MockProcessRunner(f_returncode=0, f_stdout="NEVER_CALLED")
+        f_adapter_5 = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_5),
+            f_evidence_store=self.m_evidence_store,
+        )
+        f_spec_5 = JobSpec(f_point_id=f_point_5, f_script_path="/tmp/job5.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000005")
+        f_res_5 = f_adapter_5.dispatchSubmission(f_point_5, f_spec_5, f_ordinal=4)
+        self.assertEqual(f_res_5.job_handle.job_id, "100005")
+        self.assertEqual(len(f_runner_5.m_invoked_argv), 0, "Crash point 5: expected 0 submit invocations")
+
+    def testRequestedOnlyMaySubmitOnce(self) -> None:
+        """Verifies that pre-existing submission_requested without submission_dispatched submits exactly once."""
+        f_point = self.m_plan.scale_points[0]
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_point,
+            f_writer_id="control",
+            f_payload={"script_path": "/tmp/job.sh", "job_name": self.m_token},
+            f_ordinal=0,
+        )
+
+        f_runner = MockProcessRunner(f_returncode=0, f_stdout="543210\n")
+        f_adapter = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner),
+            f_evidence_store=self.m_evidence_store,
+        )
+        f_spec = JobSpec(
+            f_point_id=f_point,
+            f_script_path="/tmp/job.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name=self.m_token,
+        )
+
+        f_res = f_adapter.dispatchSubmission(f_point, f_spec, f_ordinal=0)
+        self.assertEqual(f_res.job_handle.job_id, "543210")
+        self.assertEqual(len(f_runner.m_invoked_argv), 1)
+
+        # Second dispatch attempt returns recorded handle without submitting again
+        f_res_2 = f_adapter.dispatchSubmission(f_point, f_spec, f_ordinal=0)
+        self.assertEqual(f_res_2.job_handle.job_id, "543210")
+        self.assertEqual(len(f_runner.m_invoked_argv), 1)
+
+    def testDispatchedZeroOneManyNeverResubmits(self) -> None:
+        """Verifies that submission_dispatched without recorded handle never resubmits across 0, 1, and >1 recovery candidates."""
+        f_scale_points = self.m_plan.scale_points
+
+        # 1. Zero candidate jobs -> INDETERMINATE error, 0 submit calls
+        f_p0 = f_scale_points[0]
+        self.m_evidence_store.recordSubmissionRequested(f_point=f_p0, f_writer_id="control", f_payload={"job_name": "lm-001"}, f_ordinal=0)
+        self.m_evidence_store.recordSubmissionDispatched(f_point=f_p0, f_writer_id="control", f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": "lm-001"}, f_ordinal=0)
+
+        f_runner_zero = MockProcessRunner(f_returncode=0, f_stdout="")
+        f_adapter_zero = FakeRecoverableAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_zero),
+            f_evidence_store=self.m_evidence_store,
+            f_mock_candidates=[],
+        )
+        f_spec_0 = JobSpec(f_point_id=f_p0, f_script_path="/tmp/job.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-001")
+        with self.assertRaises(SubmissionDispatchError) as f_ctx0:
+            f_adapter_zero.dispatchSubmission(f_p0, f_spec_0, f_ordinal=0)
+        self.assertIn("0 candidate jobs", str(f_ctx0.exception))
+        self.assertEqual(len(f_runner_zero.m_invoked_argv), 0)
+
+        # 2. Exactly One candidate job -> Adopts handle, records submission_recorded, 0 submit calls
+        f_p1 = f_scale_points[1]
+        self.m_evidence_store.recordSubmissionRequested(f_point=f_p1, f_writer_id="control", f_payload={"job_name": "lm-002"}, f_ordinal=1)
+        self.m_evidence_store.recordSubmissionDispatched(f_point=f_p1, f_writer_id="control", f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": "lm-002"}, f_ordinal=1)
+
+        f_runner_one = MockProcessRunner(f_returncode=0, f_stdout="")
+        f_adapter_one = FakeRecoverableAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_one),
+            f_evidence_store=self.m_evidence_store,
+            f_mock_candidates=["445566"],
+        )
+        f_spec_1 = JobSpec(f_point_id=f_p1, f_script_path="/tmp/job.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-002")
+        f_res_one = f_adapter_one.dispatchSubmission(f_p1, f_spec_1, f_ordinal=1)
+        self.assertEqual(f_res_one.job_handle.job_id, "445566")
+        self.assertEqual(len(f_runner_one.m_invoked_argv), 0)
+        f_recs_1 = self.m_evidence_store.readSubmissionRecords(f_p1, f_ordinal=1)
+        self.assertIsNotNone(f_recs_1["submission_recorded"])
+        self.assertEqual(f_recs_1["submission_recorded"].payload["handle"]["job_id"], "445566")
+
+        # 3. Many candidate jobs (>1 distinct IDs) -> INDETERMINATE error, 0 submit calls
+        f_p2 = f_scale_points[2]
+        self.m_evidence_store.recordSubmissionRequested(f_point=f_p2, f_writer_id="control", f_payload={"job_name": "lm-003"}, f_ordinal=2)
+        self.m_evidence_store.recordSubmissionDispatched(f_point=f_p2, f_writer_id="control", f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": "lm-003"}, f_ordinal=2)
+
+        f_runner_many = MockProcessRunner(f_returncode=0, f_stdout="")
+        f_adapter_many = FakeRecoverableAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_many),
+            f_evidence_store=self.m_evidence_store,
+            f_mock_candidates=["888001", "888002"],
+        )
+        f_spec_2 = JobSpec(f_point_id=f_p2, f_script_path="/tmp/job.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-003")
+        with self.assertRaises(SubmissionDispatchError) as f_ctx2:
+            f_adapter_many.dispatchSubmission(f_p2, f_spec_2, f_ordinal=2)
+        self.assertIn("multiple distinct candidate jobs", str(f_ctx2.exception))
+        self.assertEqual(len(f_runner_many.m_invoked_argv), 0)
+
+    def testCreateCollisionAndEvidenceWriteFailure(self) -> None:
+        """Verifies that evidence creation collision or write failure halts submission and fails closed."""
+        f_point = self.m_plan.scale_points[0]
+        f_spec = JobSpec(
+            f_point_id=f_point,
+            f_script_path="/tmp/job.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name=self.m_token,
+        )
+
+        # Create a pre-existing dummy file where submission_dispatched.json would be written
+        f_disp_path = os.path.join(
+            self.m_evidence_store.layout.pointSchedulerDir(f_point, 0),
+            "submission_dispatched.json",
+        )
+        os.makedirs(os.path.dirname(f_disp_path), exist_ok=True)
+        with open(f_disp_path, "w") as f_f:
+            f_f.write("corrupt non-json\n")
+
+        f_runner = MockProcessRunner(f_returncode=0, f_stdout="123456\n")
+        f_adapter = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner),
+            f_evidence_store=self.m_evidence_store,
+        )
+
+        # dispatchSubmission should fail with EvidenceError (e.g. EvidenceCollisionError or EvidenceCorruptionError)
+        with self.assertRaises(EvidenceError):
+            f_adapter.dispatchSubmission(f_point, f_spec, f_ordinal=0)
+
+        # Submit process was NEVER spawned
+        self.assertEqual(len(f_runner.m_invoked_argv), 0)
 
     def testRequestWithoutDispatchMaySubmit(self) -> None:
         """Verifies recovery when submission was requested but not dispatched."""
@@ -425,7 +758,7 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=self.m_point,
             f_writer_id="control",
-            f_payload={"returncode": 0, "stdout": "accepted_but_crashed"},
+            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": self.m_token},
             f_ordinal=0,
         )
 
@@ -474,7 +807,7 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_2,
             f_writer_id="control",
-            f_payload={"returncode": 0, "stdout": "dispatched"},
+            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job2.sh"], "job_name": "lm-000000000000000000000002"},
             f_ordinal=1,
         )
 
@@ -510,7 +843,7 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_3,
             f_writer_id="control",
-            f_payload={"returncode": 0, "stdout": "dispatched"},
+            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job3.sh"], "job_name": "lm-000000000000000000000003"},
             f_ordinal=2,
         )
 
@@ -884,6 +1217,81 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(f_res_dict["exit_code"], 0)
         self.assertEqual(f_res_dict["status"], "queued")
         self.assertTrue(f_res_dict["is_success"])
+
+    def testEverySchedulerCallCarriesExactGraceTimeout(self) -> None:
+        """Verifies that every scheduler adapter call derives and carries the exact grace_seconds timeout."""
+        # 1. Profile derivation
+        f_profile = EnvironmentResolver.resolveProfile("VIKING", f_user="testuser", f_home="/tmp")
+        self.assertEqual(f_profile.cancellation.grace_seconds, 120)
+
+        f_runner = MockProcessRunner(f_returncode=0, f_stdout="123456\n")
+        f_adapter = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner),
+            f_profile=f_profile,
+        )
+        self.assertEqual(f_adapter.command_timeout, 120.0)
+        self.assertEqual(f_adapter.commandTimeout, 120.0)
+        self.assertEqual(f_adapter.timeout, 120.0)
+
+        # 2. Dispatch submission passes exact timeout
+        f_spec = JobSpec(
+            f_point_id=self.m_point,
+            f_script_path="/tmp/job.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name=self.m_token,
+        )
+        f_res = f_adapter.dispatchSubmission(self.m_point, f_spec)
+        self.assertEqual(f_res.job_handle.job_id, "123456")
+        self.assertEqual(len(f_runner.m_invoked_kwargs), 1)
+        self.assertEqual(f_runner.m_invoked_kwargs[0].get("f_timeout"), 120.0)
+
+        # 3. Explicit timeout constructor override
+        f_runner_custom = MockProcessRunner(f_returncode=0, f_stdout="789012\n")
+        f_adapter_custom = SchedulerAdapter(
+            f_backend=SchedulerKind.SLURM,
+            f_command_runner=SchedulerCommandRunner(f_runner_custom),
+            f_timeout=45.5,
+        )
+        self.assertEqual(f_adapter_custom.command_timeout, 45.5)
+        f_adapter_custom.dispatchSubmission(self.m_point, f_spec)
+        self.assertEqual(len(f_runner_custom.m_invoked_kwargs), 1)
+        self.assertEqual(f_runner_custom.m_invoked_kwargs[0].get("f_timeout"), 45.5)
+
+        # 4. SlurmSchedulerAdapter derives and passes exact timeout
+        f_slurm_runner = MockProcessRunner(f_returncode=0, f_stdout="999888\n")
+        f_slurm_adapter = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_slurm_runner),
+            f_profile=f_profile,
+        )
+        self.assertEqual(f_slurm_adapter.command_timeout, 120.0)
+        f_slurm_adapter.dispatchSubmission(self.m_point, f_spec)
+        self.assertEqual(f_slurm_runner.m_invoked_kwargs[0].get("f_timeout"), 120.0)
+
+        # Recovery queries on Slurm also carry exact timeout
+        f_slurm_runner.m_invoked_kwargs.clear()
+        f_slurm_adapter.recoverCandidateJobIds("lm-000000000000000000000001")
+        self.assertGreaterEqual(len(f_slurm_runner.m_invoked_kwargs), 2)
+        for f_kw in f_slurm_runner.m_invoked_kwargs:
+            self.assertEqual(f_kw.get("f_timeout"), 120.0)
+
+        # 5. PbsSchedulerAdapter derives and passes exact timeout
+        f_isambard_profile = EnvironmentResolver.resolveProfile("ISAMBARD", f_user="testuser", f_home="/tmp")
+        f_pbs_runner = MockProcessRunner(f_returncode=0, f_stdout="555444.isambard-pbs\n")
+        f_pbs_adapter = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_pbs_runner),
+            f_profile=f_isambard_profile,
+        )
+        self.assertEqual(f_pbs_adapter.command_timeout, 120.0)
+        f_pbs_adapter.dispatchSubmission(self.m_point, f_spec)
+        self.assertEqual(f_pbs_runner.m_invoked_kwargs[0].get("f_timeout"), 120.0)
+
+        # Recovery query on PBS carries exact timeout
+        f_pbs_runner.m_invoked_kwargs.clear()
+        f_pbs_runner.m_stdout = json.dumps({"Jobs": {}})
+        f_pbs_adapter.recoverCandidateJobIds("lm-000000000000000000000001", f_user="testuser")
+        self.assertEqual(len(f_pbs_runner.m_invoked_kwargs), 1)
+        self.assertEqual(f_pbs_runner.m_invoked_kwargs[0].get("f_timeout"), 120.0)
 
 
 if __name__ == "__main__":

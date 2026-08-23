@@ -36,6 +36,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Dict, List, Optional
 import unittest
 from unittest.mock import MagicMock, patch
@@ -240,6 +241,36 @@ class ProcessRunnerTest(unittest.TestCase):
         self.assertTrue(f_result.timedOut)
         self.assertFalse(f_result.is_success)
         self.assertGreater(f_result.elapsed_seconds, 0.0)
+
+    def testRealHungChildKilledAndTimedOut(self) -> None:
+        """Proves that a real hung child process ignoring SIGTERM is killed via SIGKILL and bounded in real elapsed time."""
+        # A real hung script that would sleep 60s
+        f_hung_script = (
+            "import time, signal, sys\n"
+            "try:\n"
+            "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "except Exception:\n"
+            "    pass\n"
+            "sys.stdout.write('STARTED\\n')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(60)\n"
+        )
+        f_argv = [sys.executable, "-c", f_hung_script]
+
+        f_start = time.monotonic()
+        f_result = self.m_runner.run(f_argv, f_timeout=0.2)
+        f_wall_elapsed = time.monotonic() - f_start
+
+        self.assertTrue(f_result.timed_out)
+        self.assertTrue(f_result.timedOut)
+        self.assertFalse(f_result.is_success)
+        self.assertFalse(f_result.isSuccess)
+        self.assertTrue(f_result.is_signal)
+        # Bounded in wall elapsed time (significantly less than the 60-second sleep)
+        self.assertLess(f_wall_elapsed, 5.0)
+        self.assertLess(f_result.elapsed_seconds, 5.0)
+        self.assertGreaterEqual(f_result.elapsed_seconds, 0.15)
+        self.assertIn("STARTED", f_result.stdout)
 
     def testCustomEnvironmentAndCwd(self) -> None:
         """Validates execution with custom environment variables and working directory."""

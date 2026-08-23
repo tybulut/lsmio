@@ -33,6 +33,7 @@ from enum import Enum
 import json
 import os
 import re
+import stat
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from lsmiotool.lib.artifacts import (
@@ -530,6 +531,415 @@ class EvidenceSerializer:
             )
 
         return EvidenceRecord.fromDict(f_parsed)
+
+
+class ResultPayloadValidator:
+    """Validator enforcing exact schema, type, identity, and artifact constraints on terminal result payloads."""
+
+    CANONICAL_SUCCESS_STATUSES: Set[str] = {"success", "succeeded", "completed", "complete"}
+    CANONICAL_FAILURE_STATUSES: Set[str] = {"failed", "failure"}
+
+    RANK_SUCCESS_ALLOWED_KEYS: Set[str] = {
+        "status",
+        "exit_code",
+        "returncode",
+        "exit_status",
+        "global_rank",
+        "rank",
+        "combination",
+        "argv",
+        "log_path",
+        "result_path",
+        "timed_out",
+        "node_rank",
+        "local_rank",
+        "elapsed_seconds",
+        "stage",
+    }
+
+    RANK_FAILURE_ALLOWED_KEYS: Set[str] = {
+        "status",
+        "exit_code",
+        "returncode",
+        "exit_status",
+        "global_rank",
+        "rank",
+        "combination",
+        "argv",
+        "log_path",
+        "result_path",
+        "timed_out",
+        "node_rank",
+        "local_rank",
+        "elapsed_seconds",
+        "error",
+        "signal_number",
+        "stage",
+        "spawn_error",
+    }
+
+    CONTROLLER_SUCCESS_ALLOWED_KEYS: Set[str] = {
+        "status",
+        "exit_code",
+        "returncode",
+        "stage",
+        "output_path",
+        "elapsed_seconds",
+        "combination",
+        "target",
+        "setup",
+        "tasks",
+        "tasks_validated",
+    }
+
+    CONTROLLER_FAILURE_ALLOWED_KEYS: Set[str] = {
+        "status",
+        "exit_code",
+        "returncode",
+        "stage",
+        "error",
+        "signal_number",
+        "elapsed_seconds",
+        "combination",
+        "target",
+        "tasks",
+        "tasks_validated",
+        "output_path",
+        "spawn_error",
+    }
+
+    @classmethod
+    def validateSharedPayload(cls, f_payload: Any) -> Dict[str, Any]:
+        """Validate base constraints common to all terminal result payloads."""
+        if not isinstance(f_payload, (dict, Mapping)) or not f_payload:
+            raise EvidenceSchemaError(
+                f"Result payload must be a non-empty dict/mapping, got: {type(f_payload).__name__} ({f_payload!r})"
+            )
+
+        f_clean = dict(f_payload)
+
+        # 1. status
+        if "status" not in f_clean:
+            raise EvidenceSchemaError("Result payload missing required field 'status'")
+        f_raw_status = f_clean["status"]
+        if not isinstance(f_raw_status, str) or not f_raw_status.strip():
+            raise EvidenceSchemaError(f"Result payload 'status' must be a non-empty string, got: {f_raw_status!r}")
+        f_status = f_raw_status.strip().lower()
+        if f_status not in cls.CANONICAL_SUCCESS_STATUSES and f_status not in cls.CANONICAL_FAILURE_STATUSES:
+            raise EvidenceSchemaError(
+                f"Invalid result payload status: {f_raw_status!r} (must be one of {sorted(cls.CANONICAL_SUCCESS_STATUSES | cls.CANONICAL_FAILURE_STATUSES)})"
+            )
+
+        # 2. exit_code / returncode
+        if "exit_code" not in f_clean:
+            if "returncode" in f_clean:
+                f_clean["exit_code"] = f_clean["returncode"]
+            else:
+                raise EvidenceSchemaError("Result payload missing required field 'exit_code'")
+        f_raw_exit = f_clean["exit_code"]
+        if isinstance(f_raw_exit, bool) or not isinstance(f_raw_exit, int):
+            raise EvidenceSchemaError(f"Result payload 'exit_code' must be an integer, got: {f_raw_exit!r}")
+        f_exit_code = int(f_raw_exit)
+
+        # 3. Status vs exit_code consistency
+        if f_status in cls.CANONICAL_SUCCESS_STATUSES:
+            if f_exit_code != 0:
+                raise EvidenceSchemaError(
+                    f"Success payload cannot have non-zero exit_code: {f_exit_code}"
+                )
+            if "error" in f_clean and f_clean["error"]:
+                raise EvidenceSchemaError(
+                    f"Success payload cannot contain truthy error: {f_clean['error']!r}"
+                )
+            if "timed_out" in f_clean:
+                f_to = f_clean["timed_out"]
+                if not isinstance(f_to, bool):
+                    raise EvidenceSchemaError(f"timed_out must be a boolean, got: {f_to!r}")
+                if f_to is True:
+                    raise EvidenceSchemaError("Success payload cannot have timed_out=True")
+        else:
+            # Failure
+            if f_exit_code == 0:
+                raise EvidenceSchemaError(
+                    "Failure payload cannot have exit_code 0 (failed+zero is contradictory)"
+                )
+
+        # 4. Optional common fields validation
+        if "exit_status" in f_clean:
+            f_raw_es = f_clean["exit_status"]
+            if isinstance(f_raw_es, bool) or not isinstance(f_raw_es, int):
+                raise EvidenceSchemaError(f"exit_status must be an integer, got: {f_raw_es!r}")
+            if f_status in cls.CANONICAL_SUCCESS_STATUSES and f_raw_es != 0:
+                raise EvidenceSchemaError(
+                    f"Success payload cannot have non-zero exit_status: {f_raw_es}"
+                )
+
+        if "elapsed_seconds" in f_clean:
+            f_raw_el = f_clean["elapsed_seconds"]
+            if isinstance(f_raw_el, bool) or not isinstance(f_raw_el, (int, float)) or f_raw_el < 0.0:
+                raise EvidenceSchemaError(
+                    f"elapsed_seconds must be a non-negative float/int, got: {f_raw_el!r}"
+                )
+
+        if "signal_number" in f_clean:
+            f_raw_sig = f_clean["signal_number"]
+            if isinstance(f_raw_sig, bool) or not isinstance(f_raw_sig, int):
+                raise EvidenceSchemaError(
+                    f"signal_number must be an integer, got: {f_raw_sig!r}"
+                )
+
+        return f_clean
+
+    @classmethod
+    def validateRankPayload(
+        cls,
+        f_payload: Any,
+        f_expected_rank: Optional[int] = None,
+        f_expected_combination: Optional[str] = None,
+        f_validate_files: bool = False,
+        f_strict: bool = True,
+        f_layout: Optional[ArtifactLayout] = None,
+    ) -> Dict[str, Any]:
+        """Validate rank result payload enforcing complete schema and identity."""
+        f_clean = cls.validateSharedPayload(f_payload)
+        f_status = f_clean["status"].strip().lower()
+
+        # Check identity fields if present
+        f_rank_val: Optional[int] = None
+        if "global_rank" in f_clean:
+            f_raw_gr = f_clean["global_rank"]
+            if isinstance(f_raw_gr, bool) or not isinstance(f_raw_gr, int) or f_raw_gr < 0:
+                raise EvidenceSchemaError(f"global_rank must be a non-negative integer, got: {f_raw_gr!r}")
+            f_rank_val = f_raw_gr
+
+        if "rank" in f_clean:
+            f_raw_r = f_clean["rank"]
+            if isinstance(f_raw_r, bool) or not isinstance(f_raw_r, int) or f_raw_r < 0:
+                raise EvidenceSchemaError(f"rank must be a non-negative integer, got: {f_raw_r!r}")
+            if f_rank_val is not None and f_rank_val != f_raw_r:
+                raise EvidenceSchemaError(
+                    f"Contradictory rank ({f_raw_r}) and global_rank ({f_rank_val}) in rank payload"
+                )
+            f_rank_val = f_raw_r
+
+        if f_expected_rank is not None and f_rank_val is not None:
+            if f_rank_val != f_expected_rank:
+                raise EvidenceSchemaError(
+                    f"Rank identity mismatch: expected {f_expected_rank}, got {f_rank_val}"
+                )
+
+        if "combination" in f_clean:
+            f_combo_val = f_clean["combination"]
+            if not isinstance(f_combo_val, str) or not f_combo_val.strip():
+                raise EvidenceSchemaError(f"combination must be a non-empty string, got: {f_combo_val!r}")
+            if f_expected_combination is not None:
+                f_norm_exp = f_expected_combination.strip()
+                if f_combo_val.strip() != f_norm_exp:
+                    raise EvidenceSchemaError(
+                        f"Combination identity mismatch: expected {f_norm_exp!r}, got {f_combo_val!r}"
+                    )
+
+        if f_status in cls.CANONICAL_SUCCESS_STATUSES:
+            # Check for extra/forbidden fields
+            f_extra = set(f_clean.keys()) - cls.RANK_SUCCESS_ALLOWED_KEYS
+            if f_extra:
+                raise EvidenceSchemaError(
+                    f"Rank success payload contains forbidden extra fields: {sorted(f_extra)}"
+                )
+
+            if f_strict or f_validate_files:
+                # Required rank success fields
+                if "exit_status" not in f_clean:
+                    raise EvidenceSchemaError("Rank success payload requires 'exit_status: 0'")
+                if f_clean["exit_status"] != 0:
+                    raise EvidenceSchemaError(
+                        f"Rank success payload exit_status must be 0, got: {f_clean['exit_status']}"
+                    )
+
+                if f_rank_val is None:
+                    raise EvidenceSchemaError("Rank success payload requires 'global_rank' or 'rank'")
+                if f_expected_rank is not None and f_rank_val != f_expected_rank:
+                    raise EvidenceSchemaError(
+                        f"Rank identity mismatch: expected {f_expected_rank}, got {f_rank_val}"
+                    )
+
+                if "combination" not in f_clean:
+                    raise EvidenceSchemaError("Rank success payload requires 'combination'")
+
+                if "argv" not in f_clean:
+                    raise EvidenceSchemaError("Rank success payload requires literal 'argv'")
+                f_argv = f_clean["argv"]
+                if not isinstance(f_argv, (list, tuple)) or len(f_argv) == 0 or not all(isinstance(a, str) for a in f_argv):
+                    raise EvidenceSchemaError(f"Rank success argv must be a non-empty list of strings, got: {f_argv!r}")
+
+                if "log_path" not in f_clean or not isinstance(f_clean["log_path"], str) or not f_clean["log_path"].strip():
+                    raise EvidenceSchemaError("Rank success payload requires non-empty 'log_path'")
+
+                if "result_path" not in f_clean or not isinstance(f_clean["result_path"], str) or not f_clean["result_path"].strip():
+                    raise EvidenceSchemaError("Rank success payload requires non-empty 'result_path'")
+
+                if "timed_out" not in f_clean:
+                    raise EvidenceSchemaError("Rank success payload requires 'timed_out: false'")
+                if f_clean["timed_out"] is not False:
+                    raise EvidenceSchemaError(
+                        f"Rank success payload must have timed_out=False, got: {f_clean['timed_out']!r}"
+                    )
+
+            # Artifact checks on disk if requested
+            if f_validate_files:
+                for f_field_name in ("log_path", "result_path"):
+                    f_fpath = f_clean[f_field_name]
+                    if f_layout is not None:
+                        validatePathContainment(f_fpath, f_layout.runRoot)
+                    try:
+                        f_stat = os.lstat(f_fpath)
+                    except (FileNotFoundError, OSError) as f_exc:
+                        raise EvidenceSchemaError(
+                            f"Rank success {f_field_name} '{f_fpath}' does not exist: {f_exc}"
+                        ) from f_exc
+                    if stat.S_ISLNK(f_stat.st_mode):
+                        raise EvidenceSchemaError(
+                            f"Rank success {f_field_name} '{f_fpath}' is a symlink, which is forbidden"
+                        )
+                    if not stat.S_ISREG(f_stat.st_mode):
+                        raise EvidenceSchemaError(
+                            f"Rank success {f_field_name} '{f_fpath}' is not a regular file"
+                        )
+        else:
+            # Failure
+            f_extra = set(f_clean.keys()) - cls.RANK_FAILURE_ALLOWED_KEYS
+            if f_extra:
+                raise EvidenceSchemaError(
+                    f"Rank failure payload contains forbidden extra fields: {sorted(f_extra)}"
+                )
+
+        return f_clean
+
+    @classmethod
+    def validateControllerPayload(
+        cls,
+        f_payload: Any,
+        f_target: Optional[str] = None,
+        f_expected_tasks: Optional[int] = None,
+        f_expected_combination: Optional[str] = None,
+        f_validate_files: bool = False,
+        f_strict: bool = True,
+        f_layout: Optional[ArtifactLayout] = None,
+    ) -> Dict[str, Any]:
+        """Validate controller result payload enforcing complete schema and artifact requirements."""
+        f_clean = cls.validateSharedPayload(f_payload)
+        f_status = f_clean["status"].strip().lower()
+
+        if "combination" in f_clean and f_expected_combination is not None:
+            f_combo_val = f_clean["combination"]
+            if str(f_combo_val).strip() != f_expected_combination.strip():
+                raise EvidenceSchemaError(
+                    f"Controller combination mismatch: expected {f_expected_combination!r}, got {f_combo_val!r}"
+                )
+
+        if f_status in cls.CANONICAL_SUCCESS_STATUSES:
+            f_extra = set(f_clean.keys()) - cls.CONTROLLER_SUCCESS_ALLOWED_KEYS
+            if f_extra:
+                raise EvidenceSchemaError(
+                    f"Controller success payload contains forbidden extra fields: {sorted(f_extra)}"
+                )
+
+            if f_strict:
+                # stage is required for controller success
+                if "stage" not in f_clean or not isinstance(f_clean["stage"], str) or not f_clean["stage"].strip():
+                    raise EvidenceSchemaError("Controller success payload requires non-empty 'stage'")
+
+            # LSMIO specific
+            f_norm_target = str(f_target).strip().lower() if f_target else None
+            if f_norm_target == "lsmio" or "tasks_validated" in f_clean:
+                if f_strict and "tasks_validated" not in f_clean:
+                    raise EvidenceSchemaError("LSMIO controller success requires 'tasks_validated'")
+                if "tasks_validated" in f_clean:
+                    f_tv = f_clean["tasks_validated"]
+                    if isinstance(f_tv, bool) or not isinstance(f_tv, int) or f_tv <= 0:
+                        raise EvidenceSchemaError(
+                            f"tasks_validated must be a positive integer, got: {f_tv!r}"
+                        )
+                    if f_expected_tasks is not None and f_tv != f_expected_tasks:
+                        raise EvidenceSchemaError(
+                            f"tasks_validated ({f_tv}) != planned tasks ({f_expected_tasks})"
+                        )
+
+            if "output_path" in f_clean and f_validate_files:
+                f_out_path = f_clean["output_path"]
+                if not isinstance(f_out_path, str) or not f_out_path.strip():
+                    raise EvidenceSchemaError("output_path must be a non-empty string")
+                if f_layout is not None:
+                    validatePathContainment(f_out_path, f_layout.runRoot)
+                try:
+                    f_stat = os.lstat(f_out_path)
+                except (FileNotFoundError, OSError) as f_exc:
+                    raise EvidenceSchemaError(
+                        f"Controller output artifact '{f_out_path}' does not exist: {f_exc}"
+                    ) from f_exc
+                if stat.S_ISLNK(f_stat.st_mode):
+                    raise EvidenceSchemaError(
+                        f"Controller output artifact '{f_out_path}' is a symlink, which is forbidden"
+                    )
+                if not stat.S_ISREG(f_stat.st_mode):
+                    raise EvidenceSchemaError(
+                        f"Controller output artifact '{f_out_path}' is not a regular file"
+                    )
+        else:
+            # Failure
+            f_extra = set(f_clean.keys()) - cls.CONTROLLER_FAILURE_ALLOWED_KEYS
+            if f_extra:
+                raise EvidenceSchemaError(
+                    f"Controller failure payload contains forbidden extra fields: {sorted(f_extra)}"
+                )
+            if f_strict and ("stage" not in f_clean or not isinstance(f_clean["stage"], str) or not f_clean["stage"].strip()):
+                raise EvidenceSchemaError("Controller failure payload requires non-empty 'stage'")
+
+        return f_clean
+
+    @classmethod
+    def isSuccessPayload(
+        cls,
+        f_payload: Any,
+        f_kind: Union[EvidenceKind, str, WriterKind] = EvidenceKind.CONTROLLER_RESULT,
+        f_strict: bool = False,
+        **kwargs: Any,
+    ) -> bool:
+        """Return True if payload is strictly valid and indicates success."""
+        try:
+            f_kind_str = f_kind.value if hasattr(f_kind, "value") else str(f_kind)
+            if "rank" in f_kind_str.lower():
+                cls.validateRankPayload(f_payload, f_strict=f_strict, **kwargs)
+            else:
+                cls.validateControllerPayload(f_payload, f_strict=f_strict, **kwargs)
+            if isinstance(f_payload, (dict, Mapping)):
+                f_st = str(f_payload.get("status", "")).strip().lower()
+                return f_st in cls.CANONICAL_SUCCESS_STATUSES
+            return False
+        except (EvidenceSchemaError, EvidenceCorruptionError, Exception):
+            return False
+
+    @classmethod
+    def isFailurePayload(
+        cls,
+        f_payload: Any,
+        f_kind: Union[EvidenceKind, str, WriterKind] = EvidenceKind.CONTROLLER_RESULT,
+        f_strict: bool = False,
+        **kwargs: Any,
+    ) -> bool:
+        """Return True if payload is strictly valid and indicates failure."""
+        try:
+            f_kind_str = f_kind.value if hasattr(f_kind, "value") else str(f_kind)
+            if "rank" in f_kind_str.lower():
+                cls.validateRankPayload(f_payload, f_strict=f_strict, **kwargs)
+            else:
+                cls.validateControllerPayload(f_payload, f_strict=f_strict, **kwargs)
+            if isinstance(f_payload, (dict, Mapping)):
+                f_st = str(f_payload.get("status", "")).strip().lower()
+                return f_st in cls.CANONICAL_FAILURE_STATUSES
+            return False
+        except (EvidenceSchemaError, EvidenceCorruptionError, Exception):
+            return False
 
 
 class EvidenceStore:

@@ -156,6 +156,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 )
                 f_expected_log = os.path.join(
                     self.m_layout.pointLogsDir(self.m_point),
+                    f_combo.name,
                     "rank_0.log",
                 )
                 f_expected_result = self.m_layout.pointRankResultPath(
@@ -249,7 +250,7 @@ class LsmioAdapterTest(unittest.TestCase):
         # All 4 log paths must be distinct
         self.assertEqual(len(set(f_log_paths)), 4)
         for f_r, f_log in enumerate(f_log_paths):
-            self.assertTrue(f_log.endswith(f"rank_{f_r}.log"))
+            self.assertTrue(f_log.endswith(f"c16_b1M/rank_{f_r}.log"))
 
         # All 4 result paths must be distinct
         self.assertEqual(len(set(f_result_paths)), 4)
@@ -282,7 +283,7 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertEqual(f_cmd.identity.global_rank, 2)
         self.assertTrue(f_cmd.is_rank_local)
         self.assertTrue(f_cmd.output_path.endswith("lsmio-rank-2-leveldb.db"))
-        self.assertTrue(f_cmd.stdout_path.endswith("rank_2.log"))
+        self.assertTrue(f_cmd.stdout_path.endswith("c16_b64K/rank_2.log"))
         self.assertTrue(f_cmd.result_path.endswith("ranks/2/c16_b64K/result.json"))
 
     def testRangeAndContainment(self) -> None:
@@ -395,49 +396,36 @@ class LsmioAdapterTest(unittest.TestCase):
             )
 
     def testProbeFailures(self) -> None:
-        """Verify fail-closed handling for missing or unsupported LSMIO binaries."""
-        # 1. Runner raises FileNotFoundError
-        def mockMissingBinary(f_argv: Sequence[str]) -> MockProcessResult:
-            raise FileNotFoundError("Executable not found: /path/to/missing_bm")
+        """Verify fail-closed handling for invalid arguments and diagnostic modes."""
+        # 1. Invalid executable type or empty or whitespace
+        with self.assertRaises(BenchmarkConfigurationError):
+            self.m_adapter.probeCapability(f_executable="")
+        with self.assertRaises(BenchmarkConfigurationError):
+            self.m_adapter.probeCapability(f_executable="   ")
+        with self.assertRaises(BenchmarkConfigurationError):
+            self.m_adapter.probeCapability(f_executable=None)  # type: ignore
 
-        with self.assertRaises(BenchmarkProbeError):
-            self.m_adapter.probeCapability(
-                f_executable="/path/to/missing_bm",
-                f_runner=mockMissingBinary,
-            )
+        # 2. Executable with NUL byte
+        with self.assertRaises(BenchmarkConfigurationError):
+            self.m_adapter.probeCapability(f_executable="/bin/bm_native\0")
 
-        # 2. Runner returns non-zero exit code
-        def mockFailingRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=127, stdout="", stderr="bm_native: command not found")
-
-        with self.assertRaises(BenchmarkProbeError):
-            self.m_adapter.probeCapability(
-                f_executable="/bin/bm_native",
-                f_runner=mockFailingRunner,
-            )
-
-        # 3. Runner output indicates unsupported capability
-        def mockUnsupportedRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=0, stdout="unsupported option -v", stderr="")
-
+        # 3. Diagnostic mode ENV requested for probe
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
                 f_executable="/bin/bm_native",
-                f_runner=mockUnsupportedRunner,
+                f_setup="ENV",
             )
 
-        # 4. Runner returns empty output
-        def mockEmptyRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=0, stdout="", stderr="")
-
+        # 4. Invalid setup requested for probe
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
                 f_executable="/bin/bm_native",
-                f_runner=mockEmptyRunner,
+                f_setup="INVALID_SETUP",
             )
 
     def testUnverifiedNoVersionClaim(self) -> None:
-        """Prove unprobeable binaries remain recorded as configured/unverified."""
+        """Prove unprobeable LSMIO binaries remain recorded as configured/unverified (Critic P-02)."""
+        # When runner is None, returns CapabilityState.CONFIGURED without claiming version
         f_state = self.m_adapter.probeCapability(f_executable="/bin/bm_native", f_runner=None)
         self.assertEqual(f_state, CapabilityState.CONFIGURED)
         self.assertEqual(f_state, ProbeState.CONFIGURED)
@@ -445,17 +433,23 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertFalse(f_state.is_verified)
         self.assertFalse(f_state.is_unsupported)
 
-        def mockSuccessRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            self.assertEqual(f_argv, ["/bin/bm_native", "-v"])
+        # When runner is provided, LSMIO binaries still remain configured/unverified because bare -v fails
+        f_runner_called = False
+
+        def mockRunner(f_argv: Sequence[str]) -> MockProcessResult:
+            nonlocal f_runner_called
+            f_runner_called = True
             return MockProcessResult(returncode=0, stdout="LSMIO Benchmark version 1.0", stderr="")
 
-        f_verified = self.m_adapter.probeCapability(
+        f_state_with_runner = self.m_adapter.probeCapability(
             f_executable="/bin/bm_native",
-            f_runner=mockSuccessRunner,
+            f_runner=mockRunner,
+            f_setup="NATIVE-M",
         )
-        self.assertEqual(f_verified, CapabilityState.VERIFIED)
-        self.assertTrue(f_verified.is_verified)
-        self.assertFalse(f_verified.is_configured)
+        self.assertFalse(f_runner_called, "LSMIO probe should not invoke runner on probe-incapable binaries")
+        self.assertEqual(f_state_with_runner, CapabilityState.CONFIGURED)
+        self.assertTrue(f_state_with_runner.is_configured)
+        self.assertFalse(f_state_with_runner.is_verified)
 
     def testCommandImmutability(self) -> None:
         """Verify that LsmioLaunchSpec and LsmioBoundCommand are immutable."""

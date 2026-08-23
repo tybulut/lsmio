@@ -47,6 +47,7 @@ from lsmiotool.lib.cli import (
     SourcePackageValidator,
     parseRunArguments,
 )
+from lsmiotool.lib.resources import ResourceLocator
 from lsmiotool.lib.version import getVersion
 
 LSMIOTOOL_HELP = """How to run
@@ -154,7 +155,11 @@ if __name__ == '__main__':
         except RunCliParseError as err:
             sys.stderr.write(f"{err}\n")
             sys.exit(1)
-        inst_main = main.RunMain(f_request=run_request)
+        source_layout = ResourceLocator.forSource(__file__)
+        inst_main = main.RunMain(
+            f_request=run_request,
+            f_runtime_layout=source_layout,
+        )
     elif cmd == 'shell':
         from lsmiotool.lib import main
         inst_main = main.ShellMain()

@@ -65,8 +65,8 @@ class ResourceLocatorTest(unittest.TestCase):
             f_version_file="../share/lsmio/python/VERSION",
         )
 
-    def testExactSourceLayout(self) -> None:
-        """Validates exact constructed paths for source layout across public and private entries."""
+    def testSourceLayoutExactCheckedInPaths(self) -> None:
+        """Validates exact five-path source layout across public, private worker, spaces, and relative entries."""
         # Public source entry
         f_public_entry = "/mock/repo/tools/lsmiotool/lsmiotool"
         f_layout1 = ResourceLocator.forSource(f_public_entry)
@@ -83,25 +83,45 @@ class ResourceLocatorTest(unittest.TestCase):
         self.assertEqual(f_layout1.profileFile, "/mock/repo/tools/lsmiotool/etc/environments.json")
         self.assertEqual(f_layout1.asset_root, "/mock/repo/tools/bmtool/lmp-reaxff")
         self.assertEqual(f_layout1.assetRoot, "/mock/repo/tools/bmtool/lmp-reaxff")
-        self.assertEqual(f_layout1.worker_executable, "/mock/repo/tools/lsmiotool/worker/lsmioworker")
-        self.assertEqual(f_layout1.workerExecutable, "/mock/repo/tools/lsmiotool/worker/lsmioworker")
+        self.assertEqual(f_layout1.worker_executable, "/mock/repo/tools/lsmiotool/lsmiotool-worker")
+        self.assertEqual(f_layout1.workerExecutable, "/mock/repo/tools/lsmiotool/lsmiotool-worker")
         self.assertEqual(f_layout1.version_file, "/mock/repo/VERSION")
         self.assertEqual(f_layout1.versionFile, "/mock/repo/VERSION")
 
         # Private source worker entry
-        f_private_entry = "/mock/repo/tools/lsmiotool/worker/lsmioworker"
+        f_private_entry = "/mock/repo/tools/lsmiotool/lsmiotool-worker"
         f_layout2 = ResourceLocator.forSource(f_private_entry)
         self.assertEqual(f_layout1, f_layout2)
 
-        # Source worker entry directly under tools/lsmiotool
-        f_worker_entry = "/mock/repo/tools/lsmiotool/lsmiotool-worker"
-        f_layout3 = ResourceLocator.forSource(f_worker_entry)
-        self.assertEqual(f_layout1, f_layout3)
-
         # Package directory entry
         f_pkg_entry = "/mock/repo/tools/lsmiotool"
-        f_layout4 = ResourceLocator.forSource(f_pkg_entry)
-        self.assertEqual(f_layout1, f_layout4)
+        f_layout3 = ResourceLocator.forSource(f_pkg_entry)
+        self.assertEqual(f_layout1, f_layout3)
+
+        # Path with spaces
+        f_spaces_entry = "/mock path/with spaces/repo/tools/lsmiotool/lsmiotool"
+        f_layout_spaces = ResourceLocator.forSource(f_spaces_entry)
+        self.assertEqual(f_layout_spaces.package_root, "/mock path/with spaces/repo/tools/lsmiotool")
+        self.assertEqual(f_layout_spaces.profile_file, "/mock path/with spaces/repo/tools/lsmiotool/etc/environments.json")
+        self.assertEqual(f_layout_spaces.asset_root, "/mock path/with spaces/repo/tools/bmtool/lmp-reaxff")
+        self.assertEqual(f_layout_spaces.worker_executable, "/mock path/with spaces/repo/tools/lsmiotool/lsmiotool-worker")
+        self.assertEqual(f_layout_spaces.version_file, "/mock path/with spaces/repo/VERSION")
+
+        # Relative invocation path
+        f_orig_cwd = os.getcwd()
+        try:
+            os.chdir(self.m_temp_dir)
+            f_cur_cwd = os.getcwd()
+            f_rel_entry = "./tools/lsmiotool/lsmiotool"
+            f_layout_rel = ResourceLocator.forSource(f_rel_entry)
+            self.assertEqual(f_layout_rel.package_root, os.path.normpath(os.path.join(f_cur_cwd, "tools/lsmiotool")))
+            self.assertEqual(f_layout_rel.worker_executable, os.path.normpath(os.path.join(f_cur_cwd, "tools/lsmiotool/lsmiotool-worker")))
+        finally:
+            os.chdir(f_orig_cwd)
+
+    def testExactSourceLayout(self) -> None:
+        """Alias preserving testExactSourceLayout naming from initial plan."""
+        self.testSourceLayoutExactCheckedInPaths()
 
     def testInstalledUsesOnlyAnchorAndConstants(self) -> None:
         """Validates exact constructed paths for installed layout using anchor and relative layout."""
@@ -175,15 +195,19 @@ class ResourceLocatorTest(unittest.TestCase):
         self.assertTrue(f_source_layout.package_root.startswith("/opt/nonexistent_src"))
         self.assertNotIn("never_installed", f_source_layout.package_root)
 
-    def testReturnsNonexistentConstructedPathsWithoutFallback(self) -> None:
+    def testSourceConstructionAllowsNotYetExistingConsumerPath(self) -> None:
         """Verifies path construction succeeds on non-existent paths without disk dependencies."""
         f_nonexistent_source = "/does/not/exist/anywhere/tools/lsmiotool/lsmiotool"
         f_source_layout = ResourceLocator.forSource(f_nonexistent_source)
         self.assertEqual(f_source_layout.package_root, "/does/not/exist/anywhere/tools/lsmiotool")
         self.assertEqual(f_source_layout.profile_file, "/does/not/exist/anywhere/tools/lsmiotool/etc/environments.json")
         self.assertEqual(f_source_layout.asset_root, "/does/not/exist/anywhere/tools/bmtool/lmp-reaxff")
-        self.assertEqual(f_source_layout.worker_executable, "/does/not/exist/anywhere/tools/lsmiotool/worker/lsmioworker")
+        self.assertEqual(f_source_layout.worker_executable, "/does/not/exist/anywhere/tools/lsmiotool/lsmiotool-worker")
         self.assertEqual(f_source_layout.version_file, "/does/not/exist/anywhere/VERSION")
+
+    def testReturnsNonexistentConstructedPathsWithoutFallback(self) -> None:
+        """Verifies path construction succeeds on non-existent paths without disk dependencies."""
+        self.testSourceConstructionAllowsNotYetExistingConsumerPath()
 
         f_nonexistent_installed = "/completely/fake/install/bin/lsmiotool"
         f_installed_layout = ResourceLocator.forInstalled(
@@ -246,6 +270,42 @@ class ResourceLocatorTest(unittest.TestCase):
             f_mock_path_isdir.assert_not_called()
             f_mock_path_issymlink.assert_not_called()
             f_mock_path_resolve.assert_not_called()
+
+    def testSourceLayoutIgnoresCwdHomeAndDecoys(self) -> None:
+        """Verifies source layout construction is completely isolated from cwd, HOME, and decoy files."""
+        f_decoy_cwd = os.path.join(self.m_temp_dir, "decoy_cwd")
+        f_decoy_home = os.path.join(self.m_temp_dir, "decoy_home")
+        os.makedirs(os.path.join(f_decoy_cwd, "tools", "lsmiotool"), exist_ok=True)
+        os.makedirs(f_decoy_home, exist_ok=True)
+
+        # Place decoy files in cwd and home
+        with open(os.path.join(f_decoy_cwd, "VERSION"), "w", encoding="utf-8") as f_f:
+            f_f.write("decoy_cwd_version\n")
+        with open(os.path.join(f_decoy_home, "VERSION"), "w", encoding="utf-8") as f_f:
+            f_f.write("decoy_home_version\n")
+
+        f_orig_env_home = os.environ.get("HOME")
+        f_orig_cwd = os.getcwd()
+        try:
+            os.environ["HOME"] = f_decoy_home
+            os.chdir(f_decoy_cwd)
+
+            # Call forSource on an explicit path
+            f_layout = ResourceLocator.forSource("/real/repo/tools/lsmiotool/lsmiotool")
+            self.assertEqual(f_layout.package_root, "/real/repo/tools/lsmiotool")
+            self.assertEqual(f_layout.profile_file, "/real/repo/tools/lsmiotool/etc/environments.json")
+            self.assertEqual(f_layout.asset_root, "/real/repo/tools/bmtool/lmp-reaxff")
+            self.assertEqual(f_layout.worker_executable, "/real/repo/tools/lsmiotool/lsmiotool-worker")
+            self.assertEqual(f_layout.version_file, "/real/repo/VERSION")
+            self.assertNotIn("decoy", f_layout.package_root)
+            self.assertNotIn("decoy", f_layout.worker_executable)
+            self.assertNotIn("decoy", f_layout.version_file)
+        finally:
+            os.chdir(f_orig_cwd)
+            if f_orig_env_home is not None:
+                os.environ["HOME"] = f_orig_env_home
+            else:
+                os.environ.pop("HOME", None)
 
     def testIndependentOfCwd(self) -> None:
         """Asserts output is invariant across arbitrary cwd changes."""

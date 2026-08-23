@@ -112,7 +112,7 @@ def main(f_argv: Optional[Sequence[str]] = None) -> int:
             controller = AllocationController(
                 f_worker_executable=worker_exe,
                 f_asset_source=runtime_layout.asset_root,
-                f_layout=runtime_layout,
+                f_layout=None,
             )
             return controller.run(
                 f_manifest_path=manifest_path,

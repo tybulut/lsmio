@@ -164,7 +164,7 @@ class RunPlanTest(unittest.TestCase):
             f_plan = RunPlanner.createPlan(f_req, self.m_viking_profile)
             self.assertEqual(f_plan.request.setup, f_setup)
 
-    def testLmpLargeFailsClosedWithoutIdentityOrSideEffects(self) -> None:
+    def testLmpLargeRejectsBeforeSources(self) -> None:
         """Assert lmp large is rejected fail-closed before any ID, clock, or token invocation."""
         f_id_calls = 0
         f_clock_calls = 0
@@ -201,6 +201,8 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(f_id_calls, 0)
         self.assertEqual(f_clock_calls, 0)
         self.assertEqual(f_token_calls, 0)
+
+    testLmpLargeFailsClosedWithoutIdentityOrSideEffects = testLmpLargeRejectsBeforeSources
 
     def testImmutabilityAndToDict(self) -> None:
         """Assert immutability of all records and canonical JSON schema-1 toDict serialization."""
@@ -263,6 +265,13 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(len(f_dict["combinations"]), 6)
         self.assertEqual(len(f_dict["scheduled_points"]), 1)
         self.assertEqual(f_dict["tokens"], ["lm-0123456789abcdef01234567"])
+        self.assertEqual(f_dict["lmp_task_tuning"], {})
+        self.assertEqual(f_plan.lmp_task_tuning, {})
+
+        # Mutating property copy does not mutate plan
+        f_tuning_copy = f_plan.lmp_task_tuning
+        f_tuning_copy["1"] = {"replication": 4, "buffer_size_mb": 32}
+        self.assertEqual(f_plan.lmp_task_tuning, {})
 
         # JSON round-trip
         f_json_str = json.dumps(f_dict)
@@ -420,30 +429,67 @@ class RunPlanTest(unittest.TestCase):
         with self.assertRaises(PlanValidationError):
             RunPlanner.createPlan(RunRequest("lmp", "local", f_setup="HDF5"), self.m_viking_profile)
 
-    def testOtherLmpTuningUsesTasks(self) -> None:
-        """Assert exact LMP task tuning table mapping across 1, 2, 4, 8, 16, 24, 32, 40, 48 tasks."""
-        f_expected_tuning = {
-            1: (4, 32),
-            2: (5, 32),
-            4: (6, 64),
-            8: (8, 128),
-            16: (10, 256),
-            24: (12, 512),
-            32: (14, 1024),
-            40: (15, 1024),
-            48: (16, 1024),
+    def testApprovedLmpTaskTuningForLocalBakeSmall(self) -> None:
+        """Assert exact literal LMP task tuning objects in RunPlan for local, bake, and small scales."""
+        f_expected_local = {
+            "1": {"replication": 4, "buffer_size_mb": 32},
+        }
+        f_expected_bake = {
+            "1": {"replication": 4, "buffer_size_mb": 32},
+            "2": {"replication": 5, "buffer_size_mb": 32},
+            "4": {"replication": 6, "buffer_size_mb": 64},
+            "8": {"replication": 8, "buffer_size_mb": 128},
+        }
+        f_expected_small = {
+            "1": {"replication": 4, "buffer_size_mb": 32},
+            "2": {"replication": 5, "buffer_size_mb": 32},
+            "4": {"replication": 6, "buffer_size_mb": 64},
+            "8": {"replication": 8, "buffer_size_mb": 128},
+            "16": {"replication": 10, "buffer_size_mb": 256},
+            "24": {"replication": 12, "buffer_size_mb": 512},
+            "32": {"replication": 14, "buffer_size_mb": 1024},
+            "40": {"replication": 15, "buffer_size_mb": 1024},
+            "48": {"replication": 16, "buffer_size_mb": 1024},
         }
 
-        for f_tasks, f_tuning in f_expected_tuning.items():
+        # 1. Local scale plan has exact 1-task tuning
+        f_plan_local = RunPlanner.createPlan(RunRequest("lmp", "local"), self.m_viking_profile)
+        self.assertEqual(f_plan_local.lmp_task_tuning, f_expected_local)
+
+        # 2. Bake scale plan has exact 4-task tuning
+        f_plan_bake = RunPlanner.createPlan(RunRequest("lmp", "bake"), self.m_viking_profile)
+        self.assertEqual(f_plan_bake.lmp_task_tuning, f_expected_bake)
+
+        # 3. Small scale plan has exact 9-task tuning
+        f_plan_small = RunPlanner.createPlan(RunRequest("lmp", "small"), self.m_viking_profile)
+        self.assertEqual(f_plan_small.lmp_task_tuning, f_expected_small)
+
+        # 4. Direct authority query via getLmpTuning
+        f_expected_task_map = {
+            1: {"replication": 4, "buffer_size_mb": 32},
+            2: {"replication": 5, "buffer_size_mb": 32},
+            4: {"replication": 6, "buffer_size_mb": 64},
+            8: {"replication": 8, "buffer_size_mb": 128},
+            16: {"replication": 10, "buffer_size_mb": 256},
+            24: {"replication": 12, "buffer_size_mb": 512},
+            32: {"replication": 14, "buffer_size_mb": 1024},
+            40: {"replication": 15, "buffer_size_mb": 1024},
+            48: {"replication": 16, "buffer_size_mb": 1024},
+        }
+        for f_tasks, f_tuning in f_expected_task_map.items():
             self.assertEqual(RunPlanner.getLmpTuning(f_tasks), f_tuning)
 
-        # Undefined task count raises PlanValidationError
+        # 5. Undefined or non-positive task count raises PlanValidationError
         with self.assertRaises(PlanValidationError):
             RunPlanner.getLmpTuning(64)
         with self.assertRaises(PlanValidationError):
             RunPlanner.getLmpTuning(128)
         with self.assertRaises(PlanValidationError):
             RunPlanner.getLmpTuning(256)
+        with self.assertRaises(PlanValidationError):
+            RunPlanner.getLmpTuning(0)
+        with self.assertRaises(PlanValidationError):
+            RunPlanner.getLmpTuning(-1)
 
     def testLaunchModesAndCardinality(self) -> None:
         """Assert LaunchMode enum members, LaunchSpec, and RankIdentity behavior."""

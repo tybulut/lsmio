@@ -130,15 +130,4 @@ install(
   DESTINATION "${CMAKE_INSTALL_DATADIR}/lsmio/lmp-reaxff"
   FILES_MATCHING PATTERN "*"
 )
-install(
-  FILES "${CMAKE_SOURCE_DIR}/tools/bmtool/lmp-reaxff/in.reaxc.hns"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/lsmio/lmp-reaxff"
-  RENAME "in.reaxff.hns"
-  PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-)
-install(
-  FILES "${CMAKE_SOURCE_DIR}/tools/bmtool/lmp-reaxff/data.hns-equil"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/lsmio/lmp-reaxff"
-  RENAME "data.hns"
-  PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-)
+

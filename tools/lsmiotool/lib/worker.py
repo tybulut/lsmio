@@ -35,6 +35,7 @@ import re
 import shlex
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -1727,7 +1728,7 @@ class AllocationController:
         - For each combination:
           1. Prepares point private data directory data/c<stripe>/b<block>.
           2. Configures Lustre stripe via LustreConfigurator.configure().
-          3. For LMP: stages and validates assets (in.reaxff.hns, data.hns, ffield.reax.hns) into point work directory.
+          3. For LMP: stages and validates assets (in.reaxc.hns, data.hns-equil, ffield.reax.hns) into point work directory.
           4. Resolves benchmark adapter (IOR, LSMIO, LMP):
              - Shared mode (is_rank_local=False, e.g. IOR, LMP):
                - Launches benchmark via Launcher.launchShared().
@@ -2220,24 +2221,67 @@ class AllocationController:
 
                 f_is_ok = f_proc_res.is_success
                 f_ret = f_proc_res.returncode
+                if not f_is_ok or f_ret != 0:
+                    f_store.recordControllerResult(
+                        f_point=f_matched_sp,
+                        f_combination=f_combo_name,
+                        f_payload={
+                            "status": "failed",
+                            "exit_code": f_ret if f_ret != 0 else 1,
+                            "stage": "execution",
+                            "error": f"IOR process failed with code {f_ret}",
+                        },
+                        f_ordinal=f_matched_ord,
+                    )
+                    return f_ret if f_ret != 0 else 1
+
+                # Validate expected benchmark output artifact
+                f_out_path = f_stdout_file
+                f_out_valid = False
+                f_out_err = None
+                try:
+                    from lsmiotool.lib.artifacts import validatePathContainment
+                    validatePathContainment(f_out_path, f_layout_obj.runRoot)
+                    f_st = os.lstat(f_out_path)
+                    if stat.S_ISLNK(f_st.st_mode):
+                        f_out_err = f"Expected IOR output artifact '{f_out_path}' is a symlink"
+                    elif not stat.S_ISREG(f_st.st_mode):
+                        f_out_err = f"Expected IOR output artifact '{f_out_path}' is not a regular file"
+                    else:
+                        f_out_valid = True
+                except Exception as f_stat_err:
+                    f_out_err = f"Expected IOR output artifact '{f_out_path}' could not be validated: {f_stat_err}"
+
+                if not f_out_valid:
+                    f_store.recordControllerResult(
+                        f_point=f_matched_sp,
+                        f_combination=f_combo_name,
+                        f_payload={
+                            "status": "failed",
+                            "exit_code": 1,
+                            "stage": "output_validation",
+                            "error": f_out_err,
+                            "output_path": f_out_path,
+                        },
+                        f_ordinal=f_matched_ord,
+                    )
+                    return 1
+
                 f_store.recordControllerResult(
                     f_point=f_matched_sp,
                     f_combination=f_combo_name,
                     f_payload={
-                        "status": "success" if f_is_ok else "failed",
-                        "exit_code": f_ret,
+                        "status": "success",
+                        "exit_code": 0,
                         "elapsed_seconds": f_proc_res.elapsed_seconds,
                         "stage": "execution",
+                        "output_path": f_out_path,
                     },
                     f_ordinal=f_matched_ord,
                 )
 
-                if not f_is_ok or f_ret != 0:
-                    return f_ret if f_ret != 0 else 1
-
             elif f_target == "lmp":
                 from lsmiotool.lib.benchmarks import LmpAdapter
-                from lsmiotool.lib.run import Combination
 
                 f_lmp_adapter = LmpAdapter()
                 f_lmp_exe = f_manifest.site.executables["lmp"]
@@ -2248,30 +2292,64 @@ class AllocationController:
                 )
                 f_stdout_file = os.path.join(f_logs_dir, f"lmp_{f_combo_name}.stdout")
                 f_stderr_file = os.path.join(f_logs_dir, f"lmp_{f_combo_name}.stderr")
-                f_combo_obj = (
-                    f_manifest.combinations[f_combo_idx]
-                    if hasattr(f_manifest, "combinations")
-                    and f_combo_idx < len(f_manifest.combinations)
-                    else Combination(
-                        f_processes=1,
-                        f_block_size=f_block,
-                        f_stripe_count=f_stripe,
-                        f_block_bytes=1048576,
-                        f_key_count=1024,
-                        f_segment_count=128,
-                    )
-                )
+
+                # Read tuning exclusively from manifest plan for the exact task count
+                f_tasks_str = str(f_matched_sp.tasks)
+                f_tuning_map = None
+                if isinstance(f_manifest.plan, dict) and "lmp_task_tuning" in f_manifest.plan:
+                    f_tuning_map = f_manifest.plan["lmp_task_tuning"]
+                elif hasattr(f_manifest.plan, "lmp_task_tuning"):
+                    f_tuning_map = f_manifest.plan.lmp_task_tuning
+
+                if not isinstance(f_tuning_map, (dict, Mapping)) or f_tasks_str not in f_tuning_map:
+                    f_err_msg = f"Missing LMP tuning in manifest for task count {f_tasks_str}"
+                    try:
+                        f_store.recordControllerResult(
+                            f_point=f_matched_sp,
+                            f_combination=f_combo_name,
+                            f_payload={
+                                "status": "failed",
+                                "exit_code": 1,
+                                "stage": "spec",
+                                "error": f_err_msg,
+                            },
+                            f_ordinal=f_matched_ord,
+                        )
+                    except Exception:
+                        pass
+                    return 1
+
+                f_point_tuning = f_tuning_map[f_tasks_str]
+                if not isinstance(f_point_tuning, (dict, Mapping)):
+                    f_err_msg = f"Malformed LMP tuning in manifest for task count {f_tasks_str}: {f_point_tuning!r}"
+                    try:
+                        f_store.recordControllerResult(
+                            f_point=f_matched_sp,
+                            f_combination=f_combo_name,
+                            f_payload={
+                                "status": "failed",
+                                "exit_code": 1,
+                                "stage": "spec",
+                                "error": f_err_msg,
+                            },
+                            f_ordinal=f_matched_ord,
+                        )
+                    except Exception:
+                        pass
+                    return 1
+
+                f_rep = f_point_tuning.get("replication")
+                f_buf = f_point_tuning.get("buffer_size_mb")
 
                 try:
                     f_cmd = f_lmp_adapter.buildCommand(
                         f_executable=f_lmp_exe,
                         f_setup=f_setup,
-                        f_tasks=f_matched_sp.tasks,
-                        f_threads=1,
+                        f_replication=f_rep,
+                        f_buffer_size_mb=f_buf,
                         f_working_dir=f_combo_work_dir,
                         f_stdout_path=f_stdout_file,
                         f_stderr_path=f_stderr_file,
-                        f_combination=f_combo_obj,
                     )
                 except Exception as f_spec_err:
                     try:
@@ -2318,20 +2396,64 @@ class AllocationController:
 
                 f_is_ok = f_proc_res.is_success
                 f_ret = f_proc_res.returncode
+                if not f_is_ok or f_ret != 0:
+                    f_store.recordControllerResult(
+                        f_point=f_matched_sp,
+                        f_combination=f_combo_name,
+                        f_payload={
+                            "status": "failed",
+                            "exit_code": f_ret if f_ret != 0 else 1,
+                            "stage": "execution",
+                            "error": f"LMP process failed with code {f_ret}",
+                        },
+                        f_ordinal=f_matched_ord,
+                    )
+                    return f_ret if f_ret != 0 else 1
+
+                # Validate expected benchmark output artifact
+                f_out_path = f_stdout_file
+                f_out_valid = False
+                f_out_err = None
+                try:
+                    from lsmiotool.lib.artifacts import validatePathContainment
+                    validatePathContainment(f_out_path, f_layout_obj.runRoot)
+                    f_st = os.lstat(f_out_path)
+                    if stat.S_ISLNK(f_st.st_mode):
+                        f_out_err = f"Expected LMP output artifact '{f_out_path}' is a symlink"
+                    elif not stat.S_ISREG(f_st.st_mode):
+                        f_out_err = f"Expected LMP output artifact '{f_out_path}' is not a regular file"
+                    else:
+                        f_out_valid = True
+                except Exception as f_stat_err:
+                    f_out_err = f"Expected LMP output artifact '{f_out_path}' could not be validated: {f_stat_err}"
+
+                if not f_out_valid:
+                    f_store.recordControllerResult(
+                        f_point=f_matched_sp,
+                        f_combination=f_combo_name,
+                        f_payload={
+                            "status": "failed",
+                            "exit_code": 1,
+                            "stage": "output_validation",
+                            "error": f_out_err,
+                            "output_path": f_out_path,
+                        },
+                        f_ordinal=f_matched_ord,
+                    )
+                    return 1
+
                 f_store.recordControllerResult(
                     f_point=f_matched_sp,
                     f_combination=f_combo_name,
                     f_payload={
-                        "status": "success" if f_is_ok else "failed",
-                        "exit_code": f_ret,
+                        "status": "success",
+                        "exit_code": 0,
                         "elapsed_seconds": f_proc_res.elapsed_seconds,
                         "stage": "execution",
+                        "output_path": f_out_path,
                     },
                     f_ordinal=f_matched_ord,
                 )
-
-                if not f_is_ok or f_ret != 0:
-                    return f_ret if f_ret != 0 else 1
 
             elif f_target == "lsmio":
                 # Rank-local mode
@@ -2400,6 +2522,7 @@ class AllocationController:
                 # Scan and validate rank evidence
                 f_ranks_failed = False
                 f_failure_reason = None
+                from lsmiotool.lib.evidence import ResultPayloadValidator
                 for f_rank_idx in range(f_matched_sp.tasks):
                     f_rank_result_path = f_layout_obj.pointRankResultPath(
                         f_matched_sp, f_rank_idx, f_combo_name, f_matched_ord
@@ -2409,6 +2532,21 @@ class AllocationController:
                         f_failure_reason = (
                             f"Missing rank result for rank {f_rank_idx} in combination {f_combo_name}"
                         )
+                        break
+
+                    try:
+                        f_st = os.lstat(f_rank_result_path)
+                        if stat.S_ISLNK(f_st.st_mode):
+                            f_ranks_failed = True
+                            f_failure_reason = f"Rank result for rank {f_rank_idx} is a symlink: '{f_rank_result_path}'"
+                            break
+                        if not stat.S_ISREG(f_st.st_mode):
+                            f_ranks_failed = True
+                            f_failure_reason = f"Rank result for rank {f_rank_idx} is not a regular file: '{f_rank_result_path}'"
+                            break
+                    except OSError as f_st_err:
+                        f_ranks_failed = True
+                        f_failure_reason = f"Cannot lstat rank result for rank {f_rank_idx}: {f_st_err}"
                         break
 
                     try:
@@ -2429,63 +2567,23 @@ class AllocationController:
                         )
                         break
 
+                    try:
+                        ResultPayloadValidator.validateRankPayload(
+                            f_rank_rec.payload,
+                            f_expected_rank=f_rank_idx,
+                            f_expected_combination=f_combo_name,
+                            f_validate_files=True,
+                            f_layout=f_layout_obj,
+                        )
+                    except Exception as f_val_err:
+                        f_ranks_failed = True
+                        f_failure_reason = f"Rank {f_rank_idx} failed payload validation: {f_val_err}"
+                        break
+
                     f_payload = f_rank_rec.payload or {}
-                    if not isinstance(f_payload, dict):
+                    if f_payload.get("status") != "success" or int(f_payload.get("exit_code", -1)) != 0:
                         f_ranks_failed = True
-                        f_failure_reason = (
-                            f"Invalid payload type for rank {f_rank_idx}: {type(f_payload).__name__}"
-                        )
-                        break
-
-                    if "exit_code" in f_payload:
-                        try:
-                            if int(f_payload["exit_code"]) != 0:
-                                f_ranks_failed = True
-                                f_failure_reason = (
-                                    f"Rank {f_rank_idx} reported nonzero exit code: {f_payload['exit_code']}"
-                                )
-                                break
-                        except (ValueError, TypeError):
-                            f_ranks_failed = True
-                            f_failure_reason = (
-                                f"Rank {f_rank_idx} reported non-integer exit code: {f_payload.get('exit_code')}"
-                            )
-                            break
-                    elif "exit_status" in f_payload:
-                        try:
-                            if int(f_payload["exit_status"]) != 0:
-                                f_ranks_failed = True
-                                f_failure_reason = (
-                                    f"Rank {f_rank_idx} reported nonzero exit status: {f_payload['exit_status']}"
-                                )
-                                break
-                        except (ValueError, TypeError):
-                            f_ranks_failed = True
-                            f_failure_reason = (
-                                f"Rank {f_rank_idx} reported non-integer exit status: {f_payload.get('exit_status')}"
-                            )
-                            break
-
-                    if f_payload.get("status") in (
-                        "failed",
-                        "failure",
-                        "error",
-                        "interrupted",
-                        "cancelled",
-                        "timeout",
-                        "timed_out",
-                    ):
-                        f_ranks_failed = True
-                        f_failure_reason = (
-                            f"Rank {f_rank_idx} reported failure status: {f_payload.get('status')}"
-                        )
-                        break
-
-                    if f_payload.get("error"):
-                        f_ranks_failed = True
-                        f_failure_reason = (
-                            f"Rank {f_rank_idx} reported error: {f_payload.get('error')}"
-                        )
+                        f_failure_reason = f"Rank {f_rank_idx} reported non-success: {f_payload}"
                         break
 
                 if f_ranks_failed:
@@ -2510,6 +2608,7 @@ class AllocationController:
                         "exit_code": 0,
                         "stage": "rank_evidence",
                         "tasks_validated": f_matched_sp.tasks,
+                        "elapsed_seconds": f_proc_res.elapsed_seconds,
                     },
                     f_ordinal=f_matched_ord,
                 )
@@ -2795,15 +2894,18 @@ class RankIdentityResolver:
 
 
 class RankClaimStore:
-    """Store and manager for exclusive rank claim locks.
+    """Store and manager for exclusive rank claim locks scoped by rank and combination.
 
     Invariants:
-    - Claim lockfile 'claim.lock' is created inside the rank directory (ranks/<global_rank>/claim.lock).
+    - Claim lockfile 'claim.lock' is created inside the rank combination directory
+      (ranks/<global_rank>/<combination>/claim.lock).
     - Uses atomic exclusive create (os.O_CREAT | os.O_EXCL | os.O_WRONLY).
     - If the lockfile already exists (race condition), exactly one caller wins and subsequent callers
       receive RankClaimError.
-    - Writes claim metadata and ensures durability with os.fsync before closing.
-    - Does not permit overwrite or release.
+    - Writes claim metadata (run, point, rank, combination, pid, timestamp) and ensures durability
+      with os.fsync before closing.
+    - Claims are permanent and never released or deleted.
+    - Rejects symbolic links in claim path or parent directory to ensure strict containment.
     """
 
     __slots__ = ()
@@ -2816,13 +2918,20 @@ class RankClaimStore:
         cls,
         f_rank_dir: str,
         f_global_rank: Union[int, str],
+        f_combination: Optional[Union[Combination, str, Any]] = None,
+        f_run_id: Optional[str] = None,
+        f_point_id: Optional[str] = None,
         **f_kwargs: Any,
     ) -> str:
-        """Exclusively claim a rank by creating claim.lock in the rank directory.
+        """Exclusively claim a rank for a combination by creating claim.lock.
 
         Args:
-            f_rank_dir: Path to rank directory (ranks/<global_rank>).
+            f_rank_dir: Path to rank combination directory (ranks/<global_rank>/<combination>)
+                        or base rank directory (ranks/<global_rank>).
             f_global_rank: Global rank index.
+            f_combination: Optional combination descriptor or name.
+            f_run_id: Optional run ID.
+            f_point_id: Optional point ID.
 
         Returns:
             Absolute path to the created claim.lock file.
@@ -2835,15 +2944,44 @@ class RankClaimStore:
         if "\0" in f_rank_dir:
             raise RankClaimError("Rank directory path contains NUL byte")
 
-        f_abs_rank_dir = os.path.abspath(os.path.normpath(f_rank_dir.strip()))
-        os.makedirs(f_abs_rank_dir, exist_ok=True)
+        f_raw_dir = f_rank_dir.strip()
+        f_combo_str: Optional[str] = None
+        if f_combination is not None:
+            if hasattr(f_combination, "name"):
+                f_combo_str = f_combination.name
+            else:
+                f_combo_str = str(f_combination).strip()
 
-        f_lock_path = os.path.join(f_abs_rank_dir, "claim.lock")
+        f_abs_dir = os.path.abspath(os.path.normpath(f_raw_dir))
+
+        if f_combo_str is not None:
+            if os.path.basename(f_abs_dir) != f_combo_str:
+                f_abs_dir = os.path.join(f_abs_dir, f_combo_str)
+        else:
+            f_combo_str = os.path.basename(f_abs_dir)
+
+        # Check for symbolic links in the claim directory path or parent directory
+        if os.path.islink(f_abs_dir) or os.path.islink(os.path.dirname(f_abs_dir)):
+            raise RankClaimError(f"Rank claim directory cannot be a symlink: {f_abs_dir}")
+
+        os.makedirs(f_abs_dir, exist_ok=True)
+
+        f_lock_path = os.path.join(f_abs_dir, "claim.lock")
+
+        if os.path.islink(f_lock_path):
+            raise RankClaimError(f"Rank claim lock cannot be a symlink: {f_lock_path}")
+
         f_now_utc = datetime.now(timezone.utc).isoformat()
         f_pid = os.getpid()
 
         f_payload = {
+            "run": str(f_run_id) if f_run_id is not None else "",
+            "run_id": str(f_run_id) if f_run_id is not None else "",
+            "point": str(f_point_id) if f_point_id is not None else "",
+            "point_id": str(f_point_id) if f_point_id is not None else "",
+            "rank": int(f_global_rank),
             "global_rank": int(f_global_rank),
+            "combination": f_combo_str,
             "pid": f_pid,
             "claimed_at_utc": f_now_utc,
         }
@@ -2858,7 +2996,7 @@ class RankClaimStore:
         except (FileExistsError, OSError) as f_err:
             if getattr(f_err, "errno", None) == errno.EEXIST or isinstance(f_err, FileExistsError):
                 raise RankClaimError(
-                    f"Rank {f_global_rank} has already been claimed: '{f_lock_path}'"
+                    f"Rank {f_global_rank} for combination '{f_combo_str}' has already been claimed: '{f_lock_path}'"
                 ) from f_err
             raise RankClaimError(
                 f"Failed to create rank claim lock '{f_lock_path}': {f_err}"
@@ -2880,21 +3018,41 @@ class RankClaimStore:
     claim_rank = claim
 
     @classmethod
-    def isClaimed(cls, f_rank_dir: str) -> bool:
-        """Check if a rank directory has an existing claim.lock file."""
+    def isClaimed(
+        cls,
+        f_rank_dir: str,
+        f_combination: Optional[Union[Combination, str, Any]] = None,
+    ) -> bool:
+        """Check if a rank combination directory has an existing claim.lock file."""
         if not isinstance(f_rank_dir, str) or not f_rank_dir.strip():
             return False
-        f_lock_path = os.path.join(os.path.abspath(os.path.normpath(f_rank_dir.strip())), "claim.lock")
+        f_dir = os.path.abspath(os.path.normpath(f_rank_dir.strip()))
+        if f_combination is not None:
+            f_cname = f_combination.name if hasattr(f_combination, "name") else str(f_combination).strip()
+            if os.path.basename(f_dir) != f_cname:
+                f_dir = os.path.join(f_dir, f_cname)
+        f_lock_path = os.path.join(f_dir, "claim.lock")
         return os.path.exists(f_lock_path)
 
     is_claimed = isClaimed
 
     @classmethod
-    def getClaim(cls, f_rank_dir: str) -> Optional[Dict[str, Any]]:
+    def getClaim(
+        cls,
+        f_rank_dir: str,
+        f_combination: Optional[Union[Combination, str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Read claim payload from claim.lock if present, else return None."""
-        if not cls.isClaimed(f_rank_dir):
+        if not isinstance(f_rank_dir, str) or not f_rank_dir.strip():
             return None
-        f_lock_path = os.path.join(os.path.abspath(os.path.normpath(f_rank_dir.strip())), "claim.lock")
+        f_dir = os.path.abspath(os.path.normpath(f_rank_dir.strip()))
+        if f_combination is not None:
+            f_cname = f_combination.name if hasattr(f_combination, "name") else str(f_combination).strip()
+            if os.path.basename(f_dir) != f_cname:
+                f_dir = os.path.join(f_dir, f_cname)
+        f_lock_path = os.path.join(f_dir, "claim.lock")
+        if not os.path.exists(f_lock_path):
+            return None
         try:
             with open(f_lock_path, "r", encoding="utf-8") as f_f:
                 return json.load(f_f)
@@ -2974,12 +3132,13 @@ class RankWorker:
     Invariants:
     - Deserializes and validates manifest; verifies f_point_id matches a scale point and target is 'lsmio'.
     - Rejects non-LSMIO shared targets (ior, lmp) with RankWorkerError.
+    - Validates combination descriptor and planned matrix before resolving identity or making claims.
     - Resolves RankIdentity via RankIdentityResolver.resolve().
-    - Exclusively claims the rank via RankClaimStore.claim().
-    - Prepares rank private output and log directories (ranks/<global_rank>/<combination>/).
+    - Exclusively claims the rank combination via RankClaimStore.claim().
+    - Prepares rank combination private output and log directories (ranks/<global_rank>/<combination>/).
     - Instantiates LsmioAdapter and generates launch spec via createLaunchSpec().
     - Binds launch spec for this rank via LsmioAdapter.bindRank(f_launch_spec, f_rank_identity).
-    - Executes the bound command via ProcessRunner.run(), mirroring output to rank log file.
+    - Executes the bound command via ProcessRunner.run(), mirroring output to combination rank log file.
     - Records rank result record in ranks/<global_rank>/<combination>/result.json via EvidenceStore.
     - Returns exact process exit status (0 on success, or non-zero child returncode / signal).
     - Never overwrites existing rank result files.
@@ -3054,7 +3213,30 @@ class RankWorker:
         except Exception as f_err:
             raise RankWorkerError(f"Failed to match scale point: {f_err}") from f_err
 
-        # 4. Storage Class & Benchmark Root & Layout
+        # 4. Validate Combination Descriptor & Planned Matrix BEFORE Claiming (F-04)
+        try:
+            f_stripe, f_block = LustreConfigurator._extractCombination(f_combination_desc)
+        except Exception as f_err:
+            raise RankWorkerError(f"Invalid combination descriptor {f_combination_desc!r}: {f_err}") from f_err
+
+        f_combo_name = f"c{f_stripe}_b{f_block}"
+
+        f_planned_combos: List[str] = []
+        if hasattr(f_manifest, "combinations") and f_manifest.combinations:
+            for f_c in f_manifest.combinations:
+                f_c_name = f_c.name if hasattr(f_c, "name") else (
+                    f"c{getattr(f_c, 'stripe_count', f_stripe)}_b{getattr(f_c, 'block_size', f_block)}"
+                )
+                f_planned_combos.append(f_c_name)
+        else:
+            f_planned_combos = [f"c{f_s}_b{f_b}" for f_s, f_b in STANDARD_COMBINATION_TUPLES]
+
+        if f_combo_name not in f_planned_combos:
+            raise RankWorkerError(
+                f"Combination '{f_combo_name}' is not among planned combinations {f_planned_combos} for scale point '{f_point_dir_name}'"
+            )
+
+        # 5. Storage Class & Benchmark Root & Layout
         f_storage_str = "hdd"
         if hasattr(f_manifest, "plan") and isinstance(f_manifest.plan, dict):
             f_storage_str = f_manifest.plan.get("storage", "hdd")
@@ -3084,29 +3266,41 @@ class RankWorker:
         except Exception as f_err:
             raise RankWorkerError(f"Path containment validation failed: {f_err}") from f_err
 
-        # 5. Resolve Rank Identity
+        # 6. Resolve Rank Identity BEFORE Claiming
         f_resolver = f_identity_resolver or RankIdentityResolver
         f_effective_env = f_env if f_env is not None else os.environ
 
-        f_rank_identity = f_resolver.resolve(
-            f_scheduler_kind=f_manifest.site.scheduler,
-            f_env=f_effective_env,
-            f_tasks=f_matched_sp.tasks,
-            f_ppn=f_matched_sp.ppn,
-            f_profile=f_manifest.site,
-            **f_kwargs,
-        )
+        try:
+            f_rank_identity = f_resolver.resolve(
+                f_scheduler_kind=f_manifest.site.scheduler,
+                f_env=f_effective_env,
+                f_tasks=f_matched_sp.tasks,
+                f_ppn=f_matched_sp.ppn,
+                f_profile=f_manifest.site,
+                **f_kwargs,
+            )
+        except Exception as f_err:
+            raise RankWorkerError(f"Rank identity resolution failed: {f_err}") from f_err
+
         f_global_rank = f_rank_identity.global_rank
 
-        # 6. Exclusive Rank Claim
-        f_rank_dir = f_layout_obj.pointRankDir(f_matched_sp, f_global_rank, f_matched_ord)
+        # 7. Exclusive Rank Claim (Scoped by rank and combination)
+        f_rank_combo_dir = f_layout_obj.pointRankCombinationDir(
+            f_matched_sp, f_global_rank, f_combo_name, f_matched_ord
+        )
+        if os.path.islink(f_rank_combo_dir) or os.path.islink(os.path.dirname(f_rank_combo_dir)):
+            raise RankClaimError(f"Rank claim directory cannot be a symlink: {f_rank_combo_dir}")
+
         f_claimer = f_claim_store or RankClaimStore
-        f_claimer.claim(f_rank_dir, f_global_rank)
+        f_claimer.claim(
+            f_rank_combo_dir,
+            f_global_rank,
+            f_combination=f_combo_name,
+            f_run_id=f_manifest.run_id,
+            f_point_id=f_point_dir_name,
+        )
 
-        # 7. Resolve Combination & Guard Against Result Replacement
-        f_stripe, f_block = LustreConfigurator._extractCombination(f_combination_desc)
-        f_combo_name = f"c{f_stripe}_b{f_block}"
-
+        # 8. Guard Against Result Replacement
         f_result_path = f_layout_obj.pointRankResultPath(
             f_matched_sp, f_global_rank, f_combo_name, f_matched_ord
         )
@@ -3115,18 +3309,23 @@ class RankWorker:
                 f"Rank result for rank {f_global_rank} and combination '{f_combo_name}' already exists at '{f_result_path}'; replacement rejected"
             )
 
-        # 8. Directory Preparation
-        f_rank_combo_dir = os.path.dirname(f_result_path)
-        f_logs_dir = f_layout_obj.pointLogsDir(f_matched_sp, f_matched_ord)
-        f_work_dir = f_layout_obj.pointCombinationWorkDir(f_matched_sp, f_combo_name, f_matched_ord)
-        f_data_dir = f_layout_obj.pointDataSubdir(f_matched_sp, f_stripe, f_block, f_matched_ord)
+        # 9. Directory Preparation
+        f_logs_combo_dir = f_layout_obj.pointCombinationLogsDir(
+            f_matched_sp, f_combo_name, f_matched_ord
+        )
+        f_work_dir = f_layout_obj.pointCombinationWorkDir(
+            f_matched_sp, f_combo_name, f_matched_ord
+        )
+        f_data_dir = f_layout_obj.pointDataSubdir(
+            f_matched_sp, f_stripe, f_block, f_matched_ord
+        )
 
         os.makedirs(f_rank_combo_dir, exist_ok=True)
-        os.makedirs(f_logs_dir, exist_ok=True)
+        os.makedirs(f_logs_combo_dir, exist_ok=True)
         os.makedirs(f_work_dir, exist_ok=True)
         os.makedirs(f_data_dir, exist_ok=True)
 
-        # 9. Instantiate LsmioAdapter, Create LaunchSpec, and Pure Bind
+        # 10. Instantiate LsmioAdapter, Create LaunchSpec, and Pure Bind
         from lsmiotool.lib.benchmarks import LsmioAdapter
         from lsmiotool.lib.run import Combination
 
@@ -3183,7 +3382,7 @@ class RankWorker:
             f_ordinal=f_matched_ord,
         )
 
-        # 10. Process Runner Execution
+        # 11. Process Runner Execution
         if f_runner is None:
             f_runner = ProcessRunner()
 
@@ -3218,7 +3417,7 @@ class RankWorker:
                     f_spawn_error=str(f_exec_err),
                 )
 
-        # 11. Record Rank Evidence
+        # 12. Record Rank Evidence
         from lsmiotool.lib.evidence import EvidenceStore
 
         if f_evidence_store is not None:
@@ -3229,11 +3428,14 @@ class RankWorker:
 
         f_is_ok = f_proc_res.is_success
         f_ret = f_proc_res.returncode
+        f_exit_val = 0 if f_is_ok else (f_ret if f_ret != 0 else 1)
         f_payload: Dict[str, Any] = {
             "status": "success" if f_is_ok else "failed",
-            "exit_code": f_ret,
-            "exit_status": f_ret,
+            "exit_code": f_exit_val,
+            "exit_status": f_exit_val,
             "global_rank": f_global_rank,
+            "rank": f_global_rank,
+            "combination": f_combo_name,
             "node_rank": f_rank_identity.node_rank,
             "local_rank": f_rank_identity.local_rank,
             "elapsed_seconds": f_proc_res.elapsed_seconds,
@@ -3247,7 +3449,7 @@ class RankWorker:
                 f_proc_res.stderr.strip()
                 or f_proc_res.stdout.strip()
                 or f_proc_res.spawn_error
-                or f"Process exited with code {f_ret}"
+                or f"Process exited with code {f_exit_val}"
             )
             f_payload["error"] = f_err_msg
         if f_proc_res.is_signal:
@@ -3265,4 +3467,3 @@ class RankWorker:
 
     run = _RankWorkerDispatcher(_executeImpl)
     execute = _RankWorkerDispatcher(_executeImpl)
-

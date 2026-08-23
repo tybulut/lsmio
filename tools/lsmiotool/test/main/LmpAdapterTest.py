@@ -44,7 +44,6 @@ from lsmiotool.lib.benchmarks import (
     ProbeState,
 )
 from lsmiotool.lib.resources import ExecutionMode, RuntimeLayout
-from lsmiotool.lib.run import Combination, RunRequest, ScalePoint
 
 
 class MockProcessResult(NamedTuple):
@@ -54,77 +53,107 @@ class MockProcessResult(NamedTuple):
 
 
 class LmpAdapterTest(unittest.TestCase):
-    """Comprehensive test suite for LmpAdapter contract and invariants."""
+    """Comprehensive test suite for LmpAdapter contract, upstream golden argv, and invariants."""
 
     def setUp(self) -> None:
         self.m_adapter = LmpAdapter()
         self.m_executable = "/opt/lammps/bin/lmp"
         self.m_work_dir = "/benchmark/runs/run-123/points/00-tasks-1/work/c16_b8M"
 
-    def testExactTwentySevenArgv(self) -> None:
-        """Validate all 27 exact argv tuples (3 setups x 9 task tuning points)."""
+    def testUpstreamGoldenArgvEverySupportedTaskSetup(self) -> None:
+        """Validate all 27 exact upstream-golden argv tuples (3 setups x 9 task tuning points).
+
+        Exact shared LMP argv contract:
+        - Base: lmp -in in.reaxc.hns -v x REP -v y REP -v z REP
+        - LSMIO: -lsmio-buf-size-mb BUF
+        - LSMIO-MMAP: -lsmio-mmap -lsmio-buf-size-mb BUF
+        - FS: -lsmio-fallback
+        """
         f_setups = ["LSMIO", "LSMIO-MMAP", "FS"]
-        f_dumps = {
-            "LSMIO": "1",
-            "LSMIO-MMAP": "2",
-            "FS": "0",
-        }
-        f_task_tuning = {
-            1: ("10", "10", "10"),
-            2: ("10", "10", "20"),
-            4: ("10", "20", "20"),
-            8: ("20", "20", "20"),
-            16: ("20", "20", "40"),
-            24: ("20", "30", "40"),
-            32: ("20", "40", "40"),
-            40: ("20", "40", "50"),
-            48: ("20", "40", "60"),
+        # Literal upstream tuning values from tools/bmtool/jobs/lmp-benchmark.sh:34-64
+        f_upstream_tuning: Dict[int, Tuple[int, int]] = {
+            1: (4, 32),
+            2: (5, 32),
+            4: (6, 64),
+            8: (8, 128),
+            16: (10, 256),
+            24: (12, 512),
+            32: (14, 1024),
+            40: (15, 1024),
+            48: (16, 1024),
         }
 
         f_tested_count = 0
         for f_setup in f_setups:
-            for f_tasks, (f_tx, f_ty, f_tz) in f_task_tuning.items():
+            for f_tasks, (f_rep, f_buf) in f_upstream_tuning.items():
                 f_cmd = self.m_adapter.buildCommand(
                     f_executable=self.m_executable,
                     f_setup=f_setup,
-                    f_tasks=f_tasks,
-                    f_threads=1,
+                    f_replication=f_rep,
+                    f_buffer_size_mb=f_buf,
                     f_working_dir=self.m_work_dir,
                 )
 
-                f_expected_argv = (
-                    self.m_executable,
-                    "-k",
-                    "on",
-                    "t",
-                    "1",
-                    "-sf",
-                    "kk",
-                    "-pk",
-                    "kk",
-                    "-in",
-                    "in.reaxff.hns",
-                    "-nocite",
-                    "-v",
-                    "x",
-                    f_tx,
-                    "-v",
-                    "y",
-                    f_ty,
-                    "-v",
-                    "z",
-                    f_tz,
-                    "-v",
-                    "dump",
-                    f_dumps[f_setup],
-                )
+                if f_setup == "LSMIO":
+                    f_expected_argv = (
+                        self.m_executable,
+                        "-in",
+                        "in.reaxc.hns",
+                        "-v",
+                        "x",
+                        str(f_rep),
+                        "-v",
+                        "y",
+                        str(f_rep),
+                        "-v",
+                        "z",
+                        str(f_rep),
+                        "-lsmio-buf-size-mb",
+                        str(f_buf),
+                    )
+                    self.assertEqual(len(f_cmd.argv), 14)
+                elif f_setup == "LSMIO-MMAP":
+                    f_expected_argv = (
+                        self.m_executable,
+                        "-in",
+                        "in.reaxc.hns",
+                        "-v",
+                        "x",
+                        str(f_rep),
+                        "-v",
+                        "y",
+                        str(f_rep),
+                        "-v",
+                        "z",
+                        str(f_rep),
+                        "-lsmio-mmap",
+                        "-lsmio-buf-size-mb",
+                        str(f_buf),
+                    )
+                    self.assertEqual(len(f_cmd.argv), 15)
+                elif f_setup == "FS":
+                    f_expected_argv = (
+                        self.m_executable,
+                        "-in",
+                        "in.reaxc.hns",
+                        "-v",
+                        "x",
+                        str(f_rep),
+                        "-v",
+                        "y",
+                        str(f_rep),
+                        "-v",
+                        "z",
+                        str(f_rep),
+                        "-lsmio-fallback",
+                    )
+                    self.assertEqual(len(f_cmd.argv), 13)
 
                 self.assertEqual(
                     f_cmd.argv,
                     f_expected_argv,
                     f"Argv mismatch for setup={f_setup} tasks={f_tasks}",
                 )
-                self.assertEqual(len(f_cmd.argv), 24)
                 self.assertEqual(f_cmd.is_rank_local, False)
                 self.assertEqual(f_cmd.isRankLocal, False)
                 self.assertEqual(f_cmd.working_dir, self.m_work_dir)
@@ -132,111 +161,31 @@ class LmpAdapterTest(unittest.TestCase):
 
         self.assertEqual(f_tested_count, 27)
 
-    def testLargeZeroLocatorProbeStage(self) -> None:
-        """Prove rejection of large scale and unsupported tasks occurs before any locator, probe, or staging."""
-        f_mock_locator = MagicMock()
-        f_mock_probe_runner = MagicMock()
-        f_mock_lstat = MagicMock()
-        f_mock_open = MagicMock()
+    def testExactUpstreamAssetsHashAndStage(self) -> None:
+        """Validate exact upstream asset names (in.reaxc.hns, data.hns-equil, ffield.reax.hns), hashing, and staging."""
+        self.assertEqual(
+            self.m_adapter.REQUIRED_ASSETS,
+            ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"),
+        )
 
-        with (
-            patch("lsmiotool.lib.resources.ResourceLocator.forSource", f_mock_locator),
-            patch("lsmiotool.lib.resources.ResourceLocator.forInstalled", f_mock_locator),
-            patch("os.lstat", f_mock_lstat),
-            patch("builtins.open", f_mock_open),
-        ):
-            # 1. Reject via scale='large' argument
-            with self.assertRaises(BenchmarkConfigurationError):
-                self.m_adapter.buildCommand(
-                    f_executable=self.m_executable,
-                    f_scale="large",
-                    f_tasks=4,
-                    f_working_dir=self.m_work_dir,
-                )
-
-            # 2. Reject via RunRequest with scale='large'
-            f_large_req = RunRequest(f_target="lmp", f_scale="large", f_ssd=False, f_setup="LSMIO")
-            with self.assertRaises(BenchmarkConfigurationError):
-                self.m_adapter.buildCommand(
-                    f_executable=self.m_executable,
-                    f_request=f_large_req,
-                    f_working_dir=self.m_work_dir,
-                )
-
-            # 3. Reject via unsupported task counts (e.g. 64, 128, 256)
-            for f_bad_tasks in (64, 128, 192, 256):
-                with self.assertRaises(BenchmarkConfigurationError):
-                    self.m_adapter.buildCommand(
-                        f_executable=self.m_executable,
-                        f_tasks=f_bad_tasks,
-                        f_working_dir=self.m_work_dir,
-                    )
-
-            # Assert zero calls were made to locator, filesystem, or probe
-            f_mock_locator.assert_not_called()
-            f_mock_probe_runner.assert_not_called()
-            f_mock_lstat.assert_not_called()
-            f_mock_open.assert_not_called()
-
-    def testUnsupportedNoFallback(self) -> None:
-        """Assert unsupported setups and tasks fail closed without fallback searches."""
-        # 1. Invalid setup names fail closed
-        for f_bad_setup in ("INVALID", "ENV", "BASE", "NATIVE-M", "HDF5"):
-            with self.assertRaises(BenchmarkConfigurationError):
-                self.m_adapter.buildCommand(
-                    f_executable=self.m_executable,
-                    f_setup=f_bad_setup,
-                    f_tasks=1,
-                    f_working_dir=self.m_work_dir,
-                )
-
-        # 2. Unsupported task counts fail closed
-        for f_bad_tasks in (0, -1, 3, 5, 7, 9, 15, 50, 100):
-            with self.assertRaises(BenchmarkConfigurationError):
-                self.m_adapter.buildCommand(
-                    f_executable=self.m_executable,
-                    f_setup="LSMIO",
-                    f_tasks=f_bad_tasks,
-                    f_working_dir=self.m_work_dir,
-                )
-
-        # 3. getDumpValue with invalid setup
-        with self.assertRaises(BenchmarkConfigurationError):
-            LmpAdapter.getDumpValue("INVALID")
-
-        # 4. getTuningParameters with invalid tasks
-        with self.assertRaises(BenchmarkConfigurationError):
-            LmpAdapter.getTuningParameters(99)
-
-        # 5. Missing asset fails closed without falling back to search paths or cwd
-        with tempfile.TemporaryDirectory() as f_temp_dir:
-            # Empty directory with no assets
-            with self.assertRaises(BenchmarkConfigurationError):
-                self.m_adapter.validateAssets(f_temp_dir)
-
-            with self.assertRaises(BenchmarkConfigurationError):
-                self.m_adapter.stageAssets(f_temp_dir, os.path.join(f_temp_dir, "work"))
-
-    def testExactAssetHashesPerCombination(self) -> None:
-        """Validate asset hashing and staging into combination-private work directories."""
         with tempfile.TemporaryDirectory() as f_temp_base:
             f_asset_dir = os.path.join(f_temp_base, "lmp-reaxff")
             os.makedirs(f_asset_dir, exist_ok=True)
 
-            f_content_in = b"# LAMMPS input file for ReaxFF HNS benchmark\nvariable dump index 1\n"
-            f_content_data = b"# LAMMPS data file for HNS structure\n1000 atoms\n"
-            f_content_ffield = b"# ReaxFF force field for HNS\nReaxFF parameters\n"
+            f_content_in = b"# LAMMPS input file for ReaxFF HNS benchmark\nvariable rep index 4\n"
+            f_content_data = b"# LAMMPS data file for HNS equilibrium structure\n1000 atoms\n"
+            f_content_ffield = b"# ReaxFF force field parameters for HNS\nReaxFF parameters\n"
 
-            with open(os.path.join(f_asset_dir, "in.reaxff.hns"), "wb") as f_f:
+            with open(os.path.join(f_asset_dir, "in.reaxc.hns"), "wb") as f_f:
                 f_f.write(f_content_in)
-            with open(os.path.join(f_asset_dir, "data.hns"), "wb") as f_f:
+            with open(os.path.join(f_asset_dir, "data.hns-equil"), "wb") as f_f:
                 f_f.write(f_content_data)
             with open(os.path.join(f_asset_dir, "ffield.reax.hns"), "wb") as f_f:
                 f_f.write(f_content_ffield)
 
             f_expected_hashes = {
-                "in.reaxff.hns": hashlib.sha256(f_content_in).hexdigest(),
-                "data.hns": hashlib.sha256(f_content_data).hexdigest(),
+                "in.reaxc.hns": hashlib.sha256(f_content_in).hexdigest(),
+                "data.hns-equil": hashlib.sha256(f_content_data).hexdigest(),
                 "ffield.reax.hns": hashlib.sha256(f_content_ffield).hexdigest(),
             }
 
@@ -249,10 +198,9 @@ class LmpAdapterTest(unittest.TestCase):
             f_hashes_combo1 = self.m_adapter.stageAssets(f_asset_dir, f_work_dir_combo1)
             self.assertEqual(f_hashes_combo1, f_expected_hashes)
 
-            # Verify files exist in work_dir_combo1 with exact contents
             for f_name, f_exp_content in (
-                ("in.reaxff.hns", f_content_in),
-                ("data.hns", f_content_data),
+                ("in.reaxc.hns", f_content_in),
+                ("data.hns-equil", f_content_data),
                 ("ffield.reax.hns", f_content_ffield),
             ):
                 f_staged_path = os.path.join(f_work_dir_combo1, f_name)
@@ -265,33 +213,93 @@ class LmpAdapterTest(unittest.TestCase):
             f_hashes_combo2 = self.m_adapter.stageAssets(f_asset_dir, f_work_dir_combo2)
             self.assertEqual(f_hashes_combo2, f_expected_hashes)
 
-            for f_name, f_exp_content in (
-                ("in.reaxff.hns", f_content_in),
-                ("data.hns", f_content_data),
-                ("ffield.reax.hns", f_content_ffield),
-            ):
-                f_staged_path = os.path.join(f_work_dir_combo2, f_name)
-                self.assertTrue(os.path.isfile(f_staged_path))
-                with open(f_staged_path, "rb") as f_f:
-                    self.assertEqual(f_f.read(), f_exp_content)
-
             # Verify independence: mutating combo1 work dir does not alter combo2
-            with open(os.path.join(f_work_dir_combo1, "in.reaxff.hns"), "wb") as f_f:
+            with open(os.path.join(f_work_dir_combo1, "in.reaxc.hns"), "wb") as f_f:
                 f_f.write(b"mutated")
 
-            with open(os.path.join(f_work_dir_combo2, "in.reaxff.hns"), "rb") as f_f:
+            with open(os.path.join(f_work_dir_combo2, "in.reaxc.hns"), "rb") as f_f:
                 self.assertEqual(f_f.read(), f_content_in)
 
-    def testAssetFailures(self) -> None:
-        """Assert os.lstat rejects missing assets, directories, unreadable files, and symlinks."""
+    def testNoInventedKokkosDumpRenameOrFallback(self) -> None:
+        """Assert no invented Kokkos flags, dump flags, renamed aliases, or fallback tables exist."""
+        # 1. buildCommand must reject calls without replication (no hidden fallback table)
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.buildCommand(
+                f_executable=self.m_executable,
+                f_setup="LSMIO",
+                f_working_dir=self.m_work_dir,
+            )
+        self.assertIn("replication", str(f_cm.exception).lower())
+
+        # Passing tasks without tuning or replication must also fail
+        with self.assertRaises(BenchmarkConfigurationError):
+            self.m_adapter.buildCommand(
+                f_executable=self.m_executable,
+                f_setup="LSMIO",
+                f_working_dir=self.m_work_dir,
+                f_tasks=8,
+            )
+
+        # 2. Verify no Kokkos, dump, or renamed alias tokens appear in valid commands
+        f_cmd = self.m_adapter.buildCommand(
+            f_executable=self.m_executable,
+            f_setup="LSMIO",
+            f_replication=4,
+            f_buffer_size_mb=32,
+            f_working_dir=self.m_work_dir,
+        )
+
+        f_forbidden_tokens = [
+            "-k", "-sf", "-pk", "kk", "-nocite", "dump", "-v dump",
+            "in.reaxff.hns", "data.hns",
+        ]
+        for f_tok in f_forbidden_tokens:
+            self.assertNotIn(f_tok, f_cmd.argv)
+
+        # 3. Verify adapter does not have TASK_TUNING_MAP or SETUP_DUMP_MAP attributes
+        self.assertFalse(hasattr(self.m_adapter, "TASK_TUNING_MAP"))
+        self.assertFalse(hasattr(self.m_adapter, "SETUP_DUMP_MAP"))
+        self.assertFalse(hasattr(LmpAdapter, "TASK_TUNING_MAP"))
+        self.assertFalse(hasattr(LmpAdapter, "SETUP_DUMP_MAP"))
+
+        # 4. Tuning mapping can be passed directly as f_tuning
+        f_cmd_tuning = self.m_adapter.buildCommand(
+            f_executable=self.m_executable,
+            f_setup="LSMIO-MMAP",
+            f_tuning={"replication": 6, "buffer_size_mb": 64},
+            f_working_dir=self.m_work_dir,
+        )
+        self.assertEqual(
+            f_cmd_tuning.argv,
+            (
+                self.m_executable,
+                "-in",
+                "in.reaxc.hns",
+                "-v",
+                "x",
+                "6",
+                "-v",
+                "y",
+                "6",
+                "-v",
+                "z",
+                "6",
+                "-lsmio-mmap",
+                "-lsmio-buf-size-mb",
+                "64",
+            ),
+        )
+
+    def testMissingSymlinkDirectoryUnreadableChangedAssetFails(self) -> None:
+        """Assert os.lstat strictly rejects missing assets, directories, unreadable files, and symlinks."""
         with tempfile.TemporaryDirectory() as f_temp_base:
             f_asset_dir = os.path.join(f_temp_base, "assets")
             os.makedirs(f_asset_dir, exist_ok=True)
 
             f_content = b"valid content"
-            with open(os.path.join(f_asset_dir, "in.reaxff.hns"), "wb") as f_f:
+            with open(os.path.join(f_asset_dir, "in.reaxc.hns"), "wb") as f_f:
                 f_f.write(f_content)
-            with open(os.path.join(f_asset_dir, "data.hns"), "wb") as f_f:
+            with open(os.path.join(f_asset_dir, "data.hns-equil"), "wb") as f_f:
                 f_f.write(f_content)
 
             # Case 1: Missing asset (ffield.reax.hns missing)
@@ -336,7 +344,8 @@ class LmpAdapterTest(unittest.TestCase):
         f_cmd = self.m_adapter.buildCommand(
             f_executable=self.m_executable,
             f_setup="LSMIO",
-            f_tasks=4,
+            f_replication=4,
+            f_buffer_size_mb=32,
             f_working_dir=self.m_work_dir,
         )
 
@@ -360,14 +369,16 @@ class LmpAdapterTest(unittest.TestCase):
                 self.m_adapter.buildCommand(
                     f_executable=self.m_executable,
                     f_setup="LSMIO",
-                    f_tasks=1,
+                    f_replication=4,
+                    f_buffer_size_mb=32,
                     f_working_dir=f"/tmp/work_{f_token}",
                 )
             with self.assertRaises(BenchmarkConfigurationError):
                 self.m_adapter.buildCommand(
                     f_executable=f"/bin/lmp_{f_token}",
                     f_setup="LSMIO",
-                    f_tasks=1,
+                    f_replication=4,
+                    f_buffer_size_mb=32,
                     f_working_dir=self.m_work_dir,
                 )
             with self.assertRaises(BenchmarkConfigurationError):
@@ -388,10 +399,10 @@ class LmpAdapterTest(unittest.TestCase):
             os.makedirs(f_asset_dir, exist_ok=True)
             os.makedirs(f_work_dir, exist_ok=True)
 
-            # Create decoy files with different content in decoy_dir
-            with open(os.path.join(f_decoy_dir, "in.reaxff.hns"), "wb") as f_f:
+            # Create decoy files in decoy_dir
+            with open(os.path.join(f_decoy_dir, "in.reaxc.hns"), "wb") as f_f:
                 f_f.write(b"DECOY IN")
-            with open(os.path.join(f_decoy_dir, "data.hns"), "wb") as f_f:
+            with open(os.path.join(f_decoy_dir, "data.hns-equil"), "wb") as f_f:
                 f_f.write(b"DECOY DATA")
             with open(os.path.join(f_decoy_dir, "ffield.reax.hns"), "wb") as f_f:
                 f_f.write(b"DECOY FFIELD")
@@ -400,9 +411,9 @@ class LmpAdapterTest(unittest.TestCase):
             f_real_in = b"GENUINE IN CONTENT"
             f_real_data = b"GENUINE DATA CONTENT"
             f_real_ffield = b"GENUINE FFIELD CONTENT"
-            with open(os.path.join(f_asset_dir, "in.reaxff.hns"), "wb") as f_f:
+            with open(os.path.join(f_asset_dir, "in.reaxc.hns"), "wb") as f_f:
                 f_f.write(f_real_in)
-            with open(os.path.join(f_asset_dir, "data.hns"), "wb") as f_f:
+            with open(os.path.join(f_asset_dir, "data.hns-equil"), "wb") as f_f:
                 f_f.write(f_real_data)
             with open(os.path.join(f_asset_dir, "ffield.reax.hns"), "wb") as f_f:
                 f_f.write(f_real_ffield)
@@ -412,12 +423,12 @@ class LmpAdapterTest(unittest.TestCase):
 
                 # Staging uses explicit asset directory
                 f_hashes = self.m_adapter.stageAssets(f_asset_dir, f_work_dir)
-                self.assertEqual(f_hashes["in.reaxff.hns"], hashlib.sha256(f_real_in).hexdigest())
+                self.assertEqual(f_hashes["in.reaxc.hns"], hashlib.sha256(f_real_in).hexdigest())
 
                 # Verify staged files contain genuine content, NOT decoy content
-                with open(os.path.join(f_work_dir, "in.reaxff.hns"), "rb") as f_f:
+                with open(os.path.join(f_work_dir, "in.reaxc.hns"), "rb") as f_f:
                     self.assertEqual(f_f.read(), f_real_in)
-                with open(os.path.join(f_work_dir, "data.hns"), "rb") as f_f:
+                with open(os.path.join(f_work_dir, "data.hns-equil"), "rb") as f_f:
                     self.assertEqual(f_f.read(), f_real_data)
                 with open(os.path.join(f_work_dir, "ffield.reax.hns"), "rb") as f_f:
                     self.assertEqual(f_f.read(), f_real_ffield)
@@ -426,7 +437,8 @@ class LmpAdapterTest(unittest.TestCase):
                 f_cmd = self.m_adapter.buildCommand(
                     f_executable=self.m_executable,
                     f_setup="LSMIO",
-                    f_tasks=8,
+                    f_replication=8,
+                    f_buffer_size_mb=128,
                     f_working_dir=f_work_dir,
                 )
                 self.assertEqual(f_cmd.working_dir, f_work_dir)
@@ -437,7 +449,7 @@ class LmpAdapterTest(unittest.TestCase):
                 os.chdir(f_orig_cwd)
 
     def testProbeFailures(self) -> None:
-        """Verify fail-closed handling for missing or unsupported LMP binaries."""
+        """Verify fail-closed handling for missing or unsupported LMP binaries and flag mismatches."""
         # 1. Runner raises FileNotFoundError
         def mockMissingBinary(f_argv: Sequence[str]) -> MockProcessResult:
             raise FileNotFoundError("Executable not found: /path/to/missing_lmp")
@@ -486,8 +498,33 @@ class LmpAdapterTest(unittest.TestCase):
                 f_setup="INVALID_SETUP",
             )
 
+        # 6. Setup flag mismatches:
+        # 6a. LSMIO requires 'buf'
+        with self.assertRaises(BenchmarkProbeError):
+            self.m_adapter.probeCapability(
+                f_executable=self.m_executable,
+                f_runner=lambda argv: MockProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-fallback", ""),
+                f_setup="LSMIO",
+            )
+
+        # 6b. LSMIO-MMAP requires 'buf' and 'mmap'
+        with self.assertRaises(BenchmarkProbeError):
+            self.m_adapter.probeCapability(
+                f_executable=self.m_executable,
+                f_runner=lambda argv: MockProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb", ""),
+                f_setup="LSMIO-MMAP",
+            )
+
+        # 6c. FS requires 'fallback'
+        with self.assertRaises(BenchmarkProbeError):
+            self.m_adapter.probeCapability(
+                f_executable=self.m_executable,
+                f_runner=lambda argv: MockProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb", ""),
+                f_setup="FS",
+            )
+
     def testUnverifiedNoVersionClaim(self) -> None:
-        """Prove unprobeable binaries remain recorded as configured/unverified."""
+        """Prove unprobeable binaries remain recorded as configured/unverified, and verified when flags present."""
         f_state = self.m_adapter.probeCapability(f_executable=self.m_executable, f_runner=None)
         self.assertEqual(f_state, CapabilityState.CONFIGURED)
         self.assertEqual(f_state, ProbeState.CONFIGURED)
@@ -495,24 +532,38 @@ class LmpAdapterTest(unittest.TestCase):
         self.assertFalse(f_state.is_verified)
         self.assertFalse(f_state.is_unsupported)
 
-        def mockSuccessRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            self.assertEqual(f_argv, [self.m_executable, "-h"])
-            return MockProcessResult(returncode=0, stdout="LAMMPS (2 Aug 2023) - Large-scale Atomic/Molecular Massively Parallel Simulator", stderr="")
-
-        f_verified = self.m_adapter.probeCapability(
+        # When runner successfully returns valid LMP output exposing setup flags:
+        # Setup LSMIO
+        f_verified_lsmio = self.m_adapter.probeCapability(
             f_executable=self.m_executable,
-            f_runner=mockSuccessRunner,
+            f_runner=lambda argv: MockProcessResult(0, "LAMMPS\n-lsmio-buf-size-mb\n", ""),
+            f_setup="LSMIO",
         )
-        self.assertEqual(f_verified, CapabilityState.VERIFIED)
-        self.assertTrue(f_verified.is_verified)
-        self.assertFalse(f_verified.is_configured)
+        self.assertEqual(f_verified_lsmio, CapabilityState.VERIFIED)
+
+        # Setup LSMIO-MMAP
+        f_verified_mmap = self.m_adapter.probeCapability(
+            f_executable=self.m_executable,
+            f_runner=lambda argv: MockProcessResult(0, "LAMMPS\n-lsmio-buf-size-mb\n-lsmio-mmap\n", ""),
+            f_setup="LSMIO-MMAP",
+        )
+        self.assertEqual(f_verified_mmap, CapabilityState.VERIFIED)
+
+        # Setup FS
+        f_verified_fs = self.m_adapter.probeCapability(
+            f_executable=self.m_executable,
+            f_runner=lambda argv: MockProcessResult(0, "LAMMPS\n-lsmio-fallback\n", ""),
+            f_setup="FS",
+        )
+        self.assertEqual(f_verified_fs, CapabilityState.VERIFIED)
 
     def testCommandImmutability(self) -> None:
         """Verify that BenchmarkCommand returned by LmpAdapter is immutable."""
         f_cmd = self.m_adapter.buildCommand(
             f_executable=self.m_executable,
             f_setup="LSMIO",
-            f_tasks=1,
+            f_replication=4,
+            f_buffer_size_mb=32,
             f_working_dir=self.m_work_dir,
         )
         with self.assertRaises(AttributeError):
@@ -530,13 +581,14 @@ class LmpAdapterTest(unittest.TestCase):
         f_cmd = self.m_adapter.buildCommand(
             f_executable=f_exe_with_spaces,
             f_setup="LSMIO",
-            f_tasks=1,
+            f_replication=4,
+            f_buffer_size_mb=32,
             f_working_dir=f_work_dir_with_spaces,
         )
 
         self.assertEqual(f_cmd.argv[0], f_exe_with_spaces)
         self.assertEqual(f_cmd.working_dir, f_work_dir_with_spaces)
-        self.assertEqual(len(f_cmd.argv), 24)
+        self.assertEqual(len(f_cmd.argv), 14)
 
     def testNulByteRejection(self) -> None:
         """Verify that NUL bytes in arguments or paths raise BenchmarkConfigurationError."""
@@ -544,7 +596,8 @@ class LmpAdapterTest(unittest.TestCase):
             self.m_adapter.buildCommand(
                 f_executable="/bin/lmp\0",
                 f_setup="LSMIO",
-                f_tasks=1,
+                f_replication=4,
+                f_buffer_size_mb=32,
                 f_working_dir=self.m_work_dir,
             )
 
@@ -552,41 +605,26 @@ class LmpAdapterTest(unittest.TestCase):
             self.m_adapter.buildCommand(
                 f_executable=self.m_executable,
                 f_setup="LSMIO",
-                f_tasks=1,
+                f_replication=4,
+                f_buffer_size_mb=32,
                 f_working_dir="/work\0dir",
             )
 
     def testAdapterProperties(self) -> None:
-        """Verify adapter metadata properties and helper methods."""
+        """Verify adapter metadata properties."""
         self.assertEqual(self.m_adapter.target, "lmp")
         self.assertEqual(self.m_adapter.defaultSetup, "LSMIO")
         self.assertEqual(
             set(self.m_adapter.allowedSetups),
             {"LSMIO", "LSMIO-MMAP", "FS"},
         )
-        self.assertEqual(LmpAdapter.getDumpValue("LSMIO"), 1)
-        self.assertEqual(LmpAdapter.getDumpValue("LSMIO-MMAP"), 2)
-        self.assertEqual(LmpAdapter.getDumpValue("FS"), 0)
-        self.assertEqual(LmpAdapter.getTuningParameters(1), (10, 10, 10))
-        self.assertEqual(LmpAdapter.getTuningParameters(48), (20, 40, 60))
 
-    def testScalePointAndRuntimeLayoutObjectSupport(self) -> None:
-        """Verify passing ScalePoint and RuntimeLayout objects to adapter methods."""
-        f_sp = ScalePoint(f_tasks=16, f_ppn=1, f_nodes=16)
-        f_cmd = self.m_adapter.buildCommand(
-            f_executable=self.m_executable,
-            f_setup="LSMIO-MMAP",
-            f_point=f_sp,
-            f_working_dir=self.m_work_dir,
-        )
-
-        self.assertIn("40", f_cmd.argv)
-        self.assertIn("2", f_cmd.argv)
-
+    def testRuntimeLayoutObjectSupport(self) -> None:
+        """Verify passing RuntimeLayout object to stageAssets."""
         with tempfile.TemporaryDirectory() as f_temp_base:
             f_asset_dir = os.path.join(f_temp_base, "assets")
             os.makedirs(f_asset_dir, exist_ok=True)
-            for f_name in ("in.reaxff.hns", "data.hns", "ffield.reax.hns"):
+            for f_name in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
                 with open(os.path.join(f_asset_dir, f_name), "wb") as f_f:
                     f_f.write(b"content")
 
@@ -602,8 +640,11 @@ class LmpAdapterTest(unittest.TestCase):
             f_staged_work = os.path.join(f_temp_base, "work")
             f_hashes = self.m_adapter.stageAssets(f_layout, f_staged_work)
             self.assertEqual(len(f_hashes), 3)
-            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "in.reaxff.hns")))
+            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "in.reaxc.hns")))
+            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "data.hns-equil")))
+            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "ffield.reax.hns")))
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -67,6 +67,7 @@ from lsmiotool.lib.scheduler import (
     SlurmScriptRenderer,
     SubmissionDispatchError,
     WorkerExecutableValidator,
+    validateTimeout,
 )
 from lsmiotool.lib.site import (
     EnvironmentResolver,
@@ -205,15 +206,23 @@ class SlurmAdapterTest(unittest.TestCase):
         f_submit_argv = SlurmSchedulerAdapter.submitCommand("/path/to/job.sh")
         self.assertEqual(f_submit_argv, ["sbatch", "--parsable", "/path/to/job.sh"])
 
-        # 2. Active query command: ['squeue', '-j', <job_id>, '-h', '-o', '%T']
+        # 2. Active query command: ['squeue', '--noheader', f'--jobs={job_id}', '--format=%i|%T']
         f_active_argv = SlurmSchedulerAdapter.activeQueryCommand("123456")
-        self.assertEqual(f_active_argv, ["squeue", "-j", "123456", "-h", "-o", "%T"])
+        self.assertEqual(
+            f_active_argv, ["squeue", "--noheader", "--jobs=123456", "--format=%i|%T"]
+        )
 
-        # 3. Accounting query command: ['sacct', '-j', <job_id>, '-P', '-n', '-o', 'JobIDRaw,State,ExitCode']
+        # 3. Accounting query command: ['sacct', '--noheader', '--parsable2', f'--jobs={job_id}', '--format=JobIDRaw,JobName,State,ExitCode']
         f_acct_argv = SlurmSchedulerAdapter.accountingQueryCommand("123456")
         self.assertEqual(
             f_acct_argv,
-            ["sacct", "-j", "123456", "-P", "-n", "-o", "JobIDRaw,State,ExitCode"],
+            [
+                "sacct",
+                "--noheader",
+                "--parsable2",
+                "--jobs=123456",
+                "--format=JobIDRaw,JobName,State,ExitCode",
+            ],
         )
 
         # 4. Cancel command: ['scancel', <job_id>]
@@ -255,6 +264,8 @@ class SlurmAdapterTest(unittest.TestCase):
                 "--starttime=2026-08-20T12:00:00",
             ],
         )
+
+    testApprovedLiteralArgvEveryOperation = testExactArgvForEveryOperation
 
     def testAcceptsOnlySingleDecimalParsableOutput(self) -> None:
         """Confirms acceptance of single decimal string and strict rejection of malformed outputs."""
@@ -332,15 +343,27 @@ class SlurmAdapterTest(unittest.TestCase):
 
         # Assert active query uses exact string
         f_act_argv = f_adapter.activeQueryCommand(f_result.job_handle.job_id)
-        self.assertEqual(f_act_argv[2], "00123456")
+        self.assertEqual(
+            f_act_argv,
+            ["squeue", "--noheader", "--jobs=00123456", "--format=%i|%T"],
+        )
 
         # Assert accounting query uses exact string
         f_acct_argv = f_adapter.accountingQueryCommand(f_result.job_handle.job_id)
-        self.assertEqual(f_acct_argv[2], "00123456")
+        self.assertEqual(
+            f_acct_argv,
+            [
+                "sacct",
+                "--noheader",
+                "--parsable2",
+                "--jobs=00123456",
+                "--format=JobIDRaw,JobName,State,ExitCode",
+            ],
+        )
 
         # Assert cancel command uses exact string
         f_cancel_argv = f_adapter.cancelCommand(f_result.job_handle.job_id)
-        self.assertEqual(f_cancel_argv[1], "00123456")
+        self.assertEqual(f_cancel_argv, ["scancel", "00123456"])
 
         # Verify evidence store recorded handle
         f_sub_records = self.m_evidence_store.readSubmissionRecords(f_point)
@@ -348,36 +371,38 @@ class SlurmAdapterTest(unittest.TestCase):
         self.assertEqual(f_recorded.payload["handle"]["job_id"], "00123456")
         self.assertEqual(f_recorded.payload["handle"]["backend"], "slurm")
 
+    testExactHandleUnchangedAcrossDispatchWaitCancelEvidence = testExactNumericHandlePersistsThroughQueryAccountingCancelAndEvidence
+
     def testExactOutputFieldAndRootRowParsing(self) -> None:
         """Verifies root-row extraction and step-row filtering in sacct output."""
-        # 1. Standard sacct output with root row and step rows
+        # 1. Standard sacct output with root row and step rows (4-column format)
         f_sacct_output = (
-            "123456|COMPLETED|0:0\n"
-            "123456.batch|COMPLETED|0:0\n"
-            "123456.extern|COMPLETED|0:0\n"
-            "123456.0|COMPLETED|0:0\n"
-            "123456.1|COMPLETED|0:0\n"
+            "123456|lm-0123456789abcdef01234567|COMPLETED|0:0\n"
+            "123456.batch|batch|COMPLETED|0:0\n"
+            "123456.extern|extern|COMPLETED|0:0\n"
+            "123456.0|0|COMPLETED|0:0\n"
+            "123456.1|1|COMPLETED|0:0\n"
         )
         f_state, f_exit = SlurmSchedulerAdapter.parseAccountingQuery(f_sacct_output, f_job_id="123456")
         self.assertEqual(f_state, SchedulerJobState.SUCCEEDED)
         self.assertEqual(f_exit, 0)
 
-        # 2. 4-column format (JobIDRaw, JobName, State, ExitCode)
-        f_sacct_4col = (
-            "123456|lm-0123456789abcdef01234567|COMPLETED|0:0\n"
-            "123456.batch|batch|COMPLETED|0:0\n"
-            "123456.extern|extern|COMPLETED|0:0\n"
+        # 2. 3-column format (JobIDRaw, State, ExitCode)
+        f_sacct_3col = (
+            "123456|COMPLETED|0:0\n"
+            "123456.batch|COMPLETED|0:0\n"
+            "123456.extern|COMPLETED|0:0\n"
         )
-        f_state_4, f_exit_4 = SlurmSchedulerAdapter.parseAccountingQuery(f_sacct_4col, f_job_id="123456")
-        self.assertEqual(f_state_4, SchedulerJobState.SUCCEEDED)
-        self.assertEqual(f_exit_4, 0)
+        f_state_3, f_exit_3 = SlurmSchedulerAdapter.parseAccountingQuery(f_sacct_3col, f_job_id="123456")
+        self.assertEqual(f_state_3, SchedulerJobState.SUCCEEDED)
+        self.assertEqual(f_exit_3, 0)
 
         # 3. Filtering specific root row when other jobs exist in output
         f_multi_job_output = (
-            "789012|FAILED|1:0\n"
-            "789012.batch|FAILED|1:0\n"
-            "123456|COMPLETED|0:0\n"
-            "123456.batch|COMPLETED|0:0\n"
+            "789012|other-job|FAILED|1:0\n"
+            "789012.batch|batch|FAILED|1:0\n"
+            "123456|lm-0123456789abcdef01234567|COMPLETED|0:0\n"
+            "123456.batch|batch|COMPLETED|0:0\n"
         )
         f_state_match, f_exit_match = SlurmSchedulerAdapter.parseAccountingQuery(
             f_multi_job_output, f_job_id="123456"
@@ -387,7 +412,7 @@ class SlurmAdapterTest(unittest.TestCase):
 
         # 4. Step row malformed (missing fields) causes error
         f_corrupt_step = (
-            "123456|COMPLETED|0:0\n"
+            "123456|lm-job|COMPLETED|0:0\n"
             "123456.batch|COMPLETED\n"
         )
         with self.assertRaises(SchedulerError):
@@ -395,17 +420,19 @@ class SlurmAdapterTest(unittest.TestCase):
 
         # 5. Conflicting root rows for same job ID causes error
         f_conflict_roots = (
-            "123456|COMPLETED|0:0\n"
-            "123456|FAILED|1:0\n"
+            "123456|lm-job|COMPLETED|0:0\n"
+            "123456|lm-job|FAILED|1:0\n"
         )
         with self.assertRaises(SchedulerError):
             SlurmSchedulerAdapter.parseAccountingQuery(f_conflict_roots, f_job_id="123456")
 
         # 6. No matching root row returns UNKNOWN
-        f_no_match = "789012|COMPLETED|0:0\n"
+        f_no_match = "789012|other-job|COMPLETED|0:0\n"
         f_state_un, f_exit_un = SlurmSchedulerAdapter.parseAccountingQuery(f_no_match, f_job_id="123456")
         self.assertEqual(f_state_un, SchedulerJobState.UNKNOWN)
         self.assertIsNone(f_exit_un)
+
+    testAccountingFourFieldsRootStepsCardinality = testExactOutputFieldAndRootRowParsing
 
     def testStateExitTable(self) -> None:
         """Tests full state mapping table between Slurm outputs and normalized SchedulerJobState."""
@@ -435,36 +462,36 @@ class SlurmAdapterTest(unittest.TestCase):
             ("UNKNOWN_STATE_XYZ", SchedulerJobState.UNKNOWN),
         ]
         for f_state_str, f_expected_state in f_active_cases:
-            f_parsed = SlurmSchedulerAdapter.parseActiveQuery(f"{f_state_str}\n")
+            f_parsed = SlurmSchedulerAdapter.parseActiveQuery(f"123456|{f_state_str}\n")
             self.assertEqual(
                 f_parsed,
                 f_expected_state,
                 msg=f"Active query failed for state: {f_state_str}",
             )
 
-        # Test accounting queries (sacct: JobIDRaw|State|ExitCode)
+        # Test accounting queries (sacct: JobIDRaw|JobName|State|ExitCode)
         f_acct_cases = [
-            ("123456|PENDING|0:0", SchedulerJobState.QUEUED, 0),
-            ("123456|CONFIGURING|0:0", SchedulerJobState.QUEUED, 0),
-            ("123456|RUNNING|0:0", SchedulerJobState.ACTIVE, 0),
-            ("123456|COMPLETING|0:0", SchedulerJobState.ACTIVE, 0),
-            ("123456|SUSPENDED|0:0", SchedulerJobState.ACTIVE, 0),
-            ("123456|COMPLETED|0:0", SchedulerJobState.SUCCEEDED, 0),
-            ("123456|COMPLETED|1:0", SchedulerJobState.FAILED, 1),
-            ("123456|COMPLETED|2:0", SchedulerJobState.FAILED, 2),
-            ("123456|COMPLETED|0:15", SchedulerJobState.FAILED, 143),
-            ("123456|FAILED|1:0", SchedulerJobState.FAILED, 1),
-            ("123456|BOOT_FAIL|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|NODE_FAIL|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|OUT_OF_MEMORY|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|DEADLINE|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|PREEMPTED|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|REVOKED|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|SPECIAL_EXIT|0:0", SchedulerJobState.FAILED, 0),
-            ("123456|CANCELLED|0:0", SchedulerJobState.CANCELLED, 0),
-            ("123456|CANCELLED by 1000|0:0", SchedulerJobState.CANCELLED, 0),
-            ("123456|TIMEOUT|0:0", SchedulerJobState.TIMEOUT, 0),
-            ("123456|UNKNOWN_XYZ|0:0", SchedulerJobState.UNKNOWN, 0),
+            ("123456|lm-job|PENDING|0:0", SchedulerJobState.QUEUED, 0),
+            ("123456|lm-job|CONFIGURING|0:0", SchedulerJobState.QUEUED, 0),
+            ("123456|lm-job|RUNNING|0:0", SchedulerJobState.ACTIVE, 0),
+            ("123456|lm-job|COMPLETING|0:0", SchedulerJobState.ACTIVE, 0),
+            ("123456|lm-job|SUSPENDED|0:0", SchedulerJobState.ACTIVE, 0),
+            ("123456|lm-job|COMPLETED|0:0", SchedulerJobState.SUCCEEDED, 0),
+            ("123456|lm-job|COMPLETED|1:0", SchedulerJobState.FAILED, 1),
+            ("123456|lm-job|COMPLETED|2:0", SchedulerJobState.FAILED, 2),
+            ("123456|lm-job|COMPLETED|0:15", SchedulerJobState.FAILED, 143),
+            ("123456|lm-job|FAILED|1:0", SchedulerJobState.FAILED, 1),
+            ("123456|lm-job|BOOT_FAIL|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|NODE_FAIL|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|OUT_OF_MEMORY|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|DEADLINE|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|PREEMPTED|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|REVOKED|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|SPECIAL_EXIT|0:0", SchedulerJobState.FAILED, 0),
+            ("123456|lm-job|CANCELLED|0:0", SchedulerJobState.CANCELLED, 0),
+            ("123456|lm-job|CANCELLED by 1000|0:0", SchedulerJobState.CANCELLED, 0),
+            ("123456|lm-job|TIMEOUT|0:0", SchedulerJobState.TIMEOUT, 0),
+            ("123456|lm-job|UNKNOWN_XYZ|0:0", SchedulerJobState.UNKNOWN, 0),
         ]
         for f_line, f_exp_state, f_exp_exit in f_acct_cases:
             f_parsed_state, f_parsed_exit = SlurmSchedulerAdapter.parseAccountingQuery(
@@ -480,6 +507,8 @@ class SlurmAdapterTest(unittest.TestCase):
                 f_exp_exit,
                 msg=f"Accounting exit mismatch for: {f_line}",
             )
+
+    testStateExitTableAndUnknownNonSuccess = testStateExitTable
 
     def testRecoveryZeroOneManyExactTokenNeverResubmits(self) -> None:
         """Verifies recovery logic (0 -> unrecovered, 1 -> recovered, >1 -> error) and exact token matching."""
@@ -562,13 +591,15 @@ class SlurmAdapterTest(unittest.TestCase):
             self.m_evidence_store.readSubmissionRecords(f_point)["submission_recorded"].payload.get("recovered")
         )
 
+    testRecoveryManifestUtcExactNameZeroOneMany = testRecoveryZeroOneManyExactTokenNeverResubmits
+
     def testCancelConfirmationBranches(self) -> None:
         """Tests bounded confirmation polling upon cancel."""
         # 1. Job transitioning to CANCELLED
         f_responses = [
             ProcessResult(0, "", "", 0.01),  # scancel
-            ProcessResult(0, "RUNNING\n", "", 0.01),  # squeue 1
-            ProcessResult(0, "CANCELLED\n", "", 0.01),  # squeue 2
+            ProcessResult(0, "123456|RUNNING\n", "", 0.01),  # squeue 1
+            ProcessResult(0, "123456|CANCELLED\n", "", 0.01),  # squeue 2
         ]
         f_runner = MockProcessRunner(f_response_sequence=f_responses)
         f_adapter = SlurmSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner))
@@ -584,7 +615,7 @@ class SlurmAdapterTest(unittest.TestCase):
         f_responses_term = [
             ProcessResult(0, "", "", 0.01),  # scancel
             ProcessResult(0, "", "", 0.01),  # squeue (empty, no longer active)
-            ProcessResult(0, "123456|COMPLETED|0:0\n", "", 0.01),  # sacct
+            ProcessResult(0, "123456|lm-job|COMPLETED|0:0\n", "", 0.01),  # sacct
         ]
         f_runner_term = MockProcessRunner(f_response_sequence=f_responses_term)
         f_adapter_term = SlurmSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_term))
@@ -604,7 +635,7 @@ class SlurmAdapterTest(unittest.TestCase):
             f_call_count += 1
             return float(f_call_count * 100.0)
 
-        f_runner_timeout = MockProcessRunner(f_returncode=0, f_stdout="RUNNING\n")
+        f_runner_timeout = MockProcessRunner(f_returncode=0, f_stdout="123456|RUNNING\n")
         f_adapter_timeout = SlurmSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_timeout))
         f_final_timeout = f_adapter_timeout.cancelAndConfirm(
             "123456",
@@ -614,6 +645,273 @@ class SlurmAdapterTest(unittest.TestCase):
             f_sleep=lambda _: None,
         )
         self.assertEqual(f_final_timeout, SchedulerJobState.UNKNOWN)
+
+    def testSqueueParsingValidMalformedTokenCounts(self) -> None:
+        """Tests pipe-delimited squeue parsing across valid token counts (2, 3, 7) and strict rejection of malformed outputs."""
+        # 1. Valid 2 tokens: %i|%T
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456|RUNNING\n"),
+            SchedulerJobState.ACTIVE,
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456|PENDING\n"),
+            SchedulerJobState.QUEUED,
+        )
+
+        # 2. Valid 3 tokens: %i|%j|%T
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456|lm-job|CONFIGURING\n"),
+            SchedulerJobState.QUEUED,
+        )
+
+        # 3. Valid 7 tokens: %i|%T|%M|%l|%j|%u|%b
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456|RUNNING|00:10|01:00|lm-job|sbulut|nodes\n"),
+            SchedulerJobState.ACTIVE,
+        )
+
+        # 4. Array job ID handles: 123456_0 or 123456
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456_0|RUNNING\n", f_job_id="123456"),
+            SchedulerJobState.ACTIVE,
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456_1|RUNNING\n", f_job_id="123456"),
+            SchedulerJobState.ACTIVE,
+        )
+
+        # 5. Malformed token counts raise SchedulerError
+        f_malformed_token_counts = [
+            "RUNNING\n",  # 1 token
+            "123456|a|b|RUNNING\n",  # 4 tokens
+            "123456|a|b|c|RUNNING\n",  # 5 tokens
+            "123456|a|b|c|d|RUNNING\n",  # 6 tokens
+            "123456|a|b|c|d|e|f|RUNNING\n",  # 8 tokens
+        ]
+        for f_bad in f_malformed_token_counts:
+            with self.assertRaises(SchedulerError, msg=f"Should reject token count: {f_bad!r}"):
+                SlurmSchedulerAdapter.parseActiveQuery(f_bad)
+
+        # 6. Malformed Job IDs raise SchedulerError
+        f_bad_ids = [
+            "abc|RUNNING\n",
+            "123.456|RUNNING\n",
+            "-123|RUNNING\n",
+            "123;cluster|RUNNING\n",
+        ]
+        for f_bad in f_bad_ids:
+            with self.assertRaises(SchedulerError, msg=f"Should reject Job ID: {f_bad!r}"):
+                SlurmSchedulerAdapter.parseActiveQuery(f_bad)
+
+        # 7. Empty output and headers
+        self.assertIsNone(SlurmSchedulerAdapter.parseActiveQuery(""))
+        self.assertIsNone(SlurmSchedulerAdapter.parseActiveQuery("   \n\t  \n"))
+        self.assertIsNone(SlurmSchedulerAdapter.parseActiveQuery("JOBID|STATE\n"))
+
+        # 8. Non-string input raises SchedulerError
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseActiveQuery(123)  # type: ignore
+
+    def testSacctParsingAllStatesExitCodesSignals(self) -> None:
+        """Tests sacct parsing across all supported column counts, states, flags, exit codes, and signal numbers."""
+        # 1. Supported column formats (4, 3, 5, 10 tokens)
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|lm-job|COMPLETED|0:0\n", f_job_id="123456"),
+            (SchedulerJobState.SUCCEEDED, 0),
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|COMPLETED|0:0\n", f_job_id="123456"),
+            (SchedulerJobState.SUCCEEDED, 0),
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery(
+                "123456|lm-job|COMPLETED|0:0|2026-08-20T12:00:00\n", f_job_id="123456"
+            ),
+            (SchedulerJobState.SUCCEEDED, 0),
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery(
+                "123456|COMPLETED|0:0|00:05:00|4|1|node1|2026-08-20|2026-08-20|2026-08-20\n",
+                f_job_id="123456",
+            ),
+            (SchedulerJobState.SUCCEEDED, 0),
+        )
+
+        # 2. Exit codes and signal parsing
+        f_exit_cases = [
+            ("0:0", SchedulerJobState.SUCCEEDED, 0),
+            ("1:0", SchedulerJobState.FAILED, 1),
+            ("2:0", SchedulerJobState.FAILED, 2),
+            ("127:0", SchedulerJobState.FAILED, 127),
+            ("0:9", SchedulerJobState.FAILED, 137),  # 128 + 9 = 137 (SIGKILL)
+            ("0:15", SchedulerJobState.FAILED, 143),  # 128 + 15 = 143 (SIGTERM)
+            ("0:2", SchedulerJobState.FAILED, 130),  # 128 + 2 = 130 (SIGINT)
+            ("0:6", SchedulerJobState.FAILED, 134),  # 128 + 6 = 134 (SIGABRT)
+            ("0", SchedulerJobState.SUCCEEDED, 0),
+            ("42", SchedulerJobState.FAILED, 42),
+        ]
+        for f_exit_str, f_exp_state, f_exp_code in f_exit_cases:
+            f_row = f"123456|lm-job|COMPLETED|{f_exit_str}\n"
+            f_st, f_ec = SlurmSchedulerAdapter.parseAccountingQuery(f_row, f_job_id="123456")
+            self.assertEqual(f_st, f_exp_state, msg=f"State mismatch for exit string: {f_exit_str}")
+            self.assertEqual(f_ec, f_exp_code, msg=f"Exit code mismatch for exit string: {f_exit_str}")
+
+        # 3. State flags: COMPLETED+, FAILED+, CANCELLED by 123
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|lm-job|COMPLETED+|0:0\n", f_job_id="123456"),
+            (SchedulerJobState.SUCCEEDED, 0),
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|lm-job|FAILED+|1:0\n", f_job_id="123456"),
+            (SchedulerJobState.FAILED, 1),
+        )
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|lm-job|CANCELLED by 12345|0:0\n", f_job_id="123456"),
+            (SchedulerJobState.CANCELLED, 0),
+        )
+
+        # 4. Malformed exit codes and column counts
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|lm-job|COMPLETED|invalid_exit\n")
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|lm-job|COMPLETED|0:invalid_sig\n")
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|COMPLETED\n")  # 2 columns
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseAccountingQuery("123456|a|b|c|d|COMPLETED\n")  # 6 columns
+
+    def testActiveExactIdZeroOneAndMalformedMany(self) -> None:
+        """Tests zero, one, and conflicting active records, as well as malformed lines."""
+        # Zero rows -> None
+        self.assertIsNone(SlurmSchedulerAdapter.parseActiveQuery("", f_job_id="123456"))
+        self.assertIsNone(SlurmSchedulerAdapter.parseActiveQuery("999999|RUNNING\n", f_job_id="123456"))
+
+        # One matching row
+        self.assertEqual(
+            SlurmSchedulerAdapter.parseActiveQuery("123456|RUNNING\n", f_job_id="123456"),
+            SchedulerJobState.ACTIVE,
+        )
+
+        # Multiple rows with conflicting states for same job ID raises SchedulerError
+        f_conflict = "123456|RUNNING\n123456|CANCELLED\n"
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseActiveQuery(f_conflict, f_job_id="123456")
+
+        # Malformed lines raise SchedulerError
+        with self.assertRaises(SchedulerError):
+            SlurmSchedulerAdapter.parseActiveQuery("123456\n", f_job_id="123456")
+
+    def testTokenRecoveryMatchesExactJobName(self) -> None:
+        """Tests that token recovery matches exact job name / correlation token and ignores non-exact candidates."""
+        f_target_token = "lm-0123456789abcdef01234567"
+        f_squeue_out = (
+            f"123456|{f_target_token}|RUNNING\n"
+            f"123457|{f_target_token}-extra|RUNNING\n"
+            f"123458|prefix-{f_target_token}|RUNNING\n"
+            f"123459|other-token|RUNNING\n"
+        )
+        f_sacct_out = (
+            f"123456|{f_target_token}|RUNNING|0:0\n"
+            f"123460|{f_target_token}_suffix|COMPLETED|0:0\n"
+        )
+
+        def recovery_handler(f_argv: Sequence[str]) -> ProcessResult:
+            if "squeue" in f_argv:
+                return ProcessResult(0, f_squeue_out, "", 0.01)
+            elif "sacct" in f_argv:
+                return ProcessResult(0, f_sacct_out, "", 0.01)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner = MockProcessRunner(f_custom_handler=recovery_handler)
+        f_adapter = SlurmSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner))
+        f_recovered = f_adapter.recoverDispatchedSubmission(f_target_token)
+
+        self.assertIsNotNone(f_recovered)
+        self.assertEqual(f_recovered.job_id, "123456")
+        self.assertEqual(f_recovered.backend, "slurm")
+
+    def testStateTransitionsActiveToCompletedFailedCancelled(self) -> None:
+        """Tests queryJobState orchestration: squeue active, sacct fallback, non-zero query handling."""
+        f_adapter = SlurmSchedulerAdapter()
+
+        # Case 1: Active in squeue -> returns (ACTIVE, None)
+        f_r1 = MockProcessRunner(f_returncode=0, f_stdout="123456|RUNNING\n")
+        f_adapter.m_command_runner = SchedulerCommandRunner(f_r1)
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.ACTIVE, None))
+
+        # Case 2: Queued in squeue -> returns (QUEUED, None)
+        f_r2 = MockProcessRunner(f_returncode=0, f_stdout="123456|PENDING\n")
+        f_adapter.m_command_runner = SchedulerCommandRunner(f_r2)
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.QUEUED, None))
+
+        # Case 3: Missing in squeue, sacct returns COMPLETED 0:0 -> returns (SUCCEEDED, 0)
+        def h_completed(f_argv: Sequence[str]) -> ProcessResult:
+            if "squeue" in f_argv:
+                return ProcessResult(0, "", "", 0.01)
+            elif "sacct" in f_argv:
+                return ProcessResult(0, "123456|lm-job|COMPLETED|0:0\n", "", 0.01)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_completed))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.SUCCEEDED, 0))
+
+        # Case 4: squeue fails with non-zero exit, sacct succeeds with FAILED 1:0 -> returns (FAILED, 1)
+        def h_squeue_fail(f_argv: Sequence[str]) -> ProcessResult:
+            if "squeue" in f_argv:
+                return ProcessResult(1, "", "squeue: error: controller not responding\n", 0.01)
+            elif "sacct" in f_argv:
+                return ProcessResult(0, "123456|lm-job|FAILED|1:0\n", "", 0.01)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_squeue_fail))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.FAILED, 1))
+
+        # Case 5: squeue empty, sacct returns CANCELLED -> returns (CANCELLED, 0)
+        def h_cancelled(f_argv: Sequence[str]) -> ProcessResult:
+            if "squeue" in f_argv:
+                return ProcessResult(0, "", "", 0.01)
+            elif "sacct" in f_argv:
+                return ProcessResult(0, "123456|lm-job|CANCELLED by 1000|0:0\n", "", 0.01)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_cancelled))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.CANCELLED, 0))
+
+        # Case 6: squeue empty, sacct returns TIMEOUT -> returns (TIMEOUT, 0)
+        def h_timeout(f_argv: Sequence[str]) -> ProcessResult:
+            if "squeue" in f_argv:
+                return ProcessResult(0, "", "", 0.01)
+            elif "sacct" in f_argv:
+                return ProcessResult(0, "123456|lm-job|TIMEOUT|0:0\n", "", 0.01)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_timeout))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.TIMEOUT, 0))
+
+    def testEmptyUnrecognizedAndCorruptedOutputYieldsUnknown(self) -> None:
+        """Tests that empty, unrecognized, or corrupted outputs across queries yield (UNKNOWN, None)."""
+        f_adapter = SlurmSchedulerAdapter()
+
+        # Both empty
+        def h_empty(f_argv: Sequence[str]) -> ProcessResult:
+            return ProcessResult(0, "", "", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_empty))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.UNKNOWN, None))
+
+        # Both fail with non-zero exit
+        def h_both_fail(f_argv: Sequence[str]) -> ProcessResult:
+            return ProcessResult(1, "", "Command failed\n", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_both_fail))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.UNKNOWN, None))
+
+        # Corrupted / unparseable outputs
+        def h_corrupt(f_argv: Sequence[str]) -> ProcessResult:
+            return ProcessResult(0, "corrupted_non_pipe_delimited_output\n", "", 0.01)
+
+        f_adapter.m_command_runner = SchedulerCommandRunner(MockProcessRunner(f_custom_handler=h_corrupt))
+        self.assertEqual(f_adapter.queryJobState("123456"), (SchedulerJobState.UNKNOWN, None))
 
     def testGoldenVikingViking2Archer2ScriptsUseEndFail(self) -> None:
         """Validates golden scripts across Viking, Viking2, and Archer2 with strict directive order and END,FAIL."""
@@ -869,6 +1167,446 @@ class SlurmAdapterTest(unittest.TestCase):
                     f_output_path=f_bad,
                     f_error_path=self.m_error_path,
                 )
+
+    def testCredentialWhitespaceEmptyMalformedAndInjectionRejected(self) -> None:
+        """Verifies account and email validator rejection of whitespace, empty, malformed, shell, and injection tokens."""
+        # 1. Account validation: valid cases
+        f_valid_accounts = ["e281", "proj_01", "account-123.v1", "A1", "my-account_2"]
+        for f_acc in f_valid_accounts:
+            self.assertEqual(SlurmScriptRenderer.validateAccount(f_acc), f_acc)
+            self.assertEqual(SchedulerScriptRenderer.validateAccount(f_acc), f_acc)
+
+        # 1a. Account validation: non-string types
+        for f_bad in (None, 123, [], {}, True, False):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateAccount(f_bad)
+
+        # 1b. Account validation: empty and whitespace
+        for f_bad in ("", "   ", "\t", "\n", "\r\n"):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateAccount(f_bad)
+
+        # 1c. Account validation: control characters and NUL
+        for f_bad in ("acct\0", "acct\n", "acct\r", "acct\x1f", "acct\x7f"):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateAccount(f_bad)
+
+        # 1d. Account validation: directive injection
+        for f_bad in (
+            "acct\n#SBATCH --export=ALL",
+            "acct#SBATCH",
+            "acct#PBS",
+            "acct\r#SBATCH",
+            "acct\n#PBS",
+        ):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateAccount(f_bad)
+
+        # 1e. Account validation: shell tokens and malformed regex
+        for f_bad in (
+            "-starts-with-dash",
+            ".starts-with-dot",
+            "_starts-with-underscore",
+            "has space",
+            "bad$char",
+            "bad@char",
+            "bad%char",
+            "acct; rm -rf /",
+            "acct$(whoami)",
+            "acct`whoami`",
+            "acct|cat",
+            "acct&",
+        ):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateAccount(f_bad)
+
+        # 2. Mail user validation: valid cases
+        f_valid_emails = [
+            "user@epcc.ed.ac.uk",
+            "admin+tag@sub.domain.org",
+            "a.b_c-d@host.net",
+            "user123@viking.york.ac.uk",
+        ]
+        for f_em in f_valid_emails:
+            self.assertEqual(SlurmScriptRenderer.validateMailUser(f_em), f_em)
+            self.assertEqual(SchedulerScriptRenderer.validateMailUser(f_em), f_em)
+
+        # 2a. Mail user validation: non-string types
+        for f_bad in (None, 123, [], {}, True, False):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateMailUser(f_bad)
+
+        # 2b. Mail user validation: empty and whitespace
+        for f_bad in ("", "   ", "\t", "\n", "\r\n"):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateMailUser(f_bad)
+
+        # 2c. Mail user validation: control characters and NUL
+        for f_bad in ("u@d.com\0", "u@d.com\n", "u@d.com\r", "u\x01@d.com", "u@d.com\x7f"):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateMailUser(f_bad)
+
+        # 2d. Mail user validation: directive injection
+        for f_bad in (
+            "u@d.com\n#SBATCH --mail-type=ALL",
+            "u@d.com#SBATCH",
+            "u@d.com#PBS",
+            "u@d.com\r#SBATCH",
+        ):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateMailUser(f_bad)
+
+        # 2e. Mail user validation: shell tokens and malformed regex
+        for f_bad in (
+            "notanemail",
+            "@nodomain.com",
+            "user@",
+            "user space@domain.com",
+            "user@domain with spaces.com",
+            "user@@domain.com",
+            "u@d.com; scancel 123",
+            "u@d.com$(id)",
+            "u@d.com`id`",
+            "u@d.com|cat",
+        ):
+            with self.assertRaises(SchedulerScriptError):
+                SlurmScriptRenderer.validateMailUser(f_bad)
+
+        # 3. Directives rendering with valid account and email
+        f_dirs = SlurmScriptRenderer.renderDirectives(
+            f_point=self.m_small_point,
+            f_profile=self.m_viking_profile,
+            f_job_name=self.m_job_name,
+            f_output_path=self.m_output_path,
+            f_error_path=self.m_error_path,
+            f_account="e281_prj",
+            f_mail_user="user@epcc.ed.ac.uk",
+            f_mail_mode=SlurmMailMode.END_FAIL,
+        )
+        self.assertIn("#SBATCH --account=e281_prj", f_dirs)
+        self.assertIn("#SBATCH --mail-user=user@epcc.ed.ac.uk", f_dirs)
+        self.assertIn("#SBATCH --mail-type=END,FAIL", f_dirs)
+
+        # Exact sequence check: account, mail-user, mail-type
+        f_acc_idx = f_dirs.index("#SBATCH --account=e281_prj")
+        f_mail_idx = f_dirs.index("#SBATCH --mail-user=user@epcc.ed.ac.uk")
+        f_type_idx = f_dirs.index("#SBATCH --mail-type=END,FAIL")
+        self.assertEqual(f_mail_idx, f_acc_idx + 1)
+        self.assertEqual(f_type_idx, f_mail_idx + 1)
+
+        # 4. Directives rendering rejection with invalid account or email
+        with self.assertRaises(SchedulerScriptError):
+            SlurmScriptRenderer.renderDirectives(
+                f_point=self.m_small_point,
+                f_profile=self.m_viking_profile,
+                f_job_name=self.m_job_name,
+                f_output_path=self.m_output_path,
+                f_error_path=self.m_error_path,
+                f_account="bad account spaces",
+                f_mail_user="user@epcc.ed.ac.uk",
+            )
+
+        with self.assertRaises(SchedulerScriptError):
+            SlurmScriptRenderer.renderDirectives(
+                f_point=self.m_small_point,
+                f_profile=self.m_viking_profile,
+                f_job_name=self.m_job_name,
+                f_output_path=self.m_output_path,
+                f_error_path=self.m_error_path,
+                f_account="e281_prj",
+                f_mail_user="not-an-email",
+            )
+
+        # 5. Render job script from JobSpec
+        f_spec = JobSpec(
+            f_point_id="0-tasks-8",
+            f_script_path=os.path.join(self.m_temp_dir.name, "job.sh"),
+            f_working_dir=self.m_temp_dir.name,
+            f_account="e281_prj",
+            f_mail_user="user@epcc.ed.ac.uk",
+            f_mail_mode=SlurmMailMode.END_FAIL,
+            f_output_path=self.m_output_path,
+            f_error_path=self.m_error_path,
+            f_job_name=self.m_job_name,
+        )
+        f_rendered = SlurmScriptRenderer.renderJobScript(
+            f_point=self.m_small_point,
+            f_profile=self.m_viking_profile,
+            f_spec=f_spec,
+            f_worker_executable=self.m_worker_path,
+            f_manifest_path=os.path.join(self.m_temp_dir.name, "manifest.json"),
+        )
+        self.assertIn("#SBATCH --account=e281_prj", f_rendered)
+        self.assertIn("#SBATCH --mail-user=user@epcc.ed.ac.uk", f_rendered)
+        self.assertIn("#SBATCH --mail-type=END,FAIL", f_rendered)
+
+    def testCancelCommandAndQueriesShareOneDeadline(self) -> None:
+        """Verifies that cancel and confirmation queries share a single monotonic deadline with min(cmd_timeout, remaining_grace)."""
+        f_current_time = 100.0
+
+        def mock_clock() -> float:
+            return f_current_time
+
+        f_sleep_durations: List[float] = []
+
+        def mock_sleep(f_dur: float) -> None:
+            nonlocal f_current_time
+            f_sleep_durations.append(f_dur)
+            f_current_time += f_dur
+
+        # 1. Normal cancel-confirm sharing monotonic deadline
+        f_runner = MockProcessRunner(f_returncode=0, f_stdout="123456|RUNNING\n")
+        f_adapter = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner),
+            f_timeout=60.0,
+        )
+
+        def custom_handler_with_time(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "scancel":
+                f_current_time += 2.0  # scancel takes 2.0s
+                return ProcessResult(0, "", "", 2.0)
+            elif f_argv[0] == "squeue":
+                f_current_time += 1.0  # squeue takes 1.0s
+                if f_current_time >= 106.0:
+                    return ProcessResult(0, "123456|CANCELLED\n", "", 1.0)
+                return ProcessResult(0, "123456|RUNNING\n", "", 1.0)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner.m_custom_handler = custom_handler_with_time
+
+        f_final = f_adapter.cancelAndConfirm(
+            "123456",
+            f_poll_interval=1.5,
+            f_grace_seconds=10.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_final, SchedulerJobState.CANCELLED)
+        # Verify scancel got remaining grace min(60.0, 10.0) = 10.0
+        self.assertEqual(f_runner.m_invoked_kwargs[0].get("f_timeout"), 10.0)
+        # Verify subsequent queries received remaining grace bounded by deadline
+        for f_kw in f_runner.m_invoked_kwargs[1:]:
+            self.assertLessEqual(f_kw.get("f_timeout"), 8.0)
+            self.assertGreater(f_kw.get("f_timeout"), 0.0)
+
+        # 2. Cancel command consuming all grace seconds
+        f_current_time = 200.0
+        f_runner_all_grace = MockProcessRunner()
+
+        def custom_cancel_consumes_grace(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "scancel":
+                f_current_time += 15.0  # Consumes all 10s grace
+                return ProcessResult(0, "", "", 15.0)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner_all_grace.m_custom_handler = custom_cancel_consumes_grace
+        f_adapter_all_grace = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_all_grace),
+            f_timeout=60.0,
+        )
+        f_state_all_grace = f_adapter_all_grace.cancelAndConfirm(
+            "123456",
+            f_poll_interval=1.0,
+            f_grace_seconds=10.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_state_all_grace, SchedulerJobState.UNKNOWN)
+        # Proves no query command was issued after deadline expired
+        self.assertEqual(len(f_runner_all_grace.m_invoked_argv), 1)
+        self.assertEqual(f_runner_all_grace.m_invoked_argv[0][0], "scancel")
+
+        # 3. Sleep truncation when poll_interval > remaining_grace
+        f_current_time = 300.0
+        f_sleep_durations.clear()
+        f_runner_trunc = MockProcessRunner(f_returncode=0, f_stdout="123456|RUNNING\n")
+
+        def custom_trunc_handler(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "scancel":
+                f_current_time += 3.0  # 3s elapsed, 2s remaining
+                return ProcessResult(0, "", "", 3.0)
+            elif f_argv[0] == "squeue":
+                f_current_time += 0.5  # 3.5s elapsed, 1.5s remaining
+                return ProcessResult(0, "123456|RUNNING\n", "", 0.5)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner_trunc.m_custom_handler = custom_trunc_handler
+        f_adapter_trunc = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_trunc),
+            f_timeout=60.0,
+        )
+        f_state_trunc = f_adapter_trunc.cancelAndConfirm(
+            "123456",
+            f_poll_interval=5.0,  # poll interval 5.0 is larger than 1.5s remaining
+            f_grace_seconds=5.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_state_trunc, SchedulerJobState.UNKNOWN)
+        self.assertTrue(any(abs(f_d - 1.5) < 1e-4 for f_d in f_sleep_durations))
+
+        # 4. Command exception handling during queries
+        f_current_time = 400.0
+        f_runner_exc = MockProcessRunner()
+
+        def custom_exc_handler(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "scancel":
+                f_current_time += 1.0
+                return ProcessResult(0, "", "", 1.0)
+            elif f_argv[0] == "squeue":
+                f_current_time += 1.0
+                raise ProcessExecutionError("squeue failed")
+            elif f_argv[0] == "sacct":
+                f_current_time += 1.0
+                raise ProcessExecutionError("sacct failed")
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner_exc.m_custom_handler = custom_exc_handler
+        f_adapter_exc = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_exc),
+            f_timeout=60.0,
+        )
+        f_state_exc = f_adapter_exc.cancelAndConfirm(
+            "123456",
+            f_poll_interval=1.0,
+            f_grace_seconds=5.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_state_exc, SchedulerJobState.UNKNOWN)
+
+    def testTimeoutBeforeAfterAcceptanceIsNonSuccess(self) -> None:
+        """Verifies that timeouts at submission, recovery, and queries are non-success and enforce token recovery."""
+        f_ev_store = EvidenceStore(self.m_temp_dir.name, f_run_id="test_run_123")
+        f_point = self.m_small_point
+        f_spec = JobSpec(
+            f_point_id=f_point,
+            f_script_path=os.path.join(self.m_temp_dir.name, "job.sh"),
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name=self.m_job_name,
+        )
+
+        # 1. Timed out submit command raises SubmissionDispatchError and records dispatched with timed_out=True
+        f_runner_timeout = MockProcessRunner(
+            f_returncode=-9,
+            f_stdout="",
+            f_stderr="timed out",
+        )
+        # Mark as timed_out
+        def custom_timeout_submit(f_argv: Sequence[str]) -> ProcessResult:
+            return ProcessResult(
+                f_returncode=-9,
+                f_stdout="",
+                f_stderr="command timed out",
+                f_elapsed_seconds=0.2,
+                f_timed_out=True,
+            )
+
+        f_runner_timeout.m_custom_handler = custom_timeout_submit
+        f_adapter_timeout = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_timeout),
+            f_evidence_store=f_ev_store,
+            f_timeout=10.0,
+        )
+
+        with self.assertRaises(SubmissionDispatchError) as f_ctx:
+            f_adapter_timeout.dispatchSubmission(f_point, f_spec)
+        self.assertIn("timed out", str(f_ctx.exception))
+
+        # Check evidence store has submission_dispatched (pre-spawn record)
+        f_records = f_ev_store.readSubmissionRecords(f_point)
+        self.assertIsNotNone(f_records["submission_requested"])
+        self.assertIsNotNone(f_records["submission_dispatched"])
+        self.assertIsNone(f_records["submission_recorded"])
+        f_disp_record = f_records["submission_dispatched"]
+        self.assertIsNotNone(f_disp_record)
+        self.assertEqual(f_disp_record.payload.get("job_name"), self.m_job_name)
+        self.assertNotIn("timed_out", f_disp_record.payload)
+
+        # 2. Resubmission attempt for same point enters crash recovery by token, never blind resubmit
+        f_runner_rec_zero = MockProcessRunner(f_returncode=0, f_stdout="")
+        f_adapter_rec_zero = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_rec_zero),
+            f_evidence_store=f_ev_store,
+        )
+        with self.assertRaises(SubmissionDispatchError) as f_ctx2:
+            f_adapter_rec_zero.dispatchSubmission(f_point, f_spec)
+        self.assertIn("0 candidate jobs", str(f_ctx2.exception))
+        # Ensure no second sbatch was run
+        self.assertEqual(len([f_c for f_c in f_runner_rec_zero.m_invoked_argv if f_c[0] == "sbatch"]), 0)
+
+        # 3. Crash recovery finding exactly 1 job succeeds and records handle
+        f_runner_rec_single = MockProcessRunner(
+            f_returncode=0,
+            f_stdout=f"123456|{self.m_job_name}|RUNNING\n",
+        )
+        f_adapter_rec_single = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_rec_single),
+            f_evidence_store=f_ev_store,
+        )
+        f_rec_res = f_adapter_rec_single.dispatchSubmission(f_point, f_spec)
+        self.assertEqual(f_rec_res.job_handle.job_id, "123456")
+        self.assertTrue(f_rec_res.is_success)
+
+        # 4. Recovery query timeout returns 0 candidate jobs
+        f_runner_rec_timeout = MockProcessRunner(f_returncode=-9)
+        f_runner_rec_timeout.m_custom_handler = lambda f_argv: ProcessResult(
+            f_returncode=-9, f_stdout="123456|name|R\n", f_stderr="", f_elapsed_seconds=0.2, f_timed_out=True
+        )
+        f_adapter_rec_timeout = SlurmSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_rec_timeout)
+        )
+        f_cands = f_adapter_rec_timeout.recoverCandidateJobIds(self.m_job_name)
+        self.assertEqual(len(f_cands), 0)
+
+    def testZeroNegativeNanInfinityTimeoutRejected(self) -> None:
+        """Validates that zero, negative, NaN, infinity, bool, string, and None timeouts are strictly rejected."""
+        f_invalid_timeouts = [
+            0,
+            0.0,
+            -1,
+            -0.001,
+            -100.0,
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            False,
+            "120",
+            None,
+        ]
+
+        # 1. validateTimeout directly
+        for f_bad_val in f_invalid_timeouts:
+            with self.assertRaises(SchedulerError):
+                SlurmSchedulerAdapter.validateTimeout(f_bad_val)
+
+        # 2. SlurmSchedulerAdapter constructor
+        for f_bad_val in f_invalid_timeouts:
+            if f_bad_val is None:
+                continue
+            with self.assertRaises(SchedulerError):
+                SlurmSchedulerAdapter(f_timeout=f_bad_val)
+
+            with self.assertRaises(SchedulerError):
+                SlurmSchedulerAdapter(f_command_timeout=f_bad_val)
+
+        # 3. cancelAndConfirm arguments
+        f_adapter = SlurmSchedulerAdapter()
+        for f_bad_val in f_invalid_timeouts:
+            if f_bad_val is not None:
+                with self.assertRaises(SchedulerError):
+                    f_adapter.cancelAndConfirm("123456", f_grace_seconds=f_bad_val)
+
+                with self.assertRaises(SchedulerError):
+                    f_adapter.cancelAndConfirm("123456", f_timeout=f_bad_val)
+
+            with self.assertRaises(SchedulerError):
+                f_adapter.cancelAndConfirm("123456", f_poll_interval=f_bad_val)
 
 
 if __name__ == "__main__":

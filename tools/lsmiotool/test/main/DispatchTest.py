@@ -57,7 +57,26 @@ from lsmiotool.lib.main import (
     ShellMain,
     TestMain,
 )
-from lsmiotool.lib.run import RunRequest
+from lsmiotool.lib.resources import (
+    ExecutionMode,
+    ResourceLocator,
+    RuntimeLayout,
+)
+from lsmiotool.lib.run import (
+    RunOrchestrator,
+    RunPlan,
+    RunPlanner,
+    RunReporter,
+    RunRequest,
+    ScalePoint,
+    ScheduledPointResources,
+    SignalCoordinator,
+)
+from lsmiotool.lib.state import (
+    OverallRunState,
+    PointRunState,
+    RunStateView,
+)
 from lsmiotool.lib.version import getVersion
 
 
@@ -432,6 +451,62 @@ print("LAZY_IMPORT_OK")
             f_actual_status = f_main_status.run()
             self.assertEqual(f_actual_status, f_expected_status)
 
+    def testSourceRunPassesExplicitRuntimeLayout(self) -> None:
+        """Asserts entry point 'run' command constructs and passes the explicit source RuntimeLayout with checked-in worker."""
+        f_exec_str = str(self.m_executable)
+        f_captured_init_kwargs = {}
+        f_orig_run_main_init = RunMain.__init__
+
+        def spy_run_main_init(self_obj, *args, **kwargs):
+            f_captured_init_kwargs.update(kwargs)
+            f_orig_run_main_init(self_obj, *args, **kwargs)
+
+        # 1. Standard invocation
+        with patch.object(sys, "argv", [f_exec_str, "run", "ior", "local"]):
+            with patch.object(RunMain, "__init__", side_effect=spy_run_main_init, autospec=True):
+                with patch.object(RunMain, "run", return_value=0):
+                    with self.assertRaises(SystemExit) as ctx:
+                        runpy.run_path(f_exec_str, run_name="__main__")
+                    self.assertEqual(ctx.exception.code, 0)
+
+        f_layout = f_captured_init_kwargs.get("f_runtime_layout")
+        self.assertIsNotNone(f_layout)
+        self.assertIsInstance(f_layout, RuntimeLayout)
+        self.assertEqual(f_layout.execution_mode, ExecutionMode.SOURCE)
+        self.assertTrue(f_layout.is_source)
+        self.assertFalse(f_layout.is_installed)
+        self.assertEqual(f_layout.package_root, str(self.m_package_root))
+        self.assertEqual(f_layout.profile_file, str(self.m_package_root / "etc" / "environments.json"))
+        self.assertEqual(f_layout.asset_root, str(self.m_package_root.parent / "bmtool" / "lmp-reaxff"))
+        self.assertEqual(f_layout.worker_executable, str(self.m_package_root / "lsmiotool-worker"))
+        self.assertEqual(f_layout.version_file, str(self.m_package_root.parent.parent / "VERSION"))
+
+        # 2. Invocation from unrelated cwd with decoy files
+        f_decoy_dir = os.path.join(self.m_temp_dir, "decoy_run_cwd")
+        os.makedirs(os.path.join(f_decoy_dir, "tools", "lsmiotool"), exist_ok=True)
+        with open(os.path.join(f_decoy_dir, "VERSION"), "w", encoding="utf-8") as f_f:
+            f_f.write("decoy\n")
+
+        f_orig_cwd = os.getcwd()
+        try:
+            os.chdir(f_decoy_dir)
+            f_captured_init_kwargs.clear()
+            with patch.object(sys, "argv", [f_exec_str, "run", "lmp", "bake"]):
+                with patch.object(RunMain, "__init__", side_effect=spy_run_main_init, autospec=True):
+                    with patch.object(RunMain, "run", return_value=0):
+                        with self.assertRaises(SystemExit) as ctx:
+                            runpy.run_path(f_exec_str, run_name="__main__")
+                        self.assertEqual(ctx.exception.code, 0)
+
+            f_layout_decoy = f_captured_init_kwargs.get("f_runtime_layout")
+            self.assertIsNotNone(f_layout_decoy)
+            self.assertEqual(f_layout_decoy.package_root, str(self.m_package_root))
+            self.assertEqual(f_layout_decoy.worker_executable, str(self.m_package_root / "lsmiotool-worker"))
+            self.assertNotIn("decoy", f_layout_decoy.package_root)
+            self.assertNotIn("decoy", f_layout_decoy.worker_executable)
+        finally:
+            os.chdir(f_orig_cwd)
+
     def testHelpVersionZero(self) -> None:
         """Tests --help and --version return exit code 0 and output valid text / version from Chunk 026."""
         f_exec_str = str(self.m_executable)
@@ -512,6 +587,105 @@ print("LAZY_IMPORT_OK")
                     with self.assertRaises(SystemExit) as ctx:
                         runpy.run_path(f_exec_str, run_name="__main__")
                     self.assertEqual(ctx.exception.code, 1)
+
+    def testSourceAndInstalledRunDoNotCallDetectWithUserHome(self) -> None:
+        """Asserts source and installed RunMain dispatch does not pass user/home to EnvironmentResolver.detect()."""
+        from lsmiotool.lib.site import EnvironmentResolver, SiteProfile
+        f_exec_str = str(self.m_executable)
+
+        mock_profile = MagicMock(spec=SiteProfile)
+
+        f_detect_calls = []
+        f_resolve_calls = []
+
+        def spy_detect(*args: Any, **kwargs: Any) -> str:
+            f_detect_calls.append((args, kwargs))
+            return "VIKING"
+
+        def spy_resolve(*args: Any, **kwargs: Any) -> SiteProfile:
+            f_resolve_calls.append((args, kwargs))
+            return mock_profile
+
+        # 1. Source layout through RunMain
+        source_layout = ResourceLocator.forSource(f_exec_str)
+        run_main_src = RunMain(
+            "ior", "local",
+            f_runtime_layout=source_layout,
+        )
+        f_detect_calls.clear()
+        f_resolve_calls.clear()
+
+        with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
+            with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
+                with patch("lsmiotool.lib.run.RunPlanner.createPlan") as mock_create_plan:
+                    mock_create_plan.side_effect = Exception("Stop after preflight profile resolution")
+                    exit_code = run_main_src.run()
+                    self.assertEqual(exit_code, 1)
+
+        self.assertEqual(len(f_detect_calls), 1)
+        _, det_kw = f_detect_calls[0]
+        self.assertNotIn("f_user", det_kw)
+        self.assertNotIn("f_home", det_kw)
+        self.assertNotIn("user", det_kw)
+        self.assertNotIn("home", det_kw)
+
+        self.assertEqual(len(f_resolve_calls), 1)
+        res_args, res_kw = f_resolve_calls[0]
+        self.assertEqual(res_args[0], "VIKING")
+        self.assertEqual(res_kw.get("f_env_file"), source_layout.profile_file)
+
+        # 2. Installed layout through RunMain
+        installed_layout = RuntimeLayout(
+            f_execution_mode=ExecutionMode.INSTALLED,
+            f_package_root="/usr/local/share/lsmio/python",
+            f_profile_file="/usr/local/share/lsmio/etc/environments.json",
+            f_asset_root="/usr/local/share/lsmio/lmp-reaxff",
+            f_worker_executable="/usr/local/libexec/lsmio/lsmiotool-worker",
+            f_version_file="/usr/local/share/lsmio/VERSION",
+        )
+        run_main_inst = RunMain(
+            "ior", "local",
+            f_runtime_layout=installed_layout,
+        )
+        f_detect_calls.clear()
+        f_resolve_calls.clear()
+
+        with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
+            with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
+                with patch("lsmiotool.lib.run.RunPlanner.createPlan") as mock_create_plan:
+                    mock_create_plan.side_effect = Exception("Stop after preflight profile resolution")
+                    exit_code = run_main_inst.run()
+                    self.assertEqual(exit_code, 1)
+
+        self.assertEqual(len(f_detect_calls), 1)
+        _, det_kw = f_detect_calls[0]
+        self.assertNotIn("f_user", det_kw)
+        self.assertNotIn("f_home", det_kw)
+
+        self.assertEqual(len(f_resolve_calls), 1)
+        res_args, res_kw = f_resolve_calls[0]
+        self.assertEqual(res_args[0], "VIKING")
+        self.assertEqual(res_kw.get("f_env_file"), installed_layout.profile_file)
+
+        # 3. Full entrypoint invocation with runpy to ensure no unexpected keyword argument exception
+        f_detect_calls.clear()
+        f_resolve_calls.clear()
+        with patch.object(sys, "argv", [f_exec_str, "run", "ior", "local"]):
+            with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
+                with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
+                    with patch("lsmiotool.lib.run.RunPlanner.createPlan") as mock_create_plan:
+                        mock_create_plan.side_effect = Exception("Stop after profile resolution")
+                        with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                            with self.assertRaises(SystemExit) as ctx:
+                                runpy.run_path(f_exec_str, run_name="__main__")
+                            self.assertEqual(ctx.exception.code, 1)
+                            err_out = mock_stderr.getvalue()
+                            self.assertNotIn("unexpected keyword argument", err_out)
+
+        self.assertEqual(len(f_detect_calls), 1)
+        _, det_kw = f_detect_calls[0]
+        self.assertNotIn("f_user", det_kw)
+        self.assertNotIn("f_home", det_kw)
 
     def _readReadmeContent(self) -> str:
         """Helper to read README.md content from repository root."""
@@ -649,3 +823,521 @@ print("LAZY_IMPORT_OK")
         # Atomic lmp large rejection
         self.assertIn("lmp large", f_readme)
 
+    def testReadmeHelpRuntimeConstantsAndPathsAgree(self) -> None:
+        """Chunk 021: Asserts README.md, CLI help constants, and runtime layout paths agree on benchmarks, scales, setups, syntax, and paths."""
+        f_readme = self._readReadmeContent()
+
+        # 1. Benchmarks, scales, and setups agreement
+        for f_bm in ("ior", "lsmio", "lmp"):
+            self.assertIn(f_bm, f_readme)
+            self.assertIn(f_bm, RUN_HELP_TEXT)
+            self.assertIn(f_bm, LSMIOTOOL_HELP)
+
+        for f_scale in ("local", "bake", "small", "large"):
+            self.assertIn(f_scale, f_readme)
+            self.assertIn(f_scale, RUN_HELP_TEXT)
+            self.assertIn(f_scale, LSMIOTOOL_HELP)
+
+        for f_setup in ("BASE", "NATIVE-M", "LSMIO"):
+            self.assertIn(f_setup, f_readme)
+            self.assertIn(f_setup, RUN_HELP_TEXT)
+
+        # 2. Syntax rules: --setup <name> accepted, --setup=value strictly rejected
+        self.assertIn("--setup <name>", f_readme)
+        self.assertIn("--setup=value", f_readme)
+        self.assertIn("--setup <name>", RUN_HELP_TEXT)
+        self.assertIn("--setup=value", RUN_HELP_TEXT)
+
+        # 3. Global legacy --ssd / -s option
+        self.assertIn("--ssd", f_readme)
+        self.assertIn("-s", f_readme)
+        self.assertIn("--ssd", RUN_HELP_TEXT)
+        self.assertIn("-s", RUN_HELP_TEXT)
+        self.assertIn("--ssd", LSMIOTOOL_HELP)
+
+        # 4. Installed and Source layout paths agree with runtime specifications
+        # Installed layout paths
+        self.assertIn("bin/lsmiotool", f_readme)
+        self.assertIn("libexec/lsmio/lsmiotool-worker", f_readme)
+        self.assertIn("share/lsmio/python", f_readme)
+        self.assertIn("share/lsmio/etc/environments.json", f_readme)
+        self.assertIn("share/lsmio/VERSION", f_readme)
+        self.assertIn("share/lsmio/lmp-reaxff", f_readme)
+
+        # Source layout paths
+        self.assertIn("tools/lsmiotool/lsmiotool", f_readme)
+        self.assertIn("tools/lsmiotool/lsmiotool-worker", f_readme)
+        self.assertIn("tools/lsmiotool/etc/environments.json", f_readme)
+        self.assertIn("tools/bmtool/lmp-reaxff", f_readme)
+
+        # 5. Standardized printed identity lines
+        self.assertIn("Run ID:", f_readme)
+        self.assertIn("Run Root:", f_readme)
+        self.assertIn("Point <point-id> Correlation Token:", f_readme)
+        self.assertIn("Point <point-id> Job ID:", f_readme)
+        self.assertIn("Final State:", f_readme)
+        self.assertIn("Exit Code:", f_readme)
+
+        # 6. Run collision refusal
+        self.assertIn("allocateRun", f_readme)
+        self.assertIn("Collision Refusal", f_readme)
+        self.assertIn("control/lock", f_readme)
+
+    def testReadmeDispatchSchedulerIdAndSignalContracts(self) -> None:
+        """Chunk 021: Asserts README.md documents the pre-spawn dispatch protocol, exact scheduler ID and command contracts, timeouts, fail-closed handling, and signals."""
+        f_readme = self._readReadmeContent()
+
+        # 1. 4-step dispatch protocol with pre-spawn evidence
+        self.assertIn("4-Step Dispatch Protocol", f_readme)
+        self.assertIn("submission_requested", f_readme)
+        self.assertIn("submission_dispatched", f_readme)
+        self.assertIn("submission_recorded", f_readme)
+        self.assertIn("Written immediately before spawning the scheduler process", f_readme)
+
+        # 2. Correlation token format and recovery
+        self.assertIn("^lm-[0-9a-f]{24}$", f_readme)
+        self.assertIn("without blind resubmission", f_readme)
+        self.assertIn("INDETERMINATE", f_readme)
+
+        # 3. Slurm handle contract and exact commands
+        self.assertIn("^[0-9]+$", f_readme)
+        self.assertIn("123;cluster", f_readme)
+        self.assertIn("squeue --noheader --jobs=<id> --format=%i|%T", f_readme)
+        self.assertIn("sacct --noheader --parsable2 --jobs=<id> --format=JobIDRaw,JobName,State,ExitCode", f_readme)
+        self.assertIn("scancel <id>", f_readme)
+
+        # 4. Slurm credentials
+        self.assertIn("SB_ACCOUNT", f_readme)
+        self.assertIn("SB_EMAIL", f_readme)
+
+        # 5. PBS handle contract and exact commands
+        self.assertIn("^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_readme)
+        self.assertIn("123456.isambard-pbs", f_readme)
+        self.assertIn("qstat -F json <id>", f_readme)
+        self.assertIn("qstat -F json -x <id>", f_readme)
+        self.assertIn("qdel <id>", f_readme)
+
+        # 6. Finite timeouts, polling interval, and fail-closed error handling
+        self.assertIn("grace_seconds", f_readme)
+        self.assertIn("120s", f_readme)
+        self.assertIn("8-second", f_readme)
+        self.assertIn("time.sleep", f_readme)
+        self.assertIn("fail closed", f_readme)
+        self.assertIn("no 3-unknown retry loop", f_readme)
+
+        # 7. Signal coordination and interruption-first durability
+        self.assertIn("130", f_readme)
+        self.assertIn("143", f_readme)
+        self.assertIn("Interruption-First Durability", f_readme)
+        self.assertIn("interruption event is durably appended to the control stream before any cancellation command", f_readme)
+
+        # 8. State precedence
+        self.assertIn("WHOLE_RUN_SUCCEEDED", f_readme)
+        self.assertIn("SUCCEEDED", f_readme)
+        self.assertIn("FAILED", f_readme)
+        self.assertIn("CANCELLED", f_readme)
+        self.assertIn("INTERRUPTED", f_readme)
+
+    def testReadmeLmpAssetsFlagsAndTuningMatchUpstream(self) -> None:
+        """Chunk 021: Asserts README.md documents exact upstream LMP asset filenames, tuning parameters, shared invocation argv, and the atomic large gate."""
+        f_readme = self._readReadmeContent()
+
+        # 1. Exact upstream LMP asset filenames
+        self.assertIn("in.reaxc.hns", f_readme)
+        self.assertIn("data.hns-equil", f_readme)
+        self.assertIn("ffield.reax.hns", f_readme)
+
+        # 2. Exact shared invocation argv and setup flags
+        self.assertIn("lmp -in in.reaxc.hns -v x <REP> -v y <REP> -v z <REP>", f_readme)
+        self.assertIn("-lsmio-buf-size-mb <BUF>", f_readme)
+        self.assertIn("-lsmio-mmap -lsmio-buf-size-mb <BUF>", f_readme)
+        self.assertIn("-lsmio-fallback", f_readme)
+        self.assertIn("No Kokkos or dump flags", f_readme)
+
+        # 3. Upstream tuning table for all 9 supported task counts
+        f_independent_approved_tuning = {
+            1: (4, 32),
+            2: (5, 32),
+            4: (6, 64),
+            8: (8, 128),
+            16: (10, 256),
+            24: (12, 512),
+            32: (14, 1024),
+            40: (15, 1024),
+            48: (16, 1024),
+        }
+
+        for f_tasks, (f_rep, f_buf) in f_independent_approved_tuning.items():
+            # Check against independent approved literals
+            self.assertIn(f"| {f_tasks} | {f_rep} | {f_buf} |", f_readme)
+            # Check agreement with RunPlanner.LMP_TASK_TUNING
+            f_runtime_tuning = RunPlanner.LMP_TASK_TUNING.get(f_tasks)
+            self.assertIsNotNone(f_runtime_tuning, f"Missing runtime tuning for {f_tasks} tasks")
+            self.assertEqual(f_runtime_tuning["replication"], f_rep)
+            self.assertEqual(f_runtime_tuning["buffer_size_mb"], f_buf)
+
+        # 4. Atomic lmp large gate
+        self.assertIn("lmp large", f_readme)
+        self.assertIn("rejected atomically before run ID allocation", f_readme)
+
+    def testReadmeCoverageGateAndConfiguredLabels(self) -> None:
+        """Chunk 021: Asserts README.md documents configured certification state, preflight checks, 6-combination matrix, combination-private ranks, and parse limits."""
+        f_readme = self._readReadmeContent()
+
+        # 1. Configured certification status for all production profiles
+        self.assertIn("configured", f_readme)
+        self.assertIn("pending opt-in live site certification", f_readme)
+        for f_prof in ("viking", "viking2", "archer2", "isambard", "dev"):
+            self.assertIn(f_prof, f_readme)
+
+        # 2. Executable, worker, and capability preflight checks
+        self.assertIn("Executable, Worker, and Capability Preflight Checks", f_readme)
+        self.assertIn("regular readable/executable non-symlink files", f_readme)
+        self.assertIn("SHA-256 integrity", f_readme)
+
+        # 3. 6-combination execution matrix and fixed sequence
+        f_expected_combinations = [
+            "(16, 8M)",
+            "(16, 1M)",
+            "(16, 64K)",
+            "(4, 8M)",
+            "(4, 1M)",
+            "(4, 64K)",
+        ]
+        f_last_pos = -1
+        for f_combo in f_expected_combinations:
+            f_pos = f_readme.find(f_combo)
+            self.assertNotEqual(f_pos, -1, f"Expected combination {f_combo} in README.md")
+            self.assertGreater(f_pos, f_last_pos, f"Combination {f_combo} appears out of order")
+            f_last_pos = f_pos
+
+        # 4. Combination-private rank claims, logs, and results
+        self.assertIn("ranks/<global-rank>/<combination>/claim.lock", f_readme)
+        self.assertIn("logs/<combination>/rank_<global-rank>.log", f_readme)
+        self.assertIn("ranks/<global-rank>/<combination>/result.json", f_readme)
+        self.assertIn("combinations/<combination>/controller-result.json", f_readme)
+        self.assertIn("data/c<stripe>/b<block>/", f_readme)
+
+        # 5. Parse command boundary and limitations
+        self.assertIn("RunRootResolver", f_readme)
+        self.assertIn("lsmiotool parse", f_readme)
+        self.assertIn("does not perform automatic run-root discovery", f_readme)
+
+    def testRunMainPrintsIdsTokensRootFinalStateAndExit(self) -> None:
+        """Chunk 019: Asserts RunMain emits Run ID, Run Root, point tokens/job IDs, final state, and exit code to stdout without duplicates."""
+        # 1. Successful execution scenario
+        f_mock_view = MagicMock(spec=RunStateView)
+        f_mock_view.state = OverallRunState.SUCCEEDED
+        f_mock_view.run_id = "run-20260823-100000-abcd"
+
+        class FakeSuccessOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 0
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-20260823-100000-abcd", "/tmp/benchmarks/run-20260823-100000-abcd")
+                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-111111111111111111111111", "1001")
+                    self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
+                return f_mock_view
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_succ = RunMain(
+                "ior", "local",
+                f_orchestrator_factory=lambda **kw: FakeSuccessOrchestrator(**kw),
+            )
+            f_exit = f_main_succ.run()
+            self.assertEqual(f_exit, 0)
+            f_out = mock_stdout.getvalue()
+            self.assertIn("Run ID: run-20260823-100000-abcd\n", f_out)
+            self.assertIn("Run Root: /tmp/benchmarks/run-20260823-100000-abcd\n", f_out)
+            self.assertIn("Point 00-tasks-1 Correlation Token: lm-111111111111111111111111\n", f_out)
+            self.assertIn("Point 00-tasks-1 Job ID: 1001\n", f_out)
+            self.assertIn("Final State: SUCCEEDED\n", f_out)
+            self.assertIn("Exit Code: 0\n", f_out)
+
+            # Assert order of output
+            pos_id = f_out.index("Run ID: run-20260823-100000-abcd")
+            pos_root = f_out.index("Run Root: /tmp/benchmarks/run-20260823-100000-abcd")
+            pos_token = f_out.index("Point 00-tasks-1 Correlation Token:")
+            pos_job = f_out.index("Point 00-tasks-1 Job ID: 1001")
+            pos_final = f_out.index("Final State: SUCCEEDED")
+            pos_exit = f_out.index("Exit Code: 0")
+            self.assertTrue(pos_id < pos_root < pos_token < pos_job < pos_final < pos_exit)
+
+        # 2. Failure execution scenario
+        f_mock_view_fail = MagicMock(spec=RunStateView)
+        f_mock_view_fail.state = OverallRunState.FAILED
+        f_mock_view_fail.run_id = "run-20260823-100000-fail"
+
+        class FakeFailureOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 1
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-20260823-100000-fail", "/tmp/benchmarks/run-20260823-100000-fail")
+                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-111111111111111111111111", "1002")
+                    self.m_reporter.reportCompletion(OverallRunState.FAILED, 1)
+                return f_mock_view_fail
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_fail = RunMain(
+                "ior", "local",
+                f_orchestrator_factory=lambda **kw: FakeFailureOrchestrator(**kw),
+            )
+            f_exit = f_main_fail.run()
+            self.assertEqual(f_exit, 1)
+            f_out = mock_stdout.getvalue()
+            self.assertIn("Run ID: run-20260823-100000-fail\n", f_out)
+            self.assertIn("Run Root: /tmp/benchmarks/run-20260823-100000-fail\n", f_out)
+            self.assertIn("Point 00-tasks-1 Correlation Token: lm-111111111111111111111111\n", f_out)
+            self.assertIn("Point 00-tasks-1 Job ID: 1002\n", f_out)
+            self.assertIn("Final State: FAILED\n", f_out)
+            self.assertIn("Exit Code: 1\n", f_out)
+
+        # 3. Multi-point scenario and no duplicate lines
+        class FakeMultiPointOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 0
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-20260823-multi", "/tmp/benchmarks/run-20260823-multi")
+                    # Try emitting run identity again to assert deduplication
+                    self.m_reporter.reportRunIdentity("run-20260823-multi", "/tmp/benchmarks/run-20260823-multi")
+                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-aaaaaaaaaaaaaaaaaaaaaaaa", "2001")
+                    # Try duplicate point submission emission
+                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-aaaaaaaaaaaaaaaaaaaaaaaa", "2001")
+                    self.m_reporter.reportPointSubmission("01-tasks-2", "lm-bbbbbbbbbbbbbbbbbbbbbbbb", "2002")
+                    self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
+                    self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
+                return f_mock_view
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_multi = RunMain(
+                "ior", "small",
+                f_orchestrator_factory=lambda **kw: FakeMultiPointOrchestrator(**kw),
+            )
+            f_exit = f_main_multi.run()
+            self.assertEqual(f_exit, 0)
+            f_out = mock_stdout.getvalue()
+            self.assertEqual(f_out.count("Run ID: run-20260823-multi"), 1)
+            self.assertEqual(f_out.count("Run Root: /tmp/benchmarks/run-20260823-multi"), 1)
+            self.assertEqual(f_out.count("Point 00-tasks-1 Job ID: 2001"), 1)
+            self.assertEqual(f_out.count("Point 01-tasks-2 Job ID: 2002"), 1)
+            self.assertEqual(f_out.count("Final State: SUCCEEDED"), 1)
+            self.assertEqual(f_out.count("Exit Code: 0"), 1)
+
+        # 4. Exact qualified PBS ID preservation
+        class FakePbsOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 0
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-pbs-qualified", "/tmp/benchmarks/run-pbs-qualified")
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1",
+                        "lm-cccccccccccccccccccccccc",
+                        "123456.isambard-pbs.epcc.ed.ac.uk",
+                    )
+                    self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
+                return f_mock_view
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_pbs = RunMain(
+                "ior", "local",
+                f_orchestrator_factory=lambda **kw: FakePbsOrchestrator(**kw),
+            )
+            f_exit = f_main_pbs.run()
+            self.assertEqual(f_exit, 0)
+            f_out = mock_stdout.getvalue()
+            self.assertIn("Point 00-tasks-1 Job ID: 123456.isambard-pbs.epcc.ed.ac.uk\n", f_out)
+
+    def testValidationBeforePlanPrintsNoFakeIdentity(self) -> None:
+        """Chunk 019: Asserts pre-plan validation errors print only concise stderr with no fake run identity or Run ID on stdout."""
+        f_exec_str = str(self.m_executable)
+
+        # 1. Direct RunMain with LMP large scale (rejected during preflight before plan creation)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                f_main_lmp = RunMain("lmp", "large")
+                f_exit = f_main_lmp.run()
+                self.assertEqual(f_exit, 1)
+                self.assertEqual(mock_stdout.getvalue(), "", "Stdout must be empty on preflight error")
+                self.assertIn("Error:", mock_stderr.getvalue())
+                self.assertIn("LMP large scale is unsupported", mock_stderr.getvalue())
+                self.assertNotIn("Run ID:", mock_stdout.getvalue())
+                self.assertNotIn("Run Root:", mock_stdout.getvalue())
+                self.assertNotIn("Run ID:", mock_stderr.getvalue())
+
+        # 2. Direct RunMain with invalid benchmark target
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(RunCliParseError):
+                    RunMain("invalid_benchmark", "local")
+
+        # 3. Executable invocation with unknown target via CLI parser
+        with patch.object(sys, "argv", [f_exec_str, "run", "unknown_target", "local"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                    with self.assertRaises(SystemExit) as ctx:
+                        runpy.run_path(f_exec_str, run_name="__main__")
+                    self.assertEqual(ctx.exception.code, 1)
+                    self.assertEqual(mock_stdout.getvalue(), "")
+                    self.assertIn("Invalid benchmark: 'unknown_target'", mock_stderr.getvalue())
+                    self.assertNotIn("Run ID:", mock_stdout.getvalue())
+
+    def testSignalAndIndeterminateProminentlyReportHandleRoot(self) -> None:
+        """Chunk 019: Asserts signal interruption, cancellation, and indeterminate states prominently retain exact job ID and run root in output."""
+        # 1. SIGINT with confirmed cancellation (130)
+        f_mock_view_cancel = MagicMock(spec=RunStateView)
+        f_mock_view_cancel.state = OverallRunState.CANCELLED
+        f_mock_view_cancel.run_id = "run-sigint-cancel"
+
+        class FakeCancelOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 130
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-sigint-cancel", "/tmp/benchmarks/run-sigint-cancel")
+                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-dddddddddddddddddddddddd", "55555")
+                    self.m_reporter.reportCompletion(OverallRunState.CANCELLED, 130)
+                return f_mock_view_cancel
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_cancel = RunMain(
+                "ior", "local",
+                f_orchestrator_factory=lambda **kw: FakeCancelOrchestrator(**kw),
+            )
+            f_exit = f_main_cancel.run()
+            self.assertEqual(f_exit, 130)
+            f_out = mock_stdout.getvalue()
+            self.assertIn("Run ID: run-sigint-cancel\n", f_out)
+            self.assertIn("Run Root: /tmp/benchmarks/run-sigint-cancel\n", f_out)
+            self.assertIn("Point 00-tasks-1 Correlation Token: lm-dddddddddddddddddddddddd\n", f_out)
+            self.assertIn("Point 00-tasks-1 Job ID: 55555\n", f_out)
+            self.assertIn("Final State: CANCELLED\n", f_out)
+            self.assertIn("Exit Code: 130\n", f_out)
+
+        # 2. Indeterminate execution with unconfirmed cancellation / query ambiguity
+        f_mock_view_indet = MagicMock(spec=RunStateView)
+        f_mock_view_indet.state = OverallRunState.INDETERMINATE
+        f_mock_view_indet.run_id = "run-indet-unconfirmed"
+
+        class FakeIndetOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 1
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-indet-unconfirmed", "/data/runs/run-indet-unconfirmed")
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1",
+                        "lm-eeeeeeeeeeeeeeeeeeeeeeee",
+                        "777777.pbs01.cluster",
+                    )
+                    self.m_reporter.reportCompletion(OverallRunState.INDETERMINATE, 1)
+                return f_mock_view_indet
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_indet = RunMain(
+                "ior", "local",
+                f_orchestrator_factory=lambda **kw: FakeIndetOrchestrator(**kw),
+            )
+            f_exit = f_main_indet.run()
+            self.assertEqual(f_exit, 1)
+            f_out = mock_stdout.getvalue()
+            # Prominently retain exact job ID and root
+            self.assertIn("Run Root: /data/runs/run-indet-unconfirmed\n", f_out)
+            self.assertIn("Point 00-tasks-1 Job ID: 777777.pbs01.cluster\n", f_out)
+            self.assertIn("Final State: INDETERMINATE\n", f_out)
+            self.assertIn("Exit Code: 1\n", f_out)
+
+        # 3. SIGTERM interruption before point execution (143)
+        f_mock_view_interrupted = MagicMock(spec=RunStateView)
+        f_mock_view_interrupted.state = OverallRunState.INTERRUPTED
+        f_mock_view_interrupted.run_id = "run-sigterm-early"
+
+        class FakeEarlySigtermOrchestrator:
+            def __init__(self, **kwargs: Any) -> None:
+                self.m_reporter = kwargs.get("f_reporter")
+                self.exitCode = 143
+
+            def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
+                if self.m_reporter:
+                    self.m_reporter.reportRunIdentity("run-sigterm-early", "/tmp/benchmarks/run-sigterm-early")
+                    self.m_reporter.reportCompletion(OverallRunState.INTERRUPTED, 143)
+                return f_mock_view_interrupted
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f_main_sigterm = RunMain(
+                "ior", "local",
+                f_orchestrator_factory=lambda **kw: FakeEarlySigtermOrchestrator(**kw),
+            )
+            f_exit = f_main_sigterm.run()
+            self.assertEqual(f_exit, 143)
+            f_out = mock_stdout.getvalue()
+            self.assertIn("Run ID: run-sigterm-early\n", f_out)
+            self.assertIn("Run Root: /tmp/benchmarks/run-sigterm-early\n", f_out)
+            self.assertIn("Final State: INTERRUPTED\n", f_out)
+            self.assertIn("Exit Code: 143\n", f_out)
+
+    def testRealSourceExecutableFromUnrelatedCwdHomeWithProductionProfile(self) -> None:
+        """Chunk 020: Invokes the real source lsmiotool executable from an unrelated CWD/HOME with decoys and explicit credentials, asserting preflight failure without F-01 errors."""
+        f_exec_str = str(self.m_executable)
+        f_unrelated_cwd = os.path.join(self.m_temp_dir, "real_src_exec_cwd")
+        f_unrelated_home = os.path.join(self.m_temp_dir, "real_src_exec_home")
+        os.makedirs(f_unrelated_cwd, exist_ok=True)
+        os.makedirs(f_unrelated_home, exist_ok=True)
+
+        # Plant decoy files in CWD and HOME
+        for f_dir in (f_unrelated_cwd, f_unrelated_home):
+            with open(os.path.join(f_dir, "VERSION"), "w", encoding="utf-8") as f_f:
+                f_f.write("decoy-version\n")
+            with open(os.path.join(f_dir, "in.reaxc.hns"), "w", encoding="utf-8") as f_f:
+                f_f.write("# decoy lmp asset\n")
+            with open(os.path.join(f_dir, "lsmiotool-worker"), "w", encoding="utf-8") as f_f:
+                f_f.write("#!/bin/sh\nexit 99\n")
+            os.chmod(os.path.join(f_dir, "lsmiotool-worker"), 0o755)
+
+        f_env = dict(os.environ)
+        f_env["HOME"] = f_unrelated_home
+        f_env["LSMIO_ENV"] = "VIKING"
+        f_env["SB_ACCOUNT"] = "production_acct"
+        f_env["SB_EMAIL"] = "prod@example.com"
+
+        # 1. Run IOR local: passes package validation and profile resolution, fails at missing benchmark executable preflight
+        f_proc = subprocess.run(
+            [sys.executable, f_exec_str, "run", "ior", "local", "--setup", "BASE"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_proc.returncode, 1)
+        self.assertIn("Error: Benchmark executable does not exist", f_proc.stderr)
+        self.assertNotIn("TypeError", f_proc.stderr)
+        self.assertNotIn("unexpected keyword argument", f_proc.stderr)
+        self.assertNotIn("Run ID:", f_proc.stdout)
+        self.assertNotIn("Final State:", f_proc.stdout)
+
+        # 2. Run LMP large: atomically rejected during preflight before any resource access
+        f_proc_lmp = subprocess.run(
+            [sys.executable, f_exec_str, "run", "lmp", "large"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_proc_lmp.returncode, 1)
+        self.assertIn("LMP large scale is unsupported", f_proc_lmp.stderr)
+        self.assertNotIn("Run ID:", f_proc_lmp.stdout)

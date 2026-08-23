@@ -28,6 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import concurrent.futures
 import json
 import os
 import shutil
@@ -51,13 +52,17 @@ from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import (
     Combination,
     ManifestSerializer,
+    RunOrchestrator,
     RunPlan,
     RunPlanner,
     RunRequest,
     ScalePoint,
     ScheduledPointResources,
+    _attachForExistingRun,
 )
 from lsmiotool.lib.site import EnvironmentResolver
+
+_attachForExistingRun()
 
 
 class ArtifactStoreTest(unittest.TestCase):
@@ -338,6 +343,59 @@ class ArtifactStoreTest(unittest.TestCase):
         with self.assertRaises(CleanupForbiddenError):
             f_store.cleanupIncompletePreparation(f_point)
 
+        # Remove rank result and write claim.lock
+        os.remove(f_rank_result)
+        f_claim_path = f_store.layout.pointRankClaimPath(f_point, 0, "c16_b8M")
+        with open(f_claim_path, "w") as f_f:
+            f_f.write('{"claimed_at": "2026-08-20T12:00:00Z"}')
+
+        with self.assertRaises(CleanupForbiddenError):
+            f_store.cleanupIncompletePreparation(f_point)
+
+    def testCombinationScopedRankAndLogPathsAndContainment(self) -> None:
+        """Tests that combination-scoped rank claim, result, and log paths are exact and contained."""
+        f_run_id = "run-combo-scoped-paths"
+        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
+        f_store.allocateRun()
+
+        f_point = "00-tasks-1"
+        f_store.preparePoint(f_point)
+
+        f_rank_combo_dir = f_store.layout.pointRankCombinationDir(f_point, 0, "c16_b8M")
+        self.assertEqual(
+            f_rank_combo_dir,
+            os.path.join(f_store.layout.runRoot, "points", f_point, "ranks", "0", "c16_b8M"),
+        )
+        f_store.validateContainment(f_rank_combo_dir)
+
+        f_claim_path = f_store.layout.pointRankClaimPath(f_point, 0, "c16_b8M")
+        self.assertEqual(
+            f_claim_path,
+            os.path.join(f_rank_combo_dir, "claim.lock"),
+        )
+        f_store.validateContainment(f_claim_path)
+
+        f_result_path = f_store.layout.pointRankResultPath(f_point, 0, "c16_b8M")
+        self.assertEqual(
+            f_result_path,
+            os.path.join(f_rank_combo_dir, "result.json"),
+        )
+        f_store.validateContainment(f_result_path)
+
+        f_combo_logs_dir = f_store.layout.pointCombinationLogsDir(f_point, "c16_b8M")
+        self.assertEqual(
+            f_combo_logs_dir,
+            os.path.join(f_store.layout.runRoot, "points", f_point, "logs", "c16_b8M"),
+        )
+        f_store.validateContainment(f_combo_logs_dir)
+
+        f_rank_log_path = f_store.layout.pointRankLogPath(f_point, 0, "c16_b8M")
+        self.assertEqual(
+            f_rank_log_path,
+            os.path.join(f_combo_logs_dir, "rank_0.log"),
+        )
+        f_store.validateContainment(f_rank_log_path)
+
     def testLockExclusionAndRelease(self) -> None:
         """Tests ControlLock exclusion, non-blocking contention, and release on exit."""
         f_run_id = "run-lock-test"
@@ -417,6 +475,177 @@ class ArtifactStoreTest(unittest.TestCase):
         f_store = ArtifactStore(f_layout)
         with self.assertRaises(AttributeError):
             f_store.layout = f_layout  # type: ignore
+
+    def testConcurrentSameIdExactlyOneWinnerAndLoserPreservesBytes(self) -> None:
+        """Proves concurrent allocation race on the same run ID yields exactly one winner and losers preserve winner bytes."""
+        f_run_id = "concurrent-race-run-id"
+        f_num_threads = 10
+        f_plan = self._createTestPlan(f_run_id)
+
+        f_success_count = 0
+        f_collision_count = 0
+        f_other_errors = []
+
+        def worker_allocate(thread_idx: int) -> str:
+            f_s = ArtifactStore(self.m_temp_dir, f_run_id)
+            return f_s.allocateRun(f_plan)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=f_num_threads) as executor:
+            f_futures = [executor.submit(worker_allocate, i) for i in range(f_num_threads)]
+            for f in concurrent.futures.as_completed(f_futures):
+                try:
+                    f_res = f.result()
+                    f_success_count += 1
+                except RunCollisionError:
+                    f_collision_count += 1
+                except Exception as e:
+                    f_other_errors.append(e)
+
+        self.assertEqual(f_other_errors, [])
+        self.assertEqual(f_success_count, 1, "Exactly one thread must win the allocation race")
+        self.assertEqual(f_collision_count, f_num_threads - 1, f"Remaining {f_num_threads - 1} threads must get RunCollisionError")
+
+        # Winner's directory exists and contains manifest.json
+        f_winner_store = ArtifactStore(self.m_temp_dir, f_run_id)
+        f_run_root = f_winner_store.layout.runRoot
+        self.assertTrue(os.path.isdir(f_run_root))
+        self.assertTrue(os.path.isfile(f_winner_store.layout.manifestPath))
+
+        # Write sentinel data into winner root
+        f_sentinel_path = os.path.join(f_run_root, "race_sentinel.bin")
+        f_sentinel_bytes = b"exclusive-race-winner-data-987654321"
+        with open(f_sentinel_path, "wb") as f_f:
+            f_f.write(f_sentinel_bytes)
+
+        # Record tree before loser attempt
+        f_files_before = sorted(os.listdir(f_run_root))
+
+        # Additional loser allocation attempt
+        f_loser_store = ArtifactStore(self.m_temp_dir, f_run_id)
+        with self.assertRaises(RunCollisionError):
+            f_loser_store.allocateRun(f_plan)
+
+        # Assert tree and bytes are 100% unchanged
+        f_files_after = sorted(os.listdir(f_run_root))
+        self.assertEqual(f_files_before, f_files_after)
+        with open(f_sentinel_path, "rb") as f_f:
+            self.assertEqual(f_f.read(), f_sentinel_bytes)
+
+    def testExistingRootFileSymlinkWrongTypeCollisionRejection(self) -> None:
+        """Tests that allocateRun rejects existing regular file or symlink at run root location."""
+        # 1. Existing regular file at run root
+        f_run_id_file = "run-file-collision"
+        f_store_file = ArtifactStore(self.m_temp_dir, f_run_id_file)
+        os.makedirs(f_store_file.layout.runsDir, exist_ok=True)
+        with open(f_store_file.layout.runRoot, "w") as f_f:
+            f_f.write("I am a file, not a directory")
+
+        with self.assertRaises(RunCollisionError):
+            f_store_file.allocateRun()
+
+        # 2. Existing symlink at run root
+        f_target_outside = tempfile.mkdtemp(prefix="symlink-target-")
+        try:
+            f_run_id_symlink = "run-symlink-collision"
+            f_store_symlink = ArtifactStore(self.m_temp_dir, f_run_id_symlink)
+            os.makedirs(f_store_symlink.layout.runsDir, exist_ok=True)
+            os.symlink(f_target_outside, f_store_symlink.layout.runRoot)
+
+            with self.assertRaises(ArtifactError):
+                f_store_symlink.allocateRun()
+        finally:
+            shutil.rmtree(f_target_outside, ignore_errors=True)
+
+    def testForExistingRunMatchesValidManifest(self) -> None:
+        """Tests ArtifactStore.forExistingRun successfully opens valid matching store."""
+        f_run_id = "run-for-existing-valid"
+        f_plan = self._createTestPlan(f_run_id)
+        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
+        f_store.allocateRun(f_plan)
+
+        # 1. Open by benchmark root and plan
+        f_existing_1 = ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+        self.assertEqual(f_existing_1.layout.runRoot, f_store.layout.runRoot)
+        self.assertEqual(f_existing_1.layout.manifestPath, f_store.layout.manifestPath)
+
+        # 2. Open by direct run root path and plan
+        f_existing_2 = ArtifactStore.forExistingRun(f_store.layout.runRoot, f_plan)
+        self.assertEqual(f_existing_2.layout.runRoot, f_store.layout.runRoot)
+
+        # 3. Alias for_existing_run
+        f_existing_3 = ArtifactStore.for_existing_run(self.m_temp_dir, f_plan)
+        self.assertEqual(f_existing_3.layout.runRoot, f_store.layout.runRoot)
+
+    def testForExistingRunRejectsMissingOrInvalidDirectory(self) -> None:
+        """Tests ArtifactStore.forExistingRun rejects non-existent root, symlink, or file."""
+        f_run_id = "run-for-existing-invalid-dir"
+        f_plan = self._createTestPlan(f_run_id)
+
+        # 1. Non-existent directory
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+
+        # 2. Regular file at run root
+        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
+        os.makedirs(f_store.layout.runsDir, exist_ok=True)
+        with open(f_store.layout.runRoot, "w") as f_f:
+            f_f.write("not a directory")
+
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+
+        # 3. Symlink at run root
+        os.remove(f_store.layout.runRoot)
+        f_dummy_target = tempfile.mkdtemp(prefix="dummy-sym-")
+        try:
+            os.symlink(f_dummy_target, f_store.layout.runRoot)
+            with self.assertRaises(ArtifactError):
+                ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+        finally:
+            shutil.rmtree(f_dummy_target, ignore_errors=True)
+
+    def testForExistingRunRejectsMissingCorruptOrMismatchedManifest(self) -> None:
+        """Tests ArtifactStore.forExistingRun rejects absent, corrupt, or mismatched manifest."""
+        f_run_id = "run-for-existing-manifest-checks"
+        f_plan = self._createTestPlan(f_run_id)
+        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
+        os.makedirs(f_store.layout.runRoot, exist_ok=True)
+
+        # 1. Missing manifest
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+
+        # 2. Empty manifest
+        with open(f_store.layout.manifestPath, "w") as f_f:
+            f_f.write("")
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+
+        # 3. Corrupt manifest JSON
+        with open(f_store.layout.manifestPath, "w") as f_f:
+            f_f.write("{ not valid json")
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+
+        # 4. Manifest with mismatched run_id
+        os.remove(f_store.layout.manifestPath)
+        f_other_plan = self._createTestPlan("other-run-id-999")
+        with open(f_store.layout.manifestPath, "w", encoding="utf-8") as f_f:
+            f_f.write(ManifestSerializer.serialize(f_other_plan))
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
+
+        # 5. Manifest with mismatched target
+        os.remove(f_store.layout.manifestPath)
+        f_store.writeManifest(f_plan)
+        f_mismatched_target_plan = RunPlanner.createPlan(
+            f_request=RunRequest(f_target="lsmio", f_scale="local", f_ssd=False, f_setup="MANAGER"),
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: f_run_id,
+            f_token_source=lambda: f_plan.tokens[0],
+        )
+        with self.assertRaises(ArtifactError):
+            ArtifactStore.forExistingRun(self.m_temp_dir, f_mismatched_target_plan)
 
 
 if __name__ == "__main__":

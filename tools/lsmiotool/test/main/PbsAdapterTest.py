@@ -67,6 +67,7 @@ from lsmiotool.lib.scheduler import (
     SchedulerScriptRenderer,
     SubmissionDispatchError,
     WorkerExecutableValidator,
+    validateTimeout,
 )
 from lsmiotool.lib.site import (
     EnvironmentResolver,
@@ -199,34 +200,40 @@ class PbsAdapterTest(unittest.TestCase):
         self.assertEqual(f_submit_argv, ["qsub", "/path/to/job.sh"])
 
         # 2. Exact-job query (active): ['qstat', '-f', '-F', 'json', <job_id>]
-        f_active_argv = PbsSchedulerAdapter.activeQueryCommand("123456")
-        self.assertEqual(f_active_argv, ["qstat", "-f", "-F", "json", "123456"])
+        f_active_argv = PbsSchedulerAdapter.activeQueryCommand("123456.isambard-pbs")
+        self.assertEqual(f_active_argv, ["qstat", "-f", "-F", "json", "123456.isambard-pbs"])
 
         # 3. Historical query (accounting): ['qstat', '-x', '-f', '-F', 'json', <job_id>]
-        f_acct_argv = PbsSchedulerAdapter.accountingQueryCommand("123456")
-        self.assertEqual(f_acct_argv, ["qstat", "-x", "-f", "-F", "json", "123456"])
+        f_acct_argv = PbsSchedulerAdapter.accountingQueryCommand("123456.isambard-pbs")
+        self.assertEqual(f_acct_argv, ["qstat", "-x", "-f", "-F", "json", "123456.isambard-pbs"])
 
         # 4. Recovery query: ['qstat', '-x', '-f', '-F', 'json', '-u', <user>]
         f_recovery_argv = PbsSchedulerAdapter.recoveryCommand("testuser")
         self.assertEqual(f_recovery_argv, ["qstat", "-x", "-f", "-F", "json", "-u", "testuser"])
 
-        # 5. Cancel command: ['qdel', <job_id>]
-        f_cancel_argv = PbsSchedulerAdapter.cancelCommand("123456")
-        self.assertEqual(f_cancel_argv, ["qdel", "123456"])
+        # Recovery query without user
+        f_recovery_no_user = PbsSchedulerAdapter.recoveryCommand()
+        self.assertEqual(f_recovery_no_user, ["qstat", "-x", "-f", "-F", "json"])
 
-    def testIdAndJsonSchema(self) -> None:
-        """Validates parsing of PBS JSON output, handling server suffixes, and extracting exact decimal ID."""
+        # 5. Cancel command: ['qdel', <job_id>]
+        f_cancel_argv = PbsSchedulerAdapter.cancelCommand("123456.isambard-pbs")
+        self.assertEqual(f_cancel_argv, ["qdel", "123456.isambard-pbs"])
+
+    testApprovedLiteralArgvEveryOperation = testExactArgvEveryOperation
+
+    def testPbsQualifiedHandlePreservedVerbatim(self) -> None:
+        """Validates that qualified PBS handles with server dot suffix are preserved verbatim."""
         f_adapter = PbsSchedulerAdapter()
 
-        # 1. Submit output parsing with server suffixes and plain decimal IDs
-        self.assertEqual(f_adapter.parseSubmitOutput("123456.isambard-pbs\n"), "123456")
-        self.assertEqual(f_adapter.parseSubmitOutput("123456.isambard-pbs\r\n"), "123456")
-        self.assertEqual(f_adapter.parseSubmitOutput("123456.server.domain\n"), "123456")
+        # 1. Submit output parsing: handles preserved verbatim without stripping dot suffix
+        self.assertEqual(f_adapter.parseSubmitOutput("123456.isambard-pbs\n"), "123456.isambard-pbs")
+        self.assertEqual(f_adapter.parseSubmitOutput("123456.isambard-pbs\r\n"), "123456.isambard-pbs")
+        self.assertEqual(f_adapter.parseSubmitOutput("123456.server.domain\n"), "123456.server.domain")
         self.assertEqual(f_adapter.parseSubmitOutput("99999999\n"), "99999999")
         self.assertEqual(f_adapter.parseSubmitOutput("123456"), "123456")
-        self.assertEqual(f_adapter.parseSubmitOutput("00123456.pbs\n"), "00123456")
+        self.assertEqual(f_adapter.parseSubmitOutput("00123456.pbs\n"), "00123456.pbs")
 
-        # 2. Rejected invalid submit outputs (whitespace, multiline, non-numeric)
+        # 2. Rejected invalid submit outputs (whitespace, multiline, non-numeric prefix)
         f_bad_submit_outputs = [
             "",
             "\n",
@@ -247,34 +254,7 @@ class PbsAdapterTest(unittest.TestCase):
             with self.assertRaises(SubmissionDispatchError, msg=f"Should reject: {f_bad!r}"):
                 f_adapter.parseSubmitOutput(f_bad)
 
-        # 3. JSON schema parsing: job with server suffix in Jobs dictionary
-        f_json_with_suffix = json.dumps({
-            "timestamp": 1234567890,
-            "pbs_server": "isambard-pbs",
-            "Jobs": {
-                "123456.isambard-pbs": {
-                    "Job_Name": self.m_job_name,
-                    "job_state": "R",
-                    "queue": "arm",
-                }
-            }
-        })
-        f_state = PbsSchedulerAdapter.parseActiveQuery(f_json_with_suffix, f_job_id="123456")
-        self.assertEqual(f_state, SchedulerJobState.ACTIVE)
-
-        # 4. JSON schema parsing: job without server suffix
-        f_json_plain = json.dumps({
-            "Jobs": {
-                "123456": {
-                    "Job_Name": self.m_job_name,
-                    "job_state": "Q",
-                }
-            }
-        })
-        f_state_plain = PbsSchedulerAdapter.parseActiveQuery(f_json_plain, f_job_id="123456")
-        self.assertEqual(f_state_plain, SchedulerJobState.QUEUED)
-
-        # 5. Exact numeric handle persistence in dispatch submission
+        # 3. Exact qualified handle persistence in dispatch submission
         f_mock_runner = MockProcessRunner(f_returncode=0, f_stdout="00123456.isambard-pbs\n")
         f_cmd_runner = SchedulerCommandRunner(f_mock_runner)
         f_adapter_store = PbsSchedulerAdapter(
@@ -291,43 +271,109 @@ class PbsAdapterTest(unittest.TestCase):
         f_point = self.m_plan.scale_points[0]
         f_result = f_adapter_store.dispatchSubmission(f_point=f_point, f_spec=f_spec)
 
-        self.assertEqual(f_result.job_handle.job_id, "00123456")
+        self.assertEqual(f_result.job_handle.job_id, "00123456.isambard-pbs")
         self.assertEqual(f_result.job_handle.backend, "pbs")
 
         # Verify evidence store recorded handle
         f_sub_records = self.m_evidence_store.readSubmissionRecords(f_point)
         f_recorded = f_sub_records["submission_recorded"]
-        self.assertEqual(f_recorded.payload["handle"]["job_id"], "00123456")
+        self.assertEqual(f_recorded.payload["handle"]["job_id"], "00123456.isambard-pbs")
         self.assertEqual(f_recorded.payload["handle"]["backend"], "pbs")
 
-    def testStateExitTable(self) -> None:
-        """Tests full state and exit code mapping matrix (Q, W, H, T, R, E, B, F with 0, nonzero, missing Exit_status)."""
-        # Active query tests (qstat -f -F json)
+    testQualifiedAndPlainIdPreservedVerbatim = testPbsQualifiedHandlePreservedVerbatim
+    testIdAndJsonSchema = testPbsQualifiedHandlePreservedVerbatim
+
+    def testJobSpecificJsonExactFullKeyOnly(self) -> None:
+        """Verifies that job-specific queries match the exact full key in Jobs dictionary."""
+        # 1. Job with server suffix matches exact full key
+        f_json_with_suffix = json.dumps({
+            "timestamp": 1234567890,
+            "pbs_server": "isambard-pbs",
+            "Jobs": {
+                "123456.isambard-pbs": {
+                    "Job_Name": self.m_job_name,
+                    "job_state": "R",
+                    "queue": "arm",
+                }
+            }
+        })
+        f_state = PbsSchedulerAdapter.parseActiveQuery(f_json_with_suffix, f_job_id="123456.isambard-pbs")
+        self.assertEqual(f_state, SchedulerJobState.ACTIVE)
+
+        # Non-matching full key returns None (active) / (UNKNOWN, None) (accounting)
+        f_state_mismatch = PbsSchedulerAdapter.parseActiveQuery(f_json_with_suffix, f_job_id="123456.other-pbs")
+        self.assertIsNone(f_state_mismatch)
+
+        f_acct_mismatch, f_exit_mismatch = PbsSchedulerAdapter.parseAccountingQuery(
+            f_json_with_suffix, f_job_id="123456.other-pbs"
+        )
+        self.assertEqual(f_acct_mismatch, SchedulerJobState.UNKNOWN)
+        self.assertIsNone(f_exit_mismatch)
+
+        # 2. Job without server suffix matches exact plain key
+        f_json_plain = json.dumps({
+            "Jobs": {
+                "123456": {
+                    "Job_Name": self.m_job_name,
+                    "job_state": "Q",
+                }
+            }
+        })
+        f_state_plain = PbsSchedulerAdapter.parseActiveQuery(f_json_plain, f_job_id="123456")
+        self.assertEqual(f_state_plain, SchedulerJobState.QUEUED)
+
+        # Querying for qualified ID against plain key does not match
+        f_state_mismatch2 = PbsSchedulerAdapter.parseActiveQuery(f_json_plain, f_job_id="123456.isambard-pbs")
+        self.assertIsNone(f_state_mismatch2)
+
+    def testQstatJsonParsingAllStatesExitCodesSignals(self) -> None:
+        """Tests full state and exit code mapping matrix including negative signals (128+abs(sig))."""
+        # Active and accounting query test cases: (job_state, Exit_status, expected_state, expected_exit)
         f_test_cases = [
-            ("Q", None, SchedulerJobState.QUEUED),
-            ("W", None, SchedulerJobState.QUEUED),
-            ("H", None, SchedulerJobState.QUEUED),
-            ("T", None, SchedulerJobState.QUEUED),
-            ("R", None, SchedulerJobState.ACTIVE),
-            ("E", None, SchedulerJobState.ACTIVE),
-            ("B", None, SchedulerJobState.ACTIVE),
-            ("S", None, SchedulerJobState.ACTIVE),
-            ("F", 0, SchedulerJobState.SUCCEEDED),
-            ("F", 1, SchedulerJobState.FAILED),
-            ("F", 2, SchedulerJobState.FAILED),
-            ("F", 143, SchedulerJobState.FAILED),
-            ("F", -1, SchedulerJobState.FAILED),
-            ("F", None, SchedulerJobState.UNKNOWN),  # missing Exit_status fail-closed
-            ("F", "corrupted", SchedulerJobState.UNKNOWN),
-            ("C", 0, SchedulerJobState.SUCCEEDED),
-            ("C", 1, SchedulerJobState.FAILED),
-            ("C", None, SchedulerJobState.UNKNOWN),
-            ("CANCELLED", None, SchedulerJobState.CANCELLED),
-            ("TIMEOUT", None, SchedulerJobState.TIMEOUT),
-            ("UNKNOWN_XYZ", None, SchedulerJobState.UNKNOWN),
+            ("Q", None, SchedulerJobState.QUEUED, None),
+            ("QUEUED", None, SchedulerJobState.QUEUED, None),
+            ("W", None, SchedulerJobState.QUEUED, None),
+            ("WAITING", None, SchedulerJobState.QUEUED, None),
+            ("H", None, SchedulerJobState.QUEUED, None),
+            ("HELD", None, SchedulerJobState.QUEUED, None),
+            ("T", None, SchedulerJobState.QUEUED, None),
+            ("TRANSIT", None, SchedulerJobState.QUEUED, None),
+            ("TRANSITING", None, SchedulerJobState.QUEUED, None),
+            ("R", None, SchedulerJobState.ACTIVE, None),
+            ("RUNNING", None, SchedulerJobState.ACTIVE, None),
+            ("E", None, SchedulerJobState.ACTIVE, None),
+            ("EXITING", None, SchedulerJobState.ACTIVE, None),
+            ("B", None, SchedulerJobState.ACTIVE, None),
+            ("BEGUN", None, SchedulerJobState.ACTIVE, None),
+            ("S", None, SchedulerJobState.ACTIVE, None),
+            ("SUSPENDED", None, SchedulerJobState.ACTIVE, None),
+            ("F", 0, SchedulerJobState.SUCCEEDED, 0),
+            ("FINISHED", 0, SchedulerJobState.SUCCEEDED, 0),
+            ("C", 0, SchedulerJobState.SUCCEEDED, 0),
+            ("COMPLETED", 0, SchedulerJobState.SUCCEEDED, 0),
+            ("F", 1, SchedulerJobState.FAILED, 1),
+            ("F", 2, SchedulerJobState.FAILED, 2),
+            ("F", 143, SchedulerJobState.FAILED, 143),
+            ("F", -1, SchedulerJobState.FAILED, 129),   # SIGHUP: 128 + 1 = 129
+            ("F", -2, SchedulerJobState.FAILED, 130),   # SIGINT: 128 + 2 = 130
+            ("F", -6, SchedulerJobState.FAILED, 134),   # SIGABRT: 128 + 6 = 134
+            ("F", -9, SchedulerJobState.FAILED, 137),   # SIGKILL: 128 + 9 = 137
+            ("F", -15, SchedulerJobState.FAILED, 143),  # SIGTERM: 128 + 15 = 143
+            ("F", None, SchedulerJobState.UNKNOWN, None),  # missing Exit_status fail-closed
+            ("F", "corrupted", SchedulerJobState.UNKNOWN, None),
+            ("C", 0, SchedulerJobState.SUCCEEDED, 0),
+            ("C", 1, SchedulerJobState.FAILED, 1),
+            ("C", -9, SchedulerJobState.FAILED, 137),
+            ("C", None, SchedulerJobState.UNKNOWN, None),
+            ("CANCELLED", None, SchedulerJobState.CANCELLED, None),
+            ("CANCEL", None, SchedulerJobState.CANCELLED, None),
+            ("CA", None, SchedulerJobState.CANCELLED, None),
+            ("TIMEOUT", None, SchedulerJobState.TIMEOUT, None),
+            ("TO", None, SchedulerJobState.TIMEOUT, None),
+            ("UNKNOWN_XYZ", None, SchedulerJobState.UNKNOWN, None),
         ]
 
-        for f_st_str, f_exit_val, f_exp_state in f_test_cases:
+        for f_st_str, f_exit_val, f_exp_state, f_exp_exit in f_test_cases:
             f_job_dict: Dict[str, Any] = {"job_state": f_st_str}
             if f_exit_val is not None:
                 f_job_dict["Exit_status"] = f_exit_val
@@ -335,7 +381,9 @@ class PbsAdapterTest(unittest.TestCase):
             f_json_str = json.dumps({"Jobs": {"123456.isambard-pbs": f_job_dict}})
 
             # Test active query parser
-            f_parsed_act = PbsSchedulerAdapter.parseActiveQuery(f_json_str, f_job_id="123456")
+            f_parsed_act = PbsSchedulerAdapter.parseActiveQuery(
+                f_json_str, f_job_id="123456.isambard-pbs"
+            )
             self.assertEqual(
                 f_parsed_act,
                 f_exp_state,
@@ -343,14 +391,22 @@ class PbsAdapterTest(unittest.TestCase):
             )
 
             # Test accounting query parser
-            f_parsed_acct, f_parsed_exit = PbsSchedulerAdapter.parseAccountingQuery(f_json_str, f_job_id="123456")
+            f_parsed_acct, f_parsed_exit = PbsSchedulerAdapter.parseAccountingQuery(
+                f_json_str, f_job_id="123456.isambard-pbs"
+            )
             self.assertEqual(
                 f_parsed_acct,
                 f_exp_state,
                 msg=f"Accounting query failed for state '{f_st_str}' and exit '{f_exit_val}'",
             )
-            if f_exit_val is not None and isinstance(f_exit_val, int):
-                self.assertEqual(f_parsed_exit, f_exit_val)
+            self.assertEqual(
+                f_parsed_exit,
+                f_exp_exit,
+                msg=f"Accounting exit code mismatch for state '{f_st_str}' and raw exit '{f_exit_val}'",
+            )
+
+    testStateExitTable = testQstatJsonParsingAllStatesExitCodesSignals
+    testStateExitAndMalformedSchemaTable = testQstatJsonParsingAllStatesExitCodesSignals
 
     def testOrdinaryWaitOnlyExactId(self) -> None:
         """Asserts ordinary status queries query ONLY the exact job ID and never whole-user qstat."""
@@ -380,35 +436,37 @@ class PbsAdapterTest(unittest.TestCase):
         f_adapter = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner))
 
         # 1. Build and execute active query
-        f_act_argv = f_adapter.activeQueryCommand("123456")
+        f_act_argv = f_adapter.activeQueryCommand("123456.isambard-pbs")
         self.assertNotIn("-u", f_act_argv)
-        self.assertIn("123456", f_act_argv)
+        self.assertIn("123456.isambard-pbs", f_act_argv)
         f_res_act = f_adapter.commandRunner.run(f_act_argv)
-        f_state_act = f_adapter.parseActiveQuery(f_res_act.stdout, f_job_id="123456")
+        f_state_act = f_adapter.parseActiveQuery(f_res_act.stdout, f_job_id="123456.isambard-pbs")
         self.assertEqual(f_state_act, SchedulerJobState.ACTIVE)
 
         # 2. Build and execute accounting query
-        f_acct_argv = f_adapter.accountingQueryCommand("123456")
+        f_acct_argv = f_adapter.accountingQueryCommand("123456.isambard-pbs")
         self.assertNotIn("-u", f_acct_argv)
-        self.assertIn("123456", f_acct_argv)
+        self.assertIn("123456.isambard-pbs", f_acct_argv)
         f_res_acct = f_adapter.commandRunner.run(f_acct_argv)
-        f_state_acct, f_exit_acct = f_adapter.parseAccountingQuery(f_res_acct.stdout, f_job_id="123456")
+        f_state_acct, f_exit_acct = f_adapter.parseAccountingQuery(
+            f_res_acct.stdout, f_job_id="123456.isambard-pbs"
+        )
         self.assertEqual(f_state_acct, SchedulerJobState.SUCCEEDED)
         self.assertEqual(f_exit_acct, 0)
 
         # 3. Cancellation polling queries ONLY exact job ID
         f_recorded_argvs.clear()
         f_final_cancel = f_adapter.cancelAndConfirm(
-            "123456",
+            "123456.isambard-pbs",
             f_poll_interval=0.01,
             f_grace_seconds=5.0,
             f_sleep=lambda _: None,
         )
         for f_argv in f_recorded_argvs:
             self.assertNotIn("-u", f_argv, msg=f"Unexpected whole-user flag in argv: {f_argv}")
-            self.assertIn("123456", f_argv, msg=f"Missing exact job ID in argv: {f_argv}")
+            self.assertIn("123456.isambard-pbs", f_argv, msg=f"Missing exact job ID in argv: {f_argv}")
 
-    def testRecoveryUserQueryOnlyInCrashWindowAndExactName(self) -> None:
+    def testTokenRecoveryMatchesExactJobName(self) -> None:
         """Asserts user query is invoked only during recovery and strictly filters by correlation token Job_Name."""
         f_user_json = json.dumps({
             "Jobs": {
@@ -433,13 +491,15 @@ class PbsAdapterTest(unittest.TestCase):
         f_runner = MockProcessRunner(f_returncode=0, f_stdout=f_user_json)
         f_adapter = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner))
 
-        # Recovery query uses exact user query
+        # Recovery query uses exact user query and retains full qualified handle
         f_candidates = f_adapter.recoverCandidateJobIds(self.m_job_name, f_user="testuser")
-        self.assertEqual(f_candidates, ["123456"])
+        self.assertEqual(f_candidates, ["123456.isambard-pbs"])
 
         # Recovery command argv uses -u testuser
         f_rec_argv = f_runner.m_invoked_argv[0]
         self.assertEqual(f_rec_argv, ["qstat", "-x", "-f", "-F", "json", "-u", "testuser"])
+
+    testRecoveryOnlyWholeUserQueryExactNameZeroOneMany = testTokenRecoveryMatchesExactJobName
 
     def testRecoveryZeroOneManyNeverResubmits(self) -> None:
         """Validates 0 (unrecovered), 1 (recovered), and >1 (fail-closed fatal error) recovery outcomes."""
@@ -464,7 +524,7 @@ class PbsAdapterTest(unittest.TestCase):
         f_rec_single = f_adapter_single.recoverDispatchedSubmission(self.m_job_name, f_user="testuser")
         self.assertIsNotNone(f_rec_single)
         self.assertEqual(f_rec_single.backend, "pbs")
-        self.assertEqual(f_rec_single.job_id, "123456")
+        self.assertEqual(f_rec_single.job_id, "123456.isambard-pbs")
 
         # 3. Multiple candidate jobs with same correlation token raises fatal error
         f_multi_json = json.dumps({
@@ -504,16 +564,106 @@ class PbsAdapterTest(unittest.TestCase):
             f_job_name=self.m_job_name,
         )
 
-        # Single candidate recovered and recorded
+        # Single candidate recovered and recorded with full qualified handle
         f_adapter_dispatch = PbsSchedulerAdapter(
             f_command_runner=SchedulerCommandRunner(f_runner_single),
             f_evidence_store=self.m_evidence_store,
         )
         f_res = f_adapter_dispatch.dispatchSubmission(f_point=f_point, f_spec=f_spec)
-        self.assertEqual(f_res.job_handle.job_id, "123456")
+        self.assertEqual(f_res.job_handle.job_id, "123456.isambard-pbs")
         self.assertTrue(
             self.m_evidence_store.readSubmissionRecords(f_point)["submission_recorded"].payload.get("recovered")
         )
+
+    def testStateTransitionsActiveToCompletedFailedCancelled(self) -> None:
+        """Tests queryJobState transitions from active queue to historical completed/failed/cancelled states."""
+        f_job_id = "123456.isambard-pbs"
+
+        # 1. Job in active queue as RUNNING returns immediately (ACTIVE, None)
+        f_runner_act = MockProcessRunner(
+            f_returncode=0,
+            f_stdout=json.dumps({"Jobs": {f_job_id: {"job_state": "R"}}}),
+        )
+        f_adapter_act = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_act))
+        f_st, f_ex = f_adapter_act.queryJobState(f_job_id)
+        self.assertEqual(f_st, SchedulerJobState.ACTIVE)
+        self.assertIsNone(f_ex)
+        # Accounting was not called
+        self.assertEqual(len(f_runner_act.m_invoked_argv), 1)
+
+        # 2. Job left active queue and succeeded in accounting (Exit_status: 0)
+        f_responses_succ = [
+            ProcessResult(0, json.dumps({"Jobs": {}}), "", 0.01),  # active (empty)
+            ProcessResult(
+                0,
+                json.dumps({"Jobs": {f_job_id: {"job_state": "F", "Exit_status": 0}}}),
+                "",
+                0.01,
+            ),  # accounting
+        ]
+        f_runner_succ = MockProcessRunner(f_response_sequence=f_responses_succ)
+        f_adapter_succ = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_succ))
+        f_st_succ, f_ex_succ = f_adapter_succ.queryJobState(f_job_id)
+        self.assertEqual(f_st_succ, SchedulerJobState.SUCCEEDED)
+        self.assertEqual(f_ex_succ, 0)
+
+        # 3. Job left active queue and failed with signal (Exit_status: -15)
+        f_responses_sig = [
+            ProcessResult(0, json.dumps({"Jobs": {}}), "", 0.01),
+            ProcessResult(
+                0,
+                json.dumps({"Jobs": {f_job_id: {"job_state": "F", "Exit_status": -15}}}),
+                "",
+                0.01,
+            ),
+        ]
+        f_runner_sig = MockProcessRunner(f_response_sequence=f_responses_sig)
+        f_adapter_sig = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_sig))
+        f_st_sig, f_ex_sig = f_adapter_sig.queryJobState(f_job_id)
+        self.assertEqual(f_st_sig, SchedulerJobState.FAILED)
+        self.assertEqual(f_ex_sig, 143)
+
+        # 4. Job left active queue and was cancelled in accounting
+        f_responses_canc = [
+            ProcessResult(0, json.dumps({"Jobs": {}}), "", 0.01),
+            ProcessResult(
+                0,
+                json.dumps({"Jobs": {f_job_id: {"job_state": "CANCELLED"}}}),
+                "",
+                0.01,
+            ),
+        ]
+        f_runner_canc = MockProcessRunner(f_response_sequence=f_responses_canc)
+        f_adapter_canc = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_canc))
+        f_st_canc, f_ex_canc = f_adapter_canc.queryJobState(f_job_id)
+        self.assertEqual(f_st_canc, SchedulerJobState.CANCELLED)
+
+        # 5. Query error on active query falls back to accounting query
+        f_responses_err = [
+            ProcessResult(1, "", "qstat error", 0.01),
+            ProcessResult(
+                0,
+                json.dumps({"Jobs": {f_job_id: {"job_state": "F", "Exit_status": 0}}}),
+                "",
+                0.01,
+            ),
+        ]
+        f_runner_err = MockProcessRunner(f_response_sequence=f_responses_err)
+        f_adapter_err = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_err))
+        f_st_err, f_ex_err = f_adapter_err.queryJobState(f_job_id)
+        self.assertEqual(f_st_err, SchedulerJobState.SUCCEEDED)
+        self.assertEqual(f_ex_err, 0)
+
+        # 6. Both queries fail yields UNKNOWN
+        f_responses_both_fail = [
+            ProcessResult(1, "", "qstat error 1", 0.01),
+            ProcessResult(1, "", "qstat error 2", 0.01),
+        ]
+        f_runner_bf = MockProcessRunner(f_response_sequence=f_responses_both_fail)
+        f_adapter_bf = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_bf))
+        f_st_bf, f_ex_bf = f_adapter_bf.queryJobState(f_job_id)
+        self.assertEqual(f_st_bf, SchedulerJobState.UNKNOWN)
+        self.assertIsNone(f_ex_bf)
 
     def testCancelConfirmationBranches(self) -> None:
         """Tests cancellation transition, already terminal job, and bounded grace period timeout."""
@@ -536,7 +686,7 @@ class PbsAdapterTest(unittest.TestCase):
         f_runner = MockProcessRunner(f_response_sequence=f_responses)
         f_adapter = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner))
         f_final_state = f_adapter.cancelAndConfirm(
-            "123456",
+            "123456.isambard-pbs",
             f_poll_interval=0.01,
             f_grace_seconds=5.0,
             f_sleep=lambda _: None,
@@ -557,7 +707,7 @@ class PbsAdapterTest(unittest.TestCase):
         f_runner_term = MockProcessRunner(f_response_sequence=f_responses_term)
         f_adapter_term = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_term))
         f_final_term = f_adapter_term.cancelAndConfirm(
-            "123456",
+            "123456.isambard-pbs",
             f_poll_interval=0.01,
             f_grace_seconds=5.0,
             f_sleep=lambda _: None,
@@ -578,7 +728,7 @@ class PbsAdapterTest(unittest.TestCase):
         )
         f_adapter_timeout = PbsSchedulerAdapter(f_command_runner=SchedulerCommandRunner(f_runner_timeout))
         f_final_timeout = f_adapter_timeout.cancelAndConfirm(
-            "123456",
+            "123456.isambard-pbs",
             f_poll_interval=0.01,
             f_grace_seconds=10.0,
             f_clock=mock_clock,
@@ -586,7 +736,9 @@ class PbsAdapterTest(unittest.TestCase):
         )
         self.assertEqual(f_final_timeout, SchedulerJobState.UNKNOWN)
 
-    def testMalformedUnknownIsNonSuccess(self) -> None:
+    testCancelRequiresPostQdelTerminalEvidence = testCancelConfirmationBranches
+
+    def testEmptyUnrecognizedAndCorruptedOutputYieldsUnknown(self) -> None:
         """Asserts malformed JSON, empty response, or missing fields never yield false success."""
         f_adapter = PbsSchedulerAdapter()
 
@@ -632,45 +784,61 @@ class PbsAdapterTest(unittest.TestCase):
 
         # 7. Job missing job_state field maps to UNKNOWN
         f_missing_state = json.dumps({"Jobs": {"123456.isambard-pbs": {"Job_Name": "test"}}})
-        self.assertEqual(f_adapter.parseActiveQuery(f_missing_state, f_job_id="123456"), SchedulerJobState.UNKNOWN)
         self.assertEqual(
-            f_adapter.parseAccountingQuery(f_missing_state, f_job_id="123456"),
+            f_adapter.parseActiveQuery(f_missing_state, f_job_id="123456.isambard-pbs"),
+            SchedulerJobState.UNKNOWN,
+        )
+        self.assertEqual(
+            f_adapter.parseAccountingQuery(f_missing_state, f_job_id="123456.isambard-pbs"),
             (SchedulerJobState.UNKNOWN, None),
         )
 
         # 8. Finished job missing Exit_status maps to UNKNOWN (fail-closed, never SUCCEEDED)
         f_missing_exit = json.dumps({"Jobs": {"123456.isambard-pbs": {"job_state": "F"}}})
-        self.assertEqual(f_adapter.parseActiveQuery(f_missing_exit, f_job_id="123456"), SchedulerJobState.UNKNOWN)
         self.assertEqual(
-            f_adapter.parseAccountingQuery(f_missing_exit, f_job_id="123456"),
+            f_adapter.parseActiveQuery(f_missing_exit, f_job_id="123456.isambard-pbs"),
+            SchedulerJobState.UNKNOWN,
+        )
+        self.assertEqual(
+            f_adapter.parseAccountingQuery(f_missing_exit, f_job_id="123456.isambard-pbs"),
             (SchedulerJobState.UNKNOWN, None),
         )
 
         # 9. Multiple entries matching job_id raises SchedulerError
         f_duplicate_entries = json.dumps({
             "Jobs": {
-                "123456.server1": {"job_state": "R"},
-                "123456.server2": {"job_state": "Q"},
+                "123456.isambard-pbs": {"job_state": "R"},
+                "123456.other": {"job_state": "Q"},
             }
         })
+        # If querying without specific job ID, multiple entries raises SchedulerError
         with self.assertRaises(SchedulerError):
-            f_adapter.parseActiveQuery(f_duplicate_entries, f_job_id="123456")
+            f_adapter.parseActiveQuery(f_duplicate_entries)
         with self.assertRaises(SchedulerError):
-            f_adapter.parseAccountingQuery(f_duplicate_entries, f_job_id="123456")
+            f_adapter.parseAccountingQuery(f_duplicate_entries)
+
+    testMalformedUnknownIsNonSuccess = testEmptyUnrecognizedAndCorruptedOutputYieldsUnknown
 
     def testValidateJobIdBoundaries(self) -> None:
-        """Validates validateJobId with valid decimal IDs and rejection of invalid types/characters."""
-        # Valid decimal IDs
+        """Validates validateJobId with valid qualified/unqualified IDs and rejection of invalid types/characters."""
+        # Valid IDs (plain decimal, qualified with server dot suffix)
         self.assertEqual(PbsSchedulerAdapter.validateJobId("123456"), "123456")
         self.assertEqual(PbsSchedulerAdapter.validateJobId("1"), "1")
         self.assertEqual(PbsSchedulerAdapter.validateJobId("00123456"), "00123456")
+        self.assertEqual(PbsSchedulerAdapter.validateJobId("123456.isambard-pbs"), "123456.isambard-pbs")
+        self.assertEqual(PbsSchedulerAdapter.validateJobId("00123456.pbs"), "00123456.pbs")
+        self.assertEqual(PbsSchedulerAdapter.validateJobId("123456.server.domain"), "123456.server.domain")
 
         # Invalid IDs
         f_invalid_ids = [
             "",
             "   ",
-            "123456.isambard-pbs",  # validated job ID must be the extracted decimal string
+            " 123456.isambard-pbs",
+            "123456.isambard-pbs ",
+            "123456[0]",
+            "123456[0].isambard-pbs",
             "abc",
+            "abc123.server",
             "-123",
             "123 456",
             "123\n456",
@@ -716,6 +884,297 @@ class PbsAdapterTest(unittest.TestCase):
             PbsSchedulerAdapter.parseAccountingQuery,
             PbsSchedulerAdapter.parse_accounting_query,
         )
+
+    def testCancelCommandAndQueriesShareOneDeadline(self) -> None:
+        """Verifies that cancel and confirmation queries share a single monotonic deadline with min(cmd_timeout, remaining_grace)."""
+        f_current_time = 100.0
+
+        def mock_clock() -> float:
+            return f_current_time
+
+        f_sleep_durations: List[float] = []
+
+        def mock_sleep(f_dur: float) -> None:
+            nonlocal f_current_time
+            f_sleep_durations.append(f_dur)
+            f_current_time += f_dur
+
+        # 1. Normal cancel-confirm sharing monotonic deadline
+        f_runner = MockProcessRunner(f_returncode=0)
+        f_adapter = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner),
+            f_timeout=60.0,
+        )
+
+        def custom_handler_with_time(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "qdel":
+                f_current_time += 2.0  # qdel takes 2.0s
+                return ProcessResult(0, "", "", 2.0)
+            elif f_argv[0] == "qstat":
+                f_current_time += 1.0  # qstat takes 1.0s
+                if f_current_time >= 106.0:
+                    return ProcessResult(
+                        0,
+                        json.dumps({"Jobs": {"123456.isambard-pbs": {"job_state": "CANCELLED"}}}),
+                        "",
+                        1.0,
+                    )
+                return ProcessResult(
+                    0,
+                    json.dumps({"Jobs": {"123456.isambard-pbs": {"job_state": "R"}}}),
+                    "",
+                    1.0,
+                )
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner.m_custom_handler = custom_handler_with_time
+
+        f_final = f_adapter.cancelAndConfirm(
+            "123456.isambard-pbs",
+            f_poll_interval=1.5,
+            f_grace_seconds=10.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_final, SchedulerJobState.CANCELLED)
+        # Verify qdel got remaining grace min(60.0, 10.0) = 10.0
+        self.assertEqual(f_runner.m_invoked_kwargs[0].get("f_timeout"), 10.0)
+        # Verify subsequent queries received remaining grace bounded by deadline
+        for f_kw in f_runner.m_invoked_kwargs[1:]:
+            self.assertLessEqual(f_kw.get("f_timeout"), 8.0)
+            self.assertGreater(f_kw.get("f_timeout"), 0.0)
+
+        # 2. Cancel command consuming all grace seconds
+        f_current_time = 200.0
+        f_runner_all_grace = MockProcessRunner()
+
+        def custom_cancel_consumes_grace(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "qdel":
+                f_current_time += 15.0  # Consumes all 10s grace
+                return ProcessResult(0, "", "", 15.0)
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner_all_grace.m_custom_handler = custom_cancel_consumes_grace
+        f_adapter_all_grace = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_all_grace),
+            f_timeout=60.0,
+        )
+        f_state_all_grace = f_adapter_all_grace.cancelAndConfirm(
+            "123456.isambard-pbs",
+            f_poll_interval=1.0,
+            f_grace_seconds=10.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_state_all_grace, SchedulerJobState.UNKNOWN)
+        # Proves no query command was issued after deadline expired
+        self.assertEqual(len(f_runner_all_grace.m_invoked_argv), 1)
+        self.assertEqual(f_runner_all_grace.m_invoked_argv[0][0], "qdel")
+
+        # 3. Sleep truncation when poll_interval > remaining_grace
+        f_current_time = 300.0
+        f_sleep_durations.clear()
+        f_runner_trunc = MockProcessRunner(f_returncode=0)
+
+        def custom_trunc_handler(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "qdel":
+                f_current_time += 3.0  # 3s elapsed, 2s remaining
+                return ProcessResult(0, "", "", 3.0)
+            elif f_argv[0] == "qstat":
+                f_current_time += 0.5  # 3.5s elapsed, 1.5s remaining
+                return ProcessResult(
+                    0,
+                    json.dumps({"Jobs": {"123456.isambard-pbs": {"job_state": "R"}}}),
+                    "",
+                    0.5,
+                )
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner_trunc.m_custom_handler = custom_trunc_handler
+        f_adapter_trunc = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_trunc),
+            f_timeout=60.0,
+        )
+        f_state_trunc = f_adapter_trunc.cancelAndConfirm(
+            "123456.isambard-pbs",
+            f_poll_interval=5.0,  # poll interval 5.0 is larger than 1.5s remaining
+            f_grace_seconds=5.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_state_trunc, SchedulerJobState.UNKNOWN)
+        self.assertTrue(any(abs(f_d - 1.5) < 1e-4 for f_d in f_sleep_durations))
+
+        # 4. Command exception handling during queries
+        f_current_time = 400.0
+        f_runner_exc = MockProcessRunner()
+
+        def custom_exc_handler(f_argv: Sequence[str]) -> ProcessResult:
+            nonlocal f_current_time
+            if f_argv[0] == "qdel":
+                f_current_time += 1.0
+                return ProcessResult(0, "", "", 1.0)
+            elif f_argv[0] == "qstat":
+                f_current_time += 1.0
+                raise ProcessExecutionError("qstat failed")
+            return ProcessResult(0, "", "", 0.01)
+
+        f_runner_exc.m_custom_handler = custom_exc_handler
+        f_adapter_exc = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_exc),
+            f_timeout=60.0,
+        )
+        f_state_exc = f_adapter_exc.cancelAndConfirm(
+            "123456.isambard-pbs",
+            f_poll_interval=1.0,
+            f_grace_seconds=5.0,
+            f_clock=mock_clock,
+            f_sleep=mock_sleep,
+        )
+        self.assertEqual(f_state_exc, SchedulerJobState.UNKNOWN)
+
+    def testTimeoutBeforeAfterAcceptanceIsNonSuccess(self) -> None:
+        """Verifies that timeouts at submission, recovery, and queries are non-success and enforce token recovery for PBS."""
+        f_ev_store = EvidenceStore(self.m_temp_dir.name, f_run_id="test_run_123")
+        f_point = self.m_small_point
+        f_spec = JobSpec(
+            f_point_id=f_point,
+            f_script_path=os.path.join(self.m_temp_dir.name, "job.sh"),
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-000000000000000000000001",
+        )
+
+        # 1. Timed out submit command raises SubmissionDispatchError and records dispatched with timed_out=True
+        f_runner_timeout = MockProcessRunner(
+            f_returncode=-9,
+            f_stdout="",
+            f_stderr="timed out",
+        )
+        f_runner_timeout.m_custom_handler = lambda f_argv: ProcessResult(
+            f_returncode=-9,
+            f_stdout="",
+            f_stderr="command timed out",
+            f_elapsed_seconds=0.2,
+            f_timed_out=True,
+        )
+
+        f_adapter_timeout = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_timeout),
+            f_evidence_store=f_ev_store,
+            f_timeout=10.0,
+        )
+
+        with self.assertRaises(SubmissionDispatchError) as f_ctx:
+            f_adapter_timeout.dispatchSubmission(f_point, f_spec)
+        self.assertIn("timed out", str(f_ctx.exception))
+
+        # Check evidence store has submission_dispatched (pre-spawn record)
+        f_records = f_ev_store.readSubmissionRecords(f_point)
+        self.assertIsNotNone(f_records["submission_requested"])
+        self.assertIsNotNone(f_records["submission_dispatched"])
+        self.assertIsNone(f_records["submission_recorded"])
+        f_disp_record = f_records["submission_dispatched"]
+        self.assertIsNotNone(f_disp_record)
+        self.assertEqual(f_disp_record.payload.get("job_name"), "lm-000000000000000000000001")
+        self.assertNotIn("timed_out", f_disp_record.payload)
+
+        # 2. Resubmission attempt for same point enters crash recovery by token, never blind resubmit
+        f_runner_rec_zero = MockProcessRunner(
+            f_returncode=0,
+            f_stdout=json.dumps({"Jobs": {}}),
+        )
+        f_adapter_rec_zero = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_rec_zero),
+            f_evidence_store=f_ev_store,
+        )
+        with self.assertRaises(SubmissionDispatchError) as f_ctx2:
+            f_adapter_rec_zero.dispatchSubmission(f_point, f_spec)
+        self.assertIn("0 candidate jobs", str(f_ctx2.exception))
+        # Ensure no second qsub was run
+        self.assertEqual(len([f_c for f_c in f_runner_rec_zero.m_invoked_argv if f_c[0] == "qsub"]), 0)
+
+        # 3. Crash recovery finding exactly 1 job succeeds and records handle
+        f_runner_rec_single = MockProcessRunner(
+            f_returncode=0,
+            f_stdout=json.dumps({
+                "Jobs": {
+                    "123456.isambard-pbs": {
+                        "Job_Name": "lm-000000000000000000000001",
+                        "job_state": "R",
+                    }
+                }
+            }),
+        )
+        f_adapter_rec_single = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_rec_single),
+            f_evidence_store=f_ev_store,
+        )
+        f_rec_res = f_adapter_rec_single.dispatchSubmission(f_point, f_spec)
+        self.assertEqual(f_rec_res.job_handle.job_id, "123456.isambard-pbs")
+        self.assertTrue(f_rec_res.is_success)
+
+        # 4. Recovery query timeout returns 0 candidate jobs
+        f_runner_rec_timeout = MockProcessRunner(f_returncode=-9)
+        f_runner_rec_timeout.m_custom_handler = lambda f_argv: ProcessResult(
+            f_returncode=-9,
+            f_stdout=json.dumps({"Jobs": {"123456.isambard-pbs": {"Job_Name": "lm-000000000000000000000001"}}}),
+            f_stderr="",
+            f_elapsed_seconds=0.2,
+            f_timed_out=True,
+        )
+        f_adapter_rec_timeout = PbsSchedulerAdapter(
+            f_command_runner=SchedulerCommandRunner(f_runner_rec_timeout)
+        )
+        f_cands = f_adapter_rec_timeout.recoverCandidateJobIds("lm-000000000000000000000001", f_user="testuser")
+        self.assertEqual(len(f_cands), 0)
+
+    def testZeroNegativeNanInfinityTimeoutRejected(self) -> None:
+        """Validates that zero, negative, NaN, infinity, bool, string, and None timeouts are strictly rejected for PBS."""
+        f_invalid_timeouts = [
+            0,
+            0.0,
+            -1,
+            -0.001,
+            -100.0,
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            False,
+            "120",
+            None,
+        ]
+
+        # 1. validateTimeout directly
+        for f_bad_val in f_invalid_timeouts:
+            with self.assertRaises(SchedulerError):
+                PbsSchedulerAdapter.validateTimeout(f_bad_val)
+
+        # 2. PbsSchedulerAdapter constructor
+        for f_bad_val in f_invalid_timeouts:
+            if f_bad_val is None:
+                continue
+            with self.assertRaises(SchedulerError):
+                PbsSchedulerAdapter(f_timeout=f_bad_val)
+
+            with self.assertRaises(SchedulerError):
+                PbsSchedulerAdapter(f_command_timeout=f_bad_val)
+
+        # 3. cancelAndConfirm arguments
+        f_adapter = PbsSchedulerAdapter()
+        for f_bad_val in f_invalid_timeouts:
+            if f_bad_val is not None:
+                with self.assertRaises(SchedulerError):
+                    f_adapter.cancelAndConfirm("123456", f_grace_seconds=f_bad_val)
+
+                with self.assertRaises(SchedulerError):
+                    f_adapter.cancelAndConfirm("123456", f_timeout=f_bad_val)
+
+            with self.assertRaises(SchedulerError):
+                f_adapter.cancelAndConfirm("123456", f_poll_interval=f_bad_val)
 
 
 if __name__ == "__main__":

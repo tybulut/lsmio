@@ -103,6 +103,7 @@ class FakeInterruptionSchedulerCommandRunner(SchedulerCommandRunner):
         self.m_on_submit_callback = None
         self.m_on_query_callback = None
         self.m_on_acct_callback = None
+        self.m_on_cancel_callback = None
         self.m_active_running_count = 0
 
     def run(
@@ -242,6 +243,8 @@ class FakeInterruptionSchedulerCommandRunner(SchedulerCommandRunner):
                 return ProcessResult(0, json.dumps({"Jobs": {}}), "", 0.01)
 
         elif f_exe in ("scancel", "qdel"):
+            if self.m_on_cancel_callback is not None:
+                self.m_on_cancel_callback(f_cmd)
             if self.m_cancel_fail:
                 return ProcessResult(1, "", f"{f_exe}: error: connection failed\n", 0.01)
             f_jid = f_cmd[-1].split(".")[0]
@@ -255,6 +258,9 @@ class InterruptionTest(unittest.TestCase):
     """Unit tests for SignalCoordinator, exact-job cancellation confirmation, and temporal races."""
 
     def setUp(self) -> None:
+        self.m_orig_environ = dict(os.environ)
+        os.environ["SB_ACCOUNT"] = "test_acct"
+        os.environ["SB_EMAIL"] = "user@example.com"
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-interruption-test-")
         self.m_default_profile_path = os.path.normpath(
             os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
@@ -322,6 +328,8 @@ class InterruptionTest(unittest.TestCase):
         self.m_worker_validator = lambda f_path: f_path
 
     def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self.m_orig_environ)
         shutil.rmtree(self.m_temp_dir, ignore_errors=True)
 
     def test130And143(self) -> None:
@@ -718,6 +726,372 @@ class InterruptionTest(unittest.TestCase):
         # Verify no second submit occurred
         f_sbatch_calls = [f_c for f_c in f_runner.m_calls if os.path.basename(f_c[0]) == "sbatch"]
         self.assertEqual(len(f_sbatch_calls), 0)
+
+    def testInterruptionDurableBeforeAnyCancelCall(self) -> None:
+        """Asserts that durable interruption event is persisted BEFORE any cancellation command is executed."""
+        f_runner = FakeInterruptionSchedulerCommandRunner()
+        f_sig = SignalCoordinator()
+        f_runner.m_active_running_count = 5
+
+        f_interruption_existed_at_cancel: List[bool] = []
+
+        def _onQuery(f_cmd: List[str]) -> None:
+            f_sig.trigger(signal.SIGINT)
+
+        def _onCancel(f_cmd: List[str]) -> None:
+            # Check if durable interruption event already exists on disk when cancel runs
+            if f_orch.last_evidence_store is not None:
+                f_store = f_orch.last_evidence_store
+                f_events = f_store.readControlEvents("control")
+                f_has_interrupt = any(f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_events)
+                f_interruption_existed_at_cancel.append(f_has_interrupt)
+
+        f_runner.m_on_query_callback = _onQuery
+        f_runner.m_on_cancel_callback = _onCancel
+
+        f_orch = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner,
+            f_signal_coordinator=f_sig,
+            f_poll_interval=0.01,
+        )
+
+        f_view = f_orch.execute(
+            f_request=RunRequest("ior", "local"),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_fake_worker,
+        )
+
+        self.assertIsNotNone(f_view)
+        self.assertEqual(len(f_interruption_existed_at_cancel), 1)
+        self.assertTrue(f_interruption_existed_at_cancel[0], "Interruption event must be durable on disk BEFORE cancel command runs")
+        self.assertEqual(f_orch.exit_code, 130)
+        self.assertIn(f_view.state, (OverallRunState.CANCELLED, OverallRunState.INTERRUPTED))
+
+    def testInterruptionWriteFailureSurfacedAndNeverSuccess(self) -> None:
+        """Asserts write failure during interruption recording is surfaced, never writes success, and still cancels active job."""
+        f_runner = FakeInterruptionSchedulerCommandRunner()
+        f_sig = SignalCoordinator()
+        f_runner.m_active_running_count = 5
+
+        def _onQuery(f_cmd: List[str]) -> None:
+            f_sig.trigger(signal.SIGINT)
+
+        f_runner.m_on_query_callback = _onQuery
+
+        f_orch = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner,
+            f_signal_coordinator=f_sig,
+            f_poll_interval=0.01,
+        )
+
+        import unittest.mock
+        with unittest.mock.patch.object(
+            EvidenceStore,
+            "recordInterruption",
+            side_effect=OSError("Disk write failed: simulate permission/disk error"),
+        ):
+            f_view = f_orch.execute(
+                f_request=RunRequest("ior", "local"),
+                f_site=self.m_viking_profile,
+                f_worker_executable=self.m_fake_worker,
+            )
+
+        self.assertIsNotNone(f_view)
+        # 1. Write failure was surfaced
+        self.assertIsNotNone(f_orch.last_interruption_error)
+        # 2. Never writes success / overall state is not SUCCEEDED
+        self.assertNotEqual(f_view.state, OverallRunState.SUCCEEDED)
+        # 3. Retains signal exit code 130
+        self.assertEqual(f_orch.exit_code, 130)
+        # 4. Attempted cancellation for cluster safety: scancel was still called
+        f_scancel_calls = [f_c for f_c in f_runner.m_calls if os.path.basename(f_c[0]) == "scancel"]
+        self.assertTrue(len(f_scancel_calls) >= 1)
+
+    def testBeforeRequestRequestedBeforeDispatchAfterDispatchAfterAcceptanceActiveBetweenPointsFinalPoint(self) -> None:
+        """Tests signal handling at every distinct phase of execution."""
+        # 1. Before request (before execute starts)
+        f_sig_1 = SignalCoordinator()
+        f_sig_1.trigger(signal.SIGINT)
+        f_runner_1 = FakeInterruptionSchedulerCommandRunner()
+        f_orch_1 = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner_1,
+            f_signal_coordinator=f_sig_1,
+        )
+        f_v1 = f_orch_1.execute(f_request=RunRequest("ior", "local"), f_site=self.m_viking_profile, f_worker_executable=self.m_fake_worker)
+        self.assertEqual(f_v1.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch_1.exit_code, 130)
+        self.assertEqual(len([c for c in f_runner_1.m_calls if os.path.basename(c[0]) == "sbatch"]), 0)
+
+        # 2. Between points (point 0 finishes, signal before point 1)
+        f_sig_2 = SignalCoordinator()
+        f_runner_2 = FakeInterruptionSchedulerCommandRunner()
+        def _onSubmit2(f_jid: str, f_cwd: Optional[str]) -> None:
+            if f_orch_2.last_plan is not None and f_orch_2.last_evidence_store is not None:
+                f_plan = f_orch_2.last_plan
+                f_store = f_orch_2.last_evidence_store
+                f_pt = f_plan.scale_points[0]
+                for f_combo in f_plan.combinations:
+                    f_store.recordControllerResult(f_point=f_pt, f_combination=f_combo, f_payload={"exit_code": 0, "status": "succeeded"}, f_ordinal=0)
+        def _onAcct2(f_jid: str, f_cmd: List[str]) -> None:
+            if f_jid == "1000":
+                f_sig_2.trigger(signal.SIGTERM)
+        f_runner_2.m_on_submit_callback = _onSubmit2
+        f_runner_2.m_on_acct_callback = _onAcct2
+        f_orch_2 = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner_2,
+            f_signal_coordinator=f_sig_2,
+            f_poll_interval=0.01,
+        )
+        f_v2 = f_orch_2.execute(f_request=RunRequest("ior", "bake"), f_site=self.m_viking_profile, f_worker_executable=self.m_fake_worker)
+        self.assertEqual(f_v2.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch_2.exit_code, 143)
+        self.assertEqual(f_v2.point_states[0].state, PointRunState.SUCCEEDED)
+        self.assertEqual(f_v2.point_states[1].state, PointRunState.NOT_STARTED)
+        self.assertEqual(len([c for c in f_runner_2.m_calls if os.path.basename(c[0]) == "sbatch"]), 1)
+
+        # 3. Active during polling
+        f_sig_3 = SignalCoordinator()
+        f_runner_3 = FakeInterruptionSchedulerCommandRunner()
+        f_runner_3.m_active_running_count = 5
+        f_runner_3.m_on_query_callback = lambda cmd: f_sig_3.trigger(signal.SIGINT)
+        f_orch_3 = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner_3,
+            f_signal_coordinator=f_sig_3,
+            f_poll_interval=0.01,
+        )
+        f_v3 = f_orch_3.execute(f_request=RunRequest("ior", "local"), f_site=self.m_viking_profile, f_worker_executable=self.m_fake_worker)
+        self.assertEqual(f_v3.point_states[0].state, PointRunState.CANCELLED)
+        self.assertEqual(f_orch_3.exit_code, 130)
+
+        # 4. Final point of multi-point run
+        f_sig_4 = SignalCoordinator()
+        f_runner_4 = FakeInterruptionSchedulerCommandRunner()
+        def _onSubmit4(f_jid: str, f_cwd: Optional[str]) -> None:
+            if f_orch_4.last_plan is not None and f_orch_4.last_evidence_store is not None:
+                f_plan = f_orch_4.last_plan
+                f_store = f_orch_4.last_evidence_store
+                if f_jid == "1000":
+                    f_pt = f_plan.scale_points[0]
+                    for f_combo in f_plan.combinations:
+                        f_store.recordControllerResult(f_point=f_pt, f_combination=f_combo, f_payload={"exit_code": 0, "status": "succeeded"}, f_ordinal=0)
+                else:
+                    f_runner_4.m_active_running_count = 5
+        def _onQuery4(f_cmd: List[str]) -> None:
+            for f_arg in f_cmd:
+                if f_arg.startswith("--jobs=1001"):
+                    f_sig_4.trigger(signal.SIGINT)
+        f_runner_4.m_on_submit_callback = _onSubmit4
+        f_runner_4.m_on_query_callback = _onQuery4
+        f_orch_4 = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner_4,
+            f_signal_coordinator=f_sig_4,
+            f_poll_interval=0.01,
+        )
+        f_v4 = f_orch_4.execute(f_request=RunRequest("ior", "bake"), f_site=self.m_viking_profile, f_worker_executable=self.m_fake_worker)
+        self.assertEqual(f_v4.point_states[0].state, PointRunState.SUCCEEDED)
+        self.assertEqual(f_v4.point_states[1].state, PointRunState.CANCELLED)
+        self.assertEqual(f_orch_4.exit_code, 130)
+
+    def testExactRecoveredHandleCancelledNoResubmit(self) -> None:
+        """Asserts signal during dispatch window recovers exact token candidate, cancels it, and never resubmits."""
+        f_runner = FakeInterruptionSchedulerCommandRunner()
+        f_sig = SignalCoordinator()
+
+        f_req = RunRequest("ior", "local")
+        f_plan = RunPlanner.createPlan(
+            f_request=f_req,
+            f_profile=self.m_viking_profile,
+        )
+        f_token = f_plan.tokens[0]
+        f_runner.m_recovery_candidates[f_token] = ["1000"]
+        f_runner.m_submit_fail = True
+        f_runner.m_cancel_confirmed_state = "CANCELLED"
+
+        f_sig.trigger(signal.SIGINT)
+
+        f_orch = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner,
+            f_signal_coordinator=f_sig,
+            f_planner=type("PlanStub", (), {"createPlan": lambda **kwargs: f_plan}),
+            f_poll_interval=0.01,
+        )
+
+        f_view = f_orch.execute(
+            f_request=f_req,
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_fake_worker,
+        )
+
+        self.assertIsNotNone(f_view)
+        self.assertEqual(f_view.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch.exit_code, 130)
+
+        # Ensure 0 sbatch calls executed and no duplicate submit
+        f_sbatch_calls = [f_c for f_c in f_runner.m_calls if os.path.basename(f_c[0]) == "sbatch"]
+        self.assertEqual(len(f_sbatch_calls), 0)
+
+    def testCancelTimeoutErrorGraceUnconfirmed(self) -> None:
+        """Asserts cancellation timeout or query error records unconfirmed and yields INDETERMINATE."""
+        f_runner = FakeInterruptionSchedulerCommandRunner()
+        f_sig = SignalCoordinator()
+        f_runner.m_active_running_count = 5
+
+        def _onQuery(f_cmd: List[str]) -> None:
+            f_sig.trigger(signal.SIGINT)
+            f_runner.m_query_fail = True
+
+        f_runner.m_on_query_callback = _onQuery
+
+        f_sim_time = [0.0]
+        def _clock() -> float:
+            f_sim_time[0] += 50.0
+            return f_sim_time[0]
+
+        f_orch = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner,
+            f_signal_coordinator=f_sig,
+            f_poll_interval=0.01,
+            f_clock_float=_clock,
+            f_sleep=lambda f_s: None,
+        )
+
+        f_view = f_orch.execute(
+            f_request=RunRequest("ior", "local"),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_fake_worker,
+        )
+
+        self.assertIsNotNone(f_view)
+        self.assertEqual(f_view.point_states[0].state, PointRunState.INDETERMINATE)
+        self.assertEqual(f_view.state, OverallRunState.INDETERMINATE)
+        self.assertEqual(f_orch.exit_code, 130)
+
+        f_store = f_orch.last_evidence_store
+        f_unconf_path = os.path.join(
+            f_store.layout.pointSchedulerDir(f_orch.last_plan.scale_points[0], 0),
+            "cancel_unconfirmed.json",
+        )
+        self.assertTrue(os.path.exists(f_unconf_path))
+
+    def testAlreadyTerminalEveryState(self) -> None:
+        """Asserts cancellation of already-terminal job in every terminal state (COMPLETED, FAILED, TIMEOUT, CANCELLED)."""
+        for f_state in ("COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"):
+            with self.subTest(terminal_state=f_state):
+                f_runner = FakeInterruptionSchedulerCommandRunner()
+                f_sig = SignalCoordinator()
+                f_runner.m_active_running_count = 5
+
+                def _onQuery(f_cmd: List[str]) -> None:
+                    f_sig.trigger(signal.SIGINT)
+
+                f_runner.m_on_query_callback = _onQuery
+                f_runner.m_cancel_confirmed_state = f_state
+
+                f_orch = RunOrchestrator(
+                    f_worker_validator=self.m_worker_validator,
+                    f_command_runner=f_runner,
+                    f_signal_coordinator=f_sig,
+                    f_poll_interval=0.01,
+                )
+
+                f_view = f_orch.execute(
+                    f_request=RunRequest("ior", "local"),
+                    f_site=self.m_viking_profile,
+                    f_worker_executable=self.m_fake_worker,
+                )
+
+                self.assertIsNotNone(f_view)
+                self.assertEqual(f_orch.exit_code, 130)
+                f_store = f_orch.last_evidence_store
+                f_sub_recs = f_store.readSubmissionRecords(f_orch.last_plan.scale_points[0], f_ordinal=0)
+                self.assertIsNotNone(f_sub_recs.get("cancel_recorded"))
+                if f_state == "CANCELLED":
+                    self.assertEqual(f_sub_recs["cancel_recorded"].payload.get("outcome"), "confirmed")
+                else:
+                    self.assertEqual(f_sub_recs["cancel_recorded"].payload.get("outcome"), "already_terminal")
+
+    def testFirstMixedSignalWinsAnd130Or143(self) -> None:
+        """Tests first mixed signal wins (SIGINT -> 130, SIGTERM -> 143) and ignores subsequent signals."""
+        f_coord_1 = SignalCoordinator()
+        f_coord_1.trigger(signal.SIGINT)
+        f_coord_1.trigger(signal.SIGTERM)
+        self.assertEqual(f_coord_1.interrupted_signal, signal.SIGINT)
+        self.assertEqual(f_coord_1.exit_code, 130)
+        self.assertEqual(f_coord_1.signal_name, "SIGINT")
+
+        f_coord_2 = SignalCoordinator()
+        f_coord_2.trigger(signal.SIGTERM)
+        f_coord_2.trigger(signal.SIGINT)
+        self.assertEqual(f_coord_2.interrupted_signal, signal.SIGTERM)
+        self.assertEqual(f_coord_2.exit_code, 143)
+        self.assertEqual(f_coord_2.signal_name, "SIGTERM")
+
+    def testMarkerBeforeVsInterruptionBeforeLateSuccess(self) -> None:
+        """Asserts temporal precedence between WHOLE_RUN_SUCCEEDED marker and interruption events."""
+        # Case A: Interruption before late success of point
+        f_runner_a = FakeInterruptionSchedulerCommandRunner()
+        f_sig_a = SignalCoordinator()
+        f_sig_a.trigger(signal.SIGINT)
+        f_orch_a = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner_a,
+            f_signal_coordinator=f_sig_a,
+        )
+        f_view_a = f_orch_a.execute(
+            f_request=RunRequest("ior", "local"),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_fake_worker,
+        )
+        f_plan_a = f_orch_a.last_plan
+        f_store_a = f_orch_a.last_evidence_store
+        f_pt_a = f_plan_a.scale_points[0]
+        # Late point success recorded
+        f_store_a.recordSubmissionRecorded(f_pt_a, "control", f_handle=JobHandle("slurm", "1000"), f_ordinal=0)
+        for f_combo in f_plan_a.combinations:
+            f_store_a.recordControllerResult(f_pt_a, f_combo, f_payload={"exit_code": 0, "status": "succeeded"}, f_ordinal=0)
+        f_store_a.recordSchedulerObservation(f_pt_a, "control", 1, f_payload={"state": "succeeded", "status": "succeeded", "exit_code": 0}, f_ordinal=0)
+        f_rec_view_a = StateReconciler.reconcile(f_plan_a, f_store_a)
+        self.assertEqual(f_rec_view_a.point_states[0].state, PointRunState.SUCCEEDED)
+        self.assertEqual(f_rec_view_a.state, OverallRunState.INTERRUPTED)
+
+        # Case B: WHOLE_RUN_SUCCEEDED recorded before interruption
+        f_runner_b = FakeInterruptionSchedulerCommandRunner()
+        f_sig_b = SignalCoordinator()
+        def _onSubmitB(f_jid: str, f_cwd: Optional[str]) -> None:
+            if f_orch_b.last_plan is not None and f_orch_b.last_evidence_store is not None:
+                f_plan = f_orch_b.last_plan
+                f_store = f_orch_b.last_evidence_store
+                f_pt = f_plan.scale_points[0]
+                for f_combo in f_plan.combinations:
+                    f_store.recordControllerResult(f_point=f_pt, f_combination=f_combo, f_payload={"exit_code": 0, "status": "succeeded"}, f_ordinal=0)
+        f_runner_b.m_on_submit_callback = _onSubmitB
+        f_orch_b = RunOrchestrator(
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=f_runner_b,
+            f_signal_coordinator=f_sig_b,
+            f_poll_interval=0.01,
+        )
+        f_view_b = f_orch_b.execute(
+            f_request=RunRequest("ior", "local"),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_fake_worker,
+        )
+        self.assertEqual(f_view_b.state, OverallRunState.SUCCEEDED)
+        self.assertEqual(f_orch_b.exit_code, 0)
+        # Late interruption at sequence 2
+        f_store_b = f_orch_b.last_evidence_store
+        f_ctrl_seq = len(f_store_b.readControlEvents("control")) + 1
+        f_store_b.recordInterruption("control", f_ctrl_seq, f_payload={"reason": "Late signal"})
+        f_rec_view_b = StateReconciler.reconcile(f_orch_b.last_plan, f_store_b)
+        self.assertEqual(f_rec_view_b.state, OverallRunState.SUCCEEDED)
 
 
 if __name__ == "__main__":

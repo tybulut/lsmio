@@ -633,4 +633,3 @@ class InstalledPackageValidator:
         f_required_files: Optional[Sequence[str]] = None,
     ) -> str:
         return self.validate(f_installed_pkg_root, f_required_files)
-

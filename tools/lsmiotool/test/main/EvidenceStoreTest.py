@@ -48,6 +48,7 @@ from lsmiotool.lib.evidence import (
     EvidenceSerializer,
     EvidenceStore,
     JobHandle,
+    ResultPayloadValidator,
     WriterKind,
 )
 from lsmiotool.lib.profile import ProfileLoader
@@ -777,3 +778,233 @@ class EvidenceStoreTest(unittest.TestCase):
                 f_sequence=2,
                 f_evidence_kind=EvidenceKind.OBSERVATION,
             )
+
+    def testTerminalPayloadExactSchemasAndMetadataMatch(self) -> None:
+        """Chunk 017: Verifies exact schemas, allowed/forbidden keys, type constraints, and output validation."""
+        # 1. Base / Shared Payload Tests
+        # Valid shared success
+        f_s1 = ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0})
+        self.assertEqual(f_s1["status"], "success")
+        self.assertEqual(f_s1["exit_code"], 0)
+
+        # Aliases for status and returncode
+        f_s2 = ResultPayloadValidator.validateSharedPayload({"status": "completed", "returncode": 0})
+        self.assertEqual(f_s2["exit_code"], 0)
+        f_s3 = ResultPayloadValidator.validateSharedPayload({"status": "SUCCEEDED", "exit_code": 0})
+        self.assertEqual(f_s3["status"], "SUCCEEDED")
+        f_s4 = ResultPayloadValidator.validateSharedPayload({"status": "FAILED", "exit_code": 1})
+        self.assertEqual(f_s4["status"], "FAILED")
+
+        # Negative: Non-dict, empty dict, missing keys
+        for f_invalid in (None, [], "", 123, {}, {"elapsed_seconds": 1.0}):
+            with self.assertRaises(EvidenceSchemaError):
+                ResultPayloadValidator.validateSharedPayload(f_invalid)
+
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"exit_code": 0})  # missing status
+
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success"})  # missing exit_code
+
+        # Negative: Type mismatch (bool, string)
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": True})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "failed", "exit_code": False})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": "0"})
+
+        # Negative: Contradictions
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 1})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "error": "unexpected"})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "timed_out": True})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "failed", "exit_code": 0})
+
+        # Negative: Invalid optional field types
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "elapsed_seconds": True})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "elapsed_seconds": -5.0})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "failed", "exit_code": 143, "signal_number": True})
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "exit_status": 2})
+
+        # 2. Rank Payload Validation Tests
+        f_rank_log = self.m_layout.pointRankLogPath(self.m_point, 0, "c16_b8M", f_ordinal=0)
+        f_rank_res = os.path.join(self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0), "rank_0.db")
+        os.makedirs(os.path.dirname(f_rank_log), exist_ok=True)
+        os.makedirs(os.path.dirname(f_rank_res), exist_ok=True)
+        with open(f_rank_log, "w", encoding="utf-8") as f_f:
+            f_f.write("rank log\n")
+        with open(f_rank_res, "w", encoding="utf-8") as f_f:
+            f_f.write("rank db\n")
+
+        f_valid_rank_payload = {
+            "status": "success",
+            "exit_code": 0,
+            "exit_status": 0,
+            "global_rank": 0,
+            "rank": 0,
+            "combination": "c16_b8M",
+            "argv": ["lsmioworker", "rank", "c16_b8M"],
+            "log_path": f_rank_log,
+            "result_path": f_rank_res,
+            "timed_out": False,
+        }
+        f_clean_rank = ResultPayloadValidator.validateRankPayload(
+            f_valid_rank_payload,
+            f_expected_rank=0,
+            f_expected_combination="c16_b8M",
+            f_validate_files=True,
+            f_layout=self.m_layout,
+        )
+        self.assertEqual(f_clean_rank["rank"], 0)
+
+        # Rank identity contradictions
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateRankPayload(
+                {**f_valid_rank_payload, "global_rank": 1, "rank": 0}
+            )
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateRankPayload(
+                f_valid_rank_payload, f_expected_rank=2
+            )
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateRankPayload(
+                f_valid_rank_payload, f_expected_combination="c4_b64K"
+            )
+
+        # Forbidden extra fields
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateRankPayload(
+                {**f_valid_rank_payload, "arbitrary_extra_field": "disallowed"}
+            )
+
+        # Missing required success fields
+        for f_missing_key in ("exit_status", "argv", "log_path", "result_path", "timed_out"):
+            f_bad = dict(f_valid_rank_payload)
+            del f_bad[f_missing_key]
+            with self.assertRaises(EvidenceSchemaError):
+                ResultPayloadValidator.validateRankPayload(f_bad, f_strict=True)
+
+        # Rank file validation errors
+        f_sym_res = os.path.join(self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0), "sym_rank_0.db")
+        if os.path.exists(f_sym_res):
+            os.remove(f_sym_res)
+        os.symlink(f_rank_res, f_sym_res)
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateRankPayload(
+                {**f_valid_rank_payload, "result_path": f_sym_res},
+                f_validate_files=True,
+                f_layout=self.m_layout,
+            )
+
+        f_nonexistent_res = os.path.join(self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0), "nonexistent.db")
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateRankPayload(
+                {**f_valid_rank_payload, "result_path": f_nonexistent_res},
+                f_validate_files=True,
+                f_layout=self.m_layout,
+            )
+
+        with self.assertRaises(ContainmentError):
+            ResultPayloadValidator.validateRankPayload(
+                {**f_valid_rank_payload, "result_path": "/escape/path/db.db"},
+                f_validate_files=True,
+                f_layout=self.m_layout,
+            )
+
+        # 3. Controller Payload Validation Tests
+        f_valid_ctrl_ior = {
+            "status": "success",
+            "exit_code": 0,
+            "stage": "execution",
+            "combination": "c16_b8M",
+        }
+        f_clean_ctrl = ResultPayloadValidator.validateControllerPayload(
+            f_valid_ctrl_ior, f_target="ior", f_expected_combination="c16_b8M"
+        )
+        self.assertEqual(f_clean_ctrl["status"], "success")
+
+        # LSMIO requires tasks_validated
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateControllerPayload(
+                f_valid_ctrl_ior, f_target="lsmio", f_strict=True
+            )
+
+        f_valid_ctrl_lsmio = {
+            "status": "success",
+            "exit_code": 0,
+            "stage": "rank_evidence",
+            "tasks_validated": 1,
+            "combination": "c16_b8M",
+        }
+        ResultPayloadValidator.validateControllerPayload(
+            f_valid_ctrl_lsmio, f_target="lsmio", f_expected_tasks=1
+        )
+
+        # tasks_validated mismatch or invalid
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateControllerPayload(
+                f_valid_ctrl_lsmio, f_target="lsmio", f_expected_tasks=4
+            )
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateControllerPayload(
+                {**f_valid_ctrl_lsmio, "tasks_validated": True}, f_target="lsmio"
+            )
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateControllerPayload(
+                {**f_valid_ctrl_lsmio, "tasks_validated": 0}, f_target="lsmio"
+            )
+
+        # Controller output_path file validation
+        f_ctrl_out = os.path.join(self.m_layout.pointLogsDir(self.m_point, 0), "ior.stdout")
+        with open(f_ctrl_out, "w", encoding="utf-8") as f_f:
+            f_f.write("ior output\n")
+        f_ctrl_with_out = {**f_valid_ctrl_ior, "output_path": f_ctrl_out}
+        ResultPayloadValidator.validateControllerPayload(
+            f_ctrl_with_out, f_validate_files=True, f_layout=self.m_layout
+        )
+
+        f_sym_out = os.path.join(self.m_layout.pointLogsDir(self.m_point, 0), "sym_ior.stdout")
+        if os.path.exists(f_sym_out):
+            os.remove(f_sym_out)
+        os.symlink(f_ctrl_out, f_sym_out)
+        with self.assertRaises(EvidenceSchemaError):
+            ResultPayloadValidator.validateControllerPayload(
+                {**f_valid_ctrl_ior, "output_path": f_sym_out},
+                f_validate_files=True,
+                f_layout=self.m_layout,
+            )
+
+        # 4. isSuccessPayload & isFailurePayload helpers
+        self.assertTrue(
+            ResultPayloadValidator.isSuccessPayload(
+                f_valid_ctrl_lsmio, EvidenceKind.CONTROLLER_RESULT, f_target="lsmio", f_expected_tasks=1
+            )
+        )
+        self.assertFalse(
+            ResultPayloadValidator.isFailurePayload(
+                f_valid_ctrl_lsmio, EvidenceKind.CONTROLLER_RESULT
+            )
+        )
+        self.assertTrue(
+            ResultPayloadValidator.isFailurePayload(
+                {"status": "failed", "exit_code": 1, "stage": "execution"},
+                EvidenceKind.CONTROLLER_RESULT,
+            )
+        )
+        self.assertFalse(
+            ResultPayloadValidator.isSuccessPayload(
+                {"status": "failed", "exit_code": 1, "stage": "execution"},
+                EvidenceKind.CONTROLLER_RESULT,
+            )
+        )
+        self.assertFalse(ResultPayloadValidator.isSuccessPayload({}, EvidenceKind.CONTROLLER_RESULT))
+        self.assertFalse(ResultPayloadValidator.isFailurePayload({}, EvidenceKind.CONTROLLER_RESULT))
+

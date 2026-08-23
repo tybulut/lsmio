@@ -317,6 +317,7 @@ class RunMain(BaseMain):
     m_worker_validator: Optional[Any]
     m_site: Optional[Union[str, Any]]
     m_runtime_layout: Optional[Any]
+    m_reporter: Optional[Any]
 
     def __init__(
         self,
@@ -326,6 +327,7 @@ class RunMain(BaseMain):
         f_worker_validator: Optional[Any] = None,
         f_site: Optional[Union[str, Any]] = None,
         f_runtime_layout: Optional[Any] = None,
+        f_reporter: Optional[Any] = None,
         **f_kwargs: Any,
     ) -> None:
         """Initialize RunMain.
@@ -339,6 +341,7 @@ class RunMain(BaseMain):
             f_worker_validator: Optional injected worker validator for preflight checks.
             f_site: Optional explicit site or profile.
             f_runtime_layout: Optional runtime layout.
+            f_reporter: Optional injected reporter or stream.
             **f_kwargs: Additional keyword arguments (e.g. ssd=True, setup="...").
         """
         super().__init__()
@@ -377,6 +380,11 @@ class RunMain(BaseMain):
         self.m_worker_validator = f_worker_validator
         self.m_site = f_site
         self.m_runtime_layout = f_runtime_layout
+        self.m_reporter = (
+            f_reporter
+            if f_reporter is not None
+            else f_kwargs.get("f_reporter", f_kwargs.get("reporter"))
+        )
 
     @property
     def request(self) -> Any:
@@ -410,6 +418,14 @@ class RunMain(BaseMain):
     def runtime_layout(self) -> Optional[Any]:
         return self.m_runtime_layout
 
+    @property
+    def reporter(self) -> Optional[Any]:
+        return self.m_reporter
+
+    @property
+    def f_reporter(self) -> Optional[Any]:
+        return self.m_reporter
+
     def run(self) -> int:
         """Execute benchmark run orchestration and return integer exit status."""
         from lsmiotool.lib.cli import WorkerExecutableValidator
@@ -417,6 +433,7 @@ class RunMain(BaseMain):
             OrchestrationError,
             PreflightError,
             RunOrchestrator,
+            RunReporter,
         )
 
         f_validator = (
@@ -425,17 +442,36 @@ class RunMain(BaseMain):
             else WorkerExecutableValidator
         )
 
+        f_reporter = self.m_reporter
+        if f_reporter is None:
+            f_reporter = RunReporter(sys.stdout)
+        elif not isinstance(f_reporter, RunReporter) and callable(f_reporter):
+            f_reporter = RunReporter(f_callback=f_reporter)
+
         if self.m_orchestrator_factory is not None:
             try:
                 f_orch = self.m_orchestrator_factory(
-                    f_worker_validator=f_validator
+                    f_worker_validator=f_validator,
+                    f_reporter=f_reporter,
                 )
             except TypeError:
-                f_orch = self.m_orchestrator_factory()
+                try:
+                    f_orch = self.m_orchestrator_factory(
+                        f_worker_validator=f_validator
+                    )
+                except TypeError:
+                    f_orch = self.m_orchestrator_factory()
         else:
             f_orch = RunOrchestrator(
-                f_worker_validator=f_validator
+                f_worker_validator=f_validator,
+                f_reporter=f_reporter,
             )
+
+        if hasattr(f_orch, "m_reporter") and getattr(f_orch, "m_reporter", None) is None:
+            try:
+                object.__setattr__(f_orch, "m_reporter", f_reporter)
+            except Exception:
+                pass
 
         try:
             f_view = f_orch.execute(

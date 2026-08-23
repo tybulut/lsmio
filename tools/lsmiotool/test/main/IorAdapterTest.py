@@ -57,8 +57,8 @@ class IorAdapterTest(unittest.TestCase):
         self.m_work_dir = "/benchmark/runs/run-123/points/00-tasks-1/work/c16_b8M"
         self.m_out_path = "/benchmark/runs/run-123/points/00-tasks-1/data/c16/b8M/ior.base"
 
-    def testExactEighteenArgv(self) -> None:
-        """Validate exact argv for all 6 setups across all 3 block sizes (18 combinations total)."""
+    def testUpstreamLiteralParityEveryMode(self) -> None:
+        """Validate exact upstream-golden argv for all 6 setups across all 3 block sizes (18 combinations total)."""
         f_setups = ["BASE", "HDF5", "HDF5-C", "COLLECTIVE", "FSYNC", "REVERSE"]
         f_block_sizes = ["64K", "1M", "8M"]
         f_segments = {
@@ -68,11 +68,11 @@ class IorAdapterTest(unittest.TestCase):
         }
         f_extra_flags = {
             "BASE": (),
-            "HDF5": ("-a=HDF5",),
-            "HDF5-C": ("-a=HDF5", "-c"),
-            "COLLECTIVE": ("-c",),
+            "HDF5": ("-a", "HDF5"),
+            "HDF5-C": ("-c", "-a", "HDF5"),
+            "COLLECTIVE": ("-c", "-a", "MPIIO"),
             "FSYNC": ("-e",),
-            "REVERSE": ("-z",),
+            "REVERSE": ("-C",),
         }
 
         f_tested_count = 0
@@ -94,11 +94,11 @@ class IorAdapterTest(unittest.TestCase):
                     "-r",
                     "-i=10",
                     *f_extra_flags[f_setup],
-                    f"-b={f_bs}",
-                    f"-t={f_bs}",
-                    f"-s={f_segments[f_bs]}",
                     "-o",
                     f_out_path,
+                    f"-t={f_bs}",
+                    f"-b={f_bs}",
+                    f"-s={f_segments[f_bs]}",
                 )
 
                 self.assertEqual(
@@ -247,11 +247,11 @@ class IorAdapterTest(unittest.TestCase):
         self.assertEqual(f_cmd.argv[2], "-w")
         self.assertEqual(f_cmd.argv[3], "-r")
         self.assertEqual(f_cmd.argv[4], "-i=10")
-        self.assertEqual(f_cmd.argv[5], "-b=8M")
-        self.assertEqual(f_cmd.argv[6], "-t=8M")
-        self.assertEqual(f_cmd.argv[7], "-s=128")
-        self.assertEqual(f_cmd.argv[8], "-o")
-        self.assertEqual(f_cmd.argv[9], f_out_path_with_spaces)
+        self.assertEqual(f_cmd.argv[5], "-o")
+        self.assertEqual(f_cmd.argv[6], f_out_path_with_spaces)
+        self.assertEqual(f_cmd.argv[7], "-t=8M")
+        self.assertEqual(f_cmd.argv[8], "-b=8M")
+        self.assertEqual(f_cmd.argv[9], "-s=128")
         self.assertEqual(len(f_cmd.argv), 10)
 
     def testCommandImmutability(self) -> None:
@@ -318,6 +318,8 @@ class IorAdapterTest(unittest.TestCase):
         self.assertIn("-t=1M", f_cmd.argv)
         self.assertIn("-s=1024", f_cmd.argv)
         self.assertIn("-c", f_cmd.argv)
+        self.assertIn("-a", f_cmd.argv)
+        self.assertIn("MPIIO", f_cmd.argv)
 
     def testNulByteRejection(self) -> None:
         """Verify that NUL bytes in arguments or paths raise BenchmarkConfigurationError."""

@@ -133,7 +133,7 @@ lsmiotool run <benchmark> <scale> [--ssd] [--setup <name>]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
-```bash
+```
 lsmiotool --ssd run <benchmark> <scale> [--setup <name>]
 ```
 
@@ -168,7 +168,14 @@ Each submitted scheduler allocation executes exactly 6 stripe count and block si
 5. `(4, 1M)` - 4 stripes, 1 MiB block size
 6. `(4, 64K)` - 4 stripes, 64 KiB block size
 
-On Lustre parallel filesystems, directories are explicitly configured using `lfs setstripe -c <stripes> -S <blocksize>` prior to executing each combination.
+On Lustre parallel filesystems, directories are explicitly configured using `lfs setstripe -c <stripes> -S <blocksize>` prior to executing each combination. Output and intermediate files are placed under isolated combination directories (`data/c<stripe>/b<block>/`).
+
+### Combination-Private Rank Claims, Logs, and Results
+
+To guarantee isolation across ranks and execution combinations without state leakage:
+- **Exclusive Rank Claims**: Each participating rank acquires an exclusive permanent claim lock file at `ranks/<global-rank>/<combination>/claim.lock` containing identity metadata (`run_id`, `point_id`, `rank`, `combination`). A collision on the same rank and combination has exactly one winner; claiming the same rank across different planned combinations is valid. Claims are permanent and never released.
+- **Combination-Private Logs**: Rank execution logs are bound privately at `logs/<combination>/rank_<global-rank>.log`.
+- **Combination-Private Results**: Terminal rank results are recorded at `ranks/<global-rank>/<combination>/result.json`, while combination controller results are stored at `combinations/<combination>/controller-result.json`.
 
 ### Scale Points and Allocation Shapes
 
@@ -179,6 +186,36 @@ On Lustre parallel filesystems, directories are explicitly configured using `lfs
 | `small` | `[1, 2, 4, 8, 16, 24, 32, 40, 48]` | 1 | 1, 2, 4, 8, 16, 24, 32, 40, 48 |
 | `large` | `[4, 8, 16, 32, 64, 128, 192, 256]` | 4 | 1, 2, 4, 8, 16, 32, 48, 64 |
 
+### LAMMPS (LMP) Upstream Assets, Task Tuning, Shared Argv & Large Scale Gate
+
+LMP benchmark runs adhere strictly to upstream asset naming, tuning parameters, and argument structure:
+- **Required Upstream Asset Files**:
+  - `in.reaxc.hns` (input script)
+  - `data.hns-equil` (initial molecular topology)
+  - `ffield.reax.hns` (ReaxFF force field parameters)
+  These assets are verified and staged from `share/lsmio/lmp-reaxff/` (installed) or `tools/bmtool/lmp-reaxff/` (source) without renamed aliases. SHA-256 hashes are verified during preflight and re-validated at combination staging.
+- **Immutable Task Tuning**:
+  Tuning parameters are derived exclusively from the immutable plan (`lmp_task_tuning`):
+  | Task Count | Replication Factor (`-v x/y/z`) | Buffer Size (`-lsmio-buf-size-mb`) |
+  |---|---|---|
+  | 1 | 4 | 32 |
+  | 2 | 5 | 32 |
+  | 4 | 6 | 64 |
+  | 8 | 8 | 128 |
+  | 16 | 10 | 256 |
+  | 24 | 12 | 512 |
+  | 32 | 14 | 1024 |
+  | 40 | 15 | 1024 |
+  | 48 | 16 | 1024 |
+- **Exact Shared Invocation Argv**:
+  `lmp -in in.reaxc.hns -v x <REP> -v y <REP> -v z <REP>` followed by:
+  - `LSMIO` setup: `-lsmio-buf-size-mb <BUF>`
+  - `LSMIO-MMAP` setup: `-lsmio-mmap -lsmio-buf-size-mb <BUF>`
+  - `FS` setup: `-lsmio-fallback`
+  No Kokkos or dump flags are generated.
+- **Atomic `lmp large` Gate**:
+  `lmp large` is unsupported and is rejected atomically before run ID allocation, correlation token generation, capability probing, directory creation, filesystem mutation, or scheduler interaction.
+
 ### Environment Profiles: Configured vs Certified
 
 Environment configurations are loaded from `RUN_PROFILES` in `etc/environments.json`.
@@ -188,7 +225,19 @@ Environment configurations are loaded from `RUN_PROFILES` in `etc/environments.j
   - `archer2`: Slurm scheduler (`srun` launcher, `standard` partition/QoS)
   - `isambard`: PBS scheduler (`aprun` launcher, `abe` mail, fixed 6-hour walltime)
   - `dev`: Fake scheduler & launcher (test-only profile)
-- **Certification status**: All production profiles are in `configured` state pending opt-in site-specific live certification.
+- **Certification status**: All production profiles are in `configured` state (pending opt-in live site certification). No external live certification is claimed.
+- **Slurm Credentials**: Slurm profiles (`viking`, `viking2`, `archer2`) require valid `SB_ACCOUNT` and `SB_EMAIL` in the environment (`os.environ`), validated prior to run mutation. PBS (`isambard`) and DEV (`dev`) do not require or render Slurm credentials. Credentials are not stored in the immutable `manifest.json`.
+
+### Executable, Worker, and Capability Preflight Checks
+
+Before allocating a run root or interacting with the scheduler:
+- Benchmark executable and private worker are verified as regular readable/executable non-symlink files.
+- Capability checks:
+  - `ior`: Capability probed and verified via exact output inspection.
+  - `lsmio`: Executables remain `configured` (unverified) because bare `-v` is not supported.
+  - `lmp`: Verified via `-h` help inspection for `-lsmio-buf-size-mb` and setup flags (`-lsmio-mmap`, `-lsmio-fallback`).
+  - LMP assets: Verified for existence, non-symlink status, and SHA-256 integrity.
+- Failed preflight immediately halts execution without mutating the filesystem or falling back to PATH/CWD searching.
 
 ### Scheduler Resource Directives & Policies
 
@@ -209,37 +258,54 @@ Environment configurations are loaded from `RUN_PROFILES` in `etc/environments.j
 - Archer2 partition & QoS directives: `#SBATCH -p standard`, `#SBATCH --qos=standard` (no memory directive)
 - Standard directives for job name, ntasks, nodes, ntasks-per-node, output, error, account, and mail-user.
 
-### Decimal-Only Slurm Job IDs & Cluster-Qualified Output Rejection
+### Decimal-Only Slurm Job IDs & Full Qualified PBS Handle Preservation
 
-- `sbatch --parsable` submit output is validated against regex `^[0-9]+$`. The single parsed decimal string is retained verbatim as `JobHandle.job_id`.
-- Cluster-qualified output strings (e.g. `123;cluster`) are strictly rejected as unverified.
-- PBS job IDs match regex `^[0-9]+(?:\.[A-Za-z0-9._-]+)?$`.
-- The exact numeric handle is preserved across all active queries (`squeue`), accounting (`sacct`), cancellation (`scancel`), and evidence records without modification or integer truncation.
+- **Slurm Handle Contract**: `sbatch --parsable` submit output is validated against regex `^[0-9]+$`. The single parsed decimal string is retained verbatim as `JobHandle.job_id`. Cluster-qualified output strings (e.g. `123;cluster`) are strictly rejected as unverified.
+- **PBS Handle Contract**: PBS job IDs match regex `^[0-9]+(?:\.[A-Za-z0-9._-]+)?$`. The full qualified handle, including server suffix (e.g. `123456.isambard-pbs`), is preserved verbatim across queries, evidence, cancellation, and reporting.
+- **Exact Query & Accounting Commands**:
+  - Slurm active query: `squeue --noheader --jobs=<id> --format=%i|%T`
+  - Slurm terminal accounting: `sacct --noheader --parsable2 --jobs=<id> --format=JobIDRaw,JobName,State,ExitCode`
+  - Slurm cancel: `scancel <id>`
+  - PBS active query: `qstat -F json <id>`
+  - PBS terminal query: `qstat -F json -x <id>`
+  - PBS cancel: `qdel <id>`
 
-### Correlation Tokens, 4-Step Dispatch Sequence & Crash Recovery
+### Finite Timeouts, Real Polling, and Fail-Closed Error Handling
+
+- **Finite Command Timeouts**: Every scheduler interaction (submit, active query, accounting, cancel, recovery) uses a positive finite timeout derived from profile `grace_seconds` (default: 120s).
+- **Monotonic Cancellation Deadline**: Cancellation and confirmation queries share a single monotonic deadline bounded by remaining grace time.
+- **Real Foreground Polling**: Normal foreground execution polls the scheduler at 8-second intervals using real sleep (`time.sleep`).
+- **Fail-Closed Error Handling**: Query failure, nonzero return code, unparseable payload, or command timeout immediately transitions execution to `INDETERMINATE` (fail closed; no 3-unknown retry loop, no fabricated terminal success, and no later points submitted).
+
+### Correlation Tokens, Pre-Spawn Dispatch Protocol & Crash Recovery
 
 - **Correlation Token**: A 27-character identifier matching `^lm-[0-9a-f]{24}$` (prefix `lm-` followed by 24 lowercase hexadecimal characters) generated per scale point plan and transported exclusively as the scheduler job name.
-- **4-Step Dispatch Sequence**:
-  1. `submission_requested`: Written to point evidence before scheduler command execution.
-  2. `submission_dispatched`: Written immediately before spawning the scheduler process.
+- **4-Step Dispatch Protocol**:
+  1. `submission_requested`: Written to point evidence before scheduler command argv preparation.
+  2. `submission_dispatched`: Written immediately before spawning the scheduler process (contains exact planned argv, correlation token, and script/point correlation).
   3. `sbatch` / `qsub` process execution.
-  4. `JobHandle` recorded upon verifying the returned job identifier.
-- **Accepted-Submit Crash Recovery**: If orchestration is interrupted after `submission_dispatched` before the job handle is persisted, the orchestrator queries the scheduler using the correlation token (`squeue --name=<token>` / `sacct --name=<token>` or `qstat -u <user>` filtered by `Job_Name`).
+  4. `submission_recorded`: Persisted upon verifying the returned handle.
+- **Accepted-Submit Crash Recovery**: If orchestration is interrupted after `submission_dispatched` before the job handle is persisted, the orchestrator queries the scheduler using the correlation token:
+  - Slurm recovery: `squeue --noheader --name=<token> --format=%i|%j|%T` and `sacct --noheader --parsable2 --name=<token> --starttime=<manifest_utc> --format=JobIDRaw,JobName,State,ExitCode`
+  - PBS recovery: `qstat -u <user> -F json` filtered by exact `Job_Name`.
   - Exactly 1 candidate job: Recovered and adopted without resubmission.
   - 0 or >1 candidate jobs: Marked `INDETERMINATE` without blind resubmission.
 
-### Artifact Ownership, Control Lock & State Precedence
+### Run Root Allocation, Collision Refusal & Control Lock
 
 - **Run Root Directory**: `<benchmark-root>/runs/<run-id>`
+- **Collision Refusal**: `ArtifactStore.allocateRun(plan)` unconditionally performs exclusive directory creation (`os.mkdir` / `O_EXCL`). If the run root directory already exists, execution fails immediately with a nonzero return code before point preparation, scripts, or scheduler calls. Normal runs never adopt existing run roots.
+- **Control Lock**: `control/lock` is an exclusive advisory lock (`fcntl.flock`) preventing concurrent orchestrators on the same run root.
 - **Isolated Directory Layout**:
   - `manifest.json`: Canonical, immutable write-once run plan.
-  - `control/lock`: Exclusive advisory lock (`fcntl.flock`) preventing concurrent orchestrators.
+  - `control/lock`: Exclusive advisory lock file.
   - `control/events/<writer>/<sequence>.json`: High-level lifecycle events.
   - `scheduler/submission*.json` & `scheduler/observations/<writer>/<sequence>.json`: Point-private scheduler submissions and observations.
   - `worker/events/<sequence>.json`: Controller allocation execution records.
   - `combinations/<combination>/controller-result.json`: Combination execution results.
+  - `ranks/<global-rank>/<combination>/claim.lock`: Exclusive permanent rank claim lock.
   - `ranks/<global-rank>/<combination>/result.json`: LSMIO rank worker results.
-  - `logs/`: Isolated standard output and standard error logs.
+  - `logs/<combination>/rank_<global-rank>.log`: Rank stdout and stderr logs.
   - `data/c<stripe>/b<block>/`: Stripe/block combination data directories.
 - **Disjoint Writer Ownership**: CONTROL, CONTROLLER, and RANK writers create only their owned evidence. External schedulers never write to the filesystem directly.
 - **Authoritative State Precedence**:
@@ -250,44 +316,47 @@ Environment configurations are loaded from `RUN_PROFILES` in `etc/environments.j
   5. Conflicting handles, corrupt/missing evidence, unconfirmed cancellation, or missing terminal accounting yields `INDETERMINATE`.
   6. Stale active observations cannot regress terminal facts.
 
-### Signal Coordination & Bounded Cancellation
+### Signal Coordination & Interruption-First Durability
 
 - SIGINT latches and exits with status code `130`.
 - SIGTERM latches and exits with status code `143`.
-- Upon receiving a signal, new submissions are prevented, an interruption event is appended to the control stream, the active job is cancelled via `scancel` / `qdel`, and cancellation is confirmed via bounded polling (poll interval: 8s, grace period: 120s).
+- **Interruption-First Durability**: Upon receiving a signal, new submissions are immediately blocked, an interruption event is durably appended to the control stream before any cancellation command, the active job is cancelled via `scancel` / `qdel`, and cancellation is confirmed via bounded polling (poll interval: 8s, grace period: 120s).
 
 ### Printed Identifiers and Paths
 
-At startup, `lsmiotool run` prints:
-- `Run ID`: Unique run identifier (e.g. `run-20260821-120000-abcdef123456`)
-- `Correlation Token`: Point token (e.g. `lm-abcdef0123456789abcdef01`)
-- `Run Root`: Absolute path to the isolated run root directory
-At completion, prints final reconciled state (`SUCCEEDED`, `FAILED`, `INTERRUPTED`, `CANCELLED`, `INDETERMINATE`) and exit code.
+At startup and completion, `lsmiotool run` prints standardized identity lines to stdout:
+- `Run ID: <run-id>`: Unique run identifier (e.g. `Run ID: run-20260821-120000-abcdef123456`)
+- `Run Root: <path>`: Absolute path to the isolated run root directory
+- `Point <point-id> Correlation Token: <token>`: Point token (e.g. `Point 00-tasks-1 Correlation Token: lm-abcdef0123456789abcdef01`)
+- `Point <point-id> Job ID: <exact-id>`: Exact scheduler job handle (e.g. `Point 00-tasks-1 Job ID: 12345` or `Point 00-tasks-1 Job ID: 123456.isambard-pbs`)
+- `Final State: <STATE>`: Final reconciled state (`SUCCEEDED`, `FAILED`, `INTERRUPTED`, `CANCELLED`, `INDETERMINATE`)
+- `Exit Code: <n>`: Exit code (`0`, `1`, `130`, `143`)
+
+Pre-plan validation errors print concise diagnostic messages to stderr only, without emitting fake identity lines on stdout.
 
 ### Installed Layout vs Source Layout
 
-The runtime paths are explicitly constructed without cross-fallback:
+The runtime paths are explicitly constructed without cross-fallback or directory searching:
 - **Installed Layout**:
   - Public CLI: `<prefix>/bin/lsmiotool`
   - Private Worker: `<prefix>/libexec/lsmio/lsmiotool-worker`
-  - Python Package, Profiles & VERSION: `<prefix>/share/lsmio/python/`
+  - Python Package: `<prefix>/share/lsmio/python/`
+  - Profiles: `<prefix>/share/lsmio/etc/environments.json`
+  - Version: `<prefix>/share/lsmio/VERSION`
   - LAMMPS ReaxFF Assets: `<prefix>/share/lsmio/lmp-reaxff/`
 - **Source Layout**:
   - Public CLI: `tools/lsmiotool/lsmiotool`
   - Private Worker: `tools/lsmiotool/lsmiotool-worker`
-  - Assets: `tools/bmtool/lmp-reaxff/`
+  - Python Package: `tools/lsmiotool/`
   - Profiles: `tools/lsmiotool/etc/environments.json`
-  - Version: `tools/lsmiotool/VERSION`
+  - Version: `VERSION`
+  - Assets: `tools/bmtool/lmp-reaxff/`
 
 ### Parse Command Boundary & Limitations
 
 - `lsmiotool parse` operates on legacy outputs and does not perform automatic run-root discovery or date/benchmark guessing.
-- Internal `RunRootResolver` requires an explicit path to a reconciled `manifest.json` and succeeded evidence.
+- Internal `RunRootResolver` requires an explicit path to a directory containing a reconciled `manifest.json` and succeeded evidence.
 - Legacy `parse` functionality remains backward-compatible and unchanged.
-
-### Atomic `lmp large` Gate
-
-- `lmp large` is unsupported and is rejected immediately before run ID generation, correlation token creation, capability probing, artifact directory creation, filesystem mutation, or scheduler interaction.
 
 ### Migration Incompatibilities from Legacy `bmtool`
 
@@ -296,11 +365,11 @@ The runtime paths are explicitly constructed without cross-fallback:
 | Invocation via `tools/bmtool/bmtool run` | Invocation via `lsmiotool run <benchmark> <scale>` |
 | Shared mutable paths (`$HOME/scratch/benchmark/data/*`) | Isolated private run roots (`<root>/runs/<run-id>`) |
 | Uncoordinated `dirs-cleanup.sh` wiping data | Isolated per-combination data directories (`data/c<stripe>/b<block>`) |
-| Same-day run directory collisions and overwrites | Unique immutable run IDs with collision-proof directory creation |
+| Same-day run directory collisions and overwrites | Unique immutable run IDs with collision-proof directory creation (`allocateRun`) |
 | Whole-user queue polling (`squeue -u $USER` / `qstat -u $USER`) | Exact job ID tracking with correlation tokens (`lm-...`) |
 | Status masking and hidden benchmark failures | Failure-preserving process runner and deterministic state reconciliation |
-| Benchmark setups edited via shell variables | Explicit `--setup <name>` option |
-| Unchecked CLI arguments silently ignored | Strict argument parsing; `--setup=val` and unknown options rejected |
+| Benchmark setups edited via shell variables | Explicit `--setup <name>` option (`--setup=value` rejected) |
+| Unchecked CLI arguments silently ignored | Strict argument parsing; unknown options and misplaced arguments rejected |
 
 ## Using LSMIO in a Project
 

@@ -45,7 +45,12 @@ from lsmiotool.lib.cli import (
     WorkerExecutableValidator,
 )
 from lsmiotool.lib.main import RunMain
-from lsmiotool.lib.resources import ResourceLocator
+from lsmiotool.lib.resources import (
+    ExecutionMode,
+    InstallRelativeLayout,
+    ResourceLocator,
+    RuntimeLayout,
+)
 from lsmiotool.lib.run import (
     PreflightError,
     RunOrchestrator,
@@ -460,3 +465,183 @@ class WorkerEntryTest(unittest.TestCase):
                     self.assertEqual(ctx.exception.code, 0)
                     mock_subproc.assert_not_called()
                     mock_popen.assert_not_called()
+
+    def testInstalledAllocationKeepsRuntimeAndArtifactLayoutsSeparate(self) -> None:
+        """Asserts installed worker passes RuntimeLayout.asset_root only as resource input and no resource layout as f_layout (F-02)."""
+        f_stage_dir = os.path.join(self.m_temp_dir, "stage")
+        f_pkg_dir = os.path.join(f_stage_dir, "share", "lsmio", "python", "lsmiotool")
+        f_lib_dir = os.path.join(f_pkg_dir, "lib")
+        os.makedirs(f_lib_dir, exist_ok=True)
+
+        # Copy actual lsmiotool python files to satisfy InstalledPackageValidator
+        f_src_tool_dir = Path(__file__).resolve().parents[2]
+        shutil.copyfile(str(f_src_tool_dir / "__init__.py"), os.path.join(f_pkg_dir, "__init__.py"))
+        for f_file in (f_src_tool_dir / "lib").glob("*.py"):
+            shutil.copyfile(str(f_file), os.path.join(f_lib_dir, f_file.name))
+
+        # Create VERSION file
+        with open(os.path.join(f_pkg_dir, "VERSION"), "w", encoding="utf-8") as f_f:
+            f_f.write("0.2.0\n")
+
+        # Create etc directory with environments.json
+        f_etc_dir = os.path.join(f_stage_dir, "share", "lsmio", "etc")
+        os.makedirs(f_etc_dir, exist_ok=True)
+        shutil.copyfile(str(f_src_tool_dir / "etc" / "environments.json"), os.path.join(f_etc_dir, "environments.json"))
+
+        # Create lmp-reaxff assets directory
+        f_assets_dir = os.path.join(f_stage_dir, "share", "lsmio", "lmp-reaxff")
+        os.makedirs(f_assets_dir, exist_ok=True)
+        for f_asset in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
+            with open(os.path.join(f_assets_dir, f_asset), "w", encoding="utf-8") as f_f:
+                f_f.write(f"# asset {f_asset}\n")
+
+        # Create staged worker binary from template
+        f_libexec_dir = os.path.join(f_stage_dir, "libexec", "lsmio")
+        os.makedirs(f_libexec_dir, exist_ok=True)
+        f_inst_worker = os.path.join(f_libexec_dir, "lsmiotool-worker")
+
+        f_tmpl_path = str(f_src_tool_dir / "lsmiotool-worker-installed.in")
+        with open(f_tmpl_path, "r", encoding="utf-8") as f_f:
+            f_tmpl = f_f.read()
+
+        f_configured_worker = (
+            f_tmpl
+            .replace("@REL_LIBEXEC_TO_PYTHON@", "../../share/lsmio/python")
+            .replace("@REL_LIBEXEC_TO_PROFILE@", "../../share/lsmio/etc/environments.json")
+            .replace("@REL_LIBEXEC_TO_ETC@", "../../share/lsmio/etc")
+            .replace("@REL_LIBEXEC_TO_ASSETS@", "../../share/lsmio/lmp-reaxff")
+            .replace("@REL_LIBEXEC_TO_WORKER@", "lsmiotool-worker")
+            .replace("@REL_LIBEXEC_TO_VERSION@", "../../share/lsmio/python/lsmiotool/VERSION")
+        )
+        with open(f_inst_worker, "w", encoding="utf-8") as f_f:
+            f_f.write(f_configured_worker)
+        os.chmod(f_inst_worker, 0o755)
+
+        # 1. Assert runtime layout properties
+        f_rel_layout = InstallRelativeLayout(
+            f_package_root="../../share/lsmio/python",
+            f_profile_file="../../share/lsmio/etc/environments.json",
+            f_asset_root="../../share/lsmio/lmp-reaxff",
+            f_worker_executable="lsmiotool-worker",
+            f_version_file="../../share/lsmio/python/lsmiotool/VERSION",
+        )
+        f_runtime_layout = ResourceLocator.forInstalled(f_inst_worker, f_rel_layout)
+        self.assertTrue(f_runtime_layout.is_installed)
+        self.assertEqual(f_runtime_layout.execution_mode, ExecutionMode.INSTALLED)
+        self.assertEqual(f_runtime_layout.asset_root, os.path.normpath(f_assets_dir))
+        self.assertEqual(f_runtime_layout.worker_executable, os.path.normpath(f_inst_worker))
+        self.assertFalse(hasattr(f_runtime_layout, "runRoot"))
+        self.assertFalse(hasattr(f_runtime_layout, "benchmarkRoot"))
+
+        # 2. Run allocation mode with mock AllocationController and verify kwargs
+        f_captured_alloc_kwargs = []
+
+        class MockAllocationController:
+            def __init__(self, *f_args, **f_kwargs):
+                f_captured_alloc_kwargs.append(f_kwargs)
+
+            def run(self, *f_args, **f_kwargs):
+                return 0
+
+        with patch("lsmiotool.lib.worker.AllocationController", MockAllocationController):
+            with patch.object(
+                sys,
+                "argv",
+                [f_inst_worker, "allocation", "/path/to/manifest.json", "00-tasks-1"],
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_inst_worker, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertEqual(len(f_captured_alloc_kwargs), 1)
+                f_kw = f_captured_alloc_kwargs[0]
+                self.assertEqual(f_kw.get("f_worker_executable"), os.path.abspath(f_inst_worker))
+                self.assertEqual(f_kw.get("f_asset_source"), os.path.normpath(f_assets_dir))
+                self.assertIsNone(
+                    f_kw.get("f_layout"),
+                    "AllocationController must receive f_layout=None from installed worker (F-02)",
+                )
+
+        # 3. Run rank mode with mock RankWorker and verify initialization
+        f_captured_rank_instances = []
+
+        class MockRankWorker:
+            def __init__(self, *f_args, **f_kwargs):
+                f_captured_rank_instances.append((f_args, f_kwargs))
+
+            def run(self, *f_args, **f_kwargs):
+                return 0
+
+        with patch("lsmiotool.lib.worker.RankWorker", MockRankWorker):
+            with patch.object(
+                sys,
+                "argv",
+                [f_inst_worker, "rank", "/path/to/manifest.json", "00-tasks-1", "c16_b8M"],
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_inst_worker, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertEqual(len(f_captured_rank_instances), 1)
+                f_r_args, f_r_kwargs = f_captured_rank_instances[0]
+                self.assertEqual(len(f_r_args), 0)
+                self.assertEqual(len(f_r_kwargs), 0)
+
+        # 4. Prove no duck-typing / cross-fallback between RuntimeLayout and ArtifactLayout
+        from lsmiotool.lib.artifacts import ArtifactLayout
+        with self.assertRaises(AttributeError):
+            _ = f_runtime_layout.runRoot  # type: ignore
+        with self.assertRaises(AttributeError):
+            _ = f_runtime_layout.benchmarkRoot  # type: ignore
+
+        f_bench_root = os.path.join(self.m_temp_dir, "benchmarks")
+        f_art_layout = ArtifactLayout(f_bench_root, "test-run-123")
+        self.assertFalse(hasattr(f_art_layout, "asset_root"))
+        self.assertFalse(hasattr(f_art_layout, "package_root"))
+        self.assertFalse(hasattr(f_art_layout, "profile_file"))
+        self.assertFalse(hasattr(f_art_layout, "worker_executable"))
+
+    def testRealSourceWorkerSubprocessFromUnrelatedCwdHomeWithDecoys(self) -> None:
+        """Chunk 020: Invokes the real source lsmiotool-worker script as a subprocess from an unrelated CWD/HOME with decoys, verifying arity and failure handling."""
+        f_worker_str = str(self.m_worker_executable)
+        f_unrelated_cwd = os.path.join(self.m_temp_dir, "real_worker_cwd")
+        f_unrelated_home = os.path.join(self.m_temp_dir, "real_worker_home")
+        os.makedirs(f_unrelated_cwd, exist_ok=True)
+        os.makedirs(f_unrelated_home, exist_ok=True)
+
+        # Plant decoy files
+        for f_dir in (f_unrelated_cwd, f_unrelated_home):
+            with open(os.path.join(f_dir, "manifest.json"), "w", encoding="utf-8") as f_f:
+                f_f.write("decoy\n")
+
+        f_env = dict(os.environ)
+        f_env["HOME"] = f_unrelated_home
+
+        # 1. Zero arguments -> exit 1
+        f_p1 = subprocess.run([sys.executable, f_worker_str], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        self.assertEqual(f_p1.returncode, 1)
+
+        # 2. Allocation with insufficient arguments -> exit 2
+        f_p2 = subprocess.run([sys.executable, f_worker_str, "allocation"], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        self.assertEqual(f_p2.returncode, 2)
+
+        # 3. Rank with insufficient arguments -> exit 2
+        f_p3 = subprocess.run([sys.executable, f_worker_str, "rank"], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        self.assertEqual(f_p3.returncode, 2)
+
+        # 4. Unknown mode -> exit 1
+        f_p4 = subprocess.run([sys.executable, f_worker_str, "invalid_mode"], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        self.assertEqual(f_p4.returncode, 1)
+
+        # 5. Non-existent manifest -> exit 1
+        f_p5 = subprocess.run(
+            [sys.executable, f_worker_str, "allocation", "/nonexistent/manifest.json", "00-tasks-1"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_p5.returncode, 1)
+
+        # Assert no mutations occurred in decoy cwd/home
+        self.assertEqual(os.listdir(f_unrelated_cwd), ["manifest.json"])
+        self.assertEqual(os.listdir(f_unrelated_home), ["manifest.json"])
+

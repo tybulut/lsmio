@@ -37,6 +37,7 @@ does not match test discovery patterns ('test*.py', '*Test.py', 'Test*.py').
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -68,7 +69,7 @@ class InstalledSmoke(unittest.TestCase):
     def testOnlyStagedPathsLoaded(self) -> None:
         """Verify that importing lsmiotool loads exclusively from the staged installation layout."""
         f_staged_python = os.path.normpath(os.path.join(self.m_stage_dir, "share", "lsmio", "python"))
-        
+
         # Test in a separate subprocess with clean environment
         f_script = (
             "import sys\n"
@@ -224,7 +225,7 @@ class InstalledSmoke(unittest.TestCase):
         f_asset_root = os.path.join(self.m_stage_dir, "share", "lsmio", "lmp-reaxff")
         f_adapter = LmpAdapter()
         f_hashes = f_adapter.validateAssets(f_asset_root)
-        self.assertEqual(set(f_hashes.keys()), {"in.reaxff.hns", "data.hns", "ffield.reax.hns"})
+        self.assertEqual(set(f_hashes.keys()), {"in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"})
         for f_name, f_hash in f_hashes.items():
             self.assertEqual(len(f_hash), 64, f"Hash for {f_name} is not 64 hex characters: {f_hash}")
 
@@ -232,7 +233,7 @@ class InstalledSmoke(unittest.TestCase):
         f_test_staging = os.path.join(self.m_work_dir, "test_lmp_staging")
         f_staged_hashes = f_adapter.stageAssets(f_asset_root, f_test_staging)
         self.assertEqual(f_staged_hashes, f_hashes)
-        for f_name in ("in.reaxff.hns", "data.hns", "ffield.reax.hns"):
+        for f_name in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
             f_dest_file = os.path.join(f_test_staging, f_name)
             self.assertTrue(os.path.isfile(f_dest_file), f"Staged file missing: {f_dest_file}")
 
@@ -254,11 +255,12 @@ class InstalledSmoke(unittest.TestCase):
             shutil.copytree(self.m_stage_dir, f_copy_stage, symlinks=False)
 
             # Plant decoy files in CWD and fake HOME
-            f_decoy_cwd_file = os.path.join(self.m_work_dir, "in.reaxff.hns")
+            f_decoy_cwd_file = os.path.join(self.m_work_dir, "in.reaxc.hns")
             with open(f_decoy_cwd_file, "w", encoding="utf-8") as f_f:
                 f_f.write("# decoy lmp asset in cwd\n")
 
-            f_home_dir = os.environ.get("HOME", self.m_work_dir)
+            f_home_dir = os.path.join(f_temp_dir, "fake_home")
+            os.makedirs(f_home_dir, exist_ok=True)
             f_decoy_home_file = os.path.join(f_home_dir, "VERSION")
             with open(f_decoy_home_file, "w", encoding="utf-8") as f_f:
                 f_f.write("0.2.0\n")
@@ -307,7 +309,7 @@ class InstalledSmoke(unittest.TestCase):
             # Case C: Missing asset in copied stage -> validateAssets must fail
             f_copy_c = os.path.join(f_temp_dir, "stage_c")
             shutil.copytree(self.m_stage_dir, f_copy_c, symlinks=False)
-            f_asset_c = os.path.join(f_copy_c, "share", "lsmio", "lmp-reaxff", "in.reaxff.hns")
+            f_asset_c = os.path.join(f_copy_c, "share", "lsmio", "lmp-reaxff", "in.reaxc.hns")
             os.remove(f_asset_c)
             with self.assertRaises(BenchmarkConfigurationError):
                 LmpAdapter().validateAssets(os.path.join(f_copy_c, "share", "lsmio", "lmp-reaxff"))
@@ -334,7 +336,7 @@ class InstalledSmoke(unittest.TestCase):
     def testLmpLargeRejectsBeforeResource(self) -> None:
         """Verify that 'lsmiotool run lmp large' is strictly rejected before any resource access."""
         f_public_bin = os.path.join(self.m_stage_dir, "bin", "lsmiotool")
-        
+
         # Snapshot directory contents before execution
         f_before_contents = set(os.listdir(self.m_work_dir))
 
@@ -354,6 +356,228 @@ class InstalledSmoke(unittest.TestCase):
             f_after_contents,
             f"Execution created unexpected files/directories in work dir: {f_after_contents - f_before_contents}",
         )
+
+    def testValidAllocationInvokesRealControllerFromUnrelatedCwd(self) -> None:
+        """Verify staged worker allocation invokes real controller from unrelated CWD, generating six controller results (F-02)."""
+        from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore
+        from lsmiotool.lib.run import RunPlanner, RunRequest
+        from lsmiotool.lib.site import EnvironmentResolver
+
+        f_test_dir = os.path.join(self.m_work_dir, "test_valid_alloc")
+        shutil.rmtree(f_test_dir, ignore_errors=True)
+        os.makedirs(f_test_dir, exist_ok=True)
+
+        # 1. Create real executable fixtures for ior and lfs
+        f_bin_dir = os.path.join(f_test_dir, "src", "usr", "bin")
+        os.makedirs(f_bin_dir, exist_ok=True)
+
+        # lfs fixture
+        f_lfs_fixture = os.path.join(f_bin_dir, "lfs")
+        with open(f_lfs_fixture, "w", encoding="utf-8") as f_f:
+            f_f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(f_lfs_fixture, 0o755)
+
+        # ior fixture
+        f_ior_fixture = os.path.join(f_bin_dir, "ior")
+        with open(f_ior_fixture, "w", encoding="utf-8") as f_f:
+            f_f.write(
+                "#!/usr/bin/env python3\n"
+                "import sys, os\n"
+                "args = sys.argv[1:]\n"
+                "for i, arg in enumerate(args):\n"
+                "    if arg == '-o' and i + 1 < len(args):\n"
+                "        out_path = args[i + 1]\n"
+                "        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)\n"
+                "        with open(out_path, 'w', encoding='utf-8') as out_f:\n"
+                "            out_f.write('mock ior output\\n')\n"
+                "sys.exit(0)\n"
+            )
+        os.chmod(f_ior_fixture, 0o755)
+
+        # 2. Build DEV profile with custom benchmark root and resolved ior fixture
+        f_profile_file = os.path.join(self.m_stage_dir, "share", "lsmio", "etc", "environments.json")
+        f_dev_profile = EnvironmentResolver.resolveProfile(
+            "DEV",
+            f_user="smoketest",
+            f_home=f_test_dir,
+            f_env_file=f_profile_file,
+        )
+        f_bench_root = f_dev_profile.getBenchmarkRoot("hdd")
+        os.makedirs(f_bench_root, exist_ok=True)
+
+        # 3. Create valid RunPlan and allocate run root
+        f_run_id = "smoke-ior-alloc-001"
+        f_req = RunRequest(f_target="ior", f_scale="local", f_ssd=False, f_setup="BASE")
+        f_plan = RunPlanner.createPlan(
+            f_request=f_req,
+            f_profile=f_dev_profile,
+            f_run_id_source=lambda: f_run_id,
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+
+        f_layout = ArtifactLayout(f_bench_root, f_run_id)
+        f_store = ArtifactStore(f_layout)
+        f_store.allocateRun(f_plan)
+        f_manifest_path = f_layout.manifestPath
+        f_run_root = f_layout.runRoot
+
+        # 4. Prepare unrelated CWD and unrelated HOME
+        f_unrelated_cwd = os.path.join(f_test_dir, "unrelated_cwd")
+        f_unrelated_home = os.path.join(f_test_dir, "unrelated_home")
+        os.makedirs(f_unrelated_cwd, exist_ok=True)
+        os.makedirs(f_unrelated_home, exist_ok=True)
+
+        f_worker_bin = os.path.join(self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker")
+
+        f_env = os.environ.copy()
+        f_env["HOME"] = f_unrelated_home
+        f_env["PATH"] = f"{f_bin_dir}:{f_env.get('PATH', '')}"
+        f_env.pop("PYTHONPATH", None)
+
+        # 5. Invoke staged private worker subprocess in allocation mode
+        f_proc = subprocess.run(
+            [f_worker_bin, "allocation", f_manifest_path, "00-tasks-1"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            f_proc.returncode,
+            0,
+            f"Staged worker subprocess failed with returncode {f_proc.returncode}:\nstdout: {f_proc.stdout}\nstderr: {f_proc.stderr}",
+        )
+
+        # 6. Verify exact six-result artifact tree
+        f_expected_combos = ["c16_b8M", "c16_b1M", "c16_b64K", "c4_b8M", "c4_b1M", "c4_b64K"]
+        for f_combo in f_expected_combos:
+            f_res_path = os.path.join(
+                f_run_root, "points", "00-tasks-1", "combinations", f_combo, "controller-result.json"
+            )
+            self.assertTrue(
+                os.path.isfile(f_res_path),
+                f"Missing expected controller result for combination {f_combo} at {f_res_path}",
+            )
+            with open(f_res_path, "r", encoding="utf-8") as f_f:
+                f_data = json.load(f_f)
+            f_payload = f_data.get("payload", {})
+            self.assertEqual(f_payload.get("status"), "success")
+            self.assertEqual(f_payload.get("exit_code"), 0)
+            self.assertEqual(f_payload.get("stage"), "execution")
+
+        # 7. Prove all mutations are strictly contained under runRoot
+        self.assertEqual(
+            os.listdir(f_unrelated_cwd),
+            [],
+            f"Unrelated CWD was mutated: {os.listdir(f_unrelated_cwd)}",
+        )
+        self.assertEqual(
+            os.listdir(f_unrelated_home),
+            [],
+            f"Unrelated HOME was mutated: {os.listdir(f_unrelated_home)}",
+        )
+
+        # 8. Cover mismatched manifest/root
+        f_proc_bad_pt = subprocess.run(
+            [f_worker_bin, "allocation", f_manifest_path, "99-tasks-99"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(f_proc_bad_pt.returncode, 0)
+        self.assertIn("does not match any scale point", f_proc_bad_pt.stderr)
+
+        # 9. Cover symlinked manifest rejection
+        f_symlink_manifest = os.path.join(f_test_dir, "symlink_manifest.json")
+        os.symlink(f_manifest_path, f_symlink_manifest)
+        f_proc_sym = subprocess.run(
+            [f_worker_bin, "allocation", f_symlink_manifest, "00-tasks-1"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(f_proc_sym.returncode, 0)
+        self.assertIn("symlink", f_proc_sym.stderr.lower())
+
+        # 10. Cover invalid arity
+        for f_bad_args, f_expected_ret in (
+            ([f_worker_bin, "allocation"], 2),
+            ([f_worker_bin, "allocation", f_manifest_path], 2),
+            ([f_worker_bin, "allocation", f_manifest_path, "00-tasks-1", "extra"], 2),
+            ([f_worker_bin, "rank"], 2),
+            ([f_worker_bin, "rank", f_manifest_path], 2),
+            ([f_worker_bin, "rank", f_manifest_path, "00-tasks-1"], 2),
+            ([f_worker_bin, "rank", f_manifest_path, "00-tasks-1", "c16_b8M", "extra"], 2),
+            ([f_worker_bin, "unknown_mode"], 1),
+        ):
+            f_proc_arity = subprocess.run(
+                f_bad_args,
+                cwd=f_unrelated_cwd,
+                env=f_env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                f_proc_arity.returncode,
+                f_expected_ret,
+                f"Unexpected returncode for {f_bad_args}: got {f_proc_arity.returncode}, expected {f_expected_ret}",
+            )
+
+    def testStagedPublicExecutableFromUnrelatedCwdHomeWithProductionProfile(self) -> None:
+        """Chunk 020: Invokes the staged lsmiotool executable from an unrelated CWD/HOME with decoys and credentials, asserting preflight failure without F-01 errors."""
+        f_public_bin = os.path.join(self.m_stage_dir, "bin", "lsmiotool")
+        f_unrelated_cwd = os.path.join(self.m_work_dir, "unrelated_staged_exec_cwd")
+        f_unrelated_home = os.path.join(self.m_work_dir, "unrelated_staged_exec_home")
+        os.makedirs(f_unrelated_cwd, exist_ok=True)
+        os.makedirs(f_unrelated_home, exist_ok=True)
+
+        # Plant decoy files
+        for f_dir in (f_unrelated_cwd, f_unrelated_home):
+            with open(os.path.join(f_dir, "VERSION"), "w", encoding="utf-8") as f_f:
+                f_f.write("decoy-version\n")
+            with open(os.path.join(f_dir, "in.reaxc.hns"), "w", encoding="utf-8") as f_f:
+                f_f.write("# decoy\n")
+            with open(os.path.join(f_dir, "lsmiotool-worker"), "w", encoding="utf-8") as f_f:
+                f_f.write("#!/bin/sh\nexit 99\n")
+            os.chmod(os.path.join(f_dir, "lsmiotool-worker"), 0o755)
+
+        f_env = dict(os.environ)
+        f_env["HOME"] = f_unrelated_home
+        f_env["LSMIO_ENV"] = "VIKING"
+        f_env["SB_ACCOUNT"] = "smoke_acct"
+        f_env["SB_EMAIL"] = "smoke@example.com"
+        f_env.pop("PYTHONPATH", None)
+
+        # 1. Run IOR local
+        f_proc = subprocess.run(
+            [f_public_bin, "run", "ior", "local", "--setup", "BASE"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_proc.returncode, 1)
+        self.assertIn("Error: Benchmark executable does not exist", f_proc.stderr)
+        self.assertNotIn("TypeError", f_proc.stderr)
+        self.assertNotIn("unexpected keyword argument", f_proc.stderr)
+        self.assertNotIn("Run ID:", f_proc.stdout)
+        self.assertNotIn("Final State:", f_proc.stdout)
+
+        # 2. Run LMP large
+        f_proc_lmp = subprocess.run(
+            [f_public_bin, "run", "lmp", "large"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_proc_lmp.returncode, 1)
+        self.assertIn("LMP large scale is unsupported", f_proc_lmp.stderr)
+        self.assertNotIn("Run ID:", f_proc_lmp.stdout)
+
 
 
 def main(f_argv: Optional[Sequence[str]] = None) -> int:

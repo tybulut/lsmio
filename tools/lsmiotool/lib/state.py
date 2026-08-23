@@ -43,6 +43,7 @@ from lsmiotool.lib.evidence import (
     EvidenceSequenceError,
     EvidenceStore,
     JobHandle,
+    ResultPayloadValidator,
     WriterKind,
 )
 from lsmiotool.lib.run import (
@@ -549,6 +550,10 @@ class StateReconciler:
                     f_control_corrupt = True
                     f_run_diagnostics.append(f"Control stream error for writer '{f_writer}': {f_err}")
 
+        # Deterministic sorting across all writers
+        f_whole_run_succeeded_events.sort(key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number))
+        f_interrupted_events.sort(key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number))
+
         # Determine Temporal Precedence between WHOLE_RUN_SUCCEEDED and INTERRUPTED (Rule 1 & 4)
         f_has_interruption = len(f_interrupted_events) > 0
         f_has_success_marker = len(f_whole_run_succeeded_events) > 0
@@ -639,8 +644,15 @@ class StateReconciler:
                         f_corrupt_evidence = True
                         f_point_diagnostics.append(f"Observation read error for writer '{f_obs_w}': {f_err}")
 
-            # Check handle consistency across disk observations
+            # Sort disk observations deterministically
+            f_disk_observations.sort(key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number))
+
+            # Check handle consistency and payload validity across disk observations
             for f_obs in f_disk_observations:
+                if not isinstance(f_obs.payload, dict):
+                    f_corrupt_evidence = True
+                    f_point_diagnostics.append(f"Corrupt observation payload: {f_obs.payload!r}")
+                    continue
                 f_obs_h = f_obs.payload.get("handle")
                 if isinstance(f_obs_h, dict) and f_handle is not None:
                     try:
@@ -676,14 +688,6 @@ class StateReconciler:
                 except Exception:
                     f_corrupt_evidence = True
 
-            # Resolve SchedulerJobState (Enforcing Rule 6: Terminal Non-Regression)
-            f_sched_state = StateReconciler._resolveSchedulerState(
-                f_disk_observations=f_disk_observations,
-                f_fresh_observation=f_fresh_obs,
-                f_submission_dispatched=(f_sub_disp is not None),
-                f_submission_recorded=(f_sub_rec is not None),
-            )
-
             # c) Read Controller events and results
             f_worker_events: List[EvidenceRecord] = []
             try:
@@ -712,14 +716,35 @@ class StateReconciler:
                 if f_ctrl_res is None:
                     f_combinations_missing.append(f_combo_name)
                 else:
-                    f_is_fail = StateReconciler._isResultFailure(f_ctrl_res.payload)
-                    if f_is_fail:
+                    f_target_str = (
+                        f_plan.request.target
+                        if hasattr(f_plan, "request") and hasattr(f_plan.request, "target")
+                        else getattr(f_plan, "target", None)
+                    )
+                    f_is_succ = ResultPayloadValidator.isSuccessPayload(
+                        f_ctrl_res.payload,
+                        EvidenceKind.CONTROLLER_RESULT,
+                        f_target=f_target_str,
+                        f_expected_tasks=(f_scale_point.tasks if f_is_lsmio else None),
+                        f_expected_combination=f_combo_name,
+                    )
+                    f_is_fail = ResultPayloadValidator.isFailurePayload(
+                        f_ctrl_res.payload,
+                        EvidenceKind.CONTROLLER_RESULT,
+                        f_expected_combination=f_combo_name,
+                    )
+                    if f_is_succ:
+                        f_combinations_completed.append(f_combo_name)
+                    elif f_is_fail:
                         f_combinations_failed.append(f_combo_name)
                         f_controller_failure = True
                         if f_failure_timestamp is None or f_ctrl_res.created_at_utc < f_failure_timestamp:
                             f_failure_timestamp = f_ctrl_res.created_at_utc
                     else:
-                        f_combinations_completed.append(f_combo_name)
+                        f_corrupt_evidence = True
+                        f_point_diagnostics.append(
+                            f"Corrupt or invalid controller result payload for {f_combo_name}: {f_ctrl_res.payload!r}"
+                        )
 
             # d) Read LSMIO Task Rank Results (if applicable)
             f_rank_failure = False
@@ -741,11 +766,57 @@ class StateReconciler:
                         if f_rank_res is None:
                             f_rank_missing = True
                         else:
-                            f_r_fail = StateReconciler._isResultFailure(f_rank_res.payload)
+                            f_r_succ = ResultPayloadValidator.isSuccessPayload(
+                                f_rank_res.payload,
+                                EvidenceKind.RANK_RESULT,
+                                f_expected_rank=f_rank_idx,
+                                f_expected_combination=f_combo.name,
+                            )
+                            f_r_fail = ResultPayloadValidator.isFailurePayload(
+                                f_rank_res.payload,
+                                EvidenceKind.RANK_RESULT,
+                                f_expected_rank=f_rank_idx,
+                                f_expected_combination=f_combo.name,
+                            )
                             if f_r_fail:
                                 f_rank_failure = True
                                 if f_failure_timestamp is None or f_rank_res.created_at_utc < f_failure_timestamp:
                                     f_failure_timestamp = f_rank_res.created_at_utc
+                            elif not f_r_succ:
+                                f_corrupt_evidence = True
+                                f_point_diagnostics.append(
+                                    f"Corrupt or invalid rank result payload for rank {f_rank_idx}, {f_combo.name}: {f_rank_res.payload!r}"
+                                )
+
+            # Check scheduler observation failures for failure timestamp
+            for f_obs in f_disk_observations:
+                f_p = f_obs.payload
+                if isinstance(f_p, dict):
+                    f_raw_st = f_p.get("state") or f_p.get("scheduler_state") or f_p.get("job_state")
+                    f_parsed_st = None
+                    if isinstance(f_raw_st, SchedulerJobState):
+                        f_parsed_st = f_raw_st
+                    elif isinstance(f_raw_st, str):
+                        try:
+                            f_parsed_st = SchedulerJobState(f_raw_st.strip().lower())
+                        except ValueError:
+                            pass
+                    if f_parsed_st in (SchedulerJobState.FAILED, SchedulerJobState.TIMEOUT):
+                        if f_failure_timestamp is None or f_obs.created_at_utc < f_failure_timestamp:
+                            f_failure_timestamp = f_obs.created_at_utc
+
+            # Resolve SchedulerJobState (Enforcing Reduction & Terminal Non-Regression)
+            f_sched_state = StateReconciler._resolveSchedulerState(
+                f_disk_observations=f_disk_observations,
+                f_fresh_observation=f_fresh_obs,
+                f_submission_dispatched=(f_sub_disp is not None),
+                f_submission_recorded=(f_sub_rec is not None),
+                f_point_diagnostics=f_point_diagnostics,
+                f_cancel_requested=(f_cancel_req is not None),
+                f_cancel_recorded=(f_cancel_rec is not None),
+                f_cancel_req_record=f_cancel_req,
+                f_failure_timestamp=f_failure_timestamp,
+            )
 
             # e) Derive PointRunState under the 6 Precedence Rules
             f_point_state = StateReconciler._derivePointState(
@@ -820,32 +891,7 @@ class StateReconciler:
     @staticmethod
     def _isResultFailure(f_payload: Mapping[str, Any]) -> bool:
         """Determines if a controller or rank result payload indicates failure."""
-        if not isinstance(f_payload, (dict, Mapping)):
-            return True
-
-        if "exit_code" in f_payload:
-            try:
-                if int(f_payload["exit_code"]) != 0:
-                    return True
-            except (ValueError, TypeError):
-                return True
-
-        if "exit_status" in f_payload:
-            try:
-                if int(f_payload["exit_status"]) != 0:
-                    return True
-            except (ValueError, TypeError):
-                return True
-
-        if "status" in f_payload:
-            f_st = str(f_payload["status"]).strip().lower()
-            if f_st in ("failed", "failure", "error", "interrupted", "cancelled", "timeout", "timed_out"):
-                return True
-
-        if "error" in f_payload and bool(f_payload["error"]):
-            return True
-
-        return False
+        return ResultPayloadValidator.isFailurePayload(f_payload)
 
     @staticmethod
     def _lookupSchedulerObservation(
@@ -910,43 +956,205 @@ class StateReconciler:
         f_fresh_observation: Optional[Dict[str, Any]],
         f_submission_dispatched: bool,
         f_submission_recorded: bool,
+        f_point_diagnostics: Optional[List[str]] = None,
+        f_cancel_requested: bool = False,
+        f_cancel_recorded: bool = False,
+        f_cancel_req_record: Optional[EvidenceRecord] = None,
+        f_failure_timestamp: Optional[str] = None,
     ) -> Optional[SchedulerJobState]:
-        """Resolves authoritative scheduler job state enforcing Rule 6 (Terminal Non-Regression)."""
-        f_disk_state: Optional[SchedulerJobState] = None
+        """Resolves authoritative scheduler job state by deterministically reducing observation history + fresh observation."""
+        f_all_states: List[SchedulerJobState] = []
 
-        # Parse disk observations (in monotonic order)
+        # Parse disk observations
         for f_obs in f_disk_observations:
             f_p = f_obs.payload
+            if not isinstance(f_p, dict):
+                f_all_states.append(SchedulerJobState.UNKNOWN)
+                continue
             f_raw_st = f_p.get("state") or f_p.get("scheduler_state") or f_p.get("job_state")
             if isinstance(f_raw_st, SchedulerJobState):
-                f_disk_state = f_raw_st
+                f_all_states.append(f_raw_st)
             elif isinstance(f_raw_st, str):
                 try:
-                    f_disk_state = SchedulerJobState(f_raw_st.strip().lower())
+                    f_all_states.append(SchedulerJobState(f_raw_st.strip().lower()))
                 except ValueError:
-                    f_disk_state = SchedulerJobState.UNKNOWN
+                    f_all_states.append(SchedulerJobState.UNKNOWN)
+            else:
+                f_all_states.append(SchedulerJobState.UNKNOWN)
 
-        f_fresh_state: Optional[SchedulerJobState] = None
+        # Parse fresh observation
         if f_fresh_observation and "state" in f_fresh_observation:
-            f_fresh_state = f_fresh_observation["state"]
+            f_raw_fresh = f_fresh_observation["state"]
+            if isinstance(f_raw_fresh, SchedulerJobState):
+                f_all_states.append(f_raw_fresh)
+            elif isinstance(f_raw_fresh, str):
+                try:
+                    f_all_states.append(SchedulerJobState(f_raw_fresh.strip().lower()))
+                except ValueError:
+                    f_all_states.append(SchedulerJobState.UNKNOWN)
+            else:
+                f_all_states.append(SchedulerJobState.UNKNOWN)
 
-        # Rule 6: Terminal Non-Regression
-        # If disk state has already established a terminal state, a stale active observation cannot regress it.
-        if f_disk_state and f_disk_state.isTerminal:
-            if f_fresh_state and f_fresh_state.isTerminal:
-                return f_fresh_state
-            return f_disk_state
+        # If no observations at all
+        if not f_all_states:
+            if f_submission_recorded or f_submission_dispatched:
+                return SchedulerJobState.QUEUED
+            return None
 
-        if f_fresh_state:
-            return f_fresh_state
+        # Separate terminal vs non-terminal
+        f_terminal_states = {f_st for f_st in f_all_states if f_st.isTerminal}
 
-        if f_disk_state:
-            return f_disk_state
+        # Case 1: No terminal observations
+        if not f_terminal_states:
+            if SchedulerJobState.UNKNOWN in f_all_states:
+                return SchedulerJobState.UNKNOWN
+            if SchedulerJobState.ACTIVE in f_all_states:
+                return SchedulerJobState.ACTIVE
+            if SchedulerJobState.QUEUED in f_all_states:
+                return SchedulerJobState.QUEUED
+            if f_submission_recorded or f_submission_dispatched:
+                return SchedulerJobState.QUEUED
+            return None
 
-        if f_submission_recorded or f_submission_dispatched:
-            return SchedulerJobState.QUEUED
+        # Case 2: Terminal observations exist (active/queued cannot regress established terminal facts)
+        if len(f_terminal_states) == 1:
+            return next(iter(f_terminal_states))
 
-        return None
+        # Case 3: Multiple distinct terminal states exist (evaluate precedence and conflict)
+        # 3a. SUCCEEDED vs FAILED (Rule 2: Specific failure outranks generic scheduler success)
+        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.FAILED}:
+            if f_point_diagnostics is not None:
+                f_point_diagnostics.append(
+                    "Resolved scheduler state FAILED (specific failure outranks generic scheduler success)"
+                )
+            return SchedulerJobState.FAILED
+
+        # 3b. SUCCEEDED vs TIMEOUT (Rule 2: Specific timeout outranks generic scheduler success)
+        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.TIMEOUT}:
+            if f_point_diagnostics is not None:
+                f_point_diagnostics.append(
+                    "Resolved scheduler state TIMEOUT (specific timeout outranks generic scheduler success)"
+                )
+            return SchedulerJobState.TIMEOUT
+
+        # 3c. SUCCEEDED vs CANCELLED
+        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.CANCELLED}:
+            if f_cancel_requested:
+                return SchedulerJobState.CANCELLED
+            else:
+                if f_point_diagnostics is not None:
+                    f_point_diagnostics.append(
+                        "Indeterminate: Conflicting terminal scheduler observations: succeeded vs cancelled without requested cancellation"
+                    )
+                return SchedulerJobState.UNKNOWN
+
+        # 3d. FAILED vs CANCELLED
+        if f_terminal_states == {SchedulerJobState.FAILED, SchedulerJobState.CANCELLED}:
+            if f_cancel_requested:
+                if f_failure_timestamp and f_cancel_req_record:
+                    if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
+                        return SchedulerJobState.FAILED
+                    else:
+                        return SchedulerJobState.CANCELLED
+                else:
+                    if f_point_diagnostics is not None:
+                        f_point_diagnostics.append(
+                            "Indeterminate: Ambiguous causal order between failure and cancellation"
+                        )
+                    return SchedulerJobState.UNKNOWN
+            else:
+                if f_point_diagnostics is not None:
+                    f_point_diagnostics.append(
+                        "Indeterminate: Conflicting terminal scheduler observations: failed vs cancelled without requested cancellation"
+                    )
+                return SchedulerJobState.UNKNOWN
+
+        # 3e. TIMEOUT vs CANCELLED
+        if f_terminal_states == {SchedulerJobState.TIMEOUT, SchedulerJobState.CANCELLED}:
+            if f_cancel_requested:
+                if f_failure_timestamp and f_cancel_req_record:
+                    if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
+                        return SchedulerJobState.TIMEOUT
+                    else:
+                        return SchedulerJobState.CANCELLED
+                else:
+                    if f_point_diagnostics is not None:
+                        f_point_diagnostics.append(
+                            "Indeterminate: Ambiguous causal order between timeout and cancellation"
+                        )
+                    return SchedulerJobState.UNKNOWN
+            else:
+                if f_point_diagnostics is not None:
+                    f_point_diagnostics.append(
+                        "Indeterminate: Conflicting terminal scheduler observations: timeout vs cancelled without requested cancellation"
+                    )
+                return SchedulerJobState.UNKNOWN
+
+        # 3f. FAILED vs TIMEOUT (Conflicting failure modes without causal precedence)
+        if f_terminal_states == {SchedulerJobState.FAILED, SchedulerJobState.TIMEOUT}:
+            if f_point_diagnostics is not None:
+                f_point_diagnostics.append(
+                    "Indeterminate: Conflicting terminal scheduler observations: failed vs timeout"
+                )
+            return SchedulerJobState.UNKNOWN
+
+        # 3g. Multi-way terminal state combinations:
+        # If both FAILED and TIMEOUT are in the set -> conflict between failure modes
+        if SchedulerJobState.FAILED in f_terminal_states and SchedulerJobState.TIMEOUT in f_terminal_states:
+            if f_point_diagnostics is not None:
+                f_point_diagnostics.append(
+                    "Indeterminate: Conflicting terminal scheduler observations: failed vs timeout"
+                )
+            return SchedulerJobState.UNKNOWN
+
+        # If SUCCEEDED + FAILED + CANCELLED:
+        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.FAILED, SchedulerJobState.CANCELLED}:
+            if f_cancel_requested:
+                if f_failure_timestamp and f_cancel_req_record:
+                    if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
+                        return SchedulerJobState.FAILED
+                    else:
+                        return SchedulerJobState.CANCELLED
+                else:
+                    if f_point_diagnostics is not None:
+                        f_point_diagnostics.append(
+                            "Indeterminate: Ambiguous causal order between failure and cancellation"
+                        )
+                    return SchedulerJobState.UNKNOWN
+            else:
+                if f_point_diagnostics is not None:
+                    f_point_diagnostics.append(
+                        "Indeterminate: Conflicting terminal scheduler observations without requested cancellation"
+                    )
+                return SchedulerJobState.UNKNOWN
+
+        # If SUCCEEDED + TIMEOUT + CANCELLED:
+        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.TIMEOUT, SchedulerJobState.CANCELLED}:
+            if f_cancel_requested:
+                if f_failure_timestamp and f_cancel_req_record:
+                    if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
+                        return SchedulerJobState.TIMEOUT
+                    else:
+                        return SchedulerJobState.CANCELLED
+                else:
+                    if f_point_diagnostics is not None:
+                        f_point_diagnostics.append(
+                            "Indeterminate: Ambiguous causal order between timeout and cancellation"
+                        )
+                    return SchedulerJobState.UNKNOWN
+            else:
+                if f_point_diagnostics is not None:
+                    f_point_diagnostics.append(
+                        "Indeterminate: Conflicting terminal scheduler observations without requested cancellation"
+                    )
+                return SchedulerJobState.UNKNOWN
+
+        # All other unresolvable terminal conflicts
+        if f_point_diagnostics is not None:
+            f_point_diagnostics.append(
+                f"Indeterminate: Conflicting terminal scheduler observations: {sorted(s.value for s in f_terminal_states)}"
+            )
+        return SchedulerJobState.UNKNOWN
 
     @staticmethod
     def _derivePointState(
@@ -1011,40 +1219,51 @@ class StateReconciler:
         # 4. Rule 3: Cancellation Causality
         if f_cancel_requested:
             # Check if independent failure occurred before cancel request
-            f_failure_before_cancel = False
             if f_has_specific_failure:
                 if f_failure_timestamp and f_cancel_req_record:
                     if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
-                        f_failure_before_cancel = True
+                        if f_sched_state == SchedulerJobState.TIMEOUT:
+                            return PointRunState.TIMED_OUT
+                        return PointRunState.FAILED
                     else:
-                        f_failure_before_cancel = False
+                        # Cancel request preceded failure -> cancel takes precedence if confirmed
+                        if f_cancel_recorded or f_sched_state == SchedulerJobState.CANCELLED:
+                            return PointRunState.CANCELLED
+                        elif f_sched_state and f_sched_state.isTerminal:
+                            return PointRunState.FAILED
+                        else:
+                            return PointRunState.RUNNING if f_sched_state == SchedulerJobState.ACTIVE else PointRunState.SUBMITTED
                 else:
-                    # If timestamps absent, specific failure retains precedence
-                    f_failure_before_cancel = True
-
-            if f_failure_before_cancel:
-                if f_sched_state == SchedulerJobState.TIMEOUT:
-                    return PointRunState.TIMED_OUT
-                return PointRunState.FAILED
+                    # Ambiguous causal order between failure and cancellation request
+                    f_point_diagnostics.append(
+                        "Indeterminate: Ambiguous causal order between failure and cancellation"
+                    )
+                    return PointRunState.INDETERMINATE
 
             if f_cancel_recorded or f_sched_state == SchedulerJobState.CANCELLED:
                 return PointRunState.CANCELLED
             elif f_sched_state and f_sched_state.isTerminal:
-                # Terminal but not cancelled -> evaluate failure or indeterminate
+                # Terminal but not cancelled when cancel was requested
                 if f_has_specific_failure:
                     return PointRunState.FAILED
+                f_point_diagnostics.append("Indeterminate: Terminal completion while cancellation was requested")
                 return PointRunState.INDETERMINATE
             else:
                 # Cancel requested, but still active/waiting confirmation
                 return PointRunState.RUNNING if f_sched_state == SchedulerJobState.ACTIVE else PointRunState.SUBMITTED
 
-        # 5. Rule 2: Failure Precedence without cancellation
+        # 5. Cancellation without cancel requested -> not approved cancellation -> INDETERMINATE
+        if f_sched_state == SchedulerJobState.CANCELLED and not f_cancel_requested:
+            f_point_diagnostics.append("Indeterminate: Scheduler job was cancelled without a requested cancellation record")
+            return PointRunState.INDETERMINATE
+
+        # 6. Rule 2: Failure Precedence without cancellation
         if f_has_specific_failure:
             if f_sched_state == SchedulerJobState.TIMEOUT:
                 return PointRunState.TIMED_OUT
             return PointRunState.FAILED
 
-        # 6. Rule 1: Point Success Invariant
+        # 7. Rule 1: Point Success Invariant
         if f_sched_state == SchedulerJobState.SUCCEEDED:
             f_all_combos = (
                 len(f_combinations_completed) == f_plan_combinations_count
@@ -1055,7 +1274,7 @@ class StateReconciler:
             if f_all_combos and f_all_ranks:
                 return PointRunState.SUCCEEDED
 
-        # 7. Active / Running / Submitted
+        # 8. Active / Running / Submitted
         if f_sched_state == SchedulerJobState.ACTIVE or f_has_worker_events or len(f_combinations_completed) > 0:
             return PointRunState.RUNNING
 

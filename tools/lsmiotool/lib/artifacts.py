@@ -390,7 +390,7 @@ class ArtifactLayout:
     ) -> str:
         return os.path.join(self.pointRanksDir(f_point, f_ordinal), str(f_global_rank))
 
-    def pointRankResultPath(
+    def pointRankCombinationDir(
         self,
         f_point: Union[ScalePoint, str, int],
         f_global_rank: Union[int, str],
@@ -400,6 +400,29 @@ class ArtifactLayout:
         return os.path.join(
             self.pointRankDir(f_point, f_global_rank, f_ordinal),
             self.combinationName(f_combination),
+        )
+
+    def pointRankClaimPath(
+        self,
+        f_point: Union[ScalePoint, str, int],
+        f_global_rank: Union[int, str],
+        f_combination: Union[Combination, str],
+        f_ordinal: Optional[int] = None,
+    ) -> str:
+        return os.path.join(
+            self.pointRankCombinationDir(f_point, f_global_rank, f_combination, f_ordinal),
+            "claim.lock",
+        )
+
+    def pointRankResultPath(
+        self,
+        f_point: Union[ScalePoint, str, int],
+        f_global_rank: Union[int, str],
+        f_combination: Union[Combination, str],
+        f_ordinal: Optional[int] = None,
+    ) -> str:
+        return os.path.join(
+            self.pointRankCombinationDir(f_point, f_global_rank, f_combination, f_ordinal),
             "result.json",
         )
 
@@ -409,6 +432,29 @@ class ArtifactLayout:
         f_ordinal: Optional[int] = None,
     ) -> str:
         return os.path.join(self.pointDir(f_point, f_ordinal), "logs")
+
+    def pointCombinationLogsDir(
+        self,
+        f_point: Union[ScalePoint, str, int],
+        f_combination: Union[Combination, str],
+        f_ordinal: Optional[int] = None,
+    ) -> str:
+        return os.path.join(
+            self.pointLogsDir(f_point, f_ordinal),
+            self.combinationName(f_combination),
+        )
+
+    def pointRankLogPath(
+        self,
+        f_point: Union[ScalePoint, str, int],
+        f_global_rank: Union[int, str],
+        f_combination: Union[Combination, str],
+        f_ordinal: Optional[int] = None,
+    ) -> str:
+        return os.path.join(
+            self.pointCombinationLogsDir(f_point, f_combination, f_ordinal),
+            f"rank_{f_global_rank}.log",
+        )
 
     def pointDataDir(
         self,
@@ -753,7 +799,7 @@ class ArtifactStore:
         for f_data_dir in self.m_layout.pointAllDataSubdirs(f_point, f_ordinal):
             os.makedirs(f_data_dir, exist_ok=True)
 
-        # 3. Combinations and combination work directories
+        # 3. Combinations and combination work and log directories
         if f_combinations:
             for f_combo in f_combinations:
                 os.makedirs(
@@ -762,6 +808,10 @@ class ArtifactStore:
                 )
                 os.makedirs(
                     self.m_layout.pointCombinationWorkDir(f_point, f_combo, f_ordinal),
+                    exist_ok=True,
+                )
+                os.makedirs(
+                    self.m_layout.pointCombinationLogsDir(f_point, f_combo, f_ordinal),
                     exist_ok=True,
                 )
         else:
@@ -773,6 +823,10 @@ class ArtifactStore:
                 )
                 os.makedirs(
                     self.m_layout.pointCombinationWorkDir(f_point, f_cname, f_ordinal),
+                    exist_ok=True,
+                )
+                os.makedirs(
+                    self.m_layout.pointCombinationLogsDir(f_point, f_cname, f_ordinal),
                     exist_ok=True,
                 )
 
@@ -839,14 +893,14 @@ class ArtifactStore:
                             f"Cannot clean point '{f_point_dir}': controller result exists at '{os.path.join(f_root, f_file)}'"
                         )
 
-        # Check ranks results
+        # Check ranks results and claims
         f_ranks_dir = os.path.join(f_point_dir, "ranks")
         if os.path.exists(f_ranks_dir):
             for f_root, _, f_files in os.walk(f_ranks_dir):
                 for f_file in f_files:
-                    if f_file == "result.json":
+                    if f_file in ("result.json", "claim.lock"):
                         raise CleanupForbiddenError(
-                            f"Cannot clean point '{f_point_dir}': rank result exists at '{os.path.join(f_root, f_file)}'"
+                            f"Cannot clean point '{f_point_dir}': rank artifact exists at '{os.path.join(f_root, f_file)}'"
                         )
 
         # 4. Safe removal of incomplete preparation:

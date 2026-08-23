@@ -31,6 +31,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import shutil
 import socket
 import tempfile
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -344,31 +345,38 @@ class RankWorkerTest(unittest.TestCase):
 
     def testDuplicateClaimRaceOneWinner(self) -> None:
         """Test concurrent rank claim race condition where exactly one caller wins and subsequent callers receive RankClaimError."""
-        f_rank_dir = os.path.join(self.m_real_temp, "ranks", "0")
+        f_rank_dir = os.path.join(self.m_real_temp, "ranks", "0", "c16_b8M")
 
         # 1. First claim succeeds
-        f_lock_path = RankClaimStore.claim(f_rank_dir, 0)
+        f_lock_path = RankClaimStore.claim(f_rank_dir, 0, f_combination="c16_b8M")
         self.assertTrue(os.path.exists(f_lock_path))
         self.assertTrue(RankClaimStore.isClaimed(f_rank_dir))
 
         f_claim_data = RankClaimStore.getClaim(f_rank_dir)
         self.assertIsNotNone(f_claim_data)
         self.assertEqual(f_claim_data["global_rank"], 0)
+        self.assertEqual(f_claim_data["combination"], "c16_b8M")
         self.assertEqual(f_claim_data["pid"], os.getpid())
 
-        # 2. Second claim fails with RankClaimError
+        # 2. Second claim for same rank and same combination fails with RankClaimError
         with self.assertRaises(RankClaimError) as f_ctx:
-            RankClaimStore.claim(f_rank_dir, 0)
+            RankClaimStore.claim(f_rank_dir, 0, f_combination="c16_b8M")
         self.assertIn("already been claimed", str(f_ctx.exception))
 
-        # 3. Multithreaded concurrent race test: 10 threads trying to claim rank 1 simultaneously
-        f_race_rank_dir = os.path.join(self.m_real_temp, "ranks", "1")
+        # 3. Same rank in DIFFERENT combination succeeds!
+        f_diff_combo_dir = os.path.join(self.m_real_temp, "ranks", "0", "c16_b1M")
+        f_diff_lock_path = RankClaimStore.claim(f_diff_combo_dir, 0, f_combination="c16_b1M")
+        self.assertTrue(os.path.exists(f_diff_lock_path))
+        self.assertTrue(RankClaimStore.isClaimed(f_diff_combo_dir))
+
+        # 4. Multithreaded concurrent race test: 10 threads trying to claim rank 1 in c16_b8M simultaneously
+        f_race_rank_dir = os.path.join(self.m_real_temp, "ranks", "1", "c16_b8M")
         f_success_count = 0
         f_error_count = 0
 
         def try_claim() -> bool:
             try:
-                RankClaimStore.claim(f_race_rank_dir, 1)
+                RankClaimStore.claim(f_race_rank_dir, 1, f_combination="c16_b8M")
                 return True
             except RankClaimError:
                 return False
@@ -383,6 +391,264 @@ class RankWorkerTest(unittest.TestCase):
 
         self.assertEqual(f_success_count, 1)
         self.assertEqual(f_error_count, 9)
+
+    def testSameRankAcrossAllSixCombinations(self) -> None:
+        """F-04a: Prove rank 0 executes sequentially across all six combinations without claim collisions."""
+        _, f_manifest_path, f_layout = self._createManifest(
+            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+        )
+        f_mock_runner = MockProcessRunner(
+            f_default_returncode=0,
+            f_stdout="LSMIO combination executed successfully\n",
+        )
+        f_env = {
+            "LSMIO_RANK": "0",
+            "LSMIO_NODE": "node0",
+        }
+
+        f_claim_paths: List[str] = []
+        f_result_paths: List[str] = []
+        f_log_paths: List[str] = []
+        f_output_paths: List[str] = []
+
+        # Execute RankWorker sequentially across all 6 standard combinations
+        for f_stripe, f_block in STANDARD_COMBINATION_TUPLES:
+            f_combo_name = f"c{f_stripe}_b{f_block}"
+            f_exit = RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc=f_combo_name,
+                f_env=f_env,
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+            self.assertEqual(
+                f_exit, 0, f"RankWorker failed on combination '{f_combo_name}' with exit {f_exit}"
+            )
+
+            # Record paths for validation
+            f_claim_path = f_layout.pointRankClaimPath("00-tasks-1", 0, f_combo_name)
+            f_result_path = f_layout.pointRankResultPath("00-tasks-1", 0, f_combo_name)
+            f_log_path = f_layout.pointRankLogPath("00-tasks-1", 0, f_combo_name)
+            f_out_path = os.path.join(
+                f_layout.pointDataSubdir("00-tasks-1", f_stripe, f_block),
+                "lsmio-rank-0-native-m.db",
+            )
+
+            f_claim_paths.append(f_claim_path)
+            f_result_paths.append(f_result_path)
+            f_log_paths.append(f_log_path)
+            f_output_paths.append(f_out_path)
+
+            # Check individual combination claim lock
+            self.assertTrue(os.path.exists(f_claim_path))
+            with open(f_claim_path, "r", encoding="utf-8") as f_f:
+                f_claim_meta = json.load(f_f)
+            self.assertEqual(f_claim_meta["global_rank"], 0)
+            self.assertEqual(f_claim_meta["combination"], f_combo_name)
+            self.assertEqual(f_claim_meta["point_id"], "00-tasks-1")
+            self.assertEqual(f_claim_meta["run_id"], f_layout.runId)
+            self.assertEqual(f_claim_meta["pid"], os.getpid())
+            self.assertTrue(len(f_claim_meta["claimed_at_utc"]) > 0)
+
+            # Check individual combination result record
+            self.assertTrue(os.path.exists(f_result_path))
+            with open(f_result_path, "r", encoding="utf-8") as f_f:
+                f_res_data = json.load(f_f)
+            self.assertEqual(f_res_data["payload"]["status"], "success")
+            self.assertEqual(f_res_data["payload"]["exit_code"], 0)
+            self.assertEqual(f_res_data["payload"]["global_rank"], 0)
+            self.assertEqual(f_res_data["payload"]["log_path"], f_log_path)
+            self.assertEqual(f_res_data["payload"]["result_path"], f_result_path)
+
+            # Check log file existence
+            self.assertTrue(os.path.exists(f_log_path))
+
+        # Assert all 6 claims, results, logs, and outputs are strictly unique
+        self.assertEqual(len(set(f_claim_paths)), 6)
+        self.assertEqual(len(set(f_result_paths)), 6)
+        self.assertEqual(len(set(f_log_paths)), 6)
+        self.assertEqual(len(set(f_output_paths)), 6)
+
+        # Assert all 6 claims persist permanently
+        for f_cp in f_claim_paths:
+            self.assertTrue(os.path.exists(f_cp), f"Claim lock {f_cp} was unexpectedly removed")
+
+    def testDuplicateSameRankCombinationRaceOneWinner(self) -> None:
+        """F-04a: Prove duplicate rank worker for identical rank and combination has exactly one winner."""
+        _, f_manifest_path, f_layout = self._createManifest(
+            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+        )
+        f_mock_runner = MockProcessRunner(f_default_returncode=0)
+        f_env = {"LSMIO_RANK": "0", "LSMIO_NODE": "node0"}
+
+        # First run succeeds
+        f_exit1 = RankWorker.run(
+            f_manifest_path=f_manifest_path,
+            f_point_id="00-tasks-1",
+            f_combination_desc="c16_b8M",
+            f_env=f_env,
+            f_runner=f_mock_runner,
+            f_layout=f_layout,
+        )
+        self.assertEqual(f_exit1, 0)
+
+        # Second run for same rank 0 and same combination c16_b8M fails closed with RankWorkerError / RankClaimError
+        with self.assertRaises(RankWorkerError) as f_ctx:
+            RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc="c16_b8M",
+                f_env=f_env,
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+        self.assertTrue(
+            "already been claimed" in str(f_ctx.exception)
+            or "already exists" in str(f_ctx.exception)
+        )
+
+    def testCombinationValidatedBeforeClaim(self) -> None:
+        """F-04a: Prove combination descriptor is strictly validated against planned matrix before any claim lock is created."""
+        _, f_manifest_path, f_layout = self._createManifest(
+            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+        )
+        f_mock_runner = MockProcessRunner(f_default_returncode=0)
+        f_env = {"LSMIO_RANK": "0", "LSMIO_NODE": "node0"}
+
+        # 1. Invalid combination string
+        with self.assertRaises(RankWorkerError):
+            RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc="c99_b99M",
+                f_env=f_env,
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+        # Verify no claim lock was created for c99_b99M
+        f_bad_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c99_b99M")
+        self.assertFalse(os.path.exists(f_bad_dir))
+
+        # 2. Unplanned foreign combination
+        with self.assertRaises(RankWorkerError):
+            RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc="c32_b16M",
+                f_env=f_env,
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+        f_foreign_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c32_b16M")
+        self.assertFalse(os.path.exists(f_foreign_dir))
+
+        # 3. Malformed descriptor
+        with self.assertRaises(RankWorkerError):
+            RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc="invalid-descriptor",
+                f_env=f_env,
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+
+    def testClaimLogOutputResultAllCombinationPrivate(self) -> None:
+        """F-04a: Prove all claim locks, logs, outputs, and results are combination-private and rank-private."""
+        _, f_manifest_path, f_layout = self._createManifest(
+            f_target="lsmio", f_scale="bake", f_setup="NATIVE-M"
+        )
+        f_adapter = LsmioAdapter()
+        f_point = ScalePoint(f_tasks=4, f_ppn=1, f_nodes=4)
+
+        f_combos = [
+            Combination(16, "8M", 16, 8388608, 1024, 128),
+            Combination(4, "1M", 4, 1048576, 4096, 128),
+        ]
+
+        f_all_claims = set()
+        f_all_results = set()
+        f_all_logs = set()
+        f_all_outputs = set()
+
+        for f_c in f_combos:
+            f_spec = f_adapter.createLaunchSpec(
+                f_request=RunRequest("lsmio", "bake", f_setup="NATIVE-M"),
+                f_combination=f_c,
+                f_point=f_point,
+                f_executable="bm_native",
+            )
+            for f_rank in range(f_point.tasks):
+                f_id = RankIdentity(f_global_rank=f_rank, f_node_rank=f"node-{f_rank}")
+                f_bound = f_adapter.bindRank(f_spec, f_id, f_layout, f_ordinal=0)
+                f_claim = f_layout.pointRankClaimPath(f_point, f_rank, f_c, f_ordinal=0)
+
+                f_all_claims.add(f_claim)
+                f_all_results.add(f_bound.result_path)
+                f_all_logs.add(f_bound.stdout_path)
+                f_all_outputs.add(f_bound.output_path)
+
+                # Validate exact path format and containment
+                self.assertTrue(f_claim.endswith(f"ranks/{f_rank}/{f_c.name}/claim.lock"))
+                self.assertTrue(f_bound.result_path.endswith(f"ranks/{f_rank}/{f_c.name}/result.json"))
+                self.assertTrue(f_bound.stdout_path.endswith(f"logs/{f_c.name}/rank_{f_rank}.log"))
+                self.assertTrue(f_bound.output_path.endswith(f"data/c{f_c.stripe_count}/b{f_c.block_size}/lsmio-rank-{f_rank}-native-m.db"))
+
+        # 4 ranks x 2 combinations = 8 distinct paths each
+        self.assertEqual(len(f_all_claims), 8)
+        self.assertEqual(len(f_all_results), 8)
+        self.assertEqual(len(f_all_logs), 8)
+        self.assertEqual(len(f_all_outputs), 8)
+
+    def testClaimParentSymlinkRejection(self) -> None:
+        """Prove claim lock creation rejects symbolic links in the claim path or parent directory."""
+        f_outside_dir = tempfile.mkdtemp(prefix="outside-rank-claim-")
+        try:
+            f_symlink_dir = os.path.join(self.m_real_temp, "ranks", "symlink_rank")
+            os.makedirs(os.path.dirname(f_symlink_dir), exist_ok=True)
+            os.symlink(f_outside_dir, f_symlink_dir)
+
+            with self.assertRaises(RankClaimError):
+                RankClaimStore.claim(f_symlink_dir, 0, f_combination="c16_b8M")
+        finally:
+            shutil.rmtree(f_outside_dir, ignore_errors=True)
+
+    def testRankIdentityMissingOrOutOfBoundsValidatedBeforeClaim(self) -> None:
+        """Prove rank identity is validated before any claim lock is created."""
+        _, f_manifest_path, f_layout = self._createManifest(
+            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+        )
+        f_mock_runner = MockProcessRunner(f_default_returncode=0)
+
+        # Missing identity
+        with self.assertRaises(RankWorkerError):
+            RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc="c16_b8M",
+                f_env={},  # empty env
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+
+        # Out-of-bounds rank (rank 10 for point with tasks 1)
+        with self.assertRaises(RankWorkerError):
+            RankWorker.run(
+                f_manifest_path=f_manifest_path,
+                f_point_id="00-tasks-1",
+                f_combination_desc="c16_b8M",
+                f_env={"LSMIO_RANK": "10"},
+                f_runner=f_mock_runner,
+                f_layout=f_layout,
+            )
+
+    def testNoClaimRelease(self) -> None:
+        """Prove RankClaimStore exposes no release/unlock methods and claims are strictly permanent."""
+        self.assertFalse(hasattr(RankClaimStore, "release"))
+        self.assertFalse(hasattr(RankClaimStore, "unlock"))
+        self.assertFalse(hasattr(RankClaimStore, "delete"))
+        self.assertFalse(hasattr(RankClaimStore, "remove"))
 
     def testEveryGlobalUniquePaths(self) -> None:
         """Validate distinct non-colliding paths for every global rank 0..tasks-1."""
@@ -510,12 +776,13 @@ class RankWorkerTest(unittest.TestCase):
         self.assertEqual(f_exit, 0)
 
         # 2. Check claim lock exists
-        f_rank_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0")
-        self.assertTrue(RankClaimStore.isClaimed(f_rank_dir))
+        f_rank_combo_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c16_b8M")
+        self.assertTrue(RankClaimStore.isClaimed(f_rank_combo_dir))
+        self.assertTrue(os.path.exists(os.path.join(f_rank_combo_dir, "claim.lock")))
 
         # 3. Check rank result was recorded
         f_result_path = os.path.join(
-            f_rank_dir, "c16_b8M", "result.json"
+            f_rank_combo_dir, "result.json"
         )
         self.assertTrue(os.path.exists(f_result_path))
 
@@ -529,9 +796,10 @@ class RankWorkerTest(unittest.TestCase):
         self.assertEqual(f_data["payload"]["exit_code"], 0)
         self.assertEqual(f_data["payload"]["global_rank"], 0)
 
-        # 4. Check log file was written
+        # 4. Check log file was written under combination logs dir
         f_log_path = f_data["payload"]["log_path"]
         self.assertTrue(os.path.exists(f_log_path))
+        self.assertTrue(f_log_path.endswith("logs/c16_b8M/rank_0.log"))
         with open(f_log_path, "r", encoding="utf-8") as f_f:
             f_log_content = f_f.read()
         self.assertIn("LSMIO benchmark completed successfully", f_log_content)

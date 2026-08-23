@@ -297,11 +297,11 @@ class IorAdapter(BenchmarkAdapter):
 
     SETUP_EXTRA_FLAGS: Dict[str, Tuple[str, ...]] = {
         "BASE": (),
-        "HDF5": ("-a=HDF5",),
-        "HDF5-C": ("-a=HDF5", "-c"),
-        "COLLECTIVE": ("-c",),
+        "HDF5": ("-a", "HDF5"),
+        "HDF5-C": ("-c", "-a", "HDF5"),
+        "COLLECTIVE": ("-c", "-a", "MPIIO"),
         "FSYNC": ("-e",),
-        "REVERSE": ("-z",),
+        "REVERSE": ("-C",),
     }
 
     BASE_FLAGS: Tuple[str, ...] = ("-v", "-w", "-r", "-i=10")
@@ -457,17 +457,18 @@ class IorAdapter(BenchmarkAdapter):
                         f"IOR command {f_desc} contains rank placeholder {f_ph!r}: {f_check_str!r}"
                     )
 
-        # Assemble argv sequence
+        # Assemble argv sequence in exact upstream order:
+        # ior -v -w -r -i=10 [extra_flags] -o <outpath> -t=<bs> -b=<bs> -s=<sg>
         f_extra_flags = self.SETUP_EXTRA_FLAGS[f_norm_setup]
         f_argv_list: List[str] = [
             f_norm_executable,
             *self.BASE_FLAGS,
             *f_extra_flags,
-            f"-b={f_resolved_block_size}",
-            f"-t={f_resolved_block_size}",
-            f"-s={f_segments}",
             "-o",
             f_outpath,
+            f"-t={f_resolved_block_size}",
+            f"-b={f_resolved_block_size}",
+            f"-s={f_segments}",
         ]
 
         return BenchmarkCommand(
@@ -513,7 +514,10 @@ class IorAdapter(BenchmarkAdapter):
         f_probe_argv = [f_norm_executable, "-v"]
 
         try:
-            f_result = f_runner(f_probe_argv)
+            if hasattr(f_runner, "run") and callable(getattr(f_runner, "run")):
+                f_result = f_runner.run(f_probe_argv)
+            else:
+                f_result = f_runner(f_probe_argv)
         except (FileNotFoundError, PermissionError, OSError) as f_exc:
             raise BenchmarkProbeError(
                 f"IOR executable probe failed for {f_norm_executable!r}: {f_exc}"
@@ -562,18 +566,19 @@ class IorAdapter(BenchmarkAdapter):
                 f"IOR executable {f_norm_executable!r} reported unsupported capability: {f_output_text.strip()}"
             )
 
-        # Check for IOR signature or version pattern
-        f_ior_match = re.search(r"IOR[- ](\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9_.-]*)?)", f_output_text, re.IGNORECASE)
-        if f_ior_match or "ior" in f_lower_out or "version" in f_lower_out:
-            return CapabilityState.VERIFIED
-
-        # If output was completely empty or unrecognized, fail closed
         if not f_output_text.strip():
             raise BenchmarkProbeError(
                 f"IOR executable {f_norm_executable!r} produced empty probe output"
             )
 
-        return CapabilityState.VERIFIED
+        # Check for IOR signature or version pattern
+        f_ior_match = re.search(r"IOR[- ](\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9_.-]*)?)", f_output_text, re.IGNORECASE)
+        if f_ior_match or "ior" in f_lower_out or "version" in f_lower_out:
+            return CapabilityState.VERIFIED
+
+        raise BenchmarkProbeError(
+            f"IOR executable {f_norm_executable!r} produced unrecognized probe output: {f_output_text.strip()}"
+        )
 
 
 class LsmioLaunchSpec:
@@ -1120,8 +1125,23 @@ class LsmioAdapter(BenchmarkAdapter):
         f_point_desc = f_spec.point
         f_combo_desc = f_spec.combination
 
-        f_logs_dir = f_layout.pointLogsDir(f_point_desc, f_ordinal)
-        f_log_path = os.path.join(f_logs_dir, f"rank_{f_global_rank}.log")
+        if hasattr(f_layout, "pointRankLogPath"):
+            f_log_path = f_layout.pointRankLogPath(
+                f_point_desc, f_global_rank, f_combo_desc, f_ordinal
+            )
+        elif hasattr(f_layout, "pointCombinationLogsDir"):
+            f_log_path = os.path.join(
+                f_layout.pointCombinationLogsDir(f_point_desc, f_combo_desc, f_ordinal),
+                f"rank_{f_global_rank}.log",
+            )
+        else:
+            f_combo_name = (
+                f_layout.combinationName(f_combo_desc)
+                if hasattr(f_layout, "combinationName")
+                else (f_combo_desc.name if hasattr(f_combo_desc, "name") else str(f_combo_desc))
+            )
+            f_logs_dir = f_layout.pointLogsDir(f_point_desc, f_ordinal)
+            f_log_path = os.path.join(f_logs_dir, f_combo_name, f"rank_{f_global_rank}.log")
 
         f_result_path = f_layout.pointRankResultPath(
             f_point_desc, f_global_rank, f_combo_desc, f_ordinal
@@ -1320,7 +1340,7 @@ class LsmioAdapter(BenchmarkAdapter):
         f_runner: Optional[Callable[..., Any]] = None,
         f_setup: Optional[str] = None,
     ) -> CapabilityState:
-        """Probe LSMIO capability using an injected runner or report configured/unverified."""
+        """Probe LSMIO capability or report configured/unverified."""
         if not isinstance(f_executable, str) or not f_executable.strip():
             raise BenchmarkConfigurationError(
                 f"Executable must be a non-empty string, got: {f_executable!r}"
@@ -1341,66 +1361,9 @@ class LsmioAdapter(BenchmarkAdapter):
                     f"Unsupported LSMIO setup requested: {f_setup!r}. Allowed: {self.ALLOWED_SETUPS}"
                 )
 
-        if f_runner is None:
-            return CapabilityState.CONFIGURED
-
-        f_probe_argv = [f_norm_executable, "-v"]
-
-        try:
-            f_result = f_runner(f_probe_argv)
-        except (FileNotFoundError, PermissionError, OSError) as f_exc:
-            raise BenchmarkProbeError(
-                f"LSMIO executable probe failed for {f_norm_executable!r}: {f_exc}"
-            ) from f_exc
-        except Exception as f_exc:
-            raise BenchmarkProbeError(
-                f"LSMIO probe runner raised unexpected error for {f_norm_executable!r}: {f_exc}"
-            ) from f_exc
-
-        f_exit_code: int = 0
-        f_output_text: str = ""
-
-        if hasattr(f_result, "returncode"):
-            f_exit_code = int(f_result.returncode)
-            f_stdout = getattr(f_result, "stdout", "") or ""
-            f_stderr = getattr(f_result, "stderr", "") or ""
-            f_output_text = f"{f_stdout}\n{f_stderr}"
-        elif hasattr(f_result, "exit_code"):
-            f_exit_code = int(f_result.exit_code)
-            f_stdout = getattr(f_result, "stdout", "") or ""
-            f_stderr = getattr(f_result, "stderr", "") or ""
-            f_output_text = f"{f_stdout}\n{f_stderr}"
-        elif isinstance(f_result, tuple) and len(f_result) >= 2:
-            f_exit_code = int(f_result[0])
-            f_output_text = str(f_result[1])
-            if len(f_result) >= 3:
-                f_output_text += f"\n{f_result[2]}"
-        elif isinstance(f_result, int):
-            f_exit_code = f_result
-            f_output_text = ""
-        elif isinstance(f_result, str):
-            f_exit_code = 0
-            f_output_text = f_result
-        else:
-            f_output_text = str(f_result)
-
-        if f_exit_code != 0:
-            raise BenchmarkProbeError(
-                f"LSMIO executable {f_norm_executable!r} probe failed with exit code {f_exit_code}: {f_output_text.strip()}"
-            )
-
-        f_lower_out = f_output_text.lower()
-        if "unsupported" in f_lower_out or "invalid option" in f_lower_out or "command not found" in f_lower_out:
-            raise BenchmarkProbeError(
-                f"LSMIO executable {f_norm_executable!r} reported unsupported capability: {f_output_text.strip()}"
-            )
-
-        if not f_output_text.strip():
-            raise BenchmarkProbeError(
-                f"LSMIO executable {f_norm_executable!r} produced empty probe output"
-            )
-
-        return CapabilityState.VERIFIED
+        # Per Critic P-02 and Architecture §10: LSMIO executables do not expose a probe (bare -v fails).
+        # They remain configured but unverified without invoking a probe command.
+        return CapabilityState.CONFIGURED
 
 
 class LmpAdapter(BenchmarkAdapter):
@@ -1416,27 +1379,9 @@ class LmpAdapter(BenchmarkAdapter):
         "FS",
     )
 
-    SETUP_DUMP_MAP: Dict[str, int] = {
-        "LSMIO": 1,
-        "LSMIO-MMAP": 2,
-        "FS": 0,
-    }
-
-    TASK_TUNING_MAP: Dict[int, Tuple[int, int, int]] = {
-        1: (10, 10, 10),
-        2: (10, 10, 20),
-        4: (10, 20, 20),
-        8: (20, 20, 20),
-        16: (20, 20, 40),
-        24: (20, 30, 40),
-        32: (20, 40, 40),
-        40: (20, 40, 50),
-        48: (20, 40, 60),
-    }
-
     REQUIRED_ASSETS: Tuple[str, ...] = (
-        "in.reaxff.hns",
-        "data.hns",
+        "in.reaxc.hns",
+        "data.hns-equil",
         "ffield.reax.hns",
     )
 
@@ -1459,33 +1404,6 @@ class LmpAdapter(BenchmarkAdapter):
     @property
     def allowedSetups(self) -> Tuple[str, ...]:
         return self.ALLOWED_SETUPS
-
-    @classmethod
-    def getDumpValue(cls, f_setup: str) -> int:
-        """Return integer dump value for a given setup."""
-        if not isinstance(f_setup, str) or not f_setup.strip():
-            raise BenchmarkConfigurationError(
-                f"Setup must be a non-empty string, got: {f_setup!r}"
-            )
-        f_norm_setup = f_setup.strip().upper()
-        if f_norm_setup not in cls.SETUP_DUMP_MAP:
-            raise BenchmarkConfigurationError(
-                f"Unknown LMP setup: {f_setup!r}. Allowed setups: {cls.ALLOWED_SETUPS}"
-            )
-        return cls.SETUP_DUMP_MAP[f_norm_setup]
-
-    @classmethod
-    def getTuningParameters(cls, f_tasks: int) -> Tuple[int, int, int]:
-        """Return (x, y, z) task tuning parameters for a given task count."""
-        if not isinstance(f_tasks, int) or isinstance(f_tasks, bool):
-            raise BenchmarkConfigurationError(
-                f"Task count must be an integer, got: {type(f_tasks).__name__}"
-            )
-        if f_tasks not in cls.TASK_TUNING_MAP:
-            raise BenchmarkConfigurationError(
-                f"Unsupported LMP task count: {f_tasks}. Allowed task tuning points: {sorted(cls.TASK_TUNING_MAP.keys())}"
-            )
-        return cls.TASK_TUNING_MAP[f_tasks]
 
     def validateAssets(self, f_asset_root: str) -> Dict[str, str]:
         """Verify each required asset at the consumer boundary using os.lstat.
@@ -1611,59 +1529,19 @@ class LmpAdapter(BenchmarkAdapter):
         self,
         f_executable: str,
         f_setup: str = "LSMIO",
-        f_tasks: Optional[int] = None,
-        f_threads: int = 1,
+        f_replication: Optional[int] = None,
+        f_buffer_size_mb: Optional[int] = None,
         f_working_dir: str = "/tmp",
         f_stdout_path: Optional[str] = None,
         f_stderr_path: Optional[str] = None,
-        f_point: Optional[Any] = None,
-        f_scale: Optional[str] = None,
-        f_request: Optional[Any] = None,
-        f_combination: Optional[Any] = None,
+        f_tuning: Optional[Mapping[str, Any]] = None,
+        **f_kwargs: Any,
     ) -> BenchmarkCommand:
         """Construct exact BenchmarkCommand for a shared LMP run.
 
-        Defense-in-depth rejects scale='large' or unsupported tasks before any locator or probe.
+        Consumes replication and buffer size exclusively from manifest tuning.
+        Adapter is table-free and performs zero fallback searches.
         """
-        # Defense-in-depth: check request and scale early
-        if f_request is not None:
-            if hasattr(f_request, "scale") and str(f_request.scale).strip().lower() == "large":
-                raise BenchmarkConfigurationError(
-                    "LMP large scale is unsupported: tuning beyond 48 tasks is undefined"
-                )
-            if hasattr(f_request, "setup") and f_request.setup is not None and (f_setup == "LSMIO" or not f_setup):
-                f_setup = str(f_request.setup)
-
-        if f_scale is not None and str(f_scale).strip().lower() == "large":
-            raise BenchmarkConfigurationError(
-                "LMP large scale is unsupported: tuning beyond 48 tasks is undefined"
-            )
-
-        # Resolve tasks from f_tasks or f_point
-        f_resolved_tasks: Optional[int] = None
-        if f_tasks is not None:
-            if not isinstance(f_tasks, int) or isinstance(f_tasks, bool):
-                raise BenchmarkConfigurationError(
-                    f"Task count must be an integer, got: {type(f_tasks).__name__}"
-                )
-            f_resolved_tasks = f_tasks
-        elif f_point is not None:
-            if hasattr(f_point, "tasks"):
-                f_resolved_tasks = int(f_point.tasks)
-            elif isinstance(f_point, int) and not isinstance(f_point, bool):
-                f_resolved_tasks = f_point
-            else:
-                raise BenchmarkConfigurationError(
-                    f"Cannot determine task count from point: {f_point!r}"
-                )
-        else:
-            f_resolved_tasks = 1
-
-        if f_resolved_tasks not in self.TASK_TUNING_MAP:
-            raise BenchmarkConfigurationError(
-                f"Unsupported LMP task count: {f_resolved_tasks}. Allowed task tuning points: {sorted(self.TASK_TUNING_MAP.keys())}"
-            )
-
         # Validate executable
         if not isinstance(f_executable, str) or not f_executable.strip():
             raise BenchmarkConfigurationError(
@@ -1682,11 +1560,43 @@ class LmpAdapter(BenchmarkAdapter):
                 f"Unknown LMP setup: {f_setup!r}. Allowed setups: {self.ALLOWED_SETUPS}"
             )
 
-        # Validate threads
-        if not isinstance(f_threads, int) or isinstance(f_threads, bool) or f_threads <= 0:
+        # Resolve replication (REP)
+        f_rep = f_replication
+        if f_rep is None:
+            f_rep = f_kwargs.get("f_rep") or f_kwargs.get("rep")
+        if f_rep is None and f_tuning is not None and isinstance(f_tuning, Mapping):
+            f_rep = f_tuning.get("replication", f_tuning.get("rep"))
+
+        if f_rep is None:
             raise BenchmarkConfigurationError(
-                f"Threads must be a positive integer, got: {f_threads!r}"
+                "LMP replication (REP) is required; adapter is table-free and consumes manifest tuning"
             )
+        if isinstance(f_rep, bool) or not isinstance(f_rep, int) or f_rep <= 0:
+            raise BenchmarkConfigurationError(
+                f"LMP replication must be a positive integer, got: {f_rep!r}"
+            )
+
+        # Resolve buffer size (BUF)
+        f_buf = f_buffer_size_mb
+        if f_buf is None:
+            f_buf = (
+                f_kwargs.get("f_buf")
+                or f_kwargs.get("f_buffer")
+                or f_kwargs.get("buffer_size_mb")
+                or f_kwargs.get("buffer")
+            )
+        if f_buf is None and f_tuning is not None and isinstance(f_tuning, Mapping):
+            f_buf = f_tuning.get("buffer_size_mb", f_tuning.get("buf", f_tuning.get("buffer")))
+
+        if f_norm_setup in ("LSMIO", "LSMIO-MMAP"):
+            if f_buf is None:
+                raise BenchmarkConfigurationError(
+                    f"LMP buffer_size_mb is required for setup '{f_norm_setup}'"
+                )
+            if isinstance(f_buf, bool) or not isinstance(f_buf, int) or f_buf <= 0:
+                raise BenchmarkConfigurationError(
+                    f"LMP buffer_size_mb must be a positive integer, got: {f_buf!r}"
+                )
 
         # Validate working dir
         if not isinstance(f_working_dir, str) or not f_working_dir.strip():
@@ -1743,38 +1653,28 @@ class LmpAdapter(BenchmarkAdapter):
                         f"LMP command {f_desc} contains rank placeholder {f_ph!r}: {f_check_str!r}"
                     )
 
-        # Get task tuning parameters and dump value
-        f_tx, f_ty, f_tz = self.getTuningParameters(f_resolved_tasks)
-        f_dump_val = self.getDumpValue(f_norm_setup)
-
-        # Assemble argv sequence
-        # Base argv: lmp -k on t <threads> -sf kk -pk kk -in in.reaxff.hns -nocite -v x <tx> -v y <ty> -v z <tz> -v dump <dump_val>
+        # Assemble exact upstream argv:
+        # lmp -in in.reaxc.hns -v x REP -v y REP -v z REP [setup_flags]
         f_argv_list: List[str] = [
             f_norm_executable,
-            "-k",
-            "on",
-            "t",
-            str(f_threads),
-            "-sf",
-            "kk",
-            "-pk",
-            "kk",
             "-in",
-            "in.reaxff.hns",
-            "-nocite",
+            "in.reaxc.hns",
             "-v",
             "x",
-            str(f_tx),
+            str(f_rep),
             "-v",
             "y",
-            str(f_ty),
+            str(f_rep),
             "-v",
             "z",
-            str(f_tz),
-            "-v",
-            "dump",
-            str(f_dump_val),
+            str(f_rep),
         ]
+        if f_norm_setup == "LSMIO":
+            f_argv_list.extend(["-lsmio-buf-size-mb", str(f_buf)])
+        elif f_norm_setup == "LSMIO-MMAP":
+            f_argv_list.extend(["-lsmio-mmap", "-lsmio-buf-size-mb", str(f_buf)])
+        elif f_norm_setup == "FS":
+            f_argv_list.extend(["-lsmio-fallback"])
 
         return BenchmarkCommand(
             f_argv=f_argv_list,
@@ -1818,7 +1718,10 @@ class LmpAdapter(BenchmarkAdapter):
         f_probe_argv = [f_norm_executable, "-h"]
 
         try:
-            f_result = f_runner(f_probe_argv)
+            if hasattr(f_runner, "run") and callable(getattr(f_runner, "run")):
+                f_result = f_runner.run(f_probe_argv)
+            else:
+                f_result = f_runner(f_probe_argv)
         except (FileNotFoundError, PermissionError, OSError) as f_exc:
             raise BenchmarkProbeError(
                 f"LMP executable probe failed for {f_norm_executable!r}: {f_exc}"
@@ -1861,21 +1764,37 @@ class LmpAdapter(BenchmarkAdapter):
                 f"LMP executable {f_norm_executable!r} probe failed with exit code {f_exit_code}: {f_output_text.strip()}"
             )
 
+        if not f_output_text.strip():
+            raise BenchmarkProbeError(
+                f"LMP executable {f_norm_executable!r} produced empty probe output"
+            )
+
         f_lower_out = f_output_text.lower()
         if "unsupported" in f_lower_out or "invalid option" in f_lower_out or "command not found" in f_lower_out:
             raise BenchmarkProbeError(
                 f"LMP executable {f_norm_executable!r} reported unsupported capability: {f_output_text.strip()}"
             )
 
-        f_lmp_match = re.search(r"LAMMPS|lmp", f_output_text, re.IGNORECASE)
-        if f_lmp_match or "lammps" in f_lower_out or "version" in f_lower_out:
-            return CapabilityState.VERIFIED
-
-        if not f_output_text.strip():
-            raise BenchmarkProbeError(
-                f"LMP executable {f_norm_executable!r} produced empty probe output"
-            )
+        # Check setup-specific flags in help text
+        if f_norm_setup == "LSMIO":
+            if "buf" not in f_lower_out:
+                raise BenchmarkProbeError(
+                    f"LMP executable {f_norm_executable!r} help output does not expose required buffer flag ('buf') for setup 'LSMIO'"
+                )
+        elif f_norm_setup == "LSMIO-MMAP":
+            if "buf" not in f_lower_out or "mmap" not in f_lower_out:
+                raise BenchmarkProbeError(
+                    f"LMP executable {f_norm_executable!r} help output does not expose required flags ('buf' and 'mmap') for setup 'LSMIO-MMAP'"
+                )
+        elif f_norm_setup == "FS":
+            if "fallback" not in f_lower_out:
+                raise BenchmarkProbeError(
+                    f"LMP executable {f_norm_executable!r} help output does not expose required fallback flag ('fallback') for setup 'FS'"
+                )
+        else:
+            if not ("lammps" in f_lower_out or "lmp" in f_lower_out):
+                raise BenchmarkProbeError(
+                    f"LMP executable {f_norm_executable!r} produced unrecognized help output: {f_output_text.strip()}"
+                )
 
         return CapabilityState.VERIFIED
-
-

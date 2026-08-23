@@ -78,6 +78,13 @@ class MockProcessRunner:
         f_argv_list = list(f_argv)
         self.m_invocations.append((f_argv_list, dict(f_kwargs)))
 
+        f_log = f_kwargs.get("f_log_path") or f_kwargs.get("log_path")
+        if f_log and self.m_default_returncode == 0:
+            os.makedirs(os.path.dirname(os.path.abspath(f_log)), exist_ok=True)
+            if not os.path.exists(f_log):
+                with open(f_log, "w", encoding="utf-8") as f_f:
+                    f_f.write("mock log output\n")
+
         if self.m_side_effect is not None:
             return self.m_side_effect(f_argv_list, f_kwargs)
 
@@ -108,7 +115,7 @@ class AllocationControllerTest(unittest.TestCase):
         # Create sample LMP assets in a dedicated directory
         self.m_lmp_assets_dir = os.path.join(self.m_real_temp, "lmp_assets")
         os.makedirs(self.m_lmp_assets_dir, exist_ok=True)
-        for f_asset in ("in.reaxff.hns", "data.hns", "ffield.reax.hns"):
+        for f_asset in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
             with open(os.path.join(self.m_lmp_assets_dir, f_asset), "w", encoding="utf-8") as f_f:
                 f_f.write(f"# mock content for {f_asset}\n")
 
@@ -335,6 +342,50 @@ class AllocationControllerTest(unittest.TestCase):
             self.assertIsNotNone(f_res)
             self.assertEqual(f_res.payload["status"], "success")
 
+    def _recordMockRankResult(
+        self,
+        f_store: EvidenceStore,
+        f_layout: ArtifactLayout,
+        f_point: ScalePoint,
+        f_rank_idx: int,
+        f_combo: str,
+        f_ordinal: int = 0,
+        f_status: str = "success",
+        f_exit_code: int = 0,
+        f_error: Optional[str] = None,
+    ) -> None:
+        f_log = f_layout.pointRankLogPath(f_point, f_rank_idx, f_combo, f_ordinal=f_ordinal)
+        f_res = os.path.join(f_layout.pointRankCombinationDir(f_point, f_rank_idx, f_combo, f_ordinal), f"rank_{f_rank_idx}.db")
+        os.makedirs(os.path.dirname(f_log), exist_ok=True)
+        os.makedirs(os.path.dirname(f_res), exist_ok=True)
+        if not os.path.exists(f_log):
+            with open(f_log, "w", encoding="utf-8") as f_f:
+                f_f.write("mock rank log\n")
+        if not os.path.exists(f_res):
+            with open(f_res, "w", encoding="utf-8") as f_f:
+                f_f.write("mock rank db\n")
+        f_payload: Dict[str, Any] = {
+            "status": f_status,
+            "exit_code": f_exit_code,
+            "exit_status": f_exit_code,
+            "global_rank": f_rank_idx,
+            "rank": f_rank_idx,
+            "combination": f_combo,
+            "argv": ["lsmioworker", "rank", f_combo],
+            "log_path": f_log,
+            "result_path": f_res,
+            "timed_out": False,
+        }
+        if f_error is not None:
+            f_payload["error"] = f_error
+        f_store.recordRankResult(
+            f_point=f_point,
+            f_global_rank=f_rank_idx,
+            f_combination=f_combo,
+            f_payload=f_payload,
+            f_ordinal=f_ordinal,
+        )
+
     def testLsmioExactRanks(self) -> None:
         """Tests LSMIO requiring launcher success + exact rank evidence for all tasks ranks."""
         # Scale point with 4 tasks
@@ -348,14 +399,10 @@ class AllocationControllerTest(unittest.TestCase):
         def lsmio_launcher_side_effect(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
             # When launcher runs for rank workers, simulate all 4 ranks writing result.json
             if "rank" in f_argv:
-                f_combo = f_argv[4]  # worker executable 'rank' manifest point combination
+                f_combo = f_argv[-1]  # combination is always the last argument
                 for f_rank_idx in range(4):
-                    f_store.recordRankResult(
-                        f_point=f_point,
-                        f_global_rank=f_rank_idx,
-                        f_combination=f_combo,
-                        f_payload={"exit_code": 0, "status": "success"},
-                        f_ordinal=2,
+                    self._recordMockRankResult(
+                        f_store, f_layout, f_point, f_rank_idx, f_combo, f_ordinal=2
                     )
             return ProcessResult(f_returncode=0)
 
@@ -390,15 +437,11 @@ class AllocationControllerTest(unittest.TestCase):
 
         def missing_rank_side_effect(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
             if "rank" in f_argv:
-                f_combo = f_argv[4]
+                f_combo = f_argv[-1]
                 # Write results only for ranks 0, 1, 2 (missing rank 3)
                 for f_rank_idx in range(3):
-                    f_store1.recordRankResult(
-                        f_point=f_point1,
-                        f_global_rank=f_rank_idx,
-                        f_combination=f_combo,
-                        f_payload={"exit_code": 0, "status": "success"},
-                        f_ordinal=2,
+                    self._recordMockRankResult(
+                        f_store1, f_layout1, f_point1, f_rank_idx, f_combo, f_ordinal=2
                     )
             return ProcessResult(f_returncode=0)
 
@@ -426,16 +469,21 @@ class AllocationControllerTest(unittest.TestCase):
 
         def failed_rank_side_effect(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
             if "rank" in f_argv:
-                f_combo = f_argv[4]
+                f_combo = f_argv[-1]
                 for f_rank_idx in range(4):
                     f_exit = 137 if f_rank_idx == 2 else 0
                     f_st = "failed" if f_rank_idx == 2 else "success"
-                    f_store2.recordRankResult(
-                        f_point=f_point1,
-                        f_global_rank=f_rank_idx,
-                        f_combination=f_combo,
-                        f_payload={"exit_code": f_exit, "status": f_st},
+                    f_err = "killed with 137" if f_rank_idx == 2 else None
+                    self._recordMockRankResult(
+                        f_store2,
+                        f_layout2,
+                        f_point1,
+                        f_rank_idx,
+                        f_combo,
                         f_ordinal=2,
+                        f_status=f_st,
+                        f_exit_code=f_exit,
+                        f_error=f_err,
                     )
             return ProcessResult(f_returncode=0)
 
@@ -452,7 +500,7 @@ class AllocationControllerTest(unittest.TestCase):
         self.assertEqual(f_status2, 1)
         f_ctrl_res2 = f_store2.readControllerResult(f_point1, "c16_b8M", f_ordinal=2)
         self.assertEqual(f_ctrl_res2.payload["status"], "failed")
-        self.assertIn("nonzero exit code", f_ctrl_res2.payload["error"])
+        self.assertIn("Rank 2", f_ctrl_res2.payload["error"])
 
         # 3. Corrupted Rank Evidence (corrupted JSON written to disk)
         f_doc3, f_path3, f_layout3 = self._createManifest(
@@ -462,7 +510,7 @@ class AllocationControllerTest(unittest.TestCase):
 
         def corrupt_rank_side_effect(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
             if "rank" in f_argv:
-                f_combo = f_argv[4]
+                f_combo = f_argv[-1]
                 for f_rank_idx in range(4):
                     if f_rank_idx == 1:
                         # Write corrupted raw JSON directly
@@ -471,12 +519,8 @@ class AllocationControllerTest(unittest.TestCase):
                         with open(f_rank_path, "wb") as f_f:
                             f_f.write(b"NOT_VALID_JSON{:::}")
                     else:
-                        f_store3.recordRankResult(
-                            f_point=f_point1,
-                            f_global_rank=f_rank_idx,
-                            f_combination=f_combo,
-                            f_payload={"exit_code": 0, "status": "success"},
-                            f_ordinal=2,
+                        self._recordMockRankResult(
+                            f_store3, f_layout3, f_point1, f_rank_idx, f_combo, f_ordinal=2
                         )
             return ProcessResult(f_returncode=0)
 
@@ -577,6 +621,213 @@ class AllocationControllerTest(unittest.TestCase):
         # Assert no 'module' command was passed to runner
         for f_argv, _ in f_runner.m_invocations:
             self.assertFalse(any("module" in f_arg for f_arg in f_argv))
+
+    def testLmpConsumesManifestTuningOnly(self) -> None:
+        """Asserts AllocationController consumes LMP tuning exclusively from manifest plan for exact tasks."""
+        # 1. Valid LMP run consumes tuning from manifest
+        f_doc, f_manifest_path, f_layout = self._createManifest(
+            f_target="lmp", f_scale="local", f_run_id="run-lmp-tuning-valid"
+        )
+        f_runner = MockProcessRunner()
+        f_status = AllocationController.run(
+            f_manifest_path=f_manifest_path,
+            f_point_id="00-tasks-1",
+            f_runner=f_runner,
+            f_asset_source=self.m_lmp_assets_dir,
+            f_layout=f_layout,
+        )
+        self.assertEqual(f_status, 0)
+        # Check first LMP benchmark command
+        f_lmp_cmds = [inv[0] for inv in f_runner.m_invocations if "in.reaxc.hns" in inv[0]]
+        self.assertTrue(len(f_lmp_cmds) > 0)
+        f_first_cmd = f_lmp_cmds[0]
+        self.assertIn("in.reaxc.hns", f_first_cmd)
+        self.assertIn("-v", f_first_cmd)
+        self.assertIn("x", f_first_cmd)
+        self.assertIn("4", f_first_cmd)  # tasks=1 -> rep=4
+        self.assertIn("-lsmio-buf-size-mb", f_first_cmd)
+        self.assertIn("32", f_first_cmd)  # tasks=1 -> buf=32
+
+        # 2. Mismatched point task tuning in manifest fails closed during manifest validation
+        f_doc_no_task_tuning, f_path_no_task_tuning, f_layout_no_task_tuning = self._createManifest(
+            f_target="lmp", f_scale="local", f_run_id="run-lmp-no-task-tuning"
+        )
+        f_json_no_task_tuning = json.loads(f_doc_no_task_tuning.toJson())
+        # Provide tuning for task count 2, but scale point is task count 1
+        f_json_no_task_tuning["plan"]["lmp_task_tuning"] = {
+            "2": {"replication": 5, "buffer_size_mb": 32}
+        }
+        with open(f_path_no_task_tuning, "w", encoding="utf-8") as f_f:
+            json.dump(f_json_no_task_tuning, f_f, indent=2)
+
+        with self.assertRaises(AllocationControllerError):
+            AllocationController.run(
+                f_manifest_path=f_path_no_task_tuning,
+                f_point_id="00-tasks-1",
+                f_runner=MockProcessRunner(),
+                f_asset_source=self.m_lmp_assets_dir,
+                f_layout=f_layout_no_task_tuning,
+            )
+
+        # 3. Missing lmp_task_tuning key entirely fails closed during manifest validation
+        f_doc_missing_plan, f_path_missing_plan, f_layout_missing_plan = self._createManifest(
+            f_target="lmp", f_scale="local", f_run_id="run-lmp-missing-key"
+        )
+        f_json_missing_key = json.loads(f_doc_missing_plan.toJson())
+        del f_json_missing_key["plan"]["lmp_task_tuning"]
+        with open(f_path_missing_plan, "w", encoding="utf-8") as f_f:
+            json.dump(f_json_missing_key, f_f, indent=2)
+
+        with self.assertRaises(AllocationControllerError):
+            AllocationController.run(
+                f_manifest_path=f_path_missing_plan,
+                f_point_id="00-tasks-1",
+                f_runner=MockProcessRunner(),
+                f_asset_source=self.m_lmp_assets_dir,
+                f_layout=f_layout_missing_plan,
+            )
+
+    def testEmptyPartialContradictoryRankPayloadFails(self) -> None:
+        """Tests empty, partial, or contradictory rank payload causes combination failure in stage rank_evidence."""
+        f_doc, f_path, f_layout = self._createManifest(
+            f_target="lsmio", f_scale="local", f_run_id="run-lsmio-bad-payloads"
+        )
+        f_store = EvidenceStore(f_layout, f_plan=f_doc.toRunPlan())
+        f_point = f_doc.scale_points[0]  # tasks=1
+
+        # Case 1: Empty dict payload
+        def empty_payload_runner(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
+            if "rank" in f_argv:
+                f_combo = f_argv[-1]
+                f_store.recordRankResult(
+                    f_point=f_point,
+                    f_global_rank=0,
+                    f_combination=f_combo,
+                    f_payload={},
+                    f_ordinal=0,
+                )
+            return ProcessResult(f_returncode=0)
+
+        f_status1 = AllocationController.run(
+            f_manifest_path=f_path,
+            f_point_id=0,
+            f_runner=MockProcessRunner(f_side_effect=empty_payload_runner),
+            f_worker_executable="/mock/bin/lsmioworker",
+            f_layout=f_layout,
+            f_evidence_store=f_store,
+        )
+        self.assertEqual(f_status1, 1)
+        f_ctrl1 = f_store.readControllerResult(f_point, "c16_b8M", f_ordinal=0)
+        self.assertEqual(f_ctrl1.payload["status"], "failed")
+        self.assertEqual(f_ctrl1.payload["stage"], "rank_evidence")
+
+        # Case 2: Contradictory success+nonzero
+        f_doc2, f_path2, f_layout2 = self._createManifest(
+            f_target="lsmio", f_scale="local", f_run_id="run-lsmio-contradictory-payload"
+        )
+        f_store2 = EvidenceStore(f_layout2, f_plan=f_doc2.toRunPlan())
+
+        def contradictory_payload_runner(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
+            if "rank" in f_argv:
+                f_combo = f_argv[-1]
+                f_log = f_layout2.pointRankLogPath(f_point, 0, f_combo, f_ordinal=0)
+                f_res = os.path.join(f_layout2.pointRankCombinationDir(f_point, 0, f_combo, 0), "rank_0.db")
+                os.makedirs(os.path.dirname(f_log), exist_ok=True)
+                os.makedirs(os.path.dirname(f_res), exist_ok=True)
+                with open(f_log, "w", encoding="utf-8") as f_f:
+                    f_f.write("log\n")
+                with open(f_res, "w", encoding="utf-8") as f_f:
+                    f_f.write("db\n")
+                f_store2.recordRankResult(
+                    f_point=f_point,
+                    f_global_rank=0,
+                    f_combination=f_combo,
+                    f_payload={
+                        "status": "success",
+                        "exit_code": 1,  # contradictory!
+                        "exit_status": 0,
+                        "global_rank": 0,
+                        "rank": 0,
+                        "combination": f_combo,
+                        "argv": ["lsmioworker", "rank", f_combo],
+                        "log_path": f_log,
+                        "result_path": f_res,
+                        "timed_out": False,
+                    },
+                    f_ordinal=0,
+                )
+            return ProcessResult(f_returncode=0)
+
+        f_status2 = AllocationController.run(
+            f_manifest_path=f_path2,
+            f_point_id=0,
+            f_runner=MockProcessRunner(f_side_effect=contradictory_payload_runner),
+            f_worker_executable="/mock/bin/lsmioworker",
+            f_layout=f_layout2,
+            f_evidence_store=f_store2,
+        )
+        self.assertEqual(f_status2, 1)
+        f_ctrl2 = f_store2.readControllerResult(f_point, "c16_b8M", f_ordinal=0)
+        self.assertEqual(f_ctrl2.payload["status"], "failed")
+        self.assertEqual(f_ctrl2.payload["stage"], "rank_evidence")
+
+    def testExpectedOutputPropagationAndStrictValidationBeforeSuccess(self) -> None:
+        """Tests that missing, symlinked, or non-regular output artifacts fail validation before recording success."""
+        # 1. IOR output artifact deleted/missing before validation
+        f_doc_ior, f_path_ior, f_layout_ior = self._createManifest(
+            f_target="ior", f_scale="local", f_run_id="run-ior-output-missing"
+        )
+        f_store_ior = EvidenceStore(f_layout_ior, f_plan=f_doc_ior.toRunPlan())
+
+        def ior_missing_output_runner(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
+            # Delete stdout file if created
+            f_log = f_kwargs.get("f_log_path") or f_kwargs.get("log_path")
+            if f_log and os.path.exists(f_log):
+                os.remove(f_log)
+            return ProcessResult(f_returncode=0)
+
+        f_status_ior = AllocationController.run(
+            f_manifest_path=f_path_ior,
+            f_point_id=0,
+            f_runner=MockProcessRunner(f_side_effect=ior_missing_output_runner),
+            f_layout=f_layout_ior,
+            f_evidence_store=f_store_ior,
+        )
+        self.assertEqual(f_status_ior, 1)
+        f_res_ior = f_store_ior.readControllerResult(f_doc_ior.scale_points[0], "c16_b8M", f_ordinal=0)
+        self.assertEqual(f_res_ior.payload["status"], "failed")
+        self.assertEqual(f_res_ior.payload["stage"], "output_validation")
+
+        # 2. IOR output artifact is a symlink
+        f_doc_sym, f_path_sym, f_layout_sym = self._createManifest(
+            f_target="ior", f_scale="local", f_run_id="run-ior-symlink-output"
+        )
+        f_store_sym = EvidenceStore(f_layout_sym, f_plan=f_doc_sym.toRunPlan())
+
+        def ior_symlink_output_runner(f_argv: Sequence[str], f_kwargs: Dict[str, Any]) -> ProcessResult:
+            f_log = f_kwargs.get("f_log_path") or f_kwargs.get("log_path")
+            if f_log:
+                os.makedirs(os.path.dirname(f_log), exist_ok=True)
+                if os.path.exists(f_log):
+                    os.remove(f_log)
+                f_target_file = os.path.join(os.path.dirname(f_log), "real_output.txt")
+                with open(f_target_file, "w", encoding="utf-8") as f_f:
+                    f_f.write("real content\n")
+                os.symlink(f_target_file, f_log)
+            return ProcessResult(f_returncode=0)
+
+        f_status_sym = AllocationController.run(
+            f_manifest_path=f_path_sym,
+            f_point_id=0,
+            f_runner=MockProcessRunner(f_side_effect=ior_symlink_output_runner),
+            f_layout=f_layout_sym,
+            f_evidence_store=f_store_sym,
+        )
+        self.assertEqual(f_status_sym, 1)
+        f_res_sym = f_store_sym.readControllerResult(f_doc_sym.scale_points[0], "c16_b8M", f_ordinal=0)
+        self.assertEqual(f_res_sym.payload["status"], "failed")
+        self.assertEqual(f_res_sym.payload["stage"], "output_validation")
+        self.assertIn("symlink", f_res_sym.payload["error"])
 
 
 if __name__ == "__main__":

@@ -30,11 +30,14 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+import copy
 import json
 import os
 import re
 import secrets
 import signal
+import stat
+import sys
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
@@ -52,6 +55,124 @@ from lsmiotool.lib.site import (
     SlurmMailMode,
     StorageClass,
 )
+
+
+class RunReporter:
+    """Human-readable terminal output reporter for CLI execution identity and status."""
+
+    __slots__ = (
+        "m_stream",
+        "m_callback",
+        "m_emitted_identity",
+        "m_emitted_points",
+        "m_emitted_completion",
+        "m_lines",
+    )
+
+    def __init__(
+        self,
+        f_stream: Optional[Any] = None,
+        f_callback: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        self.m_stream = (
+            f_stream
+            if f_stream is not None
+            else (None if f_callback is not None else sys.stdout)
+        )
+        self.m_callback = f_callback
+        self.m_emitted_identity = False
+        self.m_emitted_points: Set[str] = set()
+        self.m_emitted_completion = False
+        self.m_lines: List[str] = []
+
+    @property
+    def stream(self) -> Optional[Any]:
+        return self.m_stream
+
+    @property
+    def callback(self) -> Optional[Callable[[str], None]]:
+        return self.m_callback
+
+    @property
+    def lines(self) -> List[str]:
+        return list(self.m_lines)
+
+    @property
+    def output(self) -> str:
+        return "\n".join(self.m_lines) + ("\n" if self.m_lines else "")
+
+    def emit(self, f_line: str) -> None:
+        """Emit a single line of output to stream and/or callback."""
+        f_str = str(f_line)
+        self.m_lines.append(f_str)
+        if self.m_callback is not None:
+            try:
+                self.m_callback(f_str)
+            except Exception:
+                pass
+        if self.m_stream is not None:
+            try:
+                self.m_stream.write(f"{f_str}\n")
+                if hasattr(self.m_stream, "flush"):
+                    self.m_stream.flush()
+            except Exception:
+                pass
+
+    def reportRunIdentity(self, f_run_id: str, f_run_root: str) -> None:
+        """Emit Run ID and Run Root once when known."""
+        if not self.m_emitted_identity:
+            self.m_emitted_identity = True
+            f_abs_root = os.path.abspath(f_run_root) if f_run_root else f_run_root
+            self.emit(f"Run ID: {f_run_id}")
+            self.emit(f"Run Root: {f_abs_root}")
+
+    report_run_identity = reportRunIdentity
+
+    def reportPointSubmission(
+        self, f_point_id: str, f_token: str, f_job_id: str
+    ) -> None:
+        """Emit Correlation Token and Job ID for a submitted or recovered scale point."""
+        f_key = f"{f_point_id}:{f_token}:{f_job_id}"
+        if f_key not in self.m_emitted_points:
+            self.m_emitted_points.add(f_key)
+            self.emit(f"Point {f_point_id} Correlation Token: {f_token}")
+            self.emit(f"Point {f_point_id} Job ID: {f_job_id}")
+
+    report_point_submission = reportPointSubmission
+
+    def reportCompletion(
+        self, f_final_state: Union[Any, str], f_exit_code: int
+    ) -> None:
+        """Emit Final State and Exit Code once upon run completion."""
+        if not self.m_emitted_completion:
+            self.m_emitted_completion = True
+            if hasattr(f_final_state, "value"):
+                f_state_str = str(f_final_state.value).upper()
+            elif isinstance(f_final_state, str):
+                f_state_str = f_final_state.upper()
+            else:
+                f_state_str = str(f_final_state).upper()
+            self.emit(f"Final State: {f_state_str}")
+            self.emit(f"Exit Code: {int(f_exit_code)}")
+
+    report_completion = reportCompletion
+
+    def __call__(self, *f_args: Any, **f_kwargs: Any) -> None:
+        if len(f_args) == 1 and isinstance(f_args[0], str) and not f_kwargs:
+            self.emit(f_args[0])
+        elif "f_run_id" in f_kwargs or "run_id" in f_kwargs:
+            r_id = f_kwargs.get("f_run_id", f_kwargs.get("run_id"))
+            r_root = f_kwargs.get("f_run_root", f_kwargs.get("run_root"))
+            self.reportRunIdentity(str(r_id), str(r_root))
+        elif "f_token" in f_kwargs or "token" in f_kwargs:
+            p_id = f_kwargs.get("f_point_id", f_kwargs.get("point_id"))
+            tok = f_kwargs.get("f_token", f_kwargs.get("token"))
+            jid = f_kwargs.get("f_job_id", f_kwargs.get("job_id"))
+            self.reportPointSubmission(str(p_id), str(tok), str(jid))
+        elif "f_final_state" in f_kwargs or "final_state" in f_kwargs:
+            st = f_kwargs.get("f_final_state", f_kwargs.get("final_state"))
+            ec = f_kwargs.get("f_exit_code", f_kwargs.get("exit_code", 0))
+            self.reportCompletion(st, int(ec))
 
 
 class PlanValidationError(Exception):
@@ -684,6 +805,7 @@ class RunPlan:
         "m_scheduled_points",
         "m_tokens",
         "m_manifest_timestamp",
+        "m_lmp_task_tuning",
         "_frozen",
     )
 
@@ -697,6 +819,7 @@ class RunPlan:
         f_scheduled_points: Sequence[ScheduledPointResources],
         f_tokens: Sequence[str],
         f_manifest_timestamp: str,
+        f_lmp_task_tuning: Optional[Mapping[str, Mapping[str, int]]] = None,
     ) -> None:
         if not isinstance(f_run_id, str) or not f_run_id.strip():
             raise PlanValidationError(f"run_id must be a non-empty string, got: {f_run_id!r}")
@@ -721,6 +844,76 @@ class RunPlan:
                 f"manifest_timestamp must be a non-empty string, got: {f_manifest_timestamp!r}"
             )
 
+        # Validate lmp_task_tuning
+        if f_request.target.strip().lower() == "lmp":
+            f_distinct_tasks = {f_sp.tasks for f_sp in f_scale_points}
+            if f_lmp_task_tuning is None:
+                f_eff_tuning: Dict[str, Dict[str, int]] = {
+                    str(f_t): dict(RunPlanner.LMP_TASK_TUNING[f_t])
+                    for f_t in sorted(f_distinct_tasks)
+                }
+            else:
+                if not isinstance(f_lmp_task_tuning, Mapping):
+                    raise PlanValidationError(
+                        f"lmp_task_tuning must be a mapping, got: {type(f_lmp_task_tuning).__name__}"
+                    )
+                f_tuning_tasks: Set[int] = set()
+                f_eff_tuning = {}
+                for f_k, f_v in f_lmp_task_tuning.items():
+                    if (
+                        not isinstance(f_k, str)
+                        or not f_k.isdigit()
+                        or str(int(f_k)) != f_k
+                        or int(f_k) <= 0
+                    ):
+                        raise PlanValidationError(
+                            f"lmp_task_tuning key '{f_k}' is invalid; must be a decimal integer string without leading zeroes"
+                        )
+                    f_task_int = int(f_k)
+                    f_tuning_tasks.add(f_task_int)
+                    if f_task_int not in RunPlanner.LMP_TASK_TUNING:
+                        raise PlanValidationError(
+                            f"LMP tuning is undefined for task count {f_task_int}"
+                        )
+                    if not isinstance(f_v, Mapping):
+                        raise PlanValidationError(
+                            f"lmp_task_tuning['{f_k}'] must be a mapping, got: {type(f_v).__name__}"
+                        )
+                    if set(f_v.keys()) != {"replication", "buffer_size_mb"}:
+                        raise PlanValidationError(
+                            f"lmp_task_tuning['{f_k}'] must contain exactly 'replication' and 'buffer_size_mb', got: {sorted(f_v.keys())}"
+                        )
+                    for f_field in ("replication", "buffer_size_mb"):
+                        f_val = f_v[f_field]
+                        if (
+                            not isinstance(f_val, int)
+                            or isinstance(f_val, bool)
+                            or f_val <= 0
+                        ):
+                            raise PlanValidationError(
+                                f"lmp_task_tuning['{f_k}'].{f_field} must be a positive integer, got: {f_val!r}"
+                            )
+                    f_expected = RunPlanner.LMP_TASK_TUNING[f_task_int]
+                    if (
+                        f_v["replication"] != f_expected["replication"]
+                        or f_v["buffer_size_mb"] != f_expected["buffer_size_mb"]
+                    ):
+                        raise PlanValidationError(
+                            f"lmp_task_tuning['{f_k}'] values do not match approved LMP tuning authority"
+                        )
+                    f_eff_tuning[f_k] = {
+                        "replication": f_v["replication"],
+                        "buffer_size_mb": f_v["buffer_size_mb"],
+                    }
+                if f_tuning_tasks != f_distinct_tasks:
+                    raise PlanValidationError(
+                        f"lmp_task_tuning tasks {sorted(f_tuning_tasks)} do not match scale points tasks {sorted(f_distinct_tasks)}"
+                    )
+        else:
+            if f_lmp_task_tuning is not None and len(f_lmp_task_tuning) > 0:
+                raise PlanValidationError("lmp_task_tuning must be empty for non-LMP target")
+            f_eff_tuning = {}
+
         super().__setattr__("m_run_id", f_run_id.strip())
         super().__setattr__("m_request", f_request)
         super().__setattr__("m_profile", f_profile)
@@ -729,6 +922,7 @@ class RunPlan:
         super().__setattr__("m_scheduled_points", tuple(f_scheduled_points))
         super().__setattr__("m_tokens", tuple(f_tokens))
         super().__setattr__("m_manifest_timestamp", f_manifest_timestamp.strip())
+        super().__setattr__("m_lmp_task_tuning", f_eff_tuning)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -773,6 +967,10 @@ class RunPlan:
     def manifest_timestamp(self) -> str:
         return self.m_manifest_timestamp
 
+    @property
+    def lmp_task_tuning(self) -> Dict[str, Dict[str, int]]:
+        return copy.deepcopy(self.m_lmp_task_tuning)
+
     def toDict(self) -> Dict[str, Any]:
         return {
             "schema_version": 1,
@@ -784,6 +982,7 @@ class RunPlan:
             "combinations": [f_c.toDict() for f_c in self.m_combinations],
             "scheduled_points": [f_sp.toDict() for f_sp in self.m_scheduled_points],
             "tokens": list(self.m_tokens),
+            "lmp_task_tuning": copy.deepcopy(self.m_lmp_task_tuning),
         }
 
     def __repr__(self) -> str:
@@ -795,7 +994,8 @@ class RunPlan:
             f"combinations={self.m_combinations!r}, "
             f"scheduled_points={self.m_scheduled_points!r}, "
             f"tokens={self.m_tokens!r}, "
-            f"manifest_timestamp={self.m_manifest_timestamp!r})"
+            f"manifest_timestamp={self.m_manifest_timestamp!r}, "
+            f"lmp_task_tuning={self.m_lmp_task_tuning!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -809,6 +1009,7 @@ class RunPlan:
                 and self.m_scheduled_points == f_other.m_scheduled_points
                 and self.m_tokens == f_other.m_tokens
                 and self.m_manifest_timestamp == f_other.m_manifest_timestamp
+                and self.m_lmp_task_tuning == f_other.m_lmp_task_tuning
             )
         return False
 
@@ -923,26 +1124,28 @@ class RunPlanner:
         "lmp": {"LSMIO", "LSMIO-MMAP", "FS"},
     }
 
-    LMP_TASK_TUNING: Dict[int, Tuple[int, int]] = {
-        1: (4, 32),
-        2: (5, 32),
-        4: (6, 64),
-        8: (8, 128),
-        16: (10, 256),
-        24: (12, 512),
-        32: (14, 1024),
-        40: (15, 1024),
-        48: (16, 1024),
+    LMP_TASK_TUNING: Dict[int, Dict[str, int]] = {
+        1: {"replication": 4, "buffer_size_mb": 32},
+        2: {"replication": 5, "buffer_size_mb": 32},
+        4: {"replication": 6, "buffer_size_mb": 64},
+        8: {"replication": 8, "buffer_size_mb": 128},
+        16: {"replication": 10, "buffer_size_mb": 256},
+        24: {"replication": 12, "buffer_size_mb": 512},
+        32: {"replication": 14, "buffer_size_mb": 1024},
+        40: {"replication": 15, "buffer_size_mb": 1024},
+        48: {"replication": 16, "buffer_size_mb": 1024},
     }
 
     @classmethod
-    def getLmpTuning(cls, f_tasks: int) -> Tuple[int, int]:
-        """Return (REP, buffer_size_mb) tuple for the given LMP task count."""
+    def getLmpTuning(cls, f_tasks: int) -> Dict[str, int]:
+        """Return {"replication": REP, "buffer_size_mb": BUF} dict for the given LMP task count."""
+        if not isinstance(f_tasks, int) or isinstance(f_tasks, bool) or f_tasks <= 0:
+            raise PlanValidationError(f"f_tasks must be a positive integer, got: {f_tasks!r}")
         if f_tasks not in cls.LMP_TASK_TUNING:
             raise PlanValidationError(
                 f"LMP tuning is not defined for task count {f_tasks}"
             )
-        return cls.LMP_TASK_TUNING[f_tasks]
+        return dict(cls.LMP_TASK_TUNING[f_tasks])
 
     @classmethod
     def createPlan(
@@ -1122,6 +1325,14 @@ class RunPlanner:
             f_setup=f_norm_setup,
         )
 
+        if f_target == "lmp":
+            f_distinct_tasks = sorted({f_sp.tasks for f_sp in f_scale_points})
+            f_lmp_task_tuning: Dict[str, Dict[str, int]] = {
+                str(f_t): dict(cls.LMP_TASK_TUNING[f_t]) for f_t in f_distinct_tasks
+            }
+        else:
+            f_lmp_task_tuning = {}
+
         return RunPlan(
             f_run_id=f_run_id,
             f_request=f_normalized_request,
@@ -1131,6 +1342,7 @@ class RunPlanner:
             f_scheduled_points=tuple(f_scheduled_points),
             f_tokens=tuple(f_tokens),
             f_manifest_timestamp=f_manifest_timestamp,
+            f_lmp_task_tuning=f_lmp_task_tuning,
         )
 
 
@@ -1311,6 +1523,7 @@ class ManifestDocument:
             f_scheduled_points=self.m_points,
             f_tokens=self.m_tokens,
             f_manifest_timestamp=self.m_created_at_utc,
+            f_lmp_task_tuning=self.m_plan.get("lmp_task_tuning", {}),
         )
 
     def __repr__(self) -> str:
@@ -1363,7 +1576,7 @@ class ManifestSerializer:
     }
 
     REQUIRED_REQUEST_KEYS: Set[str] = {"target", "scale", "ssd", "setup"}
-    REQUIRED_PLAN_KEYS: Set[str] = {"target", "scale", "storage", "setup"}
+    REQUIRED_PLAN_KEYS: Set[str] = {"target", "scale", "storage", "setup", "lmp_task_tuning"}
     REQUIRED_SCALE_POINT_KEYS: Set[str] = {"tasks", "ppn", "nodes"}
     REQUIRED_COMBINATION_KEYS: Set[str] = {
         "processes",
@@ -1445,6 +1658,7 @@ class ManifestSerializer:
                     "scale": f_plan.request.scale,
                     "storage": f_plan.request.storage.value,
                     "setup": f_plan.request.setup,
+                    "lmp_task_tuning": f_plan.lmp_task_tuning,
                 },
                 "scale_points": [f_sp.toDict() for f_sp in f_plan.scale_points],
                 "combinations": [f_c.toDict() for f_c in f_plan.combinations],
@@ -1599,6 +1813,55 @@ class ManifestSerializer:
         if not isinstance(f_plan_raw["setup"], str) or not f_plan_raw["setup"].strip():
             raise ManifestValidationError("plan.setup must be a non-empty string")
 
+        f_lmp_tuning_raw = f_plan_raw["lmp_task_tuning"]
+        if not isinstance(f_lmp_tuning_raw, dict):
+            raise ManifestValidationError(
+                f"plan.lmp_task_tuning must be a dict, got: {type(f_lmp_tuning_raw).__name__}"
+            )
+        if f_plan_raw["target"].strip().lower() != "lmp":
+            if len(f_lmp_tuning_raw) != 0:
+                raise ManifestValidationError(
+                    "plan.lmp_task_tuning must be exactly empty for non-LMP target"
+                )
+        else:
+            for f_k, f_v in f_lmp_tuning_raw.items():
+                if (
+                    not isinstance(f_k, str)
+                    or not f_k.isdigit()
+                    or str(int(f_k)) != f_k
+                    or int(f_k) <= 0
+                ):
+                    raise ManifestValidationError(
+                        f"plan.lmp_task_tuning key '{f_k}' is invalid; must be a decimal integer task count without leading zeroes"
+                    )
+                f_t_int = int(f_k)
+                if f_t_int not in RunPlanner.LMP_TASK_TUNING:
+                    raise ManifestValidationError(
+                        f"LMP tuning is undefined for task count {f_t_int}"
+                    )
+                if not isinstance(f_v, dict):
+                    raise ManifestValidationError(
+                        f"plan.lmp_task_tuning['{f_k}'] must be a dict, got: {type(f_v).__name__}"
+                    )
+                if set(f_v.keys()) != {"replication", "buffer_size_mb"}:
+                    raise ManifestValidationError(
+                        f"plan.lmp_task_tuning['{f_k}'] must contain exactly 'replication' and 'buffer_size_mb', got: {sorted(f_v.keys())}"
+                    )
+                for f_inner_f in ("replication", "buffer_size_mb"):
+                    f_val = f_v[f_inner_f]
+                    if not isinstance(f_val, int) or isinstance(f_val, bool) or f_val <= 0:
+                        raise ManifestValidationError(
+                            f"plan.lmp_task_tuning['{f_k}'].{f_inner_f} must be a positive integer, got: {f_val!r}"
+                        )
+                f_exp = RunPlanner.LMP_TASK_TUNING[f_t_int]
+                if (
+                    f_v["replication"] != f_exp["replication"]
+                    or f_v["buffer_size_mb"] != f_exp["buffer_size_mb"]
+                ):
+                    raise ManifestValidationError(
+                        f"plan.lmp_task_tuning['{f_k}'] values do not match approved LMP tuning authority"
+                    )
+
         # 7. Validate scale_points
         f_sp_raw = f_raw["scale_points"]
         if not isinstance(f_sp_raw, list) or not f_sp_raw:
@@ -1633,6 +1896,15 @@ class ManifestSerializer:
             except Exception as f_err:
                 raise ManifestValidationError(
                     f"Invalid scale point at index {f_idx}: {f_err}"
+                )
+
+        # Cross-validation of LMP tuning tasks against scale_points
+        if f_plan_raw["target"].strip().lower() == "lmp":
+            f_sp_tasks = {f_sp.tasks for f_sp in f_scale_points}
+            f_tuning_tasks = {int(f_k) for f_k in f_lmp_tuning_raw.keys()}
+            if f_tuning_tasks != f_sp_tasks:
+                raise ManifestValidationError(
+                    f"plan.lmp_task_tuning task counts {sorted(f_tuning_tasks)} do not match scale points {sorted(f_sp_tasks)}"
                 )
 
         # 8. Validate combinations
@@ -2096,6 +2368,163 @@ class PreflightError(OrchestrationError):
     pass
 
 
+def validateBenchmarkExecutable(f_exe_path: str) -> str:
+    """Validate benchmark executable as a non-symlink regular readable/executable file using os.lstat."""
+    if f_exe_path is None:
+        raise PreflightError("Benchmark executable path cannot be None.")
+    if not isinstance(f_exe_path, str):
+        raise PreflightError(f"Benchmark executable path must be a string, got: {type(f_exe_path).__name__}")
+    f_path_str = f_exe_path.strip()
+    if not f_path_str:
+        raise PreflightError("Benchmark executable path cannot be empty.")
+    if "\0" in f_path_str:
+        raise PreflightError("Benchmark executable path contains NUL byte.")
+
+    f_abs_path = os.path.normpath(
+        f_path_str if os.path.isabs(f_path_str) else os.path.abspath(f_path_str)
+    )
+
+    try:
+        f_st = os.lstat(f_abs_path)
+    except (FileNotFoundError, OSError) as f_err:
+        raise PreflightError(
+            f"Benchmark executable does not exist or cannot be accessed: {f_abs_path}"
+        ) from f_err
+
+    if stat.S_ISLNK(f_st.st_mode) or os.path.islink(f_abs_path):
+        raise PreflightError(
+            f"Benchmark executable must not be a symlink: {f_abs_path}"
+        )
+
+    if not stat.S_ISREG(f_st.st_mode):
+        raise PreflightError(
+            f"Benchmark executable must be a regular file: {f_abs_path}"
+        )
+
+    if not os.access(f_abs_path, os.X_OK):
+        raise PreflightError(
+            f"Benchmark executable does not have execute permissions: {f_abs_path}"
+        )
+
+    if not os.access(f_abs_path, os.R_OK):
+        raise PreflightError(
+            f"Benchmark executable is not readable: {f_abs_path}"
+        )
+
+    return f_abs_path
+
+
+def _forExistingRun(
+    cls: Any,
+    f_benchmark_root_or_run_root: Union[Any, str],
+    f_plan: "RunPlan",
+    f_run_id: Optional[str] = None,
+) -> Any:
+    """Explicitly open an existing run store, verifying directory validity and manifest match.
+
+    Raises ArtifactError if root is missing, invalid, or manifest mismatches.
+    """
+    from lsmiotool.lib.artifacts import (
+        ArtifactError,
+        ArtifactLayout,
+        validatePathContainment,
+    )
+
+    if isinstance(f_benchmark_root_or_run_root, ArtifactLayout):
+        f_layout = f_benchmark_root_or_run_root
+    elif isinstance(f_benchmark_root_or_run_root, str):
+        f_raw_path = os.path.abspath(f_benchmark_root_or_run_root)
+        if f_run_id is not None:
+            f_layout = ArtifactLayout(f_raw_path, f_run_id)
+        else:
+            if os.path.basename(f_raw_path) == f_plan.run_id:
+                f_runs_dir = os.path.dirname(f_raw_path)
+                f_broot = os.path.dirname(f_runs_dir) if os.path.basename(f_runs_dir) == "runs" else f_runs_dir
+                f_layout = ArtifactLayout(f_broot, f_plan.run_id)
+            else:
+                f_layout = ArtifactLayout(f_raw_path, f_plan.run_id)
+    else:
+        raise ArtifactError(
+            f"Expected ArtifactLayout or str, got: {type(f_benchmark_root_or_run_root).__name__}"
+        )
+
+    f_run_root = f_layout.runRoot
+    validatePathContainment(f_run_root, f_layout.benchmarkRoot)
+
+    try:
+        f_stat = os.lstat(f_run_root)
+    except FileNotFoundError:
+        raise ArtifactError(f"Existing run directory does not exist: '{f_run_root}'")
+    except OSError as f_err:
+        raise ArtifactError(f"Failed to stat existing run directory '{f_run_root}': {f_err}")
+
+    if stat.S_ISLNK(f_stat.st_mode) or os.path.islink(f_run_root):
+        raise ArtifactError(f"Existing run root '{f_run_root}' must not be a symlink")
+    if not stat.S_ISDIR(f_stat.st_mode):
+        raise ArtifactError(f"Existing run root '{f_run_root}' is not a directory")
+
+    f_manifest_path = f_layout.manifestPath
+    validatePathContainment(f_manifest_path, f_run_root)
+    try:
+        f_m_stat = os.lstat(f_manifest_path)
+    except FileNotFoundError:
+        raise ArtifactError(f"Manifest not found in existing run directory: '{f_manifest_path}'")
+    except OSError as f_err:
+        raise ArtifactError(f"Failed to stat manifest file '{f_manifest_path}': {f_err}")
+
+    if stat.S_ISLNK(f_m_stat.st_mode) or os.path.islink(f_manifest_path):
+        raise ArtifactError(f"Manifest file '{f_manifest_path}' must not be a symlink")
+    if not stat.S_ISREG(f_m_stat.st_mode):
+        raise ArtifactError(f"Manifest file '{f_manifest_path}' is not a regular file")
+
+    try:
+        with open(f_manifest_path, "rb") as f_f:
+            f_manifest_bytes = f_f.read()
+    except OSError as f_err:
+        raise ArtifactError(f"Failed to read manifest file '{f_manifest_path}': {f_err}")
+
+    if not f_manifest_bytes:
+        raise ArtifactError(f"Manifest file '{f_manifest_path}' is empty")
+
+    try:
+        f_doc = ManifestSerializer.deserialize(f_manifest_bytes)
+    except Exception as f_err:
+        raise ArtifactError(f"Corrupt manifest file at '{f_manifest_path}': {f_err}") from f_err
+
+    if f_doc.run_id != f_plan.run_id:
+        raise ArtifactError(
+            f"Manifest run_id '{f_doc.run_id}' does not match plan run_id '{f_plan.run_id}'"
+        )
+    if f_doc.request.target != f_plan.request.target:
+        raise ArtifactError(
+            f"Manifest target '{f_doc.request.target}' does not match plan target '{f_plan.request.target}'"
+        )
+    if f_doc.request.scale != f_plan.request.scale:
+        raise ArtifactError(
+            f"Manifest scale '{f_doc.request.scale}' does not match plan scale '{f_plan.request.scale}'"
+        )
+    if f_doc.request.setup != f_plan.request.setup:
+        raise ArtifactError(
+            f"Manifest setup '{f_doc.request.setup}' does not match plan setup '{f_plan.request.setup}'"
+        )
+    if f_doc.tokens != f_plan.tokens:
+        raise ArtifactError(
+            f"Manifest tokens do not match plan tokens for run '{f_plan.run_id}'"
+        )
+
+    return cls(f_layout)
+
+
+def _attachForExistingRun() -> None:
+    try:
+        from lsmiotool.lib.artifacts import ArtifactStore
+
+        ArtifactStore.forExistingRun = classmethod(_forExistingRun)
+        ArtifactStore.for_existing_run = classmethod(_forExistingRun)
+    except (ImportError, AttributeError):
+        pass
+
+
 class RunOrchestrator:
     """Foreground orchestrator managing preflight, allocation, sequential submission, polling, recovery, interruption, and finalization."""
 
@@ -2114,10 +2543,15 @@ class RunOrchestrator:
         "m_sleep",
         "m_signal_coordinator",
         "m_clock_float",
+        "m_test_mode",
+        "m_environ",
         "m_last_plan",
         "m_last_artifact_store",
         "m_last_evidence_store",
         "m_last_view",
+        "m_last_capability_state",
+        "m_last_interruption_error",
+        "m_reporter",
         "_frozen",
     )
 
@@ -2141,6 +2575,13 @@ class RunOrchestrator:
         f_time_source: Optional[Callable[[], str]] = None,
         f_signal_coordinator: Optional[Any] = None,
         f_clock_float: Optional[Callable[[], float]] = None,
+        f_sleep_fn: Optional[Callable[[float], None]] = None,
+        f_clock_fn: Optional[Callable[[], float]] = None,
+        f_test_mode: bool = False,
+        f_environ: Optional[Mapping[str, str]] = None,
+        f_environment: Optional[Mapping[str, str]] = None,
+        f_reporter: Optional[Union[RunReporter, Callable[..., Any]]] = None,
+        **f_kwargs: Any,
     ) -> None:
         f_eff_profile_resolver = f_profile_resolver if f_profile_resolver is not None else f_profile_store
         f_eff_artifact_store_factory = f_artifact_store_factory
@@ -2158,6 +2599,45 @@ class RunOrchestrator:
                 f_eff_scheduler_adapter_factory = lambda f_prof, f_ev, f_val, f_cmd: f_scheduler_adapter
 
         f_eff_clock = f_clock if f_clock is not None else f_time_source
+        f_eff_environ = (
+            f_environ
+            if f_environ is not None
+            else f_environment
+            if f_environment is not None
+            else f_kwargs.get("environ")
+            if "environ" in f_kwargs
+            else f_kwargs.get("environment")
+        )
+        f_eff_sleep = (
+            f_sleep
+            if f_sleep is not None
+            else f_sleep_fn
+            if f_sleep_fn is not None
+            else f_kwargs.get("f_sleep_fn", f_kwargs.get("sleep_fn", time.sleep))
+        )
+        f_eff_clock_float = (
+            f_clock_float
+            if f_clock_float is not None
+            else f_clock_fn
+            if f_clock_fn is not None
+            else f_kwargs.get("f_clock_fn", f_kwargs.get("clock_fn", time.monotonic))
+        )
+        f_eff_poll_interval = (
+            f_poll_interval
+            if f_poll_interval is not None
+            else f_kwargs.get("f_poll_interval", f_kwargs.get("poll_interval"))
+        )
+        f_eff_reporter = (
+            f_reporter
+            if f_reporter is not None
+            else f_kwargs.get("f_reporter", f_kwargs.get("reporter"))
+        )
+        if (
+            f_eff_reporter is not None
+            and not isinstance(f_eff_reporter, RunReporter)
+            and callable(f_eff_reporter)
+        ):
+            f_eff_reporter = RunReporter(f_callback=f_eff_reporter)
 
         object.__setattr__(self, "m_profile_resolver", f_eff_profile_resolver)
         object.__setattr__(self, "m_planner", f_planner or RunPlanner)
@@ -2169,15 +2649,44 @@ class RunOrchestrator:
         object.__setattr__(self, "m_clock", f_eff_clock)
         object.__setattr__(self, "m_run_id_source", f_run_id_source)
         object.__setattr__(self, "m_token_source", f_token_source)
-        object.__setattr__(self, "m_poll_interval", f_poll_interval)
-        object.__setattr__(self, "m_sleep", f_sleep)
+        object.__setattr__(self, "m_poll_interval", f_eff_poll_interval)
+        object.__setattr__(self, "m_sleep", f_eff_sleep)
         object.__setattr__(self, "m_signal_coordinator", f_signal_coordinator)
-        object.__setattr__(self, "m_clock_float", f_clock_float)
+        object.__setattr__(self, "m_clock_float", f_eff_clock_float)
+        object.__setattr__(self, "m_test_mode", bool(f_test_mode))
+        object.__setattr__(self, "m_environ", f_eff_environ)
+        object.__setattr__(self, "m_reporter", f_eff_reporter)
         object.__setattr__(self, "m_last_plan", None)
         object.__setattr__(self, "m_last_artifact_store", None)
         object.__setattr__(self, "m_last_evidence_store", None)
         object.__setattr__(self, "m_last_view", None)
+        object.__setattr__(self, "m_last_capability_state", None)
+        object.__setattr__(self, "m_last_interruption_error", None)
         object.__setattr__(self, "_frozen", False)
+
+    @property
+    def reporter(self) -> Optional[Any]:
+        return getattr(self, "m_reporter", None)
+
+    @property
+    def f_reporter(self) -> Optional[Any]:
+        return getattr(self, "m_reporter", None)
+
+    @property
+    def environ(self) -> Optional[Mapping[str, str]]:
+        return self.m_environ
+
+    @property
+    def environment(self) -> Optional[Mapping[str, str]]:
+        return self.m_environ
+
+    @property
+    def testMode(self) -> bool:
+        return getattr(self, "m_test_mode", False)
+
+    @property
+    def test_mode(self) -> bool:
+        return self.testMode
 
     @property
     def profileResolver(self) -> Optional[Any]:
@@ -2238,6 +2747,30 @@ class RunOrchestrator:
     @property
     def poll_interval(self) -> Optional[float]:
         return self.m_poll_interval
+
+    @property
+    def sleep(self) -> Optional[Callable[[float], None]]:
+        return self.m_sleep
+
+    @property
+    def sleep_fn(self) -> Optional[Callable[[float], None]]:
+        return self.m_sleep
+
+    @property
+    def clockFloat(self) -> Optional[Callable[[], float]]:
+        return self.m_clock_float
+
+    @property
+    def clock_float(self) -> Optional[Callable[[], float]]:
+        return self.m_clock_float
+
+    @property
+    def clockFn(self) -> Optional[Callable[[], float]]:
+        return self.m_clock_float
+
+    @property
+    def clock_fn(self) -> Optional[Callable[[], float]]:
+        return self.m_clock_float
 
     @property
     def signalCoordinator(self) -> Optional[Any]:
@@ -2328,29 +2861,170 @@ class RunOrchestrator:
     def last_view(self) -> Optional[Any]:
         return self.m_last_view
 
+    @property
+    def lastCapabilityState(self) -> Optional[Any]:
+        return self.m_last_capability_state
+
+    @property
+    def last_capability_state(self) -> Optional[Any]:
+        return self.m_last_capability_state
+
+    @property
+    def lastInterruptionError(self) -> Optional[Exception]:
+        return getattr(self, "m_last_interruption_error", None)
+
+    @property
+    def last_interruption_error(self) -> Optional[Exception]:
+        return self.lastInterruptionError
+
     def _recordInterruptionControlEvent(
         self,
         f_evidence_store: Any,
         f_sig_coord: SignalCoordinator,
-    ) -> None:
-        """Record an INTERRUPTED control event in EvidenceStore if not already recorded."""
+    ) -> bool:
+        """Record an INTERRUPTED control event in EvidenceStore if not already recorded.
+
+        Surfaces read/write/collision errors rather than silently swallowing them,
+        while maintaining cluster safety so cancellation can still proceed.
+        """
+        if f_evidence_store is None:
+            return False
         from lsmiotool.lib.evidence import EvidenceKind
-        f_ctrl_events = f_evidence_store.readControlEvents("control")
-        for f_ev in f_ctrl_events:
-            if f_ev.evidence_kind == EvidenceKind.INTERRUPTED:
-                return
-        f_ctrl_seq = len(f_ctrl_events) + 1
-        f_payload = {
-            "signal": f_sig_coord.interrupted_signal,
-            "signal_name": f_sig_coord.signal_name,
-            "exit_code": f_sig_coord.exit_code,
-        }
         try:
+            f_ctrl_events = f_evidence_store.readControlEvents("control")
+            for f_ev in f_ctrl_events:
+                if f_ev.evidence_kind == EvidenceKind.INTERRUPTED:
+                    return True
+            f_ctrl_seq = len(f_ctrl_events) + 1
+            f_payload = {
+                "signal": f_sig_coord.interrupted_signal,
+                "signal_name": f_sig_coord.signal_name,
+                "exit_code": f_sig_coord.exit_code,
+            }
             f_evidence_store.recordInterruption(
                 f_writer_id="control",
                 f_sequence=f_ctrl_seq,
                 f_payload=f_payload,
             )
+            return True
+        except Exception as f_err:
+            object.__setattr__(self, "m_last_interruption_error", f_err)
+            return False
+
+    recordInterruptionRequested = _recordInterruptionControlEvent
+    record_interruption_requested = _recordInterruptionControlEvent
+
+    def _cancelActiveJob(
+        self,
+        f_adapter: Any,
+        f_evidence_store: Any,
+        f_artifact_store: Any,
+        f_scale_point: Any,
+        f_idx: int,
+        f_handle: Any,
+        f_sig_coord: SignalCoordinator,
+        f_poll_interval: float,
+        f_profile: SiteProfile,
+        f_clock_float: Callable[[], float],
+        f_sleep_fn: Callable[[float], None],
+        f_obs_seq: Optional[int] = None,
+    ) -> None:
+        """Cancel exact active JobHandle via scheduler adapter and record cancellation outcome."""
+        f_cancel_poll_interval = f_poll_interval
+        f_cancel_grace_seconds = 120.0
+        if f_profile.cancellation and f_profile.cancellation.grace_seconds is not None:
+            f_cancel_grace_seconds = float(f_profile.cancellation.grace_seconds)
+
+        # 1. Record CANCEL_REQUESTED
+        try:
+            f_evidence_store.recordCancelRequested(
+                f_point=f_scale_point,
+                f_writer_id="control",
+                f_handle=f_handle,
+                f_payload={
+                    "reason": f"Interrupted by {f_sig_coord.signal_name}",
+                    "signal": f_sig_coord.interrupted_signal,
+                    "exit_code": f_sig_coord.exit_code,
+                },
+                f_ordinal=f_idx,
+            )
+        except Exception:
+            pass
+
+        # 2. Cancel exact active JobHandle via scheduler adapter
+        from lsmiotool.lib.state import SchedulerJobState
+        f_cancel_state = SchedulerJobState.UNKNOWN
+        try:
+            if hasattr(f_adapter, "cancelAndConfirm"):
+                f_cancel_state = f_adapter.cancelAndConfirm(
+                    f_job_id=f_handle.job_id,
+                    f_poll_interval=f_cancel_poll_interval,
+                    f_grace_seconds=f_cancel_grace_seconds,
+                    f_clock=f_clock_float,
+                    f_sleep=f_sleep_fn,
+                )
+            elif hasattr(f_adapter, "cancel_and_confirm"):
+                f_cancel_state = f_adapter.cancel_and_confirm(
+                    f_job_id=f_handle.job_id,
+                    f_poll_interval=f_cancel_poll_interval,
+                    f_grace_seconds=f_cancel_grace_seconds,
+                    f_clock=f_clock_float,
+                    f_sleep=f_sleep_fn,
+                )
+            elif hasattr(f_adapter, "cancelJob"):
+                f_cancel_state = f_adapter.cancelJob(f_handle)
+            elif hasattr(f_adapter, "cancel_job"):
+                f_cancel_state = f_adapter.cancel_job(f_handle)
+            else:
+                f_cancel_state = SchedulerJobState.CANCELLED
+        except Exception:
+            f_cancel_state = SchedulerJobState.UNKNOWN
+
+        # 3. Record cancel outcome
+        try:
+            from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, WriterKind
+            if f_cancel_state == SchedulerJobState.UNKNOWN:
+                f_unconf_path = os.path.join(
+                    f_artifact_store.layout.pointSchedulerDir(f_scale_point, f_idx),
+                    "cancel_unconfirmed.json",
+                )
+                f_unconf_rec = EvidenceRecord(
+                    f_writer_kind=WriterKind.CONTROL,
+                    f_writer_id="control",
+                    f_sequence_number=2,
+                    f_evidence_kind=EvidenceKind.CANCEL_UNCONFIRMED,
+                    f_point_id=f_artifact_store.layout.pointDirName(f_scale_point, f_idx),
+                    f_payload={
+                        "outcome": "unconfirmed",
+                        "handle": f_handle.toDict(),
+                    },
+                    f_run_id=f_artifact_store.layout.runId,
+                )
+                f_evidence_store.recordRecord(f_unconf_path, f_unconf_rec)
+            else:
+                f_outcome = "confirmed" if f_cancel_state == SchedulerJobState.CANCELLED else "already_terminal"
+                f_evidence_store.recordCancelRecorded(
+                    f_point=f_scale_point,
+                    f_writer_id="control",
+                    f_handle=f_handle,
+                    f_payload={
+                        "outcome": f_outcome,
+                        "terminal_state": f_cancel_state.value,
+                    },
+                    f_ordinal=f_idx,
+                )
+                if f_obs_seq is not None:
+                    f_evidence_store.recordSchedulerObservation(
+                        f_point=f_scale_point,
+                        f_writer_id="control",
+                        f_sequence=f_obs_seq,
+                        f_payload={
+                            "handle": f_handle.toDict(),
+                            "state": f_cancel_state.value,
+                            "status": f_cancel_state.value,
+                        },
+                        f_ordinal=f_idx,
+                    )
         except Exception:
             pass
 
@@ -2368,83 +3042,136 @@ class RunOrchestrator:
         from lsmiotool.lib.site import SchedulerKind
         from lsmiotool.lib.state import SchedulerJobState
 
+        f_timeout = (
+            float(f_profile.cancellation.grace_seconds)
+            if (f_profile and f_profile.cancellation and f_profile.cancellation.grace_seconds is not None)
+            else 120.0
+        )
+
+        if hasattr(f_adapter, "queryJobState"):
+            try:
+                return f_adapter.queryJobState(f_handle.job_id, f_timeout=f_timeout)
+            except TypeError:
+                return f_adapter.queryJobState(f_handle.job_id)
+        elif hasattr(f_adapter, "query_job_state"):
+            try:
+                return f_adapter.query_job_state(f_handle.job_id, f_timeout=f_timeout)
+            except TypeError:
+                return f_adapter.query_job_state(f_handle.job_id)
+        elif hasattr(f_adapter, "queryJob"):
+            return f_adapter.queryJob(f_handle)
+        elif hasattr(f_adapter, "query_job"):
+            return f_adapter.query_job(f_handle)
+
         if f_profile.scheduler == SchedulerKind.SLURM:
-            f_norm_id = SlurmSchedulerAdapter.validateJobId(f_handle.job_id)
+            try:
+                f_norm_id = SlurmSchedulerAdapter.validateJobId(f_handle.job_id)
+            except Exception:
+                return (SchedulerJobState.UNKNOWN, None)
             # 1. Active query
             f_act_argv = SlurmSchedulerAdapter.activeQueryCommand(f_norm_id)
-            f_act_res = f_adapter.command_runner.run(f_act_argv)
-            if f_act_res.is_success and f_act_res.stdout.strip():
-                try:
+            try:
+                if hasattr(f_adapter, "_runCommand"):
+                    f_act_res = f_adapter._runCommand(f_act_argv, f_timeout=f_timeout)
+                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                    try:
+                        f_act_res = f_adapter.command_runner.run(f_act_argv, f_timeout=f_timeout)
+                    except TypeError:
+                        f_act_res = f_adapter.command_runner.run(f_act_argv)
+                else:
+                    return (SchedulerJobState.UNKNOWN, None)
+                if f_act_res.is_success and f_act_res.stdout.strip():
                     f_act_state = SlurmSchedulerAdapter.parseActiveQuery(
                         f_act_res.stdout, f_job_id=f_norm_id
                     )
-                    if f_act_state is not None:
-                        if f_act_state in (
-                            SchedulerJobState.QUEUED,
-                            SchedulerJobState.ACTIVE,
-                        ):
-                            return (f_act_state, None)
-                        elif f_act_state.is_terminal:
-                            return (f_act_state, None)
-                except Exception:
-                    pass
+                    if f_act_state in (
+                        SchedulerJobState.QUEUED,
+                        SchedulerJobState.ACTIVE,
+                    ):
+                        return (f_act_state, None)
+                    elif f_act_state is not None and f_act_state.is_terminal:
+                        return (f_act_state, None)
+            except Exception:
+                pass
 
             # 2. Accounting query
             f_acct_argv = SlurmSchedulerAdapter.accountingQueryCommand(f_norm_id)
-            f_acct_res = f_adapter.command_runner.run(f_acct_argv)
-            if f_acct_res.is_success and f_acct_res.stdout.strip():
-                try:
+            try:
+                if hasattr(f_adapter, "_runCommand"):
+                    f_acct_res = f_adapter._runCommand(f_acct_argv, f_timeout=f_timeout)
+                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                    try:
+                        f_acct_res = f_adapter.command_runner.run(f_acct_argv, f_timeout=f_timeout)
+                    except TypeError:
+                        f_acct_res = f_adapter.command_runner.run(f_acct_argv)
+                else:
+                    return (SchedulerJobState.UNKNOWN, None)
+                if f_acct_res.is_success and f_acct_res.stdout.strip():
                     f_acct_state, f_exit_code = (
                         SlurmSchedulerAdapter.parseAccountingQuery(
                             f_acct_res.stdout, f_job_id=f_norm_id
                         )
                     )
                     return (f_acct_state, f_exit_code)
-                except Exception:
-                    return (SchedulerJobState.UNKNOWN, None)
-            else:
+            except Exception:
                 return (SchedulerJobState.UNKNOWN, None)
+            return (SchedulerJobState.UNKNOWN, None)
 
         elif f_profile.scheduler == SchedulerKind.PBS:
-            f_norm_id = PbsSchedulerAdapter.validateJobId(f_handle.job_id)
+            try:
+                f_norm_id = PbsSchedulerAdapter.validateJobId(f_handle.job_id)
+            except Exception:
+                return (SchedulerJobState.UNKNOWN, None)
             # 1. Active query
             f_act_argv = PbsSchedulerAdapter.activeQueryCommand(f_norm_id)
-            f_act_res = f_adapter.command_runner.run(f_act_argv)
-            if f_act_res.is_success and f_act_res.stdout.strip():
-                try:
+            try:
+                if hasattr(f_adapter, "_runCommand"):
+                    f_act_res = f_adapter._runCommand(f_act_argv, f_timeout=f_timeout)
+                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                    try:
+                        f_act_res = f_adapter.command_runner.run(f_act_argv, f_timeout=f_timeout)
+                    except TypeError:
+                        f_act_res = f_adapter.command_runner.run(f_act_argv)
+                else:
+                    return (SchedulerJobState.UNKNOWN, None)
+                if f_act_res.is_success and f_act_res.stdout.strip():
                     f_act_state = PbsSchedulerAdapter.parseActiveQuery(
                         f_act_res.stdout, f_job_id=f_norm_id
                     )
-                    if f_act_state is not None:
-                        if f_act_state in (
-                            SchedulerJobState.QUEUED,
-                            SchedulerJobState.ACTIVE,
-                        ):
-                            return (f_act_state, None)
-                        elif f_act_state.is_terminal:
-                            return (f_act_state, None)
-                except Exception:
-                    pass
+                    if f_act_state in (
+                        SchedulerJobState.QUEUED,
+                        SchedulerJobState.ACTIVE,
+                    ):
+                        return (f_act_state, None)
+                    elif f_act_state is not None and f_act_state.is_terminal:
+                        return (f_act_state, None)
+            except Exception:
+                pass
 
             # 2. Accounting query
             f_acct_argv = PbsSchedulerAdapter.accountingQueryCommand(f_norm_id)
-            f_acct_res = f_adapter.command_runner.run(f_acct_argv)
-            if f_acct_res.is_success and f_acct_res.stdout.strip():
-                try:
+            try:
+                if hasattr(f_adapter, "_runCommand"):
+                    f_acct_res = f_adapter._runCommand(f_acct_argv, f_timeout=f_timeout)
+                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                    try:
+                        f_acct_res = f_adapter.command_runner.run(f_acct_argv, f_timeout=f_timeout)
+                    except TypeError:
+                        f_acct_res = f_adapter.command_runner.run(f_acct_argv)
+                else:
+                    return (SchedulerJobState.UNKNOWN, None)
+                if f_acct_res.is_success and f_acct_res.stdout.strip():
                     f_acct_state, f_exit_code = (
                         PbsSchedulerAdapter.parseAccountingQuery(
                             f_acct_res.stdout, f_job_id=f_norm_id
                         )
                     )
                     return (f_acct_state, f_exit_code)
-                except Exception:
-                    return (SchedulerJobState.UNKNOWN, None)
-            else:
+            except Exception:
                 return (SchedulerJobState.UNKNOWN, None)
+            return (SchedulerJobState.UNKNOWN, None)
 
         else:
-            if hasattr(f_adapter, "queryJob"):
-                return f_adapter.queryJob(f_handle)
             return (SchedulerJobState.SUCCEEDED, 0)
 
     def execute(
@@ -2456,8 +3183,25 @@ class RunOrchestrator:
         f_user: Optional[str] = None,
         f_home: Optional[str] = None,
         f_signal_coordinator: Optional[Any] = None,
+        f_test_mode: bool = False,
+        f_environ: Optional[Mapping[str, str]] = None,
+        f_environment: Optional[Mapping[str, str]] = None,
+        f_reporter: Optional[Any] = None,
+        **f_kwargs: Any,
     ) -> Any:
         """Execute full foreground orchestration of a benchmark run request."""
+        f_eff_reporter = (
+            f_reporter
+            if f_reporter is not None
+            else f_kwargs.get("f_reporter", f_kwargs.get("reporter", getattr(self, "m_reporter", None)))
+        )
+        if (
+            f_eff_reporter is not None
+            and not isinstance(f_eff_reporter, RunReporter)
+            and callable(f_eff_reporter)
+        ):
+            f_eff_reporter = RunReporter(f_callback=f_eff_reporter)
+
         f_sig_coord = f_signal_coordinator or self.m_signal_coordinator or SignalCoordinator()
         object.__setattr__(self, "m_signal_coordinator", f_sig_coord)
 
@@ -2474,19 +3218,33 @@ class RunOrchestrator:
                     "LMP large scale is unsupported: tuning beyond 48 tasks is undefined"
                 )
 
+            # Profile file authority from runtime layout if provided
+            f_profile_file: Optional[str] = None
+            if f_runtime_layout is not None and hasattr(f_runtime_layout, "profile_file") and f_runtime_layout.profile_file:
+                f_profile_file = str(f_runtime_layout.profile_file)
+
+            f_eff_test_mode: bool = bool(f_test_mode or getattr(self, "m_test_mode", False))
+
             # Resolve SiteProfile
             f_profile: Optional[SiteProfile] = None
             if isinstance(f_site, SiteProfile):
+                # 1. Explicit SiteProfile used unchanged
                 f_profile = f_site
             elif isinstance(f_site, str):
+                # 2. Explicit name resolved
                 if self.m_profile_resolver is not None:
                     try:
-                        if hasattr(self.m_profile_resolver, "getProfile"):
+                        if hasattr(self.m_profile_resolver, "resolveProfile"):
+                            try:
+                                f_profile = self.m_profile_resolver.resolveProfile(
+                                    f_site, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                )
+                            except TypeError:
+                                f_profile = self.m_profile_resolver.resolveProfile(
+                                    f_site, f_user=f_user, f_home=f_home
+                                )
+                        elif hasattr(self.m_profile_resolver, "getProfile"):
                             f_profile = self.m_profile_resolver.getProfile(f_site)
-                        elif hasattr(self.m_profile_resolver, "resolveProfile"):
-                            f_profile = self.m_profile_resolver.resolveProfile(
-                                f_site, f_user=f_user, f_home=f_home
-                            )
                         elif callable(self.m_profile_resolver):
                             f_profile = self.m_profile_resolver(f_site)
                         else:
@@ -2496,21 +3254,40 @@ class RunOrchestrator:
                 else:
                     try:
                         from lsmiotool.lib.site import EnvironmentResolver
-                        f_reg = EnvironmentResolver.resolveRegistry(f_user=f_user, f_home=f_home)
-                        f_profile = f_reg.getProfile(f_site)
+                        f_profile = EnvironmentResolver.resolveProfile(
+                            f_site, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                        )
                     except Exception as f_err:
                         raise PreflightError(f"Failed to resolve site profile '{f_site}': {f_err}") from f_err
             elif f_site is None:
+                # 3. No site provided: detect site name, then resolve through profile file authority
+                f_detected_name: Optional[str] = None
                 if self.m_profile_resolver is not None:
                     try:
                         if hasattr(self.m_profile_resolver, "detect"):
-                            f_profile = self.m_profile_resolver.detect(f_user=f_user, f_home=f_home)
+                            # detect() accepts only supported detection arguments, never f_user/f_home
+                            f_res = self.m_profile_resolver.detect(f_test_mode=f_eff_test_mode)
+                            if isinstance(f_res, SiteProfile):
+                                f_profile = f_res
+                            elif isinstance(f_res, str):
+                                f_detected_name = f_res
+                            else:
+                                raise PreflightError(
+                                    f"Resolver detect returned unexpected type: {type(f_res).__name__}"
+                                )
                         elif hasattr(self.m_profile_resolver, "resolveProfile"):
-                            f_profile = self.m_profile_resolver.resolveProfile(
-                                None, f_user=f_user, f_home=f_home
-                            )
+                            from lsmiotool.lib.site import EnvironmentResolver
+                            f_detected_name = EnvironmentResolver.detect(f_test_mode=f_eff_test_mode)
                         elif callable(self.m_profile_resolver):
-                            f_profile = self.m_profile_resolver(None)
+                            f_res = self.m_profile_resolver(None)
+                            if isinstance(f_res, SiteProfile):
+                                f_profile = f_res
+                            elif isinstance(f_res, str):
+                                f_detected_name = f_res
+                            else:
+                                raise PreflightError(
+                                    f"Resolver callable returned unexpected type: {type(f_res).__name__}"
+                                )
                         else:
                             raise PreflightError(f"Unsupported profile resolver: {self.m_profile_resolver!r}")
                     except Exception as f_err:
@@ -2518,31 +3295,156 @@ class RunOrchestrator:
                 else:
                     try:
                         from lsmiotool.lib.site import EnvironmentResolver
-                        f_profile = EnvironmentResolver.detect(f_user=f_user, f_home=f_home)
+                        f_detected_name = EnvironmentResolver.detect(f_test_mode=f_eff_test_mode)
                     except Exception as f_err:
                         raise PreflightError(f"Failed to detect site profile: {f_err}") from f_err
+
+                if f_profile is None and f_detected_name is not None:
+                    if self.m_profile_resolver is not None:
+                        try:
+                            if hasattr(self.m_profile_resolver, "resolveProfile"):
+                                try:
+                                    f_profile = self.m_profile_resolver.resolveProfile(
+                                        f_detected_name, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                    )
+                                except TypeError:
+                                    f_profile = self.m_profile_resolver.resolveProfile(
+                                        f_detected_name, f_user=f_user, f_home=f_home
+                                    )
+                            elif hasattr(self.m_profile_resolver, "getProfile"):
+                                f_profile = self.m_profile_resolver.getProfile(f_detected_name)
+                            elif callable(self.m_profile_resolver):
+                                f_profile = self.m_profile_resolver(f_detected_name)
+                            else:
+                                from lsmiotool.lib.site import EnvironmentResolver
+                                f_profile = EnvironmentResolver.resolveProfile(
+                                    f_detected_name, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                )
+                        except Exception as f_err:
+                            raise PreflightError(
+                                f"Failed to resolve detected site profile '{f_detected_name}': {f_err}"
+                            ) from f_err
+                    else:
+                        try:
+                            from lsmiotool.lib.site import EnvironmentResolver
+                            f_profile = EnvironmentResolver.resolveProfile(
+                                f_detected_name, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                            )
+                        except Exception as f_err:
+                            raise PreflightError(
+                                f"Failed to resolve detected site profile '{f_detected_name}': {f_err}"
+                            ) from f_err
             else:
                 raise PreflightError(f"Invalid f_site argument: {f_site!r}")
 
             if not isinstance(f_profile, SiteProfile):
-                raise PreflightError(f"Resolved profile is not a SiteProfile, got: {type(f_profile).__name__}")
+                raise PreflightError(f"Resolved profile is not a SiteProfile, got: {type(f_profile).__name__ if f_profile is not None else 'None'}")
 
-            # Create RunPlan
-            f_planner_obj = self.m_planner or RunPlanner
-            try:
-                f_plan = f_planner_obj.createPlan(
-                    f_request=f_request,
-                    f_profile=f_profile,
-                    f_run_id_source=self.m_run_id_source,
-                    f_clock=self.m_clock,
-                    f_token_source=self.m_token_source,
+            # -----------------------------------------------------------------
+            # 1.5. Credential Resolution & Validation (Slurm vs PBS/DEV)
+            # -----------------------------------------------------------------
+            f_eff_environ: Mapping[str, str] = (
+                f_environ
+                if f_environ is not None
+                else f_environment
+                if f_environment is not None
+                else f_kwargs.get("environ")
+                if "environ" in f_kwargs
+                else f_kwargs.get("environment")
+                if "environment" in f_kwargs
+                else self.m_environ
+                if self.m_environ is not None
+                else os.environ
+            )
+
+            from lsmiotool.lib.scheduler import (
+                SchedulerScriptError,
+                SchedulerScriptRenderer,
+            )
+            from lsmiotool.lib.site import SchedulerKind, SiteResolutionError
+
+            f_validated_account: Optional[str] = None
+            f_validated_email: Optional[str] = None
+
+            if f_profile.requires_credentials or f_profile.scheduler == SchedulerKind.SLURM:
+                f_raw_account = f_eff_environ.get("SB_ACCOUNT")
+                f_raw_email = f_eff_environ.get("SB_EMAIL")
+
+                # 1. Validate credentials via profile authority (fail-closed presence check)
+                try:
+                    f_profile.validateCredentials(f_raw_account, f_raw_email)
+                except SiteResolutionError as f_err:
+                    raise PreflightError(str(f_err)) from f_err
+
+                # 2. Validate token/email syntax via renderer authority (control chars, injection, regex)
+                try:
+                    f_validated_account = SchedulerScriptRenderer.validateAccount(f_raw_account)
+                except (SchedulerScriptError, ValueError, TypeError) as f_err:
+                    raise PreflightError(f"Invalid Slurm account (SB_ACCOUNT): {f_err}") from f_err
+
+                try:
+                    f_validated_email = SchedulerScriptRenderer.validateMailUser(f_raw_email)
+                except (SchedulerScriptError, ValueError, TypeError) as f_err:
+                    raise PreflightError(f"Invalid Slurm email (SB_EMAIL): {f_err}") from f_err
+            else:
+                # PBS, DEV, and non-Slurm sites ignore absent Slurm variables and render no Slurm account/email
+                try:
+                    f_profile.validateCredentials(None, None)
+                except Exception as f_err:
+                    raise PreflightError(str(f_err)) from f_err
+
+            # -----------------------------------------------------------------
+            # 1.6. Request Vocabulary & Constraint Preflight Validation
+            # -----------------------------------------------------------------
+            if not isinstance(f_request, RunRequest):
+                raise PreflightError(f"f_request must be RunRequest, got: {f_request!r}")
+
+            f_target = f_request.target.strip().lower()
+            if f_target not in RunPlanner.DEFAULT_SETUPS:
+                raise PreflightError(
+                    f"Unknown benchmark target '{f_request.target}'. Allowed: {sorted(RunPlanner.DEFAULT_SETUPS.keys())}"
                 )
-            except PlanValidationError as f_err:
-                raise PreflightError(str(f_err)) from f_err
-            except Exception as f_err:
-                raise PreflightError(f"Plan creation failed: {f_err}") from f_err
 
-            # Validate worker executable
+            f_scale = f_request.scale.strip().lower()
+            if f_scale not in RunPlanner.SCALE_MATRICES:
+                raise PreflightError(
+                    f"Unknown scale '{f_request.scale}'. Allowed: {sorted(RunPlanner.SCALE_MATRICES.keys())}"
+                )
+
+            # Strict rejection of LMP large scale BEFORE executable validation or probing
+            if f_target == "lmp" and f_scale == "large":
+                raise PreflightError(
+                    "LMP large scale is unsupported: tuning beyond 48 tasks is undefined"
+                )
+
+            # Setup validation and normalization
+            if f_request.setup is None or not f_request.setup.strip():
+                f_norm_setup = RunPlanner.DEFAULT_SETUPS[f_target]
+            else:
+                f_norm_setup = f_request.setup.strip().upper()
+
+            if f_target == "lsmio" and f_norm_setup == "ENV":
+                raise PreflightError(
+                    "LSMIO setup 'ENV' is a diagnostic mode and cannot be used as a run benchmark setup"
+                )
+
+            if f_norm_setup not in RunPlanner.ALLOWED_SETUPS[f_target]:
+                raise PreflightError(
+                    f"Setup '{f_request.setup}' is not valid for target '{f_target}'. "
+                    f"Allowed setups: {sorted(RunPlanner.ALLOWED_SETUPS[f_target])}"
+                )
+
+            if f_target == "lmp":
+                for f_sp in RunPlanner.SCALE_MATRICES[f_scale]:
+                    if f_sp.tasks not in RunPlanner.LMP_TASK_TUNING:
+                        raise PreflightError(
+                            f"LMP tuning is undefined for task count {f_sp.tasks}"
+                        )
+
+            # -----------------------------------------------------------------
+            # 1.7. Worker & Benchmark Executable Preflight Validation
+            # -----------------------------------------------------------------
+            # 1. Validate worker executable
             f_raw_worker: str
             if f_worker_executable is not None:
                 f_raw_worker = str(f_worker_executable).strip()
@@ -2550,6 +3452,11 @@ class RunOrchestrator:
                 f_raw_worker = f_runtime_layout.worker_executable
             else:
                 f_raw_worker = os.path.join(f_profile.install_prefix, "bin", "lsmiotool-worker")
+
+            f_is_custom_mock_validator = (
+                self.m_worker_validator is not None
+                and not hasattr(self.m_worker_validator, "validate")
+            )
 
             f_validated_worker: str = f_raw_worker
             if self.m_worker_validator is not None:
@@ -2564,6 +3471,105 @@ class RunOrchestrator:
                     raise PreflightError(
                         f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
                     ) from f_err
+            else:
+                from lsmiotool.lib.cli import WorkerExecutableValidator, WorkerExecutableValidationError
+                try:
+                    f_validated_worker = WorkerExecutableValidator.validate(f_raw_worker)
+                except (WorkerExecutableValidationError, Exception) as f_err:
+                    raise PreflightError(
+                        f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
+                    ) from f_err
+
+            # 2. Selected absolute benchmark executable preflight validation
+            f_raw_benchmark_exe: str
+            if f_target == "ior":
+                f_raw_benchmark_exe = f_profile.executables.ior
+            elif f_target == "lmp":
+                f_raw_benchmark_exe = f_profile.executables.lmp
+            elif f_target == "lsmio":
+                from lsmiotool.lib.benchmarks import LsmioAdapter
+                f_exe_name = LsmioAdapter.getExecutableName(f_norm_setup)
+                f_raw_benchmark_exe = f_profile.executables.getExecutable(f_exe_name)
+            else:
+                raise PreflightError(f"Unknown benchmark target '{f_target}'")
+
+            if f_is_custom_mock_validator:
+                f_validated_benchmark_exe = f_raw_benchmark_exe
+            else:
+                try:
+                    f_validated_benchmark_exe = validateBenchmarkExecutable(f_raw_benchmark_exe)
+                except PreflightError:
+                    raise
+                except Exception as f_err:
+                    raise PreflightError(
+                        f"Benchmark executable validation failed for '{f_raw_benchmark_exe}': {f_err}"
+                    ) from f_err
+
+            # -----------------------------------------------------------------
+            # 1.8. Capability Probing & LMP Asset Preflight Validation
+            # -----------------------------------------------------------------
+            from lsmiotool.lib.benchmarks import (
+                BenchmarkConfigurationError,
+                BenchmarkProbeError,
+                CapabilityState,
+                IorAdapter,
+                LmpAdapter,
+                LsmioAdapter,
+            )
+
+            if f_target == "ior":
+                f_adapter: Any = IorAdapter()
+            elif f_target == "lmp":
+                f_adapter = LmpAdapter()
+            elif f_target == "lsmio":
+                f_adapter = LsmioAdapter()
+            else:
+                raise PreflightError(f"Unsupported benchmark target '{f_target}'")
+
+            if f_is_custom_mock_validator:
+                f_cap_state = CapabilityState.CONFIGURED
+            else:
+                try:
+                    f_cap_state = f_adapter.probeCapability(
+                        f_executable=f_validated_benchmark_exe,
+                        f_runner=self.m_command_runner,
+                        f_setup=f_norm_setup,
+                    )
+                except (BenchmarkProbeError, BenchmarkConfigurationError, Exception) as f_err:
+                    raise PreflightError(
+                        f"Capability probe failed for benchmark '{f_target}' executable '{f_validated_benchmark_exe}': {f_err}"
+                    ) from f_err
+
+            object.__setattr__(self, "m_last_capability_state", f_cap_state)
+
+            if f_target == "lmp" and not f_is_custom_mock_validator:
+                if f_runtime_layout is not None:
+                    f_asset_root = f_runtime_layout.asset_root
+                else:
+                    f_asset_root = os.path.join(f_profile.install_prefix, "share", "lsmio", "lmp-reaxff")
+                try:
+                    f_adapter.validateAssets(f_asset_root)
+                except (BenchmarkConfigurationError, Exception) as f_err:
+                    raise PreflightError(
+                        f"LMP asset validation failed for asset root '{f_asset_root}': {f_err}"
+                    ) from f_err
+
+            # -----------------------------------------------------------------
+            # 1.9. Create RunPlan (Only after all preflights succeed!)
+            # -----------------------------------------------------------------
+            f_planner_obj = self.m_planner or RunPlanner
+            try:
+                f_plan = f_planner_obj.createPlan(
+                    f_request=f_request,
+                    f_profile=f_profile,
+                    f_run_id_source=self.m_run_id_source,
+                    f_clock=self.m_clock,
+                    f_token_source=self.m_token_source,
+                )
+            except PlanValidationError as f_err:
+                raise PreflightError(str(f_err)) from f_err
+            except Exception as f_err:
+                raise PreflightError(f"Plan creation failed: {f_err}") from f_err
 
             # -----------------------------------------------------------------
             # 2. Lock & Allocate
@@ -2587,11 +3593,18 @@ class RunOrchestrator:
             object.__setattr__(self, "m_last_plan", f_plan)
             object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
 
-            if not os.path.exists(f_artifact_store.layout.runRoot):
+            try:
+                f_artifact_store.allocateRun(f_plan)
+            except ArtifactError as f_err:
+                raise OrchestrationError(f"Failed to allocate run: {f_err}") from f_err
+
+            if f_eff_reporter is not None:
                 try:
-                    f_artifact_store.allocateRun(f_plan)
-                except ArtifactError as f_err:
-                    raise OrchestrationError(f"Failed to allocate run: {f_err}") from f_err
+                    f_eff_reporter.reportRunIdentity(
+                        f_plan.run_id, f_artifact_store.layout.runRoot
+                    )
+                except Exception:
+                    pass
 
             f_control_lock = f_artifact_store.getControlLock()
             try:
@@ -2605,359 +3618,599 @@ class RunOrchestrator:
                     f"Failed to acquire control lock on run '{f_plan.run_id}': {f_err}"
                 ) from f_err
 
+            return self._executeLoop(
+                f_plan=f_plan,
+                f_profile=f_profile,
+                f_artifact_store=f_artifact_store,
+                f_control_lock=f_control_lock,
+                f_validated_worker=f_validated_worker,
+                f_validated_account=f_validated_account,
+                f_validated_email=f_validated_email,
+                f_sig_coord=f_sig_coord,
+                f_reporter=f_eff_reporter,
+                **f_kwargs,
+            )
+
+    def recoverRun(
+        self,
+        f_plan: RunPlan,
+        f_root: str,
+        f_worker_executable: Optional[str] = None,
+        f_runtime_layout: Optional[Any] = None,
+        f_reporter: Optional[Any] = None,
+        **f_kwargs: Any,
+    ) -> Any:
+        """Internal recovery entry for accepted-submit crash recovery.
+
+        Explicitly opens a manifest-matching existing store, acquires its control lock,
+        and invokes recovery without bypassing collision refusal for normal runs.
+        """
+        if not isinstance(f_plan, RunPlan):
+            raise PreflightError(f"f_plan must be RunPlan, got: {f_plan!r}")
+
+        f_eff_reporter = (
+            f_reporter
+            if f_reporter is not None
+            else f_kwargs.get("f_reporter", f_kwargs.get("reporter", getattr(self, "m_reporter", None)))
+        )
+        if (
+            f_eff_reporter is not None
+            and not isinstance(f_eff_reporter, RunReporter)
+            and callable(f_eff_reporter)
+        ):
+            f_eff_reporter = RunReporter(f_callback=f_eff_reporter)
+
+        f_profile = f_plan.profile
+
+        from lsmiotool.lib.artifacts import (
+            ArtifactError,
+            ArtifactStore,
+            LockContentionError,
+        )
+
+        _attachForExistingRun()
+        try:
+            f_artifact_store = ArtifactStore.forExistingRun(f_root, f_plan)
+        except ArtifactError as f_err:
+            raise OrchestrationError(f"Failed to open existing run store: {f_err}") from f_err
+
+        object.__setattr__(self, "m_last_plan", f_plan)
+        object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
+
+        if f_eff_reporter is not None:
             try:
-                from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, EvidenceStore, WriterKind
-                f_evidence_store = EvidenceStore(f_artifact_store.layout, f_plan)
-                object.__setattr__(self, "m_last_evidence_store", f_evidence_store)
-
-                from lsmiotool.lib.scheduler import (
-                    JobSpec,
-                    PbsScriptRenderer,
-                    PbsSchedulerAdapter,
-                    SchedulerAdapter,
-                    SlurmScriptRenderer,
-                    SlurmSchedulerAdapter,
+                f_eff_reporter.reportRunIdentity(
+                    f_plan.run_id, f_artifact_store.layout.runRoot
                 )
-                from lsmiotool.lib.site import PbsMailMode, SchedulerKind, SlurmMailMode
-                from lsmiotool.lib.state import (
-                    OverallRunState,
-                    PointRunState,
-                    RunStateView,
-                    SchedulerJobState,
-                    StateReconciler,
-                )
+            except Exception:
+                pass
 
-                if self.m_scheduler_adapter_factory is not None:
-                    f_adapter = self.m_scheduler_adapter_factory(
-                        f_profile, f_evidence_store, self.m_worker_validator, self.m_command_runner
+        try:
+            from lsmiotool.lib.evidence import EvidenceStore
+            f_temp_ev = EvidenceStore(f_artifact_store.layout, f_plan)
+            for f_idx, f_sp in enumerate(f_plan.scale_points):
+                f_sub_recs = f_temp_ev.readSubmissionRecords(f_sp, f_ordinal=f_idx)
+                f_rec = f_sub_recs.get("submission_recorded")
+                if f_rec is not None and isinstance(f_rec.payload.get("handle"), dict):
+                    f_h_id = f_rec.payload["handle"].get("job_id")
+                    if f_h_id and f_eff_reporter is not None:
+                        f_pt_name = f_artifact_store.layout.pointDirName(f_sp, f_idx)
+                        f_tok = f_plan.tokens[f_idx]
+                        f_eff_reporter.reportPointSubmission(f_pt_name, f_tok, str(f_h_id))
+        except Exception:
+            pass
+
+        f_raw_worker: str
+        if f_worker_executable is not None:
+            f_raw_worker = str(f_worker_executable).strip()
+        elif f_runtime_layout is not None:
+            f_raw_worker = f_runtime_layout.worker_executable
+        else:
+            f_raw_worker = os.path.join(f_profile.install_prefix, "bin", "lsmiotool-worker")
+
+        f_is_custom_mock_validator = (
+            self.m_worker_validator is not None
+            and not hasattr(self.m_worker_validator, "validate")
+        )
+
+        f_validated_worker: str = f_raw_worker
+        if self.m_worker_validator is not None:
+            try:
+                if hasattr(self.m_worker_validator, "validate"):
+                    f_validated_worker = self.m_worker_validator.validate(f_raw_worker)
+                elif callable(self.m_worker_validator):
+                    f_validated_worker = self.m_worker_validator(f_raw_worker)
+                else:
+                    raise PreflightError(f"Unsupported worker validator: {self.m_worker_validator!r}")
+            except Exception as f_err:
+                raise PreflightError(
+                    f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
+                ) from f_err
+        else:
+            from lsmiotool.lib.cli import WorkerExecutableValidator, WorkerExecutableValidationError
+            try:
+                f_validated_worker = WorkerExecutableValidator.validate(f_raw_worker)
+            except (WorkerExecutableValidationError, Exception) as f_err:
+                raise PreflightError(
+                    f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
+                ) from f_err
+
+        f_eff_environ: Mapping[str, str] = (
+            f_kwargs.get("environ")
+            if "environ" in f_kwargs
+            else f_kwargs.get("environment")
+            if "environment" in f_kwargs
+            else self.m_environ
+            if self.m_environ is not None
+            else os.environ
+        )
+
+        from lsmiotool.lib.scheduler import (
+            SchedulerScriptError,
+            SchedulerScriptRenderer,
+        )
+        from lsmiotool.lib.site import SchedulerKind, SiteResolutionError
+
+        f_validated_account: Optional[str] = None
+        f_validated_email: Optional[str] = None
+
+        if f_profile.requires_credentials or f_profile.scheduler == SchedulerKind.SLURM:
+            f_raw_account = f_eff_environ.get("SB_ACCOUNT")
+            f_raw_email = f_eff_environ.get("SB_EMAIL")
+            try:
+                f_profile.validateCredentials(f_raw_account, f_raw_email)
+            except SiteResolutionError as f_err:
+                raise PreflightError(str(f_err)) from f_err
+
+            try:
+                f_validated_account = SchedulerScriptRenderer.validateAccount(f_raw_account)
+            except (SchedulerScriptError, ValueError, TypeError) as f_err:
+                raise PreflightError(f"Invalid Slurm account (SB_ACCOUNT): {f_err}") from f_err
+
+            try:
+                f_validated_email = SchedulerScriptRenderer.validateMailUser(f_raw_email)
+            except (SchedulerScriptError, ValueError, TypeError) as f_err:
+                raise PreflightError(f"Invalid Slurm email (SB_EMAIL): {f_err}") from f_err
+
+        f_sig_coord = self.m_signal_coordinator or SignalCoordinator()
+
+        f_control_lock = f_artifact_store.getControlLock()
+        try:
+            f_control_lock.acquire(f_blocking=False)
+        except LockContentionError as f_err:
+            raise OrchestrationError(
+                f"Control lock contention on run '{f_plan.run_id}': {f_err}"
+            ) from f_err
+        except ArtifactError as f_err:
+            raise OrchestrationError(
+                f"Failed to acquire control lock on run '{f_plan.run_id}': {f_err}"
+            ) from f_err
+
+        return self._executeLoop(
+            f_plan=f_plan,
+            f_profile=f_profile,
+            f_artifact_store=f_artifact_store,
+            f_control_lock=f_control_lock,
+            f_validated_worker=f_validated_worker,
+            f_validated_account=f_validated_account,
+            f_validated_email=f_validated_email,
+            f_sig_coord=f_sig_coord,
+            f_reporter=f_eff_reporter,
+            **f_kwargs,
+        )
+
+    recover_run = recoverRun
+
+    def _executeLoop(
+        self,
+        f_plan: RunPlan,
+        f_profile: SiteProfile,
+        f_artifact_store: Any,
+        f_control_lock: Any,
+        f_validated_worker: str,
+        f_validated_account: Optional[str],
+        f_validated_email: Optional[str],
+        f_sig_coord: Any,
+        f_reporter: Optional[Any] = None,
+        **f_kwargs: Any,
+    ) -> Any:
+        f_eff_reporter = (
+            f_reporter
+            if f_reporter is not None
+            else f_kwargs.get("f_reporter", f_kwargs.get("reporter", getattr(self, "m_reporter", None)))
+        )
+        if (
+            f_eff_reporter is not None
+            and not isinstance(f_eff_reporter, RunReporter)
+            and callable(f_eff_reporter)
+        ):
+            f_eff_reporter = RunReporter(f_callback=f_eff_reporter)
+        try:
+            from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, EvidenceStore, WriterKind
+            f_evidence_store = EvidenceStore(f_artifact_store.layout, f_plan)
+            object.__setattr__(self, "m_last_evidence_store", f_evidence_store)
+
+            from lsmiotool.lib.scheduler import (
+                JobSpec,
+                PbsScriptRenderer,
+                PbsSchedulerAdapter,
+                SchedulerAdapter,
+                SlurmScriptRenderer,
+                SlurmSchedulerAdapter,
+            )
+            from lsmiotool.lib.site import PbsMailMode, SchedulerKind, SlurmMailMode
+            from lsmiotool.lib.state import (
+                OverallRunState,
+                PointRunState,
+                RunStateView,
+                SchedulerJobState,
+                StateReconciler,
+            )
+
+            if self.m_scheduler_adapter_factory is not None:
+                f_adapter = self.m_scheduler_adapter_factory(
+                    f_profile, f_evidence_store, self.m_worker_validator, self.m_command_runner
+                )
+            else:
+                if f_profile.scheduler == SchedulerKind.SLURM:
+                    f_adapter = SlurmSchedulerAdapter(
+                        f_evidence_store=f_evidence_store,
+                        f_worker_validator=self.m_worker_validator,
+                        f_command_runner=self.m_command_runner,
+                    )
+                elif f_profile.scheduler == SchedulerKind.PBS:
+                    f_adapter = PbsSchedulerAdapter(
+                        f_evidence_store=f_evidence_store,
+                        f_worker_validator=self.m_worker_validator,
+                        f_command_runner=self.m_command_runner,
                     )
                 else:
-                    if f_profile.scheduler == SchedulerKind.SLURM:
-                        f_adapter = SlurmSchedulerAdapter(
-                            f_evidence_store=f_evidence_store,
-                            f_worker_validator=self.m_worker_validator,
-                            f_command_runner=self.m_command_runner,
-                        )
-                    elif f_profile.scheduler == SchedulerKind.PBS:
-                        f_adapter = PbsSchedulerAdapter(
-                            f_evidence_store=f_evidence_store,
-                            f_worker_validator=self.m_worker_validator,
-                            f_command_runner=self.m_command_runner,
-                        )
-                    else:
-                        f_adapter = SchedulerAdapter(
-                            f_backend=f_profile.scheduler,
-                            f_evidence_store=f_evidence_store,
-                            f_worker_validator=self.m_worker_validator,
-                            f_command_runner=self.m_command_runner,
-                        )
+                    f_adapter = SchedulerAdapter(
+                        f_backend=f_profile.scheduler,
+                        f_evidence_store=f_evidence_store,
+                        f_worker_validator=self.m_worker_validator,
+                        f_command_runner=self.m_command_runner,
+                    )
 
-                f_reconciler_obj = self.m_reconciler or StateReconciler
-                f_all_points_succeeded = True
-                f_current_view: Optional[RunStateView] = None
+            f_reconciler_obj = self.m_reconciler or StateReconciler
+            f_all_points_succeeded = True
+            f_current_view: Optional[RunStateView] = None
 
-                # Check if interrupted before loop
+            # Check if interrupted before loop
+            if f_sig_coord.is_interrupted:
+                self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                f_all_points_succeeded = False
+                object.__setattr__(self, "m_last_view", f_current_view)
+                if f_eff_reporter is not None:
+                    try:
+                        f_eff_reporter.reportCompletion(f_current_view.state, self.exitCode)
+                    except Exception:
+                        pass
+                return f_current_view
+
+            # -----------------------------------------------------------------
+            # 3. Sequential Point Submission & Monitoring
+            # -----------------------------------------------------------------
+            for f_idx, f_scale_point in enumerate(f_plan.scale_points):
                 if f_sig_coord.is_interrupted:
                     self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
                     f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
                     f_all_points_succeeded = False
-                    object.__setattr__(self, "m_last_view", f_current_view)
-                    return f_current_view
+                    break
 
-                # -----------------------------------------------------------------
-                # 3. Sequential Point Submission & Monitoring
-                # -----------------------------------------------------------------
-                for f_idx, f_scale_point in enumerate(f_plan.scale_points):
-                    if f_sig_coord.is_interrupted:
-                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                        f_all_points_succeeded = False
-                        break
+                f_point_name = f_artifact_store.layout.pointDirName(f_scale_point, f_idx)
 
-                    f_point_name = f_artifact_store.layout.pointDirName(f_scale_point, f_idx)
+                # Prepare point directory structure
+                f_artifact_store.preparePoint(f_scale_point, f_plan.combinations, f_ordinal=f_idx)
 
-                    # Prepare point directory structure
-                    f_artifact_store.preparePoint(f_scale_point, f_plan.combinations, f_ordinal=f_idx)
+                # Render script
+                f_point_sched_dir = f_artifact_store.layout.pointSchedulerDir(f_scale_point, f_idx)
+                f_script_path = os.path.join(f_point_sched_dir, "job.sh")
+                f_logs_dir = f_artifact_store.layout.pointLogsDir(f_scale_point, f_idx)
+                f_output_path = os.path.join(f_logs_dir, "job.out")
+                f_error_path = os.path.join(f_logs_dir, "job.err")
 
-                    # Render script
-                    f_point_sched_dir = f_artifact_store.layout.pointSchedulerDir(f_scale_point, f_idx)
-                    f_script_path = os.path.join(f_point_sched_dir, "job.sh")
-                    f_logs_dir = f_artifact_store.layout.pointLogsDir(f_scale_point, f_idx)
-                    f_output_path = os.path.join(f_logs_dir, "job.out")
-                    f_error_path = os.path.join(f_logs_dir, "job.err")
+                f_point_res = f_plan.scheduled_points[f_idx]
+                f_token = f_plan.tokens[f_idx]
+                f_mail_mode_val: Optional[Any] = None
 
-                    f_point_res = f_plan.scheduled_points[f_idx]
-                    f_token = f_plan.tokens[f_idx]
-
-                    if f_profile.scheduler == SchedulerKind.SLURM:
-                        f_mail_mode_val = SlurmMailMode.END_FAIL if f_point_res.mail_mode else None
-                        f_directives = SlurmScriptRenderer.renderDirectives(
-                            f_point=f_scale_point,
-                            f_profile=f_profile,
-                            f_job_name=f_token,
-                            f_output_path=f_output_path,
-                            f_error_path=f_error_path,
-                            f_account=None,
-                            f_mail_user=None,
-                            f_mail_mode=f_mail_mode_val,
-                            f_walltime=f_point_res.walltime,
-                        )
-                    elif f_profile.scheduler == SchedulerKind.PBS:
-                        f_mail_mode_val = PbsMailMode.ABE if f_point_res.mail_mode else None
-                        f_directives = PbsScriptRenderer.renderDirectives(
-                            f_point=f_scale_point,
-                            f_profile=f_profile,
-                            f_job_name=f_token,
-                            f_output_path=f_output_path,
-                            f_error_path=f_error_path,
-                            f_mail_mode=f_mail_mode_val,
-                            f_walltime=f_point_res.walltime,
-                            f_resources=f_point_res,
-                        )
-                    else:
-                        f_directives = [
-                            f"#FAKE --job-name={f_token}",
-                            f"#FAKE --output={f_output_path}",
-                            f"#FAKE --error={f_error_path}",
-                        ]
-
-                    f_script_body = f_adapter.renderScript(
-                        f_directives=f_directives,
+                if f_profile.scheduler == SchedulerKind.SLURM:
+                    f_mail_mode_val = SlurmMailMode.END_FAIL if f_point_res.mail_mode else None
+                    f_directives = SlurmScriptRenderer.renderDirectives(
+                        f_point=f_scale_point,
                         f_profile=f_profile,
-                        f_worker_executable=f_validated_worker,
-                        f_manifest_path=f_artifact_store.layout.manifestPath,
-                        f_point_id=f_point_name,
-                    )
-
-                    with open(f_script_path, "w", encoding="utf-8") as f_f:
-                        f_f.write(f_script_body)
-                    os.chmod(f_script_path, 0o755)
-
-                    f_spec = JobSpec(
-                        f_point_id=f_scale_point,
-                        f_script_path=f_script_path,
-                        f_working_dir=f_artifact_store.layout.pointDir(f_scale_point, f_idx),
-                        f_resources=f_point_res,
+                        f_job_name=f_token,
                         f_output_path=f_output_path,
                         f_error_path=f_error_path,
+                        f_account=f_validated_account,
+                        f_mail_user=f_validated_email,
+                        f_mail_mode=f_mail_mode_val,
+                        f_walltime=f_point_res.walltime,
+                    )
+                elif f_profile.scheduler == SchedulerKind.PBS:
+                    f_mail_mode_val = PbsMailMode.ABE if f_point_res.mail_mode else None
+                    f_directives = PbsScriptRenderer.renderDirectives(
+                        f_point=f_scale_point,
+                        f_profile=f_profile,
                         f_job_name=f_token,
+                        f_output_path=f_output_path,
+                        f_error_path=f_error_path,
+                        f_mail_mode=f_mail_mode_val,
+                        f_walltime=f_point_res.walltime,
                     )
+                else:
+                    f_directives = [
+                        f"#FAKE --job-name={f_token}",
+                        f"#FAKE --output={f_output_path}",
+                        f"#FAKE --error={f_error_path}",
+                    ]
 
-                    if f_sig_coord.is_interrupted:
-                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                        f_all_points_succeeded = False
-                        break
+                f_script_body = f_adapter.renderScript(
+                    f_directives=f_directives,
+                    f_profile=f_profile,
+                    f_worker_executable=f_validated_worker,
+                    f_manifest_path=f_artifact_store.layout.manifestPath,
+                    f_point_id=f_point_name,
+                )
 
-                    try:
-                        f_job_result = f_adapter.dispatchSubmission(
-                            f_point=f_scale_point,
-                            f_spec=f_spec,
-                            f_writer_id="control",
-                            f_ordinal=f_idx,
-                        )
-                    except Exception:
-                        if f_sig_coord.is_interrupted:
-                            self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                        f_all_points_succeeded = False
-                        break
+                with open(f_script_path, "w", encoding="utf-8") as f_f:
+                    f_f.write(f_script_body)
+                os.chmod(f_script_path, 0o755)
 
-                    f_handle = f_job_result.job_handle
+                f_spec = JobSpec(
+                    f_point_id=f_scale_point,
+                    f_script_path=f_script_path,
+                    f_working_dir=f_artifact_store.layout.pointDir(f_scale_point, f_idx),
+                    f_resources=f_point_res,
+                    f_mail_user=f_validated_email if f_profile.scheduler == SchedulerKind.SLURM else None,
+                    f_mail_mode=f_mail_mode_val,
+                    f_account=f_validated_account if f_profile.scheduler == SchedulerKind.SLURM else None,
+                    f_output_path=f_output_path,
+                    f_error_path=f_error_path,
+                    f_job_name=f_token,
+                )
 
-                    f_poll_interval = (
-                        self.m_poll_interval
-                        if self.m_poll_interval is not None
-                        else (
-                            f_profile.cancellation.poll_interval_seconds
-                            if f_profile.cancellation
-                            else 1.0
-                        )
-                    )
-                    f_sleep_fn = self.m_sleep or (lambda f_s: None)
-
-                    f_obs_seq = 1
-                    f_obs_dir = f_artifact_store.layout.pointSchedulerObservationsDir(
-                        f_scale_point, f_writer="control", f_ordinal=f_idx
-                    )
-                    if os.path.exists(f_obs_dir):
-                        f_existing_obs = [
-                            f_x for f_x in os.listdir(f_obs_dir) if f_x.endswith(".json")
-                        ]
-                        f_obs_seq = len(f_existing_obs) + 1
-
-                    f_point_terminal = False
-                    f_consecutive_unknown = 0
-                    f_max_consecutive_unknown = 3
-                    while not f_point_terminal:
-                        if f_sig_coord.is_interrupted:
-                            # 1. Record CANCEL_REQUESTED
-                            f_evidence_store.recordCancelRequested(
-                                f_point=f_scale_point,
-                                f_writer_id="control",
-                                f_handle=f_handle,
-                                f_payload={
-                                    "reason": f"Interrupted by {f_sig_coord.signal_name}",
-                                    "signal": f_sig_coord.interrupted_signal,
-                                    "exit_code": f_sig_coord.exit_code,
-                                },
-                                f_ordinal=f_idx,
-                            )
-
-                            # 2. Cancel exact active JobHandle via scheduler adapter
-                            f_cancel_poll_interval = 1.0
-                            f_cancel_grace_seconds = 120.0
-                            if f_profile.cancellation:
-                                f_cancel_poll_interval = float(f_profile.cancellation.poll_interval_seconds)
-                                f_cancel_grace_seconds = float(f_profile.cancellation.grace_seconds)
-                            if self.m_poll_interval is not None:
-                                f_cancel_poll_interval = self.m_poll_interval
-
-                            f_cancel_state = SchedulerJobState.UNKNOWN
-                            if hasattr(f_adapter, "cancelAndConfirm"):
-                                f_cancel_state = f_adapter.cancelAndConfirm(
-                                    f_job_id=f_handle.job_id,
-                                    f_poll_interval=f_cancel_poll_interval,
-                                    f_grace_seconds=f_cancel_grace_seconds,
-                                    f_clock=self.m_clock_float,
-                                    f_sleep=self.m_sleep,
-                                )
-                            elif hasattr(f_adapter, "cancel_and_confirm"):
-                                f_cancel_state = f_adapter.cancel_and_confirm(
-                                    f_job_id=f_handle.job_id,
-                                    f_poll_interval=f_cancel_poll_interval,
-                                    f_grace_seconds=f_cancel_grace_seconds,
-                                    f_clock=self.m_clock_float,
-                                    f_sleep=self.m_sleep,
-                                )
-                            elif hasattr(f_adapter, "cancelJob"):
-                                f_cancel_state = f_adapter.cancelJob(f_handle)
-                            elif hasattr(f_adapter, "cancel_job"):
-                                f_cancel_state = f_adapter.cancel_job(f_handle)
-                            else:
-                                f_cancel_state = SchedulerJobState.CANCELLED
-
-                            # 3. Record cancel outcome
-                            if f_cancel_state == SchedulerJobState.UNKNOWN:
-                                f_unconf_path = os.path.join(
-                                    f_artifact_store.layout.pointSchedulerDir(f_scale_point, f_idx),
-                                    "cancel_unconfirmed.json",
-                                )
-                                f_unconf_rec = EvidenceRecord(
-                                    f_writer_kind=WriterKind.CONTROL,
-                                    f_writer_id="control",
-                                    f_sequence_number=2,
-                                    f_evidence_kind=EvidenceKind.CANCEL_UNCONFIRMED,
-                                    f_point_id=f_artifact_store.layout.pointDirName(f_scale_point, f_idx),
-                                    f_payload={
-                                        "outcome": "unconfirmed",
-                                        "handle": f_handle.toDict(),
-                                    },
-                                    f_run_id=f_artifact_store.layout.runId,
-                                )
-                                f_evidence_store.recordRecord(f_unconf_path, f_unconf_rec)
-                            else:
-                                f_outcome = "confirmed" if f_cancel_state == SchedulerJobState.CANCELLED else "already_terminal"
-                                f_evidence_store.recordCancelRecorded(
-                                    f_point=f_scale_point,
-                                    f_writer_id="control",
-                                    f_handle=f_handle,
-                                    f_payload={
-                                        "outcome": f_outcome,
-                                        "terminal_state": f_cancel_state.value,
-                                    },
-                                    f_ordinal=f_idx,
-                                )
-                                f_evidence_store.recordSchedulerObservation(
-                                    f_point=f_scale_point,
-                                    f_writer_id="control",
-                                    f_sequence=f_obs_seq,
-                                    f_payload={
-                                        "handle": f_handle.toDict(),
-                                        "state": f_cancel_state.value,
-                                        "status": f_cancel_state.value,
-                                    },
-                                    f_ordinal=f_idx,
-                                )
-                                f_obs_seq += 1
-
-                            # 4. Record INTERRUPTED control event
-                            self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                            f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                            f_all_points_succeeded = False
-                            f_point_terminal = True
-                            break
-
-                        f_job_state, f_exit_code = self._queryJobState(
-                            f_adapter=f_adapter,
-                            f_handle=f_handle,
-                            f_profile=f_profile,
-                        )
-
-                        f_evidence_store.recordSchedulerObservation(
-                            f_point=f_scale_point,
-                            f_writer_id="control",
-                            f_sequence=f_obs_seq,
-                            f_payload={
-                                "handle": f_handle.toDict(),
-                                "state": f_job_state.value,
-                                "status": f_job_state.value,
-                                "exit_code": f_exit_code,
-                            },
-                            f_ordinal=f_idx,
-                        )
-                        f_obs_seq += 1
-
-                        if f_job_state.is_terminal:
-                            f_point_terminal = True
-                        elif f_job_state == SchedulerJobState.UNKNOWN:
-                            f_consecutive_unknown += 1
-                            if f_consecutive_unknown >= f_max_consecutive_unknown:
-                                f_point_terminal = True
-                            else:
-                                f_sleep_fn(f_poll_interval)
-                        else:
-                            f_consecutive_unknown = 0
-                            f_sleep_fn(f_poll_interval)
-
-                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                    f_pt_view = f_current_view.point_states[f_idx]
-
-                    if f_sig_coord.is_interrupted or f_pt_view.state != PointRunState.SUCCEEDED:
-                        if f_sig_coord.is_interrupted:
-                            self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                            f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                        f_all_points_succeeded = False
-                        break
-
-                # -----------------------------------------------------------------
-                # 4. Finalization
-                # -----------------------------------------------------------------
                 if f_sig_coord.is_interrupted:
                     self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
                     f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                elif f_all_points_succeeded and f_current_view is not None:
-                    f_all_pts_ok = all(
-                        f_pv.state == PointRunState.SUCCEEDED
-                        for f_pv in f_current_view.point_states
-                    )
-                    if f_all_pts_ok and not f_current_view.has_interruption and not f_sig_coord.is_interrupted:
-                        f_ctrl_seq = len(f_evidence_store.readControlEvents("control")) + 1
-                        try:
-                            f_evidence_store.recordWholeRunSucceeded(
-                                f_writer_id="control",
-                                f_sequence=f_ctrl_seq,
-                                f_payload={"run_id": f_plan.run_id},
-                            )
-                            f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
-                        except Exception:
-                            f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_all_points_succeeded = False
+                    break
 
-                object.__setattr__(self, "m_last_view", f_current_view)
-                return f_current_view
-            finally:
-                f_control_lock.release()
+                f_job_result = None
+                f_dispatch_error = None
+                try:
+                    f_job_result = f_adapter.dispatchSubmission(
+                        f_point=f_scale_point,
+                        f_spec=f_spec,
+                        f_writer_id="control",
+                        f_ordinal=f_idx,
+                    )
+                    if f_job_result is not None and f_job_result.job_handle is not None:
+                        if f_eff_reporter is not None:
+                            try:
+                                f_eff_reporter.reportPointSubmission(
+                                    f_point_name, f_token, f_job_result.job_handle.job_id
+                                )
+                            except Exception:
+                                pass
+                except Exception as f_err:
+                    f_dispatch_error = f_err
+
+                f_poll_override = f_kwargs.get("f_poll_interval", f_kwargs.get("poll_interval", self.m_poll_interval))
+                if f_poll_override is not None:
+                    f_poll_interval = float(f_poll_override)
+                elif f_profile.cancellation and f_profile.cancellation.poll_interval_seconds is not None:
+                    f_poll_interval = float(f_profile.cancellation.poll_interval_seconds)
+                elif hasattr(f_profile, "scheduler") and hasattr(f_profile.scheduler, "poll_interval_seconds"):
+                    f_poll_interval = float(f_profile.scheduler.poll_interval_seconds)
+                elif hasattr(f_profile, "poll_interval_seconds") and f_profile.poll_interval_seconds is not None:
+                    f_poll_interval = float(f_profile.poll_interval_seconds)
+                else:
+                    f_poll_interval = 8.0
+
+                f_sleep_fn = (
+                    f_kwargs.get("f_sleep_fn", f_kwargs.get("f_sleep", self.m_sleep if self.m_sleep is not None else time.sleep))
+                )
+                f_clock_float = (
+                    f_kwargs.get("f_clock_fn", f_kwargs.get("f_clock_float", self.m_clock_float if self.m_clock_float is not None else time.monotonic))
+                )
+
+                if f_sig_coord.is_interrupted:
+                    # Step A: Durably record interruption FIRST
+                    self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                    f_all_points_succeeded = False
+
+                    # Step B: Determine if a job handle is known or can be recovered
+                    f_handle = None
+                    if f_job_result is not None:
+                        f_handle = f_job_result.job_handle
+                    else:
+                        try:
+                            f_sub_recs = f_evidence_store.readSubmissionRecords(f_scale_point, f_ordinal=f_idx)
+                            if f_sub_recs.get("submission_recorded") is not None:
+                                f_h_dict = f_sub_recs["submission_recorded"].payload.get("handle")
+                                if isinstance(f_h_dict, dict):
+                                    from lsmiotool.lib.evidence import JobHandle
+                                    f_handle = JobHandle.fromDict(f_h_dict)
+                            elif f_sub_recs.get("submission_dispatched") is not None:
+                                if f_spec.job_name and hasattr(f_adapter, "recoverJobHandle"):
+                                    f_rec_h = f_adapter.recoverJobHandle(f_spec.job_name)
+                                    if f_rec_h is not None:
+                                        f_evidence_store.recordSubmissionRecorded(
+                                            f_point=f_scale_point,
+                                            f_writer_id="control",
+                                            f_handle=f_rec_h,
+                                            f_payload={"recovered": True, "job_name": f_spec.job_name},
+                                            f_ordinal=f_idx,
+                                        )
+                                        f_handle = f_rec_h
+                                        if f_eff_reporter is not None:
+                                            try:
+                                                f_eff_reporter.reportPointSubmission(
+                                                    f_point_name, f_token, f_handle.job_id
+                                                )
+                                            except Exception:
+                                                pass
+                        except Exception:
+                            pass
+
+                    # Step C: If a handle is known/recovered, perform exact cancellation
+                    if f_handle is not None:
+                        self._cancelActiveJob(
+                            f_adapter=f_adapter,
+                            f_evidence_store=f_evidence_store,
+                            f_artifact_store=f_artifact_store,
+                            f_scale_point=f_scale_point,
+                            f_idx=f_idx,
+                            f_handle=f_handle,
+                            f_sig_coord=f_sig_coord,
+                            f_poll_interval=f_poll_interval,
+                            f_profile=f_profile,
+                            f_clock_float=f_clock_float,
+                            f_sleep_fn=f_sleep_fn,
+                        )
+
+                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    break
+
+                if f_dispatch_error is not None:
+                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_all_points_succeeded = False
+                    break
+
+                f_handle = f_job_result.job_handle
+
+                f_obs_seq = 1
+                f_obs_dir = f_artifact_store.layout.pointSchedulerObservationsDir(
+                    f_scale_point, f_writer="control", f_ordinal=f_idx
+                )
+                if os.path.exists(f_obs_dir):
+                    f_existing_obs = [
+                        f_x for f_x in os.listdir(f_obs_dir) if f_x.endswith(".json")
+                    ]
+                    f_obs_seq = len(f_existing_obs) + 1
+
+                f_point_terminal = False
+                while not f_point_terminal:
+                    if f_sig_coord.is_interrupted:
+                        # 1. Record INTERRUPTED control event FIRST
+                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                        f_all_points_succeeded = False
+
+                        # 2. Cancel exact active job and record outcome
+                        self._cancelActiveJob(
+                            f_adapter=f_adapter,
+                            f_evidence_store=f_evidence_store,
+                            f_artifact_store=f_artifact_store,
+                            f_scale_point=f_scale_point,
+                            f_idx=f_idx,
+                            f_handle=f_handle,
+                            f_sig_coord=f_sig_coord,
+                            f_poll_interval=f_poll_interval,
+                            f_profile=f_profile,
+                            f_clock_float=f_clock_float,
+                            f_sleep_fn=f_sleep_fn,
+                            f_obs_seq=f_obs_seq,
+                        )
+
+                        # 3. Reconcile and exit loop
+                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        f_point_terminal = True
+                        break
+
+                    f_job_state, f_exit_code = self._queryJobState(
+                        f_adapter=f_adapter,
+                        f_handle=f_handle,
+                        f_profile=f_profile,
+                    )
+
+                    f_evidence_store.recordSchedulerObservation(
+                        f_point=f_scale_point,
+                        f_writer_id="control",
+                        f_sequence=f_obs_seq,
+                        f_payload={
+                            "handle": f_handle.toDict(),
+                            "state": f_job_state.value,
+                            "status": f_job_state.value,
+                            "exit_code": f_exit_code,
+                        },
+                        f_ordinal=f_idx,
+                    )
+                    f_obs_seq += 1
+
+                    if f_job_state.is_terminal or f_job_state == SchedulerJobState.UNKNOWN:
+                        f_point_terminal = True
+                    elif f_sig_coord.is_interrupted:
+                        # Interrupted while job was active (non-terminal)
+                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                        f_all_points_succeeded = False
+
+                        self._cancelActiveJob(
+                            f_adapter=f_adapter,
+                            f_evidence_store=f_evidence_store,
+                            f_artifact_store=f_artifact_store,
+                            f_scale_point=f_scale_point,
+                            f_idx=f_idx,
+                            f_handle=f_handle,
+                            f_sig_coord=f_sig_coord,
+                            f_poll_interval=f_poll_interval,
+                            f_profile=f_profile,
+                            f_clock_float=f_clock_float,
+                            f_sleep_fn=f_sleep_fn,
+                            f_obs_seq=f_obs_seq,
+                        )
+
+                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        f_point_terminal = True
+                        break
+                    else:
+                        f_sleep_fn(f_poll_interval)
+
+                f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                f_pt_view = f_current_view.point_states[f_idx]
+
+                if f_sig_coord.is_interrupted or f_pt_view.state != PointRunState.SUCCEEDED:
+                    if f_sig_coord.is_interrupted:
+                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_all_points_succeeded = False
+                    break
+
+            # -----------------------------------------------------------------
+            # 4. Finalization
+            # -----------------------------------------------------------------
+            if f_sig_coord.is_interrupted:
+                self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+            elif f_all_points_succeeded and f_current_view is not None:
+                f_all_pts_ok = all(
+                    f_pv.state == PointRunState.SUCCEEDED
+                    for f_pv in f_current_view.point_states
+                )
+                if f_all_pts_ok and not f_current_view.has_interruption and not f_sig_coord.is_interrupted:
+                    f_ctrl_seq = len(f_evidence_store.readControlEvents("control")) + 1
+                    try:
+                        f_evidence_store.recordWholeRunSucceeded(
+                            f_writer_id="control",
+                            f_sequence=f_ctrl_seq,
+                            f_payload={"run_id": f_plan.run_id},
+                        )
+                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    except Exception:
+                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+
+            object.__setattr__(self, "m_last_view", f_current_view)
+            if f_current_view is not None and f_eff_reporter is not None:
+                try:
+                    f_eff_reporter.reportCompletion(f_current_view.state, self.exitCode)
+                except Exception:
+                    pass
+            return f_current_view
+        finally:
+            f_control_lock.release()
 
     run = execute
 
 
+_attachForExistingRun()

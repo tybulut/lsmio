@@ -418,9 +418,7 @@ class ResourceLocator:
             f_package_root = os.path.normpath(os.path.join(f_repo_root, "tools", "lsmiotool"))
         else:
             # If not explicitly in tools/lsmiotool, derive from entry path
-            if len(f_parts) >= 2 and f_parts[-2] == "worker" and f_parts[-1] == "lsmioworker":
-                f_package_root = "/" + "/".join(f_parts[:-2])
-            elif len(f_parts) >= 2 and f_parts[-2] == "lib":
+            if len(f_parts) >= 2 and f_parts[-2] == "lib":
                 f_package_root = "/" + "/".join(f_parts[:-2])
             elif len(f_parts) >= 1 and (f_parts[-1] in ("lsmiotool", "lsmiotool-worker") or "." in f_parts[-1]):
                 f_package_root = "/" + "/".join(f_parts[:-1]) if len(f_parts) > 1 else "/"
@@ -435,7 +433,7 @@ class ResourceLocator:
 
         f_profile_file = os.path.normpath(os.path.join(f_package_root, "etc", "environments.json"))
         f_asset_root = os.path.normpath(os.path.join(f_repo_root, "tools", "bmtool", "lmp-reaxff"))
-        f_worker_executable = os.path.normpath(os.path.join(f_package_root, "worker", "lsmioworker"))
+        f_worker_executable = os.path.normpath(os.path.join(f_package_root, "lsmiotool-worker"))
         f_version_file = os.path.normpath(os.path.join(f_repo_root, "VERSION"))
 
         return RuntimeLayout(

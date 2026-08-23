@@ -31,6 +31,7 @@
 import copy
 import getpass
 import json
+import math
 import os
 import re
 import shlex
@@ -134,6 +135,23 @@ def _checkNoDirectiveInjection(f_val: str, f_field_name: str) -> None:
         raise SchedulerScriptError(
             f"{f_field_name} contains directive injection pattern: {f_val!r}"
         )
+
+
+def validateTimeout(f_timeout: Any, f_param_name: str = "timeout") -> float:
+    """Validate that a timeout value is a positive finite number (not bool, nan, inf, zero, or negative)."""
+    if isinstance(f_timeout, bool) or not isinstance(f_timeout, (int, float)):
+        raise SchedulerError(
+            f"{f_param_name} must be a positive finite number, got {type(f_timeout).__name__}: {f_timeout!r}"
+        )
+    f_num = float(f_timeout)
+    if math.isnan(f_num) or math.isinf(f_num) or f_num <= 0.0:
+        raise SchedulerError(
+            f"{f_param_name} must be a positive finite number, got: {f_timeout!r}"
+        )
+    return f_num
+
+
+validate_timeout = validateTimeout
 
 
 @runtime_checkable
@@ -942,10 +960,12 @@ class SchedulerAdapter:
 
     Invariants:
     - Order of evidence records when dispatching a point:
-      1. SUBMISSION_REQUESTED: recorded before executing submit command.
-      2. Execute submit command via SchedulerCommandRunner.
-      3. SUBMISSION_DISPATCHED: recorded immediately after command returns with raw output/exit code.
-      4. SUBMISSION_RECORDED: recorded once exact job_id is extracted and verified into JobHandle.
+      1. SUBMISSION_REQUESTED: recorded before building submit argv.
+      2. Build exact argv.
+      3. SUBMISSION_DISPATCHED: recorded immediately BEFORE process spawn with argv, correlation token, and script/point correlation (no invented post-return result).
+      4. Execute submit command via SchedulerCommandRunner.
+      5. Validate process status and output.
+      6. SUBMISSION_RECORDED: recorded once exact job_id is extracted and verified into JobHandle.
     - If submission_dispatched exists without submission_recorded: recovers by token/job name.
     - Indeterminate recovery (0 or >1 candidates) fails closed without re-submitting.
     - A request without submission_dispatched may submit once.
@@ -956,6 +976,7 @@ class SchedulerAdapter:
         "m_command_runner",
         "m_evidence_store",
         "m_worker_validator",
+        "m_command_timeout",
     )
 
     def __init__(
@@ -964,6 +985,9 @@ class SchedulerAdapter:
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
         f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_timeout: Optional[float] = None,
+        f_command_timeout: Optional[float] = None,
+        f_profile: Optional[SiteProfile] = None,
     ) -> None:
         if not isinstance(f_backend, SchedulerKind):
             raise SchedulerError(f"Backend must be SchedulerKind, got: {type(f_backend).__name__}")
@@ -971,6 +995,26 @@ class SchedulerAdapter:
         self.m_command_runner = f_command_runner or SchedulerCommandRunner()
         self.m_evidence_store = f_evidence_store
         self.m_worker_validator = f_worker_validator
+
+        # Derive positive finite command timeout
+        f_raw_timeout: Any = None
+        if f_timeout is not None:
+            f_raw_timeout = f_timeout
+        elif f_command_timeout is not None:
+            f_raw_timeout = f_command_timeout
+        elif f_profile is not None:
+            f_raw_timeout = f_profile.cancellation.grace_seconds
+        else:
+            f_raw_timeout = 120.0
+
+        self.m_command_timeout = self.validateTimeout(f_raw_timeout, "timeout")
+
+    @classmethod
+    def validateTimeout(cls, f_timeout: Any, f_param_name: str = "timeout") -> float:
+        """Validate timeout value as positive finite float."""
+        return validateTimeout(f_timeout, f_param_name)
+
+    validate_timeout = validateTimeout
 
     @property
     def backend(self) -> SchedulerKind:
@@ -983,6 +1027,18 @@ class SchedulerAdapter:
     @property
     def command_runner(self) -> SchedulerCommandRunner:
         return self.m_command_runner
+
+    @property
+    def commandTimeout(self) -> float:
+        return self.m_command_timeout
+
+    @property
+    def command_timeout(self) -> float:
+        return self.m_command_timeout
+
+    @property
+    def timeout(self) -> float:
+        return self.m_command_timeout
 
     @property
     def evidenceStore(self) -> Optional[EvidenceStore]:
@@ -999,6 +1055,30 @@ class SchedulerAdapter:
     @property
     def worker_validator(self) -> Optional[Union[WorkerExecutableValidator, Callable[[str], str]]]:
         return self.m_worker_validator
+
+    def _runCommand(
+        self,
+        f_argv: Sequence[str],
+        f_cwd: Optional[str] = None,
+        f_env: Optional[Mapping[str, str]] = None,
+        f_timeout: Optional[float] = None,
+    ) -> ProcessResult:
+        """Helper to invoke command runner with timeout and fallback for legacy test mocks."""
+        f_eff_timeout = f_timeout if f_timeout is not None else self.m_command_timeout
+        try:
+            return self.m_command_runner.run(
+                f_argv,
+                f_cwd=f_cwd,
+                f_env=f_env,
+                f_timeout=f_eff_timeout,
+            )
+        except TypeError as f_type_err:
+            if "f_timeout" in str(f_type_err) or "unexpected keyword argument" in str(f_type_err):
+                try:
+                    return self.m_command_runner.run(f_argv, f_cwd=f_cwd)
+                except TypeError:
+                    return self.m_command_runner.run(f_argv)
+            raise
 
     def buildSubmitArgv(self, f_spec: JobSpec) -> List[str]:
         """Build command argv for job script submission."""
@@ -1121,17 +1201,19 @@ class SchedulerAdapter:
         f_writer_id: str = "control",
         f_ordinal: Optional[int] = None,
     ) -> JobResult:
-        """Execute submission dispatch orchestration adhering to exact 4-step evidence protocol.
+        """Execute submission dispatch orchestration adhering to exact pre-spawn evidence protocol.
 
         Order of evidence records:
         1. Check existing records on crash recovery:
            - submission_recorded exists -> return recorded JobResult.
-           - submission_dispatched exists without recorded handle -> recover by token; if single candidate persist and return; if 0 or >1 candidates fail closed.
-           - submission_requested exists without dispatched -> proceed to submit.
-        2. SUBMISSION_REQUESTED: record before process call.
-        3. Execute submit command via SchedulerCommandRunner.
-        4. SUBMISSION_DISPATCHED: record immediately after command returns.
-        5. SUBMISSION_RECORDED: record once job ID is extracted into JobHandle.
+           - submission_dispatched exists without recorded handle -> recover by token; if single candidate persist and return; if 0 or >1 candidates fail closed (INDETERMINATE, never blindly resubmits).
+           - submission_requested exists without dispatched -> proceed to submit once.
+        2. SUBMISSION_REQUESTED: record before building argv/dispatching if not already recorded.
+        3. Build exact submit argv.
+        4. SUBMISSION_DISPATCHED: create-only record immediately BEFORE process spawn containing argv, correlation token, and script/point metadata (no invented post-return result).
+        5. Execute submit command via SchedulerCommandRunner.
+        6. Validate process status and output.
+        7. SUBMISSION_RECORDED: record once job ID is extracted into JobHandle.
         """
         # Step 1: Check existing evidence records for recovery
         if self.m_evidence_store is not None:
@@ -1149,7 +1231,7 @@ class SchedulerAdapter:
                     return JobResult(
                         f_job_handle=f_handle,
                         f_raw_output=str(f_payload.get("raw_output", "")),
-                        f_exit_code=0,
+                        f_exit_code=int(f_payload.get("exit_code", 0)),
                         f_status=SchedulerJobState.QUEUED,
                     )
 
@@ -1200,44 +1282,52 @@ class SchedulerAdapter:
                     f_ordinal=f_ordinal,
                 )
 
-        # Step 3: Execute submit command via SchedulerCommandRunner
+        # Step 3: Build exact argv
         f_submit_argv = self.buildSubmitArgv(f_spec)
-        f_proc_res = self.m_command_runner.run(
-            f_submit_argv,
-            f_cwd=f_spec.working_dir,
-        )
 
-        # Step 4: Record SUBMISSION_DISPATCHED immediately after command returns
+        # Step 4: Record SUBMISSION_DISPATCHED immediately BEFORE process spawn
         if self.m_evidence_store is not None:
             self.m_evidence_store.recordSubmissionDispatched(
                 f_point=f_point,
                 f_writer_id=f_writer_id,
                 f_payload={
                     "argv": f_submit_argv,
-                    "returncode": f_proc_res.returncode,
-                    "stdout": f_proc_res.stdout,
-                    "stderr": f_proc_res.stderr,
-                    "elapsed_seconds": f_proc_res.elapsed_seconds,
+                    "job_name": f_spec.job_name,
+                    "correlation_token": f_spec.job_name,
+                    "script_path": f_spec.script_path,
+                    "working_dir": f_spec.working_dir,
+                    "point_id": str(f_spec.point_id),
                 },
                 f_ordinal=f_ordinal,
             )
 
-        # Validate process return code
-        if not f_proc_res.is_success:
+        # Step 5: Execute submit command via SchedulerCommandRunner
+        f_proc_res = self._runCommand(
+            f_submit_argv,
+            f_cwd=f_spec.working_dir,
+            f_timeout=self.m_command_timeout,
+        )
+
+        # Step 6: Validate process return code and timeout
+        if f_proc_res.timed_out or not f_proc_res.is_success:
             f_err_msg = (
-                f_proc_res.stderr.strip()
-                or f_proc_res.stdout.strip()
-                or f"submit command exited with code {f_proc_res.returncode}"
+                "command timed out"
+                if f_proc_res.timed_out
+                else (
+                    f_proc_res.stderr.strip()
+                    or f_proc_res.stdout.strip()
+                    or f"submit command exited with code {f_proc_res.returncode}"
+                )
             )
             raise SubmissionDispatchError(
                 f"Scheduler submission failed with return code {f_proc_res.returncode}: {f_err_msg}"
             )
 
-        # Extract Job ID and build JobHandle
+        # Step 7: Extract Job ID and build JobHandle
         f_job_id = self.parseSubmitOutput(f_proc_res.stdout)
         f_handle = JobHandle(self.m_backend.value, f_job_id)
 
-        # Step 5: Record SUBMISSION_RECORDED
+        # Step 8: Record SUBMISSION_RECORDED
         if self.m_evidence_store is not None:
             self.m_evidence_store.recordSubmissionRecorded(
                 f_point=f_point,
@@ -1776,12 +1866,18 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
         f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_timeout: Optional[float] = None,
+        f_command_timeout: Optional[float] = None,
+        f_profile: Optional[SiteProfile] = None,
     ) -> None:
         super().__init__(
             f_backend=SchedulerKind.SLURM,
             f_command_runner=f_command_runner,
             f_evidence_store=f_evidence_store,
             f_worker_validator=f_worker_validator,
+            f_timeout=f_timeout,
+            f_command_timeout=f_command_timeout,
+            f_profile=f_profile,
         )
 
     @classmethod
@@ -1789,15 +1885,14 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         """Validate that Job ID is a non-empty exact decimal string '^[0-9]+$'."""
         if not isinstance(f_job_id, str):
             raise SchedulerError(f"Job ID must be a string, got: {type(f_job_id).__name__}")
-        f_norm = f_job_id.strip()
-        if not f_norm:
+        if not f_job_id:
             raise SchedulerError("Job ID cannot be empty")
         _checkNoControlChars(f_job_id, "job_id")
-        if not re.match(r"^[0-9]+$", f_norm):
+        if not re.fullmatch(r"[0-9]+", f_job_id):
             raise SchedulerError(
                 f"Slurm Job ID must match exact decimal string '^[0-9]+$', got: {f_job_id!r}"
             )
-        return f_norm
+        return f_job_id
 
     validate_job_id = validateJobId
 
@@ -1816,9 +1911,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 
     @classmethod
     def activeQueryCommand(cls, f_job_id: str) -> List[str]:
-        """Build exact squeue active query argv: ['squeue', '-j', <job_id>, '-h', '-o', '%T']."""
+        """Build exact squeue active query argv: ['squeue', '--noheader', f'--jobs={job_id}', '--format=%i|%T']."""
         f_norm_id = cls.validateJobId(f_job_id)
-        return ["squeue", "-j", f_norm_id, "-h", "-o", "%T"]
+        return ["squeue", "--noheader", f"--jobs={f_norm_id}", "--format=%i|%T"]
 
     active_query_command = activeQueryCommand
     buildActiveQueryArgv = activeQueryCommand
@@ -1826,9 +1921,15 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 
     @classmethod
     def accountingQueryCommand(cls, f_job_id: str) -> List[str]:
-        """Build exact sacct accounting query argv: ['sacct', '-j', <job_id>, '-P', '-n', '-o', 'JobIDRaw,State,ExitCode']."""
+        """Build exact sacct accounting query argv: ['sacct', '--noheader', '--parsable2', f'--jobs={job_id}', '--format=JobIDRaw,JobName,State,ExitCode']."""
         f_norm_id = cls.validateJobId(f_job_id)
-        return ["sacct", "-j", f_norm_id, "-P", "-n", "-o", "JobIDRaw,State,ExitCode"]
+        return [
+            "sacct",
+            "--noheader",
+            "--parsable2",
+            f"--jobs={f_norm_id}",
+            "--format=JobIDRaw,JobName,State,ExitCode",
+        ]
 
     accounting_query_command = accountingQueryCommand
     buildAccountingQueryArgv = accountingQueryCommand
@@ -1875,7 +1976,8 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         if not isinstance(f_state_str, str) or not f_state_str.strip():
             return SchedulerJobState.UNKNOWN
 
-        f_token = f_state_str.strip().split()[0].rstrip("+").upper()
+        f_clean = f_state_str.strip()
+        f_token = f_clean.split()[0].rstrip("+").upper()
 
         if f_token in ("PENDING", "CONFIGURING", "PD", "CF"):
             return SchedulerJobState.QUEUED
@@ -1889,7 +1991,7 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
                 else:
                     return SchedulerJobState.FAILED
             return SchedulerJobState.SUCCEEDED
-        elif f_token.startswith("CANCELLED") or f_token in ("CA",):
+        elif f_clean.upper().startswith("CANCELLED") or f_token in ("CANCELLED", "CA"):
             return SchedulerJobState.CANCELLED
         elif f_token in ("TIMEOUT", "TO"):
             return SchedulerJobState.TIMEOUT
@@ -1941,32 +2043,32 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             return None
 
         f_candidate_states: List[SchedulerJobState] = []
+        f_expected_id = cls.validateJobId(f_job_id) if f_job_id is not None else None
 
         for f_line in f_data_lines:
             f_parts = [f_p.strip() for f_p in f_line.split("|")]
-            if len(f_parts) == 1:
-                # Format %T
-                f_state_str = f_parts[0]
-            elif len(f_parts) == 2:
+            if len(f_parts) == 2:
                 # Format %i|%T
                 f_raw_id, f_state_str = f_parts[0], f_parts[1]
-                if f_job_id is not None and f_raw_id != str(f_job_id).strip():
-                    continue
             elif len(f_parts) == 3:
                 # Format %i|%j|%T
                 f_raw_id, _, f_state_str = f_parts[0], f_parts[1], f_parts[2]
-                if f_job_id is not None and f_raw_id != str(f_job_id).strip():
-                    continue
+            elif len(f_parts) == 7:
+                # Format %i|%T|%M|%l|%j|%u|%b
+                f_raw_id, f_state_str = f_parts[0], f_parts[1]
             else:
-                f_tokens = f_line.split()
-                if len(f_tokens) == 1:
-                    f_state_str = f_tokens[0]
-                elif len(f_tokens) >= 2 and f_job_id is not None:
-                    if f_tokens[0] != str(f_job_id).strip():
-                        continue
-                    f_state_str = f_tokens[1]
-                else:
-                    f_state_str = f_tokens[-1]
+                raise SchedulerError(
+                    f"Malformed squeue row: expected pipe-delimited fields, got: {f_line!r}"
+                )
+
+            # Validate f_raw_id: exact numeric or root array handle (e.g. 123456 or 123456_0)
+            if not re.fullmatch(r"[0-9]+(_[0-9]+)?", f_raw_id):
+                raise SchedulerError(f"Malformed Job ID in squeue output: {f_raw_id!r}")
+
+            if f_expected_id is not None:
+                f_base_id = f_raw_id.split("_", 1)[0]
+                if f_raw_id != f_expected_id and f_base_id != f_expected_id:
+                    continue
 
             f_norm_state = cls.mapSlurmState(f_state_str)
             f_candidate_states.append(f_norm_state)
@@ -2003,7 +2105,7 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             return (SchedulerJobState.UNKNOWN, None)
 
         f_root_candidates: List[Tuple[SchedulerJobState, int]] = []
-        f_expected_id = str(f_job_id).strip() if f_job_id is not None else None
+        f_expected_id = cls.validateJobId(f_job_id) if f_job_id is not None else None
 
         for f_idx, f_line in enumerate(f_lines):
             if f_line.startswith("JobIDRaw|") or f_line.startswith("JobID|"):
@@ -2011,24 +2113,38 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 
             f_parts = [f_p.strip() for f_p in f_line.split("|")]
             if len(f_parts) == 3:
+                # JobIDRaw, State, ExitCode
                 f_raw_id, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2]
             elif len(f_parts) == 4:
+                # JobIDRaw, JobName, State, ExitCode
                 f_raw_id, _, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2], f_parts[3]
+            elif len(f_parts) == 5:
+                # JobIDRaw, JobName, State, ExitCode, Submit
+                f_raw_id, _, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2], f_parts[3]
+            elif len(f_parts) == 10:
+                # JobIDRaw, State, ExitCode, Elapsed, AllocCPUs, AllocNodes, NodeList, Submit, Start, End
+                f_raw_id, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2]
             else:
                 raise SchedulerError(
-                    f"Malformed sacct row at line {f_idx + 1}: expected 3 or 4 fields delimited by '|', got: {f_line!r}"
+                    f"Malformed sacct row at line {f_idx + 1}: expected pipe-delimited fields, got: {f_line!r}"
                 )
 
             # Check step row
             if "." in f_raw_id:
                 f_prefix, f_step = f_raw_id.split(".", 1)
-                if not re.match(r"^[0-9]+$", f_prefix) or not f_step:
+                if not re.fullmatch(r"[0-9]+", f_prefix) or not f_step:
                     raise SchedulerError(f"Malformed step row ID in sacct output: {f_raw_id!r}")
+                if ":" in f_exit_str:
+                    f_ret_s, f_sig_s = f_exit_str.split(":", 1)
+                    if not (f_ret_s.strip().lstrip("-").isdigit() and f_sig_s.strip().lstrip("-").isdigit()):
+                        raise SchedulerError(f"Malformed exit code in sacct output: {f_exit_str!r}")
+                elif not f_exit_str.strip().lstrip("-").isdigit():
+                    raise SchedulerError(f"Malformed exit code in sacct output: {f_exit_str!r}")
                 if f_expected_id is not None and f_prefix != f_expected_id:
                     continue
                 continue
 
-            if not re.match(r"^[0-9]+$", f_raw_id):
+            if not re.fullmatch(r"[0-9]+", f_raw_id):
                 raise SchedulerError(f"Malformed root JobIDRaw in sacct output: {f_raw_id!r}")
 
             if f_expected_id is not None and f_raw_id != f_expected_id:
@@ -2067,6 +2183,56 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     parseAccountingOutput = parseAccountingQuery
     parse_accounting_output = parseAccountingQuery
 
+    def queryJobState(
+        self,
+        f_job_id: str,
+        f_timeout: Optional[float] = None,
+    ) -> Tuple[SchedulerJobState, Optional[int]]:
+        """Query Slurm job state: check squeue first; if missing/terminal or error, query sacct.
+
+        Non-zero exit on query is non-fatal if other query succeeds, else returns (UNKNOWN, None).
+        """
+        f_norm_id = self.validateJobId(f_job_id)
+        f_effective_timeout = (
+            self.validateTimeout(f_timeout, "timeout")
+            if f_timeout is not None
+            else self.m_command_timeout
+        )
+
+        f_act_state: Optional[SchedulerJobState] = None
+
+        # 1. Check squeue first
+        f_act_argv = self.activeQueryCommand(f_norm_id)
+        try:
+            f_act_res = self._runCommand(f_act_argv, f_timeout=f_effective_timeout)
+            if f_act_res.is_success and f_act_res.stdout.strip():
+                f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                if f_act_state in (SchedulerJobState.QUEUED, SchedulerJobState.ACTIVE):
+                    return (f_act_state, None)
+        except Exception:
+            f_act_state = None
+
+        # 2. Check sacct (if missing from squeue, or squeue reported terminal, or squeue failed)
+        f_acct_argv = self.accountingQueryCommand(f_norm_id)
+        try:
+            f_acct_res = self._runCommand(f_acct_argv, f_timeout=f_effective_timeout)
+            if f_acct_res.is_success and f_acct_res.stdout.strip():
+                f_acct_state, f_exit_code = self.parseAccountingQuery(
+                    f_acct_res.stdout, f_job_id=f_norm_id
+                )
+                if f_acct_state != SchedulerJobState.UNKNOWN:
+                    return (f_acct_state, f_exit_code)
+        except Exception:
+            pass
+
+        # 3. Fallback: if squeue had parsed a valid terminal state earlier
+        if f_act_state is not None and f_act_state.is_terminal:
+            return (f_act_state, None)
+
+        return (SchedulerJobState.UNKNOWN, None)
+
+    query_job_state = queryJobState
+
     def recoverCandidateJobIds(
         self,
         f_job_name: str,
@@ -2079,31 +2245,37 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 
         # 1. squeue by job name
         f_sq_argv = self.recoveryActiveCommand(f_valid_name)
-        f_sq_res = self.m_command_runner.run(f_sq_argv)
-        if f_sq_res.is_success and f_sq_res.stdout.strip():
-            for f_line in f_sq_res.stdout.splitlines():
-                f_clean_l = f_line.strip()
-                if not f_clean_l:
-                    continue
-                f_parts = [f_p.strip() for f_p in f_clean_l.split("|")]
-                if len(f_parts) >= 2:
-                    f_cand_id, f_cand_name = f_parts[0], f_parts[1]
-                    if f_cand_name == f_valid_name and re.match(r"^[0-9]+$", f_cand_id):
-                        f_found_ids.add(f_cand_id)
+        try:
+            f_sq_res = self._runCommand(f_sq_argv, f_timeout=self.m_command_timeout)
+            if f_sq_res.is_success and f_sq_res.stdout.strip():
+                for f_line in f_sq_res.stdout.splitlines():
+                    f_clean_l = f_line.strip()
+                    if not f_clean_l:
+                        continue
+                    f_parts = [f_p.strip() for f_p in f_clean_l.split("|")]
+                    if len(f_parts) >= 2:
+                        f_cand_id, f_cand_name = f_parts[0], f_parts[1]
+                        if f_cand_name == f_valid_name and re.fullmatch(r"[0-9]+", f_cand_id):
+                            f_found_ids.add(f_cand_id)
+        except Exception:
+            pass
 
         # 2. sacct by job name
         f_sa_argv = self.recoveryTerminalCommand(f_valid_name, f_start_time=f_start_time)
-        f_sa_res = self.m_command_runner.run(f_sa_argv)
-        if f_sa_res.is_success and f_sa_res.stdout.strip():
-            for f_line in f_sa_res.stdout.splitlines():
-                f_clean_l = f_line.strip()
-                if not f_clean_l or f_clean_l.startswith("JobIDRaw|"):
-                    continue
-                f_parts = [f_p.strip() for f_p in f_clean_l.split("|")]
-                if len(f_parts) >= 2:
-                    f_cand_id, f_cand_name = f_parts[0], f_parts[1]
-                    if "." not in f_cand_id and f_cand_name == f_valid_name and re.match(r"^[0-9]+$", f_cand_id):
-                        f_found_ids.add(f_cand_id)
+        try:
+            f_sa_res = self._runCommand(f_sa_argv, f_timeout=self.m_command_timeout)
+            if f_sa_res.is_success and f_sa_res.stdout.strip():
+                for f_line in f_sa_res.stdout.splitlines():
+                    f_clean_l = f_line.strip()
+                    if not f_clean_l or f_clean_l.startswith("JobIDRaw|") or f_clean_l.startswith("JobID|"):
+                        continue
+                    f_parts = [f_p.strip() for f_p in f_clean_l.split("|")]
+                    if len(f_parts) >= 2:
+                        f_cand_id, f_cand_name = f_parts[0], f_parts[1]
+                        if "." not in f_cand_id and f_cand_name == f_valid_name and re.fullmatch(r"[0-9]+", f_cand_id):
+                            f_found_ids.add(f_cand_id)
+        except Exception:
+            pass
 
         return sorted(list(f_found_ids))
 
@@ -2150,27 +2322,77 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         self,
         f_job_id: str,
         f_poll_interval: float = 1.0,
-        f_grace_seconds: float = 120.0,
+        f_grace_seconds: Optional[float] = None,
         f_clock: Optional[Callable[[], float]] = None,
         f_sleep: Optional[Callable[[float], None]] = None,
+        f_timeout: Optional[float] = None,
+        f_command_timeout: Optional[float] = None,
     ) -> SchedulerJobState:
-        """Cancel exact Slurm job and poll with bounded confirmation until terminal state or grace period expires."""
+        """Cancel exact Slurm job and poll with bounded confirmation until terminal state or grace period expires.
+
+        Invariants:
+        - Starts one monotonic deadline before cancel command.
+        - Each command receives min(command_timeout, remaining_grace).
+        - Sleep duration is truncated to at most remaining grace.
+        - The deadline is never reset per loop.
+        - Returns UNKNOWN immediately on timeout or when deadline expires.
+        """
         f_norm_id = self.validateJobId(f_job_id)
-        f_now_fn = f_clock or time.time
+        f_valid_poll = self.validateTimeout(f_poll_interval, "poll_interval")
+        f_grace = (
+            self.validateTimeout(f_grace_seconds, "grace_seconds")
+            if f_grace_seconds is not None
+            else self.m_command_timeout
+        )
+        if f_command_timeout is not None:
+            f_cmd_timeout = self.validateTimeout(f_command_timeout, "command_timeout")
+        elif f_timeout is not None:
+            f_cmd_timeout = self.validateTimeout(f_timeout, "timeout")
+        else:
+            f_cmd_timeout = self.m_command_timeout
+
+        f_now_fn = f_clock or time.monotonic
         f_sleep_fn = f_sleep or time.sleep
+
+        # Start one monotonic deadline BEFORE executing cancel
+        f_start_time = f_now_fn()
+        f_deadline = f_start_time + f_grace
+
+        def _run_with_remaining(f_argv: Sequence[str]) -> Optional[ProcessResult]:
+            f_now = f_now_fn()
+            f_rem = f_deadline - f_now
+            if f_rem <= 0.0:
+                return None
+            f_effective_timeout = min(f_cmd_timeout, f_rem)
+            if f_effective_timeout <= 0.0:
+                return None
+            try:
+                return self._runCommand(f_argv, f_timeout=f_effective_timeout)
+            except Exception:
+                return None
 
         # 1. Execute cancel command
         f_cancel_argv = self.cancelCommand(f_norm_id)
-        self.m_command_runner.run(f_cancel_argv)
+        f_cancel_res = _run_with_remaining(f_cancel_argv)
+        if f_cancel_res is None or (f_deadline - f_now_fn() <= 0.0):
+            return SchedulerJobState.UNKNOWN
 
         # 2. Bounded confirmation polling loop
-        f_start_time = f_now_fn()
         while True:
+            f_now = f_now_fn()
+            f_rem = f_deadline - f_now
+            if f_rem <= 0.0:
+                return SchedulerJobState.UNKNOWN
+
             # Active query
             f_act_argv = self.activeQueryCommand(f_norm_id)
-            f_act_res = self.m_command_runner.run(f_act_argv)
-            if f_act_res.is_success and f_act_res.stdout.strip():
-                f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+            f_act_res = _run_with_remaining(f_act_argv)
+            if f_act_res is not None and f_act_res.is_success and f_act_res.stdout.strip():
+                try:
+                    f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                except Exception:
+                    f_act_state = None
+
                 if f_act_state in (
                     SchedulerJobState.CANCELLED,
                     SchedulerJobState.FAILED,
@@ -2178,18 +2400,28 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
                     SchedulerJobState.TIMEOUT,
                 ):
                     return f_act_state
+
                 # If still QUEUED or ACTIVE in squeue, sleep and retry
-                f_elapsed = f_now_fn() - f_start_time
-                if f_elapsed >= f_grace_seconds:
+                f_now_after = f_now_fn()
+                f_rem_after = f_deadline - f_now_after
+                if f_rem_after <= 0.0:
                     return SchedulerJobState.UNKNOWN
-                f_sleep_fn(f_poll_interval)
+                f_sleep_dur = min(f_valid_poll, f_rem_after)
+                if f_sleep_dur > 0.0:
+                    f_sleep_fn(f_sleep_dur)
+                if f_deadline - f_now_fn() <= 0.0:
+                    return SchedulerJobState.UNKNOWN
                 continue
 
             # Accounting query (when job has completed or left active queue)
             f_acct_argv = self.accountingQueryCommand(f_norm_id)
-            f_acct_res = self.m_command_runner.run(f_acct_argv)
-            if f_acct_res.is_success and f_acct_res.stdout.strip():
-                f_acct_state, _ = self.parseAccountingQuery(f_acct_res.stdout, f_job_id=f_norm_id)
+            f_acct_res = _run_with_remaining(f_acct_argv)
+            if f_acct_res is not None and f_acct_res.is_success and f_acct_res.stdout.strip():
+                try:
+                    f_acct_state, _ = self.parseAccountingQuery(f_acct_res.stdout, f_job_id=f_norm_id)
+                except Exception:
+                    f_acct_state = None
+
                 if f_acct_state in (
                     SchedulerJobState.CANCELLED,
                     SchedulerJobState.FAILED,
@@ -2198,11 +2430,17 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
                 ):
                     return f_acct_state
 
-            f_elapsed = f_now_fn() - f_start_time
-            if f_elapsed >= f_grace_seconds:
+            f_now_after_acct = f_now_fn()
+            f_rem_after_acct = f_deadline - f_now_after_acct
+            if f_rem_after_acct <= 0.0:
                 return SchedulerJobState.UNKNOWN
 
-            f_sleep_fn(f_poll_interval)
+            f_sleep_dur = min(f_valid_poll, f_rem_after_acct)
+            if f_sleep_dur > 0.0:
+                f_sleep_fn(f_sleep_dur)
+
+            if f_deadline - f_now_fn() <= 0.0:
+                return SchedulerJobState.UNKNOWN
 
     cancel_and_confirm = cancelAndConfirm
 
@@ -2222,10 +2460,11 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     - recovery: ['qstat', '-x', '-f', '-F', 'json', '-u', <user>]
 
     Invariants:
-    - Stores exact decimal job ID in JobHandle('pbs', job_id) after stripping server suffix (e.g. '123456.isambard-pbs' -> '123456').
-    - Status polling and cancellation query ONLY exact numeric job ID, never whole-user qstat.
+    - Stores exact qualified or unqualified PBS job ID in JobHandle('pbs', job_id) verbatim without stripping server suffix (e.g. '123456.isambard-pbs').
+    - Status polling and cancellation query ONLY exact job ID, never whole-user qstat.
     - Whole-user query is permitted strictly during dispatch-crash correlation token recovery.
     - Missing/corrupted Exit_status on finished jobs fails closed to SchedulerJobState.UNKNOWN.
+    - Negative signal exit statuses map to standard POSIX 128 + abs(sig).
     - Zero or multiple recovery matches fail closed without re-submitting.
     """
 
@@ -2236,28 +2475,33 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
         f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_timeout: Optional[float] = None,
+        f_command_timeout: Optional[float] = None,
+        f_profile: Optional[SiteProfile] = None,
     ) -> None:
         super().__init__(
             f_backend=SchedulerKind.PBS,
             f_command_runner=f_command_runner,
             f_evidence_store=f_evidence_store,
             f_worker_validator=f_worker_validator,
+            f_timeout=f_timeout,
+            f_command_timeout=f_command_timeout,
+            f_profile=f_profile,
         )
 
     @classmethod
     def validateJobId(cls, f_job_id: Any) -> str:
-        """Validate that Job ID is a non-empty exact decimal string '^[0-9]+$'."""
+        """Validate that Job ID is a non-empty string matching '^[0-9]+(?:\\.[A-Za-z0-9._-]+)?$'."""
         if not isinstance(f_job_id, str):
             raise SchedulerError(f"Job ID must be a string, got: {type(f_job_id).__name__}")
-        f_norm = f_job_id.strip()
-        if not f_norm:
+        if not f_job_id:
             raise SchedulerError("Job ID cannot be empty")
         _checkNoControlChars(f_job_id, "job_id")
-        if not re.fullmatch(r"[0-9]+", f_norm):
+        if not re.fullmatch(r"^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_job_id):
             raise SchedulerError(
-                f"PBS Job ID must match exact decimal string '^[0-9]+$', got: {f_job_id!r}"
+                f"PBS Job ID must match format '^[0-9]+(?:\\.[A-Za-z0-9._-]+)?$', got: {f_job_id!r}"
             )
-        return f_norm
+        return f_job_id
 
     validate_job_id = validateJobId
 
@@ -2277,10 +2521,10 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     build_submit_argv = buildSubmitArgv
 
     def parseSubmitOutput(self, f_stdout: str) -> str:
-        """Extract exact decimal job ID string from PBS submission command standard output.
+        """Extract exact qualified or unqualified PBS job ID string from PBS submission output.
 
         Accepts <job_id>[.<server_suffix>] (e.g. '123456.isambard-pbs' or '123456'),
-        extracts and returns the exact decimal job ID '123456'.
+        extracts and returns the exact full job ID verbatim without stripping server suffix.
         Rejects invalid formats, whitespace, or multiline outputs.
         """
         if not isinstance(f_stdout, str) or not f_stdout:
@@ -2295,12 +2539,12 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         if not f_clean:
             raise SubmissionDispatchError(f"PBS submission output is empty: {f_stdout!r}")
 
-        m = re.fullmatch(r"([0-9]+)(?:\.[A-Za-z0-9._-]+)?", f_clean)
+        m = re.fullmatch(r"^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_clean)
         if not m:
             raise SubmissionDispatchError(
                 f"PBS submission output does not match valid PBS ID pattern: {f_stdout!r}"
             )
-        return m.group(1)
+        return f_clean
 
     parse_submit_output = parseSubmitOutput
 
@@ -2325,12 +2569,12 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     build_accounting_query_argv = accountingQueryCommand
 
     @classmethod
-    def recoveryCommand(cls, f_user: str) -> List[str]:
+    def recoveryCommand(cls, f_user: Optional[str] = None) -> List[str]:
         """Build exact qstat user recovery argv: ['qstat', '-x', '-f', '-F', 'json', '-u', <user>]."""
-        if not isinstance(f_user, str) or not f_user.strip():
-            raise SchedulerError("User must be a non-empty string")
-        _checkNoControlChars(f_user, "user")
-        return ["qstat", "-x", "-f", "-F", "json", "-u", f_user.strip()]
+        if f_user is not None and f_user.strip():
+            _checkNoControlChars(f_user, "user")
+            return ["qstat", "-x", "-f", "-F", "json", "-u", f_user.strip()]
+        return ["qstat", "-x", "-f", "-F", "json"]
 
     recovery_command = recoveryCommand
     buildRecoveryArgv = recoveryCommand
@@ -2373,7 +2617,7 @@ class PbsSchedulerAdapter(SchedulerAdapter):
                 return SchedulerJobState.SUCCEEDED
             else:
                 return SchedulerJobState.FAILED
-        elif f_token.startswith("CANCELLED") or f_token in ("CA",):
+        elif f_token.startswith("CANCELLED") or f_token in ("CA", "CANCEL", "CANCELLED"):
             return SchedulerJobState.CANCELLED
         elif f_token in ("TIMEOUT", "TO"):
             return SchedulerJobState.TIMEOUT
@@ -2423,9 +2667,8 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             if not isinstance(f_key, str):
                 continue
             f_key_clean = f_key.strip()
-            f_key_decimal = f_key_clean.split(".")[0]
             if f_expected_id is not None:
-                if f_key_clean == f_expected_id or f_key_decimal == f_expected_id:
+                if f_key_clean == f_expected_id:
                     if not isinstance(f_val, dict):
                         raise SchedulerError(f"Job entry '{f_key}' in PBS JSON is not an object")
                     f_matched_entries.append((f_key_clean, f_val))
@@ -2494,9 +2737,8 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             if not isinstance(f_key, str):
                 continue
             f_key_clean = f_key.strip()
-            f_key_decimal = f_key_clean.split(".")[0]
             if f_expected_id is not None:
-                if f_key_clean == f_expected_id or f_key_decimal == f_expected_id:
+                if f_key_clean == f_expected_id:
                     if not isinstance(f_val, dict):
                         raise SchedulerError(f"Job entry '{f_key}' in PBS JSON is not an object")
                     f_matched_entries.append((f_key_clean, f_val))
@@ -2522,7 +2764,11 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         f_exit_int: Optional[int] = None
         if f_exit_raw is not None:
             try:
-                f_exit_int = int(str(f_exit_raw).strip())
+                f_raw_int = int(str(f_exit_raw).strip())
+                if f_raw_int < 0:
+                    f_exit_int = 128 + abs(f_raw_int)
+                else:
+                    f_exit_int = f_raw_int
             except (ValueError, TypeError):
                 f_exit_int = None
 
@@ -2532,6 +2778,56 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     parse_accounting_query = parseAccountingQuery
     parseAccountingOutput = parseAccountingQuery
     parse_accounting_output = parseAccountingQuery
+
+    def queryJobState(
+        self,
+        f_job_id: str,
+        f_timeout: Optional[float] = None,
+    ) -> Tuple[SchedulerJobState, Optional[int]]:
+        """Query PBS job state: check active qstat first; if missing/terminal or error, query historical qstat -x.
+
+        Non-zero exit on query is non-fatal if other query succeeds, else returns (UNKNOWN, None).
+        """
+        f_norm_id = self.validateJobId(f_job_id)
+        f_effective_timeout = (
+            self.validateTimeout(f_timeout, "timeout")
+            if f_timeout is not None
+            else self.m_command_timeout
+        )
+
+        f_act_state: Optional[SchedulerJobState] = None
+
+        # 1. Check active queue first (qstat -f -F json <job_id>)
+        f_act_argv = self.activeQueryCommand(f_norm_id)
+        try:
+            f_act_res = self._runCommand(f_act_argv, f_timeout=f_effective_timeout)
+            if f_act_res.is_success and f_act_res.stdout.strip():
+                f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                if f_act_state in (SchedulerJobState.QUEUED, SchedulerJobState.ACTIVE):
+                    return (f_act_state, None)
+        except Exception:
+            f_act_state = None
+
+        # 2. Check accounting / historical query (qstat -x -f -F json <job_id>)
+        f_acct_argv = self.accountingQueryCommand(f_norm_id)
+        try:
+            f_acct_res = self._runCommand(f_acct_argv, f_timeout=f_effective_timeout)
+            if f_acct_res.is_success and f_acct_res.stdout.strip():
+                f_acct_state, f_exit_code = self.parseAccountingQuery(
+                    f_acct_res.stdout, f_job_id=f_norm_id
+                )
+                if f_acct_state != SchedulerJobState.UNKNOWN:
+                    return (f_acct_state, f_exit_code)
+        except Exception:
+            pass
+
+        # 3. Fallback: if active query parsed a terminal state earlier
+        if f_act_state is not None and f_act_state.is_terminal:
+            return (f_act_state, None)
+
+        return (SchedulerJobState.UNKNOWN, None)
+
+    query_job_state = queryJobState
 
     def recoverCandidateJobIds(
         self,
@@ -2547,7 +2843,7 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         _checkNoControlChars(f_clean_user, "user")
 
         f_qstat_argv = self.recoveryCommand(f_clean_user)
-        f_res = self.m_command_runner.run(f_qstat_argv)
+        f_res = self._runCommand(f_qstat_argv, f_timeout=self.m_command_timeout)
 
         if not f_res.is_success or not f_res.stdout.strip():
             return []
@@ -2570,9 +2866,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
                 continue
             f_cand_name = f_job_dict.get("Job_Name")
             if f_cand_name == f_valid_name:
-                m = re.match(r"^([0-9]+)(?:\.[A-Za-z0-9._-]+)?$", f_key.strip())
-                if m:
-                    f_found_ids.add(m.group(1))
+                f_key_clean = f_key.strip()
+                if re.fullmatch(r"^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_key_clean):
+                    f_found_ids.add(f_key_clean)
 
         return sorted(list(f_found_ids))
 
@@ -2619,32 +2915,79 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         self,
         f_job_id: str,
         f_poll_interval: float = 1.0,
-        f_grace_seconds: float = 120.0,
+        f_grace_seconds: Optional[float] = None,
         f_clock: Optional[Callable[[], float]] = None,
         f_sleep: Optional[Callable[[float], None]] = None,
+        f_timeout: Optional[float] = None,
+        f_command_timeout: Optional[float] = None,
     ) -> SchedulerJobState:
         """Cancel exact PBS job and poll with bounded confirmation until terminal state or grace period expires.
 
         Invariants:
+        - Starts one monotonic deadline before cancel command.
+        - Each command receives min(command_timeout, remaining_grace).
+        - Sleep duration is truncated to at most remaining grace.
+        - The deadline is never reset per loop.
+        - Returns UNKNOWN immediately on timeout or when deadline expires.
         - Queries ONLY exact job ID using qstat -f -F json <job_id> (or qstat -x -f -F json <job_id>).
         - NEVER invokes whole-user qstat during cancellation polling.
         """
         f_norm_id = self.validateJobId(f_job_id)
-        f_now_fn = f_clock or time.time
+        f_valid_poll = self.validateTimeout(f_poll_interval, "poll_interval")
+        f_grace = (
+            self.validateTimeout(f_grace_seconds, "grace_seconds")
+            if f_grace_seconds is not None
+            else self.m_command_timeout
+        )
+        if f_command_timeout is not None:
+            f_cmd_timeout = self.validateTimeout(f_command_timeout, "command_timeout")
+        elif f_timeout is not None:
+            f_cmd_timeout = self.validateTimeout(f_timeout, "timeout")
+        else:
+            f_cmd_timeout = self.m_command_timeout
+
+        f_now_fn = f_clock or time.monotonic
         f_sleep_fn = f_sleep or time.sleep
+
+        # Start one monotonic deadline BEFORE executing cancel
+        f_start_time = f_now_fn()
+        f_deadline = f_start_time + f_grace
+
+        def _run_with_remaining(f_argv: Sequence[str]) -> Optional[ProcessResult]:
+            f_now = f_now_fn()
+            f_rem = f_deadline - f_now
+            if f_rem <= 0.0:
+                return None
+            f_effective_timeout = min(f_cmd_timeout, f_rem)
+            if f_effective_timeout <= 0.0:
+                return None
+            try:
+                return self._runCommand(f_argv, f_timeout=f_effective_timeout)
+            except Exception:
+                return None
 
         # 1. Execute cancel command
         f_cancel_argv = self.cancelCommand(f_norm_id)
-        self.m_command_runner.run(f_cancel_argv)
+        f_cancel_res = _run_with_remaining(f_cancel_argv)
+        if f_cancel_res is None or (f_deadline - f_now_fn() <= 0.0):
+            return SchedulerJobState.UNKNOWN
 
         # 2. Bounded confirmation polling loop
-        f_start_time = f_now_fn()
         while True:
+            f_now = f_now_fn()
+            f_rem = f_deadline - f_now
+            if f_rem <= 0.0:
+                return SchedulerJobState.UNKNOWN
+
             # Active query
             f_act_argv = self.activeQueryCommand(f_norm_id)
-            f_act_res = self.m_command_runner.run(f_act_argv)
-            if f_act_res.is_success and f_act_res.stdout.strip():
-                f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+            f_act_res = _run_with_remaining(f_act_argv)
+            if f_act_res is not None and f_act_res.is_success and f_act_res.stdout.strip():
+                try:
+                    f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                except Exception:
+                    f_act_state = None
+
                 if f_act_state in (
                     SchedulerJobState.CANCELLED,
                     SchedulerJobState.FAILED,
@@ -2652,18 +2995,29 @@ class PbsSchedulerAdapter(SchedulerAdapter):
                     SchedulerJobState.TIMEOUT,
                 ):
                     return f_act_state
-                # If still QUEUED or ACTIVE in qstat, check elapsed and sleep
-                f_elapsed = f_now_fn() - f_start_time
-                if f_elapsed >= f_grace_seconds:
-                    return SchedulerJobState.UNKNOWN
-                f_sleep_fn(f_poll_interval)
-                continue
+
+                if f_act_state in (SchedulerJobState.QUEUED, SchedulerJobState.ACTIVE):
+                    # If still QUEUED or ACTIVE in qstat, check elapsed and sleep
+                    f_now_after = f_now_fn()
+                    f_rem_after = f_deadline - f_now_after
+                    if f_rem_after <= 0.0:
+                        return SchedulerJobState.UNKNOWN
+                    f_sleep_dur = min(f_valid_poll, f_rem_after)
+                    if f_sleep_dur > 0.0:
+                        f_sleep_fn(f_sleep_dur)
+                    if f_deadline - f_now_fn() <= 0.0:
+                        return SchedulerJobState.UNKNOWN
+                    continue
 
             # Historical / accounting query
             f_acct_argv = self.accountingQueryCommand(f_norm_id)
-            f_acct_res = self.m_command_runner.run(f_acct_argv)
-            if f_acct_res.is_success and f_acct_res.stdout.strip():
-                f_acct_state, _ = self.parseAccountingQuery(f_acct_res.stdout, f_job_id=f_norm_id)
+            f_acct_res = _run_with_remaining(f_acct_argv)
+            if f_acct_res is not None and f_acct_res.is_success and f_acct_res.stdout.strip():
+                try:
+                    f_acct_state, _ = self.parseAccountingQuery(f_acct_res.stdout, f_job_id=f_norm_id)
+                except Exception:
+                    f_acct_state = None
+
                 if f_acct_state in (
                     SchedulerJobState.CANCELLED,
                     SchedulerJobState.FAILED,
@@ -2672,12 +3026,16 @@ class PbsSchedulerAdapter(SchedulerAdapter):
                 ):
                     return f_acct_state
 
-            f_elapsed = f_now_fn() - f_start_time
-            if f_elapsed >= f_grace_seconds:
+            f_now_after_acct = f_now_fn()
+            f_rem_after_acct = f_deadline - f_now_after_acct
+            if f_rem_after_acct <= 0.0:
                 return SchedulerJobState.UNKNOWN
 
-            f_sleep_fn(f_poll_interval)
+            f_sleep_dur = min(f_valid_poll, f_rem_after_acct)
+            if f_sleep_dur > 0.0:
+                f_sleep_fn(f_sleep_dur)
+
+            if f_deadline - f_now_fn() <= 0.0:
+                return SchedulerJobState.UNKNOWN
 
     cancel_and_confirm = cancelAndConfirm
-
-

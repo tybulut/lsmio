@@ -300,6 +300,51 @@ class SiteResolverTest(unittest.TestCase):
         self.assertIsNone(f_large.pmem)
         self.assertIsNone(f_large.pvmem)
 
+    def testCredentialScope(self) -> None:
+        """Verify credential requirement scope for Slurm (VIKING, VIKING2, ARCHER2) vs PBS (ISAMBARD) and DEV."""
+        for f_slurm_name in ("VIKING", "VIKING2", "ARCHER2"):
+            f_prof = EnvironmentResolver.resolveProfile(
+                f_slurm_name,
+                f_user=self.m_test_user,
+                f_home=self.m_test_home,
+                f_document=self.m_profile_doc,
+            )
+            self.assertTrue(f_prof.requires_credentials)
+            self.assertTrue(f_prof.requires_account)
+            self.assertTrue(f_prof.requires_email)
+
+            # Valid credentials succeed
+            f_prof.validateCredentials("e281", "user@epcc.ed.ac.uk")
+
+            # Missing or whitespace account fails
+            for f_bad_acct in (None, "", "   ", "\t"):
+                with self.assertRaises(SiteResolutionError):
+                    f_prof.validateCredentials(f_bad_acct, "user@epcc.ed.ac.uk")
+
+            # Missing or whitespace email fails
+            for f_bad_email in (None, "", "   ", "\t"):
+                with self.assertRaises(SiteResolutionError):
+                    f_prof.validateCredentials("e281", f_bad_email)
+
+            # Both missing fails
+            with self.assertRaises(SiteResolutionError):
+                f_prof.validateCredentials(None, None)
+
+        # PBS and DEV require no credentials
+        for f_non_slurm in ("ISAMBARD", "DEV"):
+            f_prof = EnvironmentResolver.resolveProfile(
+                f_non_slurm,
+                f_user=self.m_test_user,
+                f_home=self.m_test_home,
+                f_document=self.m_profile_doc,
+            )
+            self.assertFalse(f_prof.requires_credentials)
+            self.assertFalse(f_prof.requires_account)
+            self.assertFalse(f_prof.requires_email)
+            # Validates without raising on None or empty strings
+            f_prof.validateCredentials(None, None)
+            f_prof.validateCredentials("", "")
+
     def testSlurmPolicyAndCredentialScope(self) -> None:
         """Verify Slurm credential requirement scope versus PBS/DEV and partition/memory shapes."""
         for f_slurm_name in ("VIKING", "VIKING2", "ARCHER2"):

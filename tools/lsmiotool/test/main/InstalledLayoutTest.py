@@ -346,6 +346,113 @@ class InstalledLayoutTest(unittest.TestCase):
         self.assertTrue(f_layout.is_installed)
         self.assertEqual(f_layout.package_root, os.path.join(f_share_dir, "python"))
 
+    def testInstalledLmpAssetsExactFilenamesAndNoAliases(self) -> None:
+        """Asserts that LMP assets in source and installed layouts use exact upstream names with no renamed aliases."""
+        f_source_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tools", "bmtool", "lmp-reaxff")
+        )
+        if os.path.isdir(f_source_dir):
+            f_assets = sorted(os.listdir(f_source_dir))
+            self.assertEqual(
+                f_assets,
+                ["data.hns-equil", "ffield.reax.hns", "in.reaxc.hns"],
+                "Source LMP assets must match exact upstream filenames",
+            )
+            self.assertNotIn("in.reaxff.hns", f_assets)
+            self.assertNotIn("data.hns", f_assets)
+
+    def testRuntimeLayoutHasNoArtifactRole(self) -> None:
+        """Asserts that RuntimeLayout has no artifact roles and ArtifactLayout has no resource roles (F-02)."""
+        from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore, validatePathContainment
+        from lsmiotool.lib.evidence import EvidenceStore
+        from lsmiotool.lib.worker import AllocationController, AllocationControllerError
+
+        # 1. Create installed RuntimeLayout
+        f_rel = InstallRelativeLayout(
+            f_package_root="../share/lsmio/python",
+            f_profile_file="../share/lsmio/etc/environments.json",
+            f_asset_root="../share/lsmio/lmp-reaxff",
+            f_worker_executable="../libexec/lsmio/lsmiotool-worker",
+            f_version_file="../share/lsmio/python/lsmiotool/VERSION",
+        )
+        f_inst_layout = ResourceLocator.forInstalled("/opt/lsmio/bin/lsmiotool", f_rel)
+
+        # 2. Create source RuntimeLayout
+        f_src_worker = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "lsmiotool-worker")
+        )
+        f_src_layout = ResourceLocator.forSource(f_src_worker)
+
+        # 3. Assert RuntimeLayout has no artifact attributes or methods
+        f_artifact_attrs = (
+            "runRoot",
+            "benchmarkRoot",
+            "manifestPath",
+            "pointDir",
+            "pointDataDir",
+            "pointLogsDir",
+            "pointCombinationsDir",
+            "pointResultsDir",
+            "pointWorkDir",
+            "pointClaimsDir",
+            "pointWorkerEventsDir",
+            "rankDir",
+            "rankCombinationDir",
+            "rankResultPath",
+            "rankLogPath",
+            "rankClaimPath",
+            "controllerResultPath",
+            "outputArtifactPath",
+        )
+        for f_layout in (f_inst_layout, f_src_layout):
+            for f_attr in f_artifact_attrs:
+                self.assertFalse(
+                    hasattr(f_layout, f_attr),
+                    f"RuntimeLayout must NOT have artifact attribute '{f_attr}'",
+                )
+                with self.assertRaises(AttributeError):
+                    getattr(f_layout, f_attr)
+
+        # 4. Assert ArtifactLayout has no resource attributes or methods
+        f_art_layout = ArtifactLayout("/tmp/benchmarks", "run-001")
+        f_resource_attrs = (
+            "package_root",
+            "profile_file",
+            "asset_root",
+            "worker_executable",
+            "version_file",
+            "execution_mode",
+            "is_source",
+            "is_installed",
+        )
+        for f_attr in f_resource_attrs:
+            self.assertFalse(
+                hasattr(f_art_layout, f_attr),
+                f"ArtifactLayout must NOT have resource attribute '{f_attr}'",
+            )
+            with self.assertRaises(AttributeError):
+                getattr(f_art_layout, f_attr)
+
+        # 5. Using RuntimeLayout with ArtifactStore / EvidenceStore fails closed
+        from lsmiotool.lib.artifacts import ArtifactError
+        with self.assertRaises((ArtifactError, AttributeError, TypeError)):
+            ArtifactStore(f_inst_layout)  # type: ignore
+
+        with self.assertRaises((ArtifactError, AttributeError, TypeError)):
+            EvidenceStore(f_inst_layout)  # type: ignore
+
+        # 6. AllocationController rejects RuntimeLayout passed as f_layout during execution
+        f_controller = AllocationController(
+            f_worker_executable=f_inst_layout.worker_executable,
+            f_asset_source=f_inst_layout.asset_root,
+            f_layout=f_inst_layout,  # Invalid layout
+        )
+        with self.assertRaises((AllocationControllerError, AttributeError)):
+            f_controller.run(
+                f_manifest_path="/nonexistent/manifest.json",
+                f_point_id="00-tasks-1",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

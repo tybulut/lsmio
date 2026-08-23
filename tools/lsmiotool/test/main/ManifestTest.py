@@ -141,6 +141,7 @@ class ManifestTest(unittest.TestCase):
             self.assertEqual(f_doc.plan["scale"], f_plan.request.scale)
             self.assertEqual(f_doc.plan["storage"], f_plan.request.storage.value)
             self.assertEqual(f_doc.plan["setup"], f_plan.request.setup)
+            self.assertEqual(f_doc.plan["lmp_task_tuning"], f_plan.lmp_task_tuning)
 
             # Roundtrip to RunPlan
             f_reconstructed_plan = f_doc.toRunPlan()
@@ -364,7 +365,7 @@ class ManifestTest(unittest.TestCase):
         self.assertIn("extra_plan_prop", str(f_ctx.exception))
 
         # Missing key in plan
-        for f_plan_sub in ["target", "scale", "storage", "setup"]:
+        for f_plan_sub in ["target", "scale", "storage", "setup", "lmp_task_tuning"]:
             f_dict = copy.deepcopy(f_base_dict)
             del f_dict["plan"][f_plan_sub]
             with self.assertRaises(ManifestValidationError) as f_ctx:
@@ -599,3 +600,281 @@ class ManifestTest(unittest.TestCase):
         )
         with self.assertRaises(ManifestValidationError):
             ManifestSerializer.serialize(f_bad_plan)
+
+    def testLmpTuningCanonicalRoundTripAndByteStability(self) -> None:
+        """Assert LMP task tuning round-trips through canonical JSON serialization with byte stability."""
+        f_expected_local = {
+            "1": {"replication": 4, "buffer_size_mb": 32},
+        }
+        f_expected_bake = {
+            "1": {"replication": 4, "buffer_size_mb": 32},
+            "2": {"replication": 5, "buffer_size_mb": 32},
+            "4": {"replication": 6, "buffer_size_mb": 64},
+            "8": {"replication": 8, "buffer_size_mb": 128},
+        }
+        f_expected_small = {
+            "1": {"replication": 4, "buffer_size_mb": 32},
+            "2": {"replication": 5, "buffer_size_mb": 32},
+            "4": {"replication": 6, "buffer_size_mb": 64},
+            "8": {"replication": 8, "buffer_size_mb": 128},
+            "16": {"replication": 10, "buffer_size_mb": 256},
+            "24": {"replication": 12, "buffer_size_mb": 512},
+            "32": {"replication": 14, "buffer_size_mb": 1024},
+            "40": {"replication": 15, "buffer_size_mb": 1024},
+            "48": {"replication": 16, "buffer_size_mb": 1024},
+        }
+
+        f_cases = [
+            ("local", self.m_viking_profile, f_expected_local),
+            ("bake", self.m_viking2_profile, f_expected_bake),
+            ("small", self.m_isambard_profile, f_expected_small),
+        ]
+
+        for f_scale, f_profile, f_expected in f_cases:
+            f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+            f_tok_idx = 0
+
+            def token_gen() -> str:
+                nonlocal f_tok_idx
+                f_tok = f_tokens[f_tok_idx]
+                f_tok_idx += 1
+                return f_tok
+
+            f_req = RunRequest(f_target="lmp", f_scale=f_scale, f_ssd=False, f_setup="LSMIO")
+            f_plan = RunPlanner.createPlan(
+                f_request=f_req,
+                f_profile=f_profile,
+                f_run_id_source=lambda: f"run-lmp-{f_scale}",
+                f_clock=lambda: "2026-08-20T12:00:00Z",
+                f_token_source=token_gen,
+            )
+
+            # Plan contains exact literal expected tuning
+            self.assertEqual(f_plan.lmp_task_tuning, f_expected)
+
+            # Serialize to canonical JSON
+            f_json_str = ManifestSerializer.serialize(f_plan)
+
+            # Verify presence in serialized manifest
+            f_parsed_raw = json.loads(f_json_str)
+            self.assertEqual(f_parsed_raw["plan"]["lmp_task_tuning"], f_expected)
+
+            # Deserialize to ManifestDocument
+            f_doc = ManifestSerializer.deserialize(f_json_str)
+            self.assertEqual(f_doc.plan["lmp_task_tuning"], f_expected)
+
+            # Reconstruct to RunPlan
+            f_reconstructed_plan = f_doc.toRunPlan()
+            self.assertEqual(f_reconstructed_plan.lmp_task_tuning, f_expected)
+            self.assertEqual(f_reconstructed_plan, f_plan)
+
+            # Byte stability
+            self.assertEqual(ManifestSerializer.serialize(f_doc), f_json_str)
+            self.assertEqual(ManifestSerializer.serialize(f_reconstructed_plan), f_json_str)
+            self.assertEqual(f_doc.toJson(), f_json_str)
+
+    def testNonLmpTuningIsExactlyEmpty(self) -> None:
+        """Assert non-LMP manifests (IOR, LSMIO) always have lmp_task_tuning as exactly {}."""
+        f_cases = [
+            ("ior", "local", self.m_viking_profile, "BASE"),
+            ("ior", "bake", self.m_viking2_profile, "HDF5"),
+            ("ior", "small", self.m_isambard_profile, "COLLECTIVE"),
+            ("ior", "large", self.m_archer2_profile, "REVERSE"),
+            ("lsmio", "local", self.m_dev_profile, "NATIVE-M"),
+            ("lsmio", "bake", self.m_viking_profile, "ROCKSDB-M"),
+            ("lsmio", "small", self.m_viking2_profile, "ADIOS-M"),
+            ("lsmio", "large", self.m_archer2_profile, "LEVELDB-M"),
+        ]
+
+        for f_target, f_scale, f_profile, f_setup in f_cases:
+            f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+            f_tok_idx = 0
+
+            def token_gen() -> str:
+                nonlocal f_tok_idx
+                f_tok = f_tokens[f_tok_idx]
+                f_tok_idx += 1
+                return f_tok
+
+            f_req = RunRequest(f_target=f_target, f_scale=f_scale, f_ssd=False, f_setup=f_setup)
+            f_plan = RunPlanner.createPlan(
+                f_request=f_req,
+                f_profile=f_profile,
+                f_run_id_source=lambda: f"run-{f_target}-{f_scale}",
+                f_clock=lambda: "2026-08-20T12:00:00Z",
+                f_token_source=token_gen,
+            )
+
+            self.assertEqual(f_plan.lmp_task_tuning, {})
+            f_json_str = ManifestSerializer.serialize(f_plan)
+            f_parsed_raw = json.loads(f_json_str)
+            self.assertEqual(f_parsed_raw["plan"]["lmp_task_tuning"], {})
+
+            f_doc = ManifestSerializer.deserialize(f_json_str)
+            self.assertEqual(f_doc.plan["lmp_task_tuning"], {})
+
+            f_reconstructed_plan = f_doc.toRunPlan()
+            self.assertEqual(f_reconstructed_plan.lmp_task_tuning, {})
+            self.assertEqual(f_reconstructed_plan, f_plan)
+
+            self.assertEqual(ManifestSerializer.serialize(f_doc), f_json_str)
+            self.assertEqual(ManifestSerializer.serialize(f_reconstructed_plan), f_json_str)
+
+    def testMissingExtraMalformedNodeKeyedOrMismatchedTuningRejected(self) -> None:
+        """Assert fail-closed rejection of missing, extra, malformed, node-keyed, or mismatched LMP tuning."""
+        # 1. Base valid LMP small manifest dictionary
+        f_tokens = [f"lm-{f_i:024x}" for f_i in range(9)]
+        f_tok_idx = 0
+
+        def token_gen() -> str:
+            nonlocal f_tok_idx
+            f_tok = f_tokens[f_tok_idx]
+            f_tok_idx += 1
+            return f_tok
+
+        f_lmp_req = RunRequest(f_target="lmp", f_scale="small")
+        f_lmp_plan = RunPlanner.createPlan(
+            f_request=f_lmp_req,
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-lmp-valid",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=token_gen,
+        )
+        f_lmp_base_dict = json.loads(ManifestSerializer.serialize(f_lmp_plan))
+
+        # Base valid IOR local manifest dictionary
+        f_ior_req = RunRequest(f_target="ior", f_scale="local")
+        f_ior_plan = RunPlanner.createPlan(
+            f_request=f_ior_req,
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-ior-valid",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        f_ior_base_dict = json.loads(ManifestSerializer.serialize(f_ior_plan))
+
+        # A. Missing lmp_task_tuning key in plan
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        del f_d["plan"]["lmp_task_tuning"]
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("lmp_task_tuning", str(f_ctx.exception))
+
+        # B. Non-dict lmp_task_tuning
+        for f_bad_val in ["not-a-dict", [1, 2, 4], 123, True, None]:
+            f_d = copy.deepcopy(f_lmp_base_dict)
+            f_d["plan"]["lmp_task_tuning"] = f_bad_val
+            with self.assertRaises(ManifestValidationError) as f_ctx:
+                ManifestSerializer.deserialize(f_d)
+            self.assertIn("lmp_task_tuning", str(f_ctx.exception))
+
+        # C. Non-LMP target with non-empty lmp_task_tuning
+        f_d = copy.deepcopy(f_ior_base_dict)
+        f_d["plan"]["lmp_task_tuning"] = {"1": {"replication": 4, "buffer_size_mb": 32}}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("empty", str(f_ctx.exception))
+
+        # D. LMP missing a planned scale point's task count (missing task "48")
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        del f_d["plan"]["lmp_task_tuning"]["48"]
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("match", str(f_ctx.exception))
+
+        # E. LMP with extra task count not in scale points (adding "64" to small)
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["64"] = {"replication": 20, "buffer_size_mb": 2048}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertTrue("undefined" in str(f_ctx.exception) or "match" in str(f_ctx.exception))
+
+        # F. Node-keyed substitutions instead of decimal tasks
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"] = {
+            "node_1": {"replication": 4, "buffer_size_mb": 32},
+        }
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("invalid", str(f_ctx.exception))
+
+        # G. Non-decimal or malformed keys (e.g. "01", "-1", "1.0", "one", "")
+        for f_bad_key in ["01", "-1", "1.0", "one", "", " 1 ", "1_0"]:
+            f_d = copy.deepcopy(f_lmp_base_dict)
+            f_d["plan"]["lmp_task_tuning"][f_bad_key] = {"replication": 4, "buffer_size_mb": 32}
+            with self.assertRaises(ManifestValidationError) as f_ctx:
+                ManifestSerializer.deserialize(f_d)
+            self.assertIn("invalid", str(f_ctx.exception))
+
+        # H. Inner dictionary malformed
+        # Missing replication
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"buffer_size_mb": 32}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("contain exactly", str(f_ctx.exception))
+
+        # Missing buffer_size_mb
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 4}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("contain exactly", str(f_ctx.exception))
+
+        # Extra key in inner dict
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {
+            "replication": 4,
+            "buffer_size_mb": 32,
+            "extra_key": 99,
+        }
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("contain exactly", str(f_ctx.exception))
+
+        # Non-dict inner value
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = "replication=4"
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("dict", str(f_ctx.exception))
+
+        # Boolean values in replication or buffer_size_mb
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": True, "buffer_size_mb": 32}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("positive integer", str(f_ctx.exception))
+
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 4, "buffer_size_mb": False}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("positive integer", str(f_ctx.exception))
+
+        # Zero or negative values
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 0, "buffer_size_mb": 32}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("positive integer", str(f_ctx.exception))
+
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 4, "buffer_size_mb": -32}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("positive integer", str(f_ctx.exception))
+
+        # Float values
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 4.0, "buffer_size_mb": 32}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("positive integer", str(f_ctx.exception))
+
+        # Mismatched tuning values (does not match approved LMP tuning authority)
+        f_d = copy.deepcopy(f_lmp_base_dict)
+        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 99, "buffer_size_mb": 32}
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestSerializer.deserialize(f_d)
+        self.assertIn("match", str(f_ctx.exception))
