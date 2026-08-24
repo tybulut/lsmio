@@ -45,7 +45,7 @@ LSMIOTOOL_HELP = """How to run
 common cmds:
   compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
   load-modules  load needed HPC modules
-  parse <ior|lsmio|lmp> <local|bake|small|large>
+  parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
   run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
 
 other cmds:

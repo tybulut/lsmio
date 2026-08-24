@@ -510,24 +510,24 @@ class RunParseTest(unittest.TestCase):
 
     def testLegacyParseUnchanged(self) -> None:
         """Asserts legacy parse routines and compatibility remain unchanged."""
-        from lsmiotool.lib.main import ParseMain
+        from lsmiotool.lib.main import ParseLegacyMain
 
-        # Legacy ParseMain initialization for ior, lsmio, lmp
-        inst_ior = ParseMain("ior", "local")
+        # Legacy ParseLegacyMain initialization for ior, lsmio, lmp
+        inst_ior = ParseLegacyMain("ior", "local")
         self.assertEqual(inst_ior.m_command, "ior")
         self.assertEqual(inst_ior.m_mode, "local")
         self.assertFalse(inst_ior.m_is_ssd)
 
-        inst_lsmio = ParseMain("lsmio", "small", ssd=True)
+        inst_lsmio = ParseLegacyMain("lsmio", "small", ssd=True)
         self.assertEqual(inst_lsmio.m_command, "lsmio")
         self.assertEqual(inst_lsmio.m_mode, "small")
         self.assertTrue(inst_lsmio.m_is_ssd)
 
-        inst_lmp = ParseMain("lmp", "bake")
+        inst_lmp = ParseLegacyMain("lmp", "bake")
         self.assertEqual(inst_lmp.m_command, "lmp")
         self.assertEqual(inst_lmp.m_mode, "bake")
 
-        # Assert ParseMain does not import or call RunRootResolver
+        # Assert ParseLegacyMain does not import or call RunRootResolver
         self.assertFalse(hasattr(inst_ior, "resolve"))
         self.assertFalse(hasattr(inst_ior, "select"))
 

@@ -59,17 +59,17 @@ class TestMain(BaseMain):
         return test.run_and_report()
 
 
-class ParseMain(BaseMain):
-    """Parse command for processing benchmark output logs."""
+class ParseLegacyMain(BaseMain):
+    """ParseLegacy command for processing benchmark output logs."""
 
     m_command: str
     m_mode: str
     m_is_ssd: bool
 
     def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
-        """Initialize ParseMain.
+        """Initialize ParseLegacyMain.
 
-        Command: parse <ior|lsmio|lmp> <local|bake|small|large> [--ssd]
+        Command: parseLegacy <ior|lsmio|lmp> <local|bake|small|large> [--ssd]
 
         Args:
             *f_args: Variable length argument list (command, mode)
@@ -78,7 +78,7 @@ class ParseMain(BaseMain):
         super().__init__()
         if len(f_args) < 2:
             log.Console.error(
-                "Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>"
+                "ParseLegacy: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>"
             )
             sys.exit(1)
         self.m_command = f_args[0]

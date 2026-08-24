@@ -53,7 +53,7 @@ from lsmiotool.lib.main import (
     CompareMain,
     HpcEnvMain,
     LatexMain,
-    ParseMain,
+    ParseLegacyMain,
     RunMain,
     ShellMain,
     TestMain,
@@ -278,11 +278,35 @@ class DispatchTest(unittest.TestCase):
                 runpy.run_path(f_exec_str, run_name="__main__")
             self.assertEqual(ctx.exception.code, 1)
 
-        # parse with insufficient arguments
-        with patch.object(sys, "argv", [f_exec_str, "parse", "ior"]):
-            with self.assertRaises(SystemExit) as ctx:
-                runpy.run_path(f_exec_str, run_name="__main__")
-            self.assertEqual(ctx.exception.code, 1)
+        # parseLegacy with insufficient arguments
+        with patch.object(sys, "argv", [f_exec_str, "parseLegacy", "ior"]):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("ParseLegacy: Needs two arguments:", mock_stderr.getvalue())
+
+        # legacy parse command with no additional arguments
+        with patch.object(sys, "argv", [f_exec_str, "parse"]):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn(
+                    "The 'parse' command has been renamed to 'parseLegacy'. Please use 'parseLegacy' instead.",
+                    mock_stderr.getvalue(),
+                )
+
+        # legacy parse command with full arguments
+        with patch.object(sys, "argv", [f_exec_str, "parse", "ior", "local"]):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn(
+                    "The 'parse' command has been renamed to 'parseLegacy'. Please use 'parseLegacy' instead.",
+                    mock_stderr.getvalue(),
+                )
 
         # empty command
         with patch.object(sys, "argv", [f_exec_str]):
@@ -302,13 +326,13 @@ class DispatchTest(unittest.TestCase):
                 runpy.run_path(f_exec_str, run_name="__main__")
             self.assertEqual(ctx.exception.code, 1)
 
-    def testParseStillReceivesSsd(self) -> None:
-        """Asserts parse command receives the SSD boolean flag."""
+    def testParseLegacyReceivesSsd(self) -> None:
+        """Asserts parseLegacy command receives the SSD boolean flag."""
         f_exec_str = str(self.m_executable)
 
-        # 1. parse without SSD
-        with patch.object(sys, "argv", [f_exec_str, "parse", "ior", "local"]):
-            with patch("lsmiotool.lib.main.ParseMain") as mock_parse_cls:
+        # 1. parseLegacy without SSD
+        with patch.object(sys, "argv", [f_exec_str, "parseLegacy", "ior", "local"]):
+            with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
                 mock_inst = MagicMock()
                 mock_inst.run.return_value = 0
                 mock_parse_cls.return_value = mock_inst
@@ -317,9 +341,9 @@ class DispatchTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 0)
                 mock_parse_cls.assert_called_once_with("ior", "local", ssd=False)
 
-        # 2. parse with global --ssd
-        with patch.object(sys, "argv", [f_exec_str, "--ssd", "parse", "lsmio", "small"]):
-            with patch("lsmiotool.lib.main.ParseMain") as mock_parse_cls:
+        # 2. parseLegacy with global --ssd
+        with patch.object(sys, "argv", [f_exec_str, "--ssd", "parseLegacy", "lsmio", "small"]):
+            with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
                 mock_inst = MagicMock()
                 mock_inst.run.return_value = 0
                 mock_parse_cls.return_value = mock_inst
@@ -328,9 +352,9 @@ class DispatchTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 0)
                 mock_parse_cls.assert_called_once_with("lsmio", "small", ssd=True)
 
-        # 3. parse with global -s
-        with patch.object(sys, "argv", [f_exec_str, "-s", "parse", "lmp", "bake"]):
-            with patch("lsmiotool.lib.main.ParseMain") as mock_parse_cls:
+        # 3. parseLegacy with global -s
+        with patch.object(sys, "argv", [f_exec_str, "-s", "parseLegacy", "lmp", "bake"]):
+            with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
                 mock_inst = MagicMock()
                 mock_inst.run.return_value = 0
                 mock_parse_cls.return_value = mock_inst
@@ -792,7 +816,7 @@ print("LAZY_IMPORT_OK")
 
         # Parse limitations (no auto-discovery, RunRootResolver)
         self.assertIn("RunRootResolver", f_readme)
-        self.assertIn("lsmiotool parse", f_readme)
+        self.assertIn("lsmiotool parseLegacy", f_readme)
 
     def testReadmeInstallAndStateConstants(self) -> None:
         """Asserts documentation records installed layout paths and state precedence rules."""
@@ -1021,7 +1045,7 @@ print("LAZY_IMPORT_OK")
 
         # 5. Parse command boundary and limitations
         self.assertIn("RunRootResolver", f_readme)
-        self.assertIn("lsmiotool parse", f_readme)
+        self.assertIn("lsmiotool parseLegacy", f_readme)
         self.assertIn("does not perform automatic run-root discovery", f_readme)
 
     def testRunMainPrintsIdsTokensRootFinalStateAndExit(self) -> None:

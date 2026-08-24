@@ -57,7 +57,7 @@ LSMIOTOOL_HELP = """How to run
 common cmds:
   compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
   load-modules  load needed HPC modules
-  parse <ior|lsmio|lmp> <local|bake|small|large>
+  parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
   run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
 
 other cmds:
@@ -140,14 +140,19 @@ if __name__ == '__main__':
         from lsmiotool.lib import main
         inst_main = main.HpcEnvMain()
     elif cmd == 'parse':
+        sys.stderr.write(
+            "The 'parse' command has been renamed to 'parseLegacy'. Please use 'parseLegacy' instead.\n"
+        )
+        sys.exit(1)
+    elif cmd == 'parseLegacy':
         from lsmiotool.lib import main
         cmd_args = args[1:]
         if len(cmd_args) < 2:
             sys.stderr.write(
-                "Parse: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>\n"
+                "ParseLegacy: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>\n"
             )
             sys.exit(1)
-        inst_main = main.ParseMain(*cmd_args, ssd=is_ssd)
+        inst_main = main.ParseLegacyMain(*cmd_args, ssd=is_ssd)
     elif cmd == 'run':
         from lsmiotool.lib import main
         try:

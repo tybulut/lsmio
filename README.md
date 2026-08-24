@@ -352,11 +352,11 @@ The runtime paths are explicitly constructed without cross-fallback or directory
   - Version: `VERSION`
   - Assets: `tools/bmtool/lmp-reaxff/`
 
-### Parse Command Boundary & Limitations
+### ParseLegacy Command Boundary & Limitations
 
-- `lsmiotool parse` operates on legacy outputs and does not perform automatic run-root discovery or date/benchmark guessing.
+- `lsmiotool parseLegacy` operates on legacy outputs and does not perform automatic run-root discovery or date/benchmark guessing.
 - Internal `RunRootResolver` requires an explicit path to a directory containing a reconciled `manifest.json` and succeeded evidence.
-- Legacy `parse` functionality remains backward-compatible and unchanged.
+- Legacy `parseLegacy` functionality remains backward-compatible and unchanged.
 
 ### Migration Incompatibilities from Legacy `bmtool`
 

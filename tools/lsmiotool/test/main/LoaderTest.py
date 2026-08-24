@@ -46,7 +46,7 @@ _PREEXISTING_MODULE_NAMES = (
     "lsmiotool.test.parse.TestLmpData",
     "lsmiotool.test.parse.TestMultiBarPlot",
     "lsmiotool.test.parse.TestOutputAggregation",
-    "lsmiotool.test.parse.TestParseMain",
+    "lsmiotool.test.parse.TestParseLegacyMain",
     "lsmiotool.test.parse.test_data",
     "lsmiotool.test.parse.test_log",
     "lsmiotool.test.parse.test_output",
@@ -58,7 +58,7 @@ _LEGACY_PREFIX_MODULE_NAMES = (
     "lsmiotool.test.parse.TestLmpData",
     "lsmiotool.test.parse.TestMultiBarPlot",
     "lsmiotool.test.parse.TestOutputAggregation",
-    "lsmiotool.test.parse.TestParseMain",
+    "lsmiotool.test.parse.TestParseLegacyMain",
 )
 
 
