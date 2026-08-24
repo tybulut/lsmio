@@ -1,4 +1,11 @@
+# build related
 build
+
+# tmp files
 .coverage
 __pycache__
 *.pyc
+
+# benchmark scripts logs dir
+tools/bmtool/logs
+

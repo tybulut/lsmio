@@ -46,6 +46,8 @@ from lsmiotool.lib.cli import (
     WorkerExecutableValidationError,
     WorkerExecutableValidator,
 )
+from lsmiotool.lib.run import Combination
+
 
 
 class WorkerError(Exception):

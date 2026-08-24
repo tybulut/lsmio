@@ -308,7 +308,7 @@ class CoverageContractTest(unittest.TestCase):
                 check=False,
             )
             self.assertNotEqual(res_mismatch.returncode, 0)
-            self.assertIn("does not match marker SHA256", res_mismatch.stderr)
+            self.assertIn("does not match marker SHA256", " ".join(res_mismatch.stderr.split()))
 
     def testDefaultDotCoverageDecoyIsNeverConsumed(self) -> None:
         with tempfile.TemporaryDirectory() as f_temp_dir:

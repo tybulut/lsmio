@@ -32,6 +32,7 @@ import json
 import os
 import shutil
 import tempfile
+from typing import Any, Dict, List, Optional, Tuple, Union
 import unittest
 
 from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore
