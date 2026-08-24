@@ -44,6 +44,7 @@ from lsmiotool.lib.cli import (
     LSMIOTOOL_HELP,
     RUN_HELP_TEXT,
     PackageValidationError,
+    ParseRequest,
     RunCliParseError,
     RunCliParser,
     SourcePackageValidator,
@@ -54,6 +55,7 @@ from lsmiotool.lib.main import (
     HpcEnvMain,
     LatexMain,
     ParseLegacyMain,
+    ParseMain,
     RunMain,
     ShellMain,
     TestMain,
@@ -286,25 +288,25 @@ class DispatchTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 1)
                 self.assertIn("ParseLegacy: Needs two arguments:", mock_stderr.getvalue())
 
-        # legacy parse command with no additional arguments
+        # parse command with no additional arguments
         with patch.object(sys, "argv", [f_exec_str, "parse"]):
             with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 1)
+                self.assertEqual(ctx.exception.code, 2)
                 self.assertIn(
-                    "The 'parse' command has been renamed to 'parseLegacy'. Please use 'parseLegacy' instead.",
+                    "Missing required positional argument: <target>",
                     mock_stderr.getvalue(),
                 )
 
-        # legacy parse command with full arguments
+        # parse command with unexpected extra positional argument
         with patch.object(sys, "argv", [f_exec_str, "parse", "ior", "local"]):
             with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 1)
+                self.assertEqual(ctx.exception.code, 2)
                 self.assertIn(
-                    "The 'parse' command has been renamed to 'parseLegacy'. Please use 'parseLegacy' instead.",
+                    "Unexpected extra positional argument: 'local'",
                     mock_stderr.getvalue(),
                 )
 
@@ -362,6 +364,48 @@ class DispatchTest(unittest.TestCase):
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 0)
                 mock_parse_cls.assert_called_once_with("lmp", "bake", ssd=True)
+
+    def testParseCommandDispatch(self) -> None:
+        """Asserts parse command dispatches to ParseMain with parsed ParseRequest."""
+        f_exec_str = str(self.m_executable)
+
+        # 1. parse command with target
+        with patch.object(sys, "argv", [f_exec_str, "parse", "ior"]):
+            with patch("lsmiotool.lib.main.ParseMain") as mock_parse_cls:
+                mock_inst = MagicMock()
+                mock_inst.run.return_value = 0
+                mock_parse_cls.return_value = mock_inst
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                mock_parse_cls.assert_called_once()
+                call_kwargs = mock_parse_cls.call_args[1]
+                req = call_kwargs.get("f_request")
+                self.assertIsInstance(req, ParseRequest)
+                self.assertEqual(req.target, "ior")
+                self.assertEqual(req.format, "csv")
+                self.assertIsNone(req.output_dir)
+
+        # 2. parse command with options
+        with patch.object(
+            sys,
+            "argv",
+            [f_exec_str, "parse", "/path/to/manifest.json", "--output-dir", "/tmp/out", "--format", "json"],
+        ):
+            with patch("lsmiotool.lib.main.ParseMain") as mock_parse_cls:
+                mock_inst = MagicMock()
+                mock_inst.run.return_value = 0
+                mock_parse_cls.return_value = mock_inst
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                mock_parse_cls.assert_called_once()
+                call_kwargs = mock_parse_cls.call_args[1]
+                req = call_kwargs.get("f_request")
+                self.assertIsInstance(req, ParseRequest)
+                self.assertEqual(req.target, "/path/to/manifest.json")
+                self.assertEqual(req.format, "json")
+                self.assertEqual(req.output_dir, "/tmp/out")
 
     def testRunLazyWithoutOptionalImportsOrOsGetlogin(self) -> None:
         """Asserts run command does not eagerly import heavy/optional modules (Matplotlib, NumPy) or call os.getlogin."""

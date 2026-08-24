@@ -33,7 +33,7 @@
 import os
 from pathlib import Path
 import stat
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from lsmiotool.lib.run import RunRequest
 
@@ -45,6 +45,7 @@ LSMIOTOOL_HELP = """How to run
 common cmds:
   compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
   load-modules  load needed HPC modules
+  parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
   run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
 
@@ -78,6 +79,19 @@ Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
 """
 
+PARSE_HELP_TEXT = """Usage:
+  lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
+
+Arguments:
+  <target>      Target run root path, manifest file path, or benchmark name (ior, lsmio, lmp).
+
+Options:
+  --output-dir <dir>
+                Destination directory for reports (default: current working directory).
+  --format <format>
+                Report format: 'csv' or 'json' (default: csv).
+"""
+
 
 class PackageValidationError(Exception):
     """Raised when package root or required module files fail validation."""
@@ -99,6 +113,12 @@ class CliParseError(Exception):
 
 class RunCliParseError(CliParseError):
     """Exception raised when CLI arguments for the 'run' command are invalid."""
+
+    pass
+
+
+class ParseCliParseError(CliParseError):
+    """Exception raised when CLI arguments for the 'parse' command are invalid."""
 
     pass
 
@@ -312,6 +332,234 @@ def parseRunArguments(
 ) -> RunRequest:
     """Convenience function wrapping RunCliParser.parse."""
     return RunCliParser.parse(f_argv=f_argv, f_global_ssd=f_global_ssd)
+
+
+class ParseRequest:
+    """Immutable parsed and validated parse request."""
+
+    __slots__ = ("m_target", "m_output_dir", "m_format", "_frozen")
+
+    def __init__(
+        self,
+        f_target: str,
+        f_output_dir: Optional[str] = None,
+        f_format: str = "csv",
+    ) -> None:
+        if not isinstance(f_target, str) or not f_target.strip():
+            raise ValueError(
+                f"target must be a non-empty string, got: {f_target!r}"
+            )
+        if f_output_dir is not None and (
+            not isinstance(f_output_dir, str) or not f_output_dir.strip()
+        ):
+            raise ValueError(
+                f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
+            )
+        if not isinstance(f_format, str) or not f_format.strip():
+            raise ValueError(
+                f"format must be a non-empty string, got: {f_format!r}"
+            )
+        f_norm_format = f_format.strip().lower()
+        if f_norm_format not in {"csv", "json"}:
+            raise ValueError(
+                f"format must be 'csv' or 'json', got: {f_format!r}"
+            )
+
+        super().__setattr__("m_target", f_target.strip())
+        super().__setattr__(
+            "m_output_dir",
+            f_output_dir.strip() if f_output_dir is not None else None,
+        )
+        super().__setattr__("m_format", f_norm_format)
+        super().__setattr__("_frozen", True)
+
+    def __setattr__(self, f_key: str, f_value: Any) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Cannot modify immutable {self.__class__.__name__}"
+            )
+        super().__setattr__(f_key, f_value)
+
+    def __delattr__(self, f_key: str) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
+        super().__delattr__(f_key)
+
+    @property
+    def target(self) -> str:
+        return self.m_target
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def outputDir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def format(self) -> str:
+        return self.m_format
+
+    def toDict(self) -> Dict[str, Any]:
+        return {
+            "target": self.m_target,
+            "output_dir": self.m_output_dir,
+            "format": self.m_format,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"ParseRequest(target={self.m_target!r}, "
+            f"output_dir={self.m_output_dir!r}, "
+            f"format={self.m_format!r})"
+        )
+
+    def __eq__(self, f_other: Any) -> bool:
+        if isinstance(f_other, ParseRequest):
+            return (
+                self.m_target == f_other.m_target
+                and self.m_output_dir == f_other.m_output_dir
+                and self.m_format == f_other.m_format
+            )
+        return False
+
+
+class ParseCliParser:
+    """Pure standard-library parser for 'lsmiotool parse' CLI arguments.
+
+    Usage:
+        lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
+
+    Arguments:
+        <target>: Target run root path, manifest file path, or benchmark name ('ior', 'lsmio', 'lmp').
+
+    Options:
+        --output-dir <dir>: Destination directory for reports (default: current working directory).
+        --format <format>: Report format ('csv' or 'json', default: 'csv').
+    """
+
+    VALID_FORMATS = frozenset({"csv", "json"})
+
+    @classmethod
+    def parse(
+        cls,
+        f_argv: Sequence[str],
+    ) -> ParseRequest:
+        """Parses argument sequence into an immutable canonical ParseRequest.
+
+        Args:
+            f_argv: Sequence of argument strings (either including or excluding leading 'parse').
+
+        Returns:
+            Canonical ParseRequest instance.
+
+        Raises:
+            ParseCliParseError: If syntax, arity, flags, or values are invalid.
+        """
+        if f_argv is None or isinstance(f_argv, (str, bytes)):
+            raise ParseCliParseError(
+                f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
+            )
+        try:
+            f_tokens: List[str] = list(f_argv)
+        except TypeError:
+            raise ParseCliParseError(
+                f"f_argv must be iterable, got: {type(f_argv).__name__}"
+            )
+
+        for f_idx, f_elem in enumerate(f_tokens):
+            if not isinstance(f_elem, str):
+                raise ParseCliParseError(
+                    f"All argv elements must be strings, got {type(f_elem).__name__} at index {f_idx}"
+                )
+
+        f_tokens_copy = list(f_tokens)
+        if f_tokens_copy and f_tokens_copy[0].lower() == "parse":
+            f_tokens_copy.pop(0)
+
+        if not f_tokens_copy:
+            raise ParseCliParseError(
+                "Missing required positional argument: <target>"
+            )
+
+        f_target_tok = f_tokens_copy[0]
+        if f_target_tok.startswith("-"):
+            raise ParseCliParseError(
+                f"Unexpected option {f_target_tok!r} placed before positional argument <target>."
+            )
+
+        f_target = f_target_tok.strip()
+        if not f_target:
+            raise ParseCliParseError("Target cannot be empty.")
+
+        f_remaining_tokens = f_tokens_copy[1:]
+        f_output_dir: Optional[str] = None
+        f_format: str = "csv"
+        f_format_seen: bool = False
+
+        f_idx = 0
+        while f_idx < len(f_remaining_tokens):
+            f_tok = f_remaining_tokens[f_idx]
+            if f_tok == "--output-dir":
+                if f_output_dir is not None:
+                    raise ParseCliParseError(
+                        "Duplicate '--output-dir' option specified."
+                    )
+                if f_idx + 1 >= len(f_remaining_tokens):
+                    raise ParseCliParseError(
+                        "Missing value after '--output-dir' option."
+                    )
+                f_val = f_remaining_tokens[f_idx + 1]
+                if f_val.startswith("-"):
+                    raise ParseCliParseError(
+                        f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
+                    )
+                if not f_val.strip():
+                    raise ParseCliParseError("Output directory cannot be empty.")
+                f_output_dir = f_val.strip()
+                f_idx += 2
+            elif f_tok == "--format":
+                if f_format_seen:
+                    raise ParseCliParseError(
+                        "Duplicate '--format' option specified."
+                    )
+                if f_idx + 1 >= len(f_remaining_tokens):
+                    raise ParseCliParseError(
+                        "Missing value after '--format' option."
+                    )
+                f_val = f_remaining_tokens[f_idx + 1]
+                if f_val.startswith("-"):
+                    raise ParseCliParseError(
+                        f"Missing valid value after '--format' option, got option-like token: {f_val!r}"
+                    )
+                f_norm_val = f_val.strip().lower()
+                if f_norm_val not in cls.VALID_FORMATS:
+                    raise ParseCliParseError(
+                        f"Invalid format: {f_val!r}. Must be one of: {sorted(cls.VALID_FORMATS)}"
+                    )
+                f_format = f_norm_val
+                f_format_seen = True
+                f_idx += 2
+            elif f_tok.startswith("-"):
+                raise ParseCliParseError(f"Unknown option: {f_tok!r}")
+            else:
+                raise ParseCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
+
+        return ParseRequest(
+            f_target=f_target,
+            f_output_dir=f_output_dir,
+            f_format=f_format,
+        )
+
+
+def parseParseArguments(f_argv: Sequence[str]) -> ParseRequest:
+    """Convenience function wrapping ParseCliParser.parse."""
+    return ParseCliParser.parse(f_argv=f_argv)
 
 
 class SourcePackageValidator:

@@ -28,11 +28,13 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import csv
 import json
+import math
 import os
 import shutil
 import tempfile
-from typing import Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 import unittest
 
 from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore
@@ -53,11 +55,23 @@ from lsmiotool.lib.run import (
     ScalePoint,
 )
 from lsmiotool.lib.runparse import (
+    ConsoleSummaryFormatter,
+    ExtractionError,
+    IOR_SUMMARY_COLUMNS,
+    IorLogExtractor,
+    IorReportGenerator,
+    LmpLogExtractor,
+    LmpReportGenerator,
+    LsmioLogExtractor,
+    LsmioReportGenerator,
+    ReportGenerator,
     ResolvedPoint,
     ResolvedRun,
     RunParseError,
     RunRootResolutionError,
     RunRootResolver,
+    extractRun,
+    generateReports,
 )
 from lsmiotool.lib.site import EnvironmentResolver
 from lsmiotool.lib.state import OverallRunState, PointRunState
@@ -592,6 +606,445 @@ class RunParseTest(unittest.TestCase):
         with self.assertRaises(RunRootResolutionError) as f_ctx:
             RunRootResolver.resolvePoint(f_run_root, 999)
         self.assertIn("not found in manifest scale points", str(f_ctx.exception))
+
+    def testIorLogExtractor(self) -> None:
+        """Tests extraction of 26 summary metrics for write and read operations from IOR output logs."""
+        f_run_root, f_plan, _ = self._setupSucceededRun("run-ior-extract-001", "ior", "local", "BASE")
+        f_resolved = RunRootResolver.resolve(f_run_root)
+        f_pt = f_resolved.points[0]
+        f_combo = f_plan.combinations[0]
+
+        # 1. Write synthetic valid IOR stdout log
+        f_logs_dir = os.path.join(f_pt.pointDir, "logs")
+        os.makedirs(f_logs_dir, exist_ok=True)
+        f_log_path = os.path.join(f_logs_dir, f"ior_{f_combo.name}.stdout")
+
+        f_ior_log_content = (
+            "IOR-3.3.0: MPI Coordinated Test of Parallel I/O\n"
+            "Began               : Mon Aug 24 10:00:00 2026\n"
+            "Command line        : ior -a POSIX -w -r -b 1m -t 1m\n"
+            "Machine             : Linux\n"
+            "Test 0 started      : Mon Aug 24 10:00:01 2026\n"
+            "Summary of all tests:\n"
+            "Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewl(s) Stonewl(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt blksiz    xsize aggs(MiB)   API RefNum\n"
+            "write        1234.50    1000.00    1100.25      50.12    1234.50    1000.00    1100.25      50.12     1.500         NA           NA     0      1   1    1   0     0        1         0    0      1 1048576  1048576       1.0 POSIX      0\n"
+            "read         2345.60    2000.00    2200.50      60.25    2345.60    2000.00    2200.50      60.25     0.750         NA           NA     0      1   1    1   0     0        1         0    0      1 1048576  1048576       1.0 POSIX      0\n"
+            "Finished            : Mon Aug 24 10:00:05 2026\n"
+        )
+        with open(f_log_path, "w") as f_f:
+            f_f.write(f_ior_log_content)
+
+        # 2. Extract metrics
+        f_extracted = IorLogExtractor.extractPointCombo(f_pt, f_combo)
+        self.assertIn("write", f_extracted)
+        self.assertIn("read", f_extracted)
+
+        # Verify write metrics (26 summary metrics)
+        f_w = f_extracted["write"]
+        self.assertEqual(f_w["Max(MiB)"], 1234.50)
+        self.assertEqual(f_w["Min(MiB)"], 1000.00)
+        self.assertEqual(f_w["Mean(MiB)"], 1100.25)
+        self.assertEqual(f_w["StdDev"], 50.12)
+        self.assertEqual(f_w["Max(OPs)"], 1234.50)
+        self.assertEqual(f_w["Min(OPs)"], 1000.00)
+        self.assertEqual(f_w["Mean(OPs)"], 1100.25)
+        self.assertEqual(f_w["Mean(s)"], 1.500)
+        self.assertEqual(f_w["Stonewall(s)"], "NA")
+        self.assertEqual(f_w["Stonewall(MiB)"], "NA")
+        self.assertEqual(f_w["Test#"], 0)
+        self.assertEqual(f_w["#Tasks"], 1)
+        self.assertEqual(f_w["tPN"], 1)
+        self.assertEqual(f_w["reps"], 1)
+        self.assertEqual(f_w["fPP"], 0)
+        self.assertEqual(f_w["reord"], 0)
+        self.assertEqual(f_w["reordoff"], 1)
+        self.assertEqual(f_w["reordrand"], 0)
+        self.assertEqual(f_w["seed"], 0)
+        self.assertEqual(f_w["segcnt"], 1)
+        self.assertEqual(f_w["blksiz"], 1048576)
+        self.assertEqual(f_w["xsize"], 1048576)
+        self.assertEqual(f_w["aggs(MiB)"], 1.0)
+        self.assertEqual(f_w["API"], "POSIX")
+        self.assertEqual(f_w["RefNum"], 0)
+        self.assertEqual(len(f_w["_raw_values"]), 26)
+
+        # Verify read metrics
+        f_r = f_extracted["read"]
+        self.assertEqual(f_r["Max(MiB)"], 2345.60)
+        self.assertEqual(f_r["Min(MiB)"], 2000.00)
+        self.assertEqual(f_r["Mean(MiB)"], 2200.50)
+        self.assertEqual(f_r["Mean(s)"], 0.750)
+        self.assertEqual(f_r["API"], "POSIX")
+
+        # 3. Missing log file error
+        f_other_combo = f_plan.combinations[1]
+        with self.assertRaises(ExtractionError) as f_ctx:
+            IorLogExtractor.extractPointCombo(f_pt, f_other_combo)
+        self.assertIn("Log file does not exist", str(f_ctx.exception))
+
+        # 4. Malformed log file (missing summary)
+        f_bad_log_path = os.path.join(f_logs_dir, f"ior_{f_other_combo.name}.stdout")
+        with open(f_bad_log_path, "w") as f_f:
+            f_f.write("Some invalid log output without summary section\n")
+        with self.assertRaises(ExtractionError) as f_ctx:
+            IorLogExtractor.extractPointCombo(f_pt, f_other_combo)
+        self.assertIn("missing 'Summary of all tests'", str(f_ctx.exception))
+
+        # 5. Symlink log file rejected
+        f_sym_log_path = os.path.join(f_logs_dir, f"ior_{f_plan.combinations[2].name}.stdout")
+        os.symlink(f_log_path, f_sym_log_path)
+        with self.assertRaises(ExtractionError) as f_ctx:
+            IorLogExtractor.extractPointCombo(f_pt, f_plan.combinations[2])
+        self.assertIn("must not be a symlink", str(f_ctx.exception))
+
+    def testLsmioLogExtractorWithFsumStability(self) -> None:
+        """Tests iteration and summary metric extraction across multi-rank logs with math.fsum stability."""
+        f_run_root, f_plan, _ = self._setupSucceededRun("run-lsmio-fsum-001", "lsmio", "bake", "NATIVE-M")
+        f_resolved = RunRootResolver.resolve(f_run_root)
+        # Point 2 has 4 tasks
+        f_pt = f_resolved.getPoint(2)
+        self.assertEqual(f_pt.scalePoint.tasks, 4)
+        f_combo = f_plan.combinations[0]
+
+        f_combo_logs_dir = os.path.join(f_pt.pointDir, "logs", f_combo.name)
+        os.makedirs(f_combo_logs_dir, exist_ok=True)
+
+        f_all_w_iters: List[float] = []
+        f_all_r_iters: List[float] = []
+
+        # Create rank logs for ranks 0..3
+        for f_rank in range(4):
+            f_w_iters = [100.1 + f_rank * 10.0, 100.2 + f_rank * 10.0, 100.3 + f_rank * 10.0, 100.4 + f_rank * 10.0, 100.5 + f_rank * 10.0]
+            f_r_iters = [200.1 + f_rank * 10.0, 200.2 + f_rank * 10.0, 200.3 + f_rank * 10.0, 200.4 + f_rank * 10.0, 200.5 + f_rank * 10.0]
+            f_all_w_iters.extend(f_w_iters)
+            f_all_r_iters.extend(f_r_iters)
+
+            f_rank_log_lines = [
+                "LSMIO benchmark initialization...",
+                "Bench-WRITE:",
+                "write,1500.50,0.75,1024,1024,5",
+            ]
+            for f_val in f_w_iters:
+                f_rank_log_lines.append(f"iwrite,{f_val}")
+            f_rank_log_lines.extend([
+                "Bench-READ:",
+                "read,3000.50,0.35,1024,1024,5",
+            ])
+            for f_val in f_r_iters:
+                f_rank_log_lines.append(f"iread,{f_val}")
+
+            f_rank_file = os.path.join(f_combo_logs_dir, f"rank_{f_rank}.log")
+            with open(f_rank_file, "w") as f_f:
+                f_f.write("\n".join(f_rank_log_lines) + "\n")
+
+        # Extract metrics
+        f_extracted = LsmioLogExtractor.extractPointCombo(f_pt, f_combo)
+        self.assertIn("write", f_extracted)
+        self.assertIn("read", f_extracted)
+
+        # Validate write statistics and exact math.fsum stability
+        f_w = f_extracted["write"]
+        self.assertEqual(len(f_w["iterations"]), 20)
+        self.assertEqual(f_w["max"], max(f_all_w_iters))
+        self.assertEqual(f_w["min"], min(f_all_w_iters))
+        f_expected_w_mean = math.fsum(f_all_w_iters) / len(f_all_w_iters)
+        self.assertEqual(f_w["mean"], f_expected_w_mean)
+        self.assertEqual(f_w["bw"], 1500.50)
+        self.assertEqual(f_w["latency"], 0.75)
+        self.assertEqual(f_w["block_kib"], 1024)
+        self.assertEqual(f_w["xfer_kib"], 1024)
+        self.assertEqual(f_w["iter"], 5)
+
+        # Validate read statistics and exact math.fsum stability
+        f_r = f_extracted["read"]
+        self.assertEqual(len(f_r["iterations"]), 20)
+        self.assertEqual(f_r["max"], max(f_all_r_iters))
+        self.assertEqual(f_r["min"], min(f_all_r_iters))
+        f_expected_r_mean = math.fsum(f_all_r_iters) / len(f_all_r_iters)
+        self.assertEqual(f_r["mean"], f_expected_r_mean)
+        self.assertEqual(f_r["bw"], 3000.50)
+        self.assertEqual(f_r["latency"], 0.35)
+
+        # Missing rank log raises ExtractionError
+        f_other_combo = f_plan.combinations[1]
+        with self.assertRaises(ExtractionError) as f_ctx:
+            LsmioLogExtractor.extractPointCombo(f_pt, f_other_combo)
+        self.assertIn("Rank log file does not exist", str(f_ctx.exception))
+
+        # Symlink rank log rejected
+        f_sym_combo_dir = os.path.join(f_pt.pointDir, "logs", f_plan.combinations[2].name)
+        os.makedirs(f_sym_combo_dir, exist_ok=True)
+        for f_r_idx in range(4):
+            os.symlink(
+                os.path.join(f_combo_logs_dir, f"rank_{f_r_idx}.log"),
+                os.path.join(f_sym_combo_dir, f"rank_{f_r_idx}.log"),
+            )
+        with self.assertRaises(ExtractionError) as f_ctx:
+            LsmioLogExtractor.extractPointCombo(f_pt, f_plan.combinations[2])
+        self.assertIn("must not be a symlink", str(f_ctx.exception))
+
+    def testLmpLogExtractor(self) -> None:
+        """Tests throughput metric extraction from LAMMPS stdout logs."""
+        f_run_root, f_plan, _ = self._setupSucceededRun("run-lmp-extract-001", "lmp", "local", "FS")
+        f_resolved = RunRootResolver.resolve(f_run_root)
+        f_pt = f_resolved.points[0]
+        f_combo0 = f_plan.combinations[0]
+        f_combo1 = f_plan.combinations[1]
+
+        f_logs_dir = os.path.join(f_pt.pointDir, "logs")
+        os.makedirs(f_logs_dir, exist_ok=True)
+
+        # 1. Format 1: "write, 1MB, 789.25"
+        f_log_path0 = os.path.join(f_logs_dir, f"lmp_{f_combo0.name}.stdout")
+        with open(f_log_path0, "w") as f_f:
+            f_f.write(
+                "LAMMPS (2 Aug 2023)\n"
+                "Setting up run ...\n"
+                "Memory usage per processor = 12.0 Mbytes\n"
+                "write, 1MB, 789.25\n"
+                "Total wall time: 0:00:10\n"
+            )
+
+        f_extracted0 = LmpLogExtractor.extractPointCombo(f_pt, f_combo0)
+        self.assertEqual(f_extracted0["write"]["throughput"], 789.25)
+        self.assertEqual(f_extracted0["write"]["bw(MiB/s)"], 789.25)
+
+        # 2. Format 2: ".write, bw: 654.32"
+        f_log_path1 = os.path.join(f_logs_dir, f"lmp_{f_combo1.name}.stdout")
+        with open(f_log_path1, "w") as f_f:
+            f_f.write(
+                "LAMMPS (2 Aug 2023)\n"
+                "Setting up run ...\n"
+                ".write, bw: 654.32\n"
+                "Total wall time: 0:00:15\n"
+            )
+
+        f_extracted1 = LmpLogExtractor.extractPointCombo(f_pt, f_combo1)
+        self.assertEqual(f_extracted1["write"]["throughput"], 654.32)
+
+        # 3. Missing log file raises ExtractionError
+        f_combo2 = f_plan.combinations[2]
+        with self.assertRaises(ExtractionError) as f_ctx:
+            LmpLogExtractor.extractPointCombo(f_pt, f_combo2)
+        self.assertIn("Log file does not exist", str(f_ctx.exception))
+
+        # 4. Malformed log file (missing throughput line)
+        f_bad_path = os.path.join(f_logs_dir, f"lmp_{f_combo2.name}.stdout")
+        with open(f_bad_path, "w") as f_f:
+            f_f.write("LAMMPS output without write throughput\n")
+        with self.assertRaises(ExtractionError) as f_ctx:
+            LmpLogExtractor.extractPointCombo(f_pt, f_combo2)
+        self.assertIn("could not extract write throughput metric", str(f_ctx.exception))
+
+        # 5. Symlink log file rejected
+        f_sym_path = os.path.join(f_logs_dir, f"lmp_{f_plan.combinations[3].name}.stdout")
+        os.symlink(f_log_path0, f_sym_path)
+        with self.assertRaises(ExtractionError) as f_ctx:
+            LmpLogExtractor.extractPointCombo(f_pt, f_plan.combinations[3])
+        self.assertIn("must not be a symlink", str(f_ctx.exception))
+
+    def testReportGeneratorsCsvSchemas(self) -> None:
+        """Tests exact column schemas for Stage 1 intermediate and Stage 2 master CSV reports across all benchmarks."""
+        f_out_dir = os.path.join(self.m_temp_dir, "csv_reports_test")
+        os.makedirs(f_out_dir, exist_ok=True)
+
+        # 1. IOR Master Report CSV (30 columns)
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-report-001", "ior", "local", "BASE")
+        f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
+        f_extracted_ior = {
+            f_resolved_ior.points[0].pointId: {
+                f_c.name: {
+                    "write": {
+                        "_raw_values": ["100.0", "90.0", "95.0", "2.0", "100.0", "90.0", "95.0", "2.0", "1.0", "NA", "NA", "0", "1", "1", "1", "0", "0", "1", "0", "0", "1", "1048576", "1048576", "1.0", "POSIX", "0"]
+                    },
+                    "read": {
+                        "_raw_values": ["200.0", "180.0", "190.0", "3.0", "200.0", "180.0", "190.0", "3.0", "0.5", "NA", "NA", "0", "1", "1", "1", "0", "0", "1", "0", "0", "1", "1048576", "1048576", "1.0", "POSIX", "0"]
+                    },
+                }
+                for f_c in f_plan_ior.combinations
+            }
+        }
+        f_ior_files = IorReportGenerator.generate(f_resolved_ior, f_extracted_ior, f_out_dir, f_format="csv")
+        self.assertIn("ior-report.csv", f_ior_files)
+        f_ior_csv_path = f_ior_files["ior-report.csv"]
+        self.assertTrue(os.path.isfile(f_ior_csv_path))
+
+        with open(f_ior_csv_path, "r") as f_f:
+            f_ior_rows = [line.strip() for line in f_f if line.strip()]
+        # 6 combos * 2 operations (write, read) = 12 rows
+        self.assertEqual(len(f_ior_rows), 12)
+        for f_row in f_ior_rows:
+            f_cols = f_row.split(",")
+            self.assertEqual(len(f_cols), 30, f"Expected 30 columns in IOR row: {f_row}")
+
+        # 2. LSMIO Stage 1 (9 columns) & Stage 2 Master (12 columns)
+        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun("run-lsm-report-001", "lsmio", "local", "NATIVE-M")
+        f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
+        f_extracted_lsm = {
+            f_resolved_lsm.points[0].pointId: {
+                f_c.name: {
+                    "write": {"first_line": "write,1200.0,0.85,1024,1024,5", "max": 1300.0, "min": 1100.0, "mean": 1200.0},
+                    "read": {"first_line": "read,2400.0,0.42,1024,1024,5", "max": 2500.0, "min": 2300.0, "mean": 2400.0},
+                }
+                for f_c in f_plan_lsm.combinations
+            }
+        }
+        f_lsm_files = LsmioReportGenerator.generate(f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="csv")
+        self.assertIn("lsm-report.csv", f_lsm_files)
+
+        # Verify Stage 1 files (agg-<stripe_count>-<stripe_size>-report.csv)
+        f_stage1_header = "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter,max(MiB/s),min(MiB/s),mean(MiB/s)"
+        for f_c in f_plan_lsm.combinations:
+            f_stage1_path = os.path.join(f_out_dir, "1", f"agg-{f_c.stripe_count}-{f_c.block_size}-report.csv")
+            self.assertTrue(os.path.isfile(f_stage1_path), f"Missing Stage 1 file: {f_stage1_path}")
+            with open(f_stage1_path, "r") as f_f:
+                f_lines = [l.strip() for l in f_f if l.strip()]
+            self.assertEqual(len(f_lines), 3)
+            self.assertEqual(f_lines[0], f_stage1_header)
+            self.assertEqual(len(f_lines[0].split(",")), 9)
+            self.assertEqual(len(f_lines[1].split(",")), 9)
+            self.assertEqual(len(f_lines[2].split(",")), 9)
+
+        # Verify Stage 2 master file (lsm-report.csv)
+        f_lsm_csv_path = f_lsm_files["lsm-report.csv"]
+        with open(f_lsm_csv_path, "r") as f_f:
+            f_lsm_rows = [line.strip() for line in f_f if line.strip()]
+        self.assertEqual(len(f_lsm_rows), 12)
+        for f_row in f_lsm_rows:
+            f_cols = f_row.split(",")
+            self.assertEqual(len(f_cols), 12, f"Expected 12 columns in LSMIO row: {f_row}")
+
+        # 3. LAMMPS Master Report CSV (4 columns)
+        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun("run-lmp-report-001", "lmp", "local", "FS")
+        f_resolved_lmp = RunRootResolver.resolve(f_run_root_lmp)
+        f_extracted_lmp = {
+            f_resolved_lmp.points[0].pointId: {
+                f_c.name: {"write": {"throughput": 456.78}}
+                for f_c in f_plan_lmp.combinations
+            }
+        }
+        f_lmp_files = LmpReportGenerator.generate(f_resolved_lmp, f_extracted_lmp, f_out_dir, f_format="csv")
+        self.assertIn("lmp-report.csv", f_lmp_files)
+        f_lmp_csv_path = f_lmp_files["lmp-report.csv"]
+
+        with open(f_lmp_csv_path, "r") as f_f:
+            f_lmp_rows = [line.strip() for line in f_f if line.strip()]
+        self.assertEqual(len(f_lmp_rows), 6)
+        for f_row in f_lmp_rows:
+            f_cols = f_row.split(",")
+            self.assertEqual(len(f_cols), 4, f"Expected 4 columns in LMP row: {f_row}")
+
+    def testReportGeneratorsJsonFormat(self) -> None:
+        """Tests structured JSON report generation across all benchmarks."""
+        f_out_dir = os.path.join(self.m_temp_dir, "json_reports_test")
+        os.makedirs(f_out_dir, exist_ok=True)
+
+        # 1. IOR JSON
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-json-001", "ior", "local", "BASE")
+        f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
+        f_extracted_ior = {
+            f_resolved_ior.points[0].pointId: {
+                f_c.name: {"write": {"Max(MiB)": 1000.0}, "read": {"Max(MiB)": 2000.0}}
+                for f_c in f_plan_ior.combinations
+            }
+        }
+        f_ior_files = IorReportGenerator.generate(f_resolved_ior, f_extracted_ior, f_out_dir, f_format="json")
+        self.assertIn("ior-report.json", f_ior_files)
+        with open(f_ior_files["ior-report.json"], "r") as f_f:
+            f_json_ior = json.load(f_f)
+        self.assertEqual(f_json_ior["target"], "ior")
+        self.assertEqual(f_json_ior["run_id"], "run-ior-json-001")
+        self.assertEqual(len(f_json_ior["points"]), 1)
+
+        # 2. LSMIO JSON
+        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun("run-lsm-json-001", "lsmio", "local", "NATIVE-M")
+        f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
+        f_extracted_lsm = {
+            f_resolved_lsm.points[0].pointId: {
+                f_c.name: {"write": {"mean": 1200.0}, "read": {"mean": 2400.0}}
+                for f_c in f_plan_lsm.combinations
+            }
+        }
+        f_lsm_files = LsmioReportGenerator.generate(f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="json")
+        self.assertIn("lsm-report.json", f_lsm_files)
+        with open(f_lsm_files["lsm-report.json"], "r") as f_f:
+            f_json_lsm = json.load(f_f)
+        self.assertEqual(f_json_lsm["target"], "lsmio")
+        self.assertEqual(f_json_lsm["run_id"], "run-lsm-json-001")
+
+        # 3. LAMMPS JSON
+        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun("run-lmp-json-001", "lmp", "local", "FS")
+        f_resolved_lmp = RunRootResolver.resolve(f_run_root_lmp)
+        f_extracted_lmp = {
+            f_resolved_lmp.points[0].pointId: {
+                f_c.name: {"write": {"throughput": 456.78}}
+                for f_c in f_plan_lmp.combinations
+            }
+        }
+        f_lmp_files = LmpReportGenerator.generate(f_resolved_lmp, f_extracted_lmp, f_out_dir, f_format="json")
+        self.assertIn("lmp-report.json", f_lmp_files)
+        with open(f_lmp_files["lmp-report.json"], "r") as f_f:
+            f_json_lmp = json.load(f_f)
+        self.assertEqual(f_json_lmp["target"], "lmp")
+        self.assertEqual(f_json_lmp["run_id"], "run-lmp-json-001")
+
+    def testConsoleSummaryFormatterTableOutput(self) -> None:
+        """Tests formatted ASCII summary table generation for IOR, LSMIO, and LAMMPS."""
+        # 1. IOR Table
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-table-001", "ior", "local", "BASE")
+        f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
+        f_extracted_ior = {
+            f_resolved_ior.points[0].pointId: {
+                f_c.name: {
+                    "write": {"Mean(MiB)": 1100.25, "Mean(OPs)": 1100.25, "Mean(s)": 1.50},
+                    "read": {"Mean(MiB)": 2200.50, "Mean(OPs)": 2200.50, "Mean(s)": 0.75},
+                }
+                for f_c in f_plan_ior.combinations
+            }
+        }
+        f_tbl_ior = ConsoleSummaryFormatter.formatSummaryTable(f_resolved_ior, f_extracted_ior)
+        self.assertIn("Benchmark", f_tbl_ior)
+        self.assertIn("Point ID", f_tbl_ior)
+        self.assertIn("Tasks/Cores", f_tbl_ior)
+        self.assertIn("Combination", f_tbl_ior)
+        self.assertIn("Operation", f_tbl_ior)
+        self.assertIn("Throughput MB/s", f_tbl_ior)
+        self.assertIn("IOPS", f_tbl_ior)
+        self.assertIn("Duration", f_tbl_ior)
+        self.assertIn("IOR", f_tbl_ior)
+        self.assertIn("1100.25", f_tbl_ior)
+        self.assertIn("2200.50", f_tbl_ior)
+
+        # 2. LSMIO Table
+        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun("run-lsm-table-001", "lsmio", "local", "NATIVE-M")
+        f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
+        f_extracted_lsm = {
+            f_resolved_lsm.points[0].pointId: {
+                f_c.name: {
+                    "write": {"mean": 1250.75, "latency": 0.85},
+                    "read": {"mean": 2450.25, "latency": 0.42},
+                }
+                for f_c in f_plan_lsm.combinations
+            }
+        }
+        f_tbl_lsm = ConsoleSummaryFormatter.formatSummaryTable(f_resolved_lsm, f_extracted_lsm)
+        self.assertIn("LSMIO", f_tbl_lsm)
+        self.assertIn("1250.75", f_tbl_lsm)
+        self.assertIn("2450.25", f_tbl_lsm)
+        self.assertIn("0.850ms", f_tbl_lsm)
+
+        # 3. LAMMPS Table
+        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun("run-lmp-table-001", "lmp", "local", "FS")
+        f_resolved_lmp = RunRootResolver.resolve(f_run_root_lmp)
+        f_extracted_lmp = {
+            f_resolved_lmp.points[0].pointId: {
+                f_c.name: {"write": {"throughput": 876.54}}
+                for f_c in f_plan_lmp.combinations
+            }
+        }
+        f_tbl_lmp = ConsoleSummaryFormatter.formatSummaryTable(f_resolved_lmp, f_extracted_lmp)
+        self.assertIn("LMP", f_tbl_lmp)
+        self.assertIn("876.54", f_tbl_lmp)
 
 
 if __name__ == "__main__":

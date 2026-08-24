@@ -208,6 +208,208 @@ class ParseLegacyMain(BaseMain):
             self.parseLmp(self.m_mode, self.m_is_ssd)
 
 
+class ParseMain(BaseMain):
+    """Parse command execution mode for modern benchmark run artifacts."""
+
+    m_request: Optional[Any]
+    m_init_error: Optional[Exception]
+
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[Any] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        """Initialize ParseMain.
+
+        Command: parse <target> [--output-dir <dir>] [--format <csv|json>]
+
+        Args:
+            *f_args: Variable positional arguments (e.g. target, or list of CLI tokens, or ParseRequest).
+            f_request: Optional canonical ParseRequest.
+            **f_kwargs: Keyword arguments (e.g. target, output_dir, format).
+        """
+        super().__init__()
+        from lsmiotool.lib.cli import (
+            ParseCliParseError,
+            ParseRequest,
+            parseParseArguments,
+        )
+
+        self.m_request = None
+        self.m_init_error = None
+
+        if f_request is not None:
+            if not isinstance(f_request, ParseRequest):
+                raise ValueError(
+                    f"f_request must be ParseRequest, got: {type(f_request).__name__}"
+                )
+            self.m_request = f_request
+        elif len(f_args) == 1 and isinstance(f_args[0], ParseRequest):
+            self.m_request = f_args[0]
+        elif len(f_args) == 1 and isinstance(f_args[0], (list, tuple)):
+            try:
+                self.m_request = parseParseArguments(list(f_args[0]))
+            except ParseCliParseError as f_err:
+                self.m_init_error = f_err
+        elif len(f_args) >= 1:
+            f_argv: List[str] = [str(a) for a in f_args]
+            try:
+                self.m_request = parseParseArguments(f_argv)
+            except ParseCliParseError as f_err:
+                self.m_init_error = f_err
+        elif "target" in f_kwargs or "f_target" in f_kwargs:
+            try:
+                f_target = f_kwargs.get("f_target", f_kwargs.get("target"))
+                f_output_dir = f_kwargs.get(
+                    "f_output_dir",
+                    f_kwargs.get("output_dir", f_kwargs.get("outputDir")),
+                )
+                f_format = f_kwargs.get(
+                    "f_format", f_kwargs.get("format", "csv")
+                )
+                self.m_request = ParseRequest(
+                    f_target=f_target,
+                    f_output_dir=f_output_dir,
+                    f_format=f_format,
+                )
+            except (ValueError, TypeError) as f_err:
+                self.m_init_error = ParseCliParseError(str(f_err))
+            except ParseCliParseError as f_err:
+                self.m_init_error = f_err
+        else:
+            try:
+                self.m_request = parseParseArguments([])
+            except ParseCliParseError as f_err:
+                self.m_init_error = f_err
+
+    @property
+    def request(self) -> Optional[Any]:
+        return self.m_request
+
+    @property
+    def target(self) -> str:
+        return self.m_request.target if self.m_request is not None else ""
+
+    @property
+    def output_dir(self) -> str:
+        if self.m_request is not None and self.m_request.output_dir is not None:
+            return self.m_request.output_dir
+        return os.getcwd()
+
+    @property
+    def outputDir(self) -> str:
+        return self.output_dir
+
+    @property
+    def format(self) -> str:
+        return self.m_request.format if self.m_request is not None else "csv"
+
+    def _classifyResolutionError(self, f_err: Exception) -> int:
+        """Classify RunRootResolutionError into exit code 3 or 4.
+
+        Exit codes:
+            3: Missing or unreadable run artifacts (manifest.json missing or inaccessible,
+               unreadable run root directory, symlink violations).
+            4: Corrupted or incomplete run state (state reconciliation fails, run did not succeed,
+               missing whole_run_succeeded marker, missing controller/rank results).
+        """
+        from lsmiotool.lib.evidence import EvidenceError
+        from lsmiotool.lib.state import StateError
+
+        f_msg = str(f_err).lower()
+        f_state_indicators = (
+            "did not succeed",
+            "state reconciliation failed",
+            "whole_run_succeeded",
+            "missing controller result",
+            "missing rank result",
+            "does not match manifest run_id",
+        )
+        for f_ind in f_state_indicators:
+            if f_ind in f_msg:
+                return 4
+
+        if isinstance(getattr(f_err, "__cause__", None), (StateError, EvidenceError)):
+            return 4
+
+        return 3
+
+    def run(self) -> int:
+        """Execute benchmark run parsing, metric extraction, and report generation.
+
+        Returns:
+            0: Success (reports generated, summary printed to stdout).
+            1: General runtime / configuration error.
+            2: ParseCliParseError (invalid CLI syntax/arguments).
+            3: RunRootResolutionError (missing manifest.json or unreadable run directory).
+            4: RunRootResolutionError (failed state reconciliation or non-SUCCEEDED overall state).
+            5: ExtractionError (malformed log files or missing required metrics).
+        """
+        from lsmiotool.lib.cli import ParseCliParseError
+        from lsmiotool.lib.evidence import EvidenceError
+        from lsmiotool.lib.runparse import (
+            ConsoleSummaryFormatter,
+            ExtractionError,
+            RunRootResolutionError,
+            RunRootResolver,
+            extractRun,
+            generateReports,
+        )
+        from lsmiotool.lib.state import StateError
+
+        if self.m_init_error is not None:
+            sys.stderr.write(f"Error: {self.m_init_error}\n")
+            if isinstance(self.m_init_error, (ParseCliParseError, ValueError, TypeError)):
+                return 2
+            return 1
+
+        if self.m_request is None:
+            sys.stderr.write("Error: No valid parse request configured.\n")
+            return 1
+
+        try:
+            # 1. Target resolution
+            f_resolved_run = RunRootResolver.resolveTarget(self.m_request.target)
+
+            # 2. Metric extraction
+            f_extracted_data = extractRun(f_resolved_run)
+
+            # 3. Report generation
+            f_effective_out_dir = self.output_dir
+            generateReports(
+                f_resolved_run=f_resolved_run,
+                f_extracted_data=f_extracted_data,
+                f_out_dir=f_effective_out_dir,
+                f_format=self.format,
+            )
+
+            # 4. Formatting and writing console summary table to sys.stdout
+            f_summary_table = ConsoleSummaryFormatter.formatSummaryTable(
+                f_resolved_run=f_resolved_run,
+                f_extracted_data=f_extracted_data,
+            )
+            sys.stdout.write(f"{f_summary_table}\n")
+            sys.stdout.flush()
+
+            return 0
+        except ParseCliParseError as f_err:
+            sys.stderr.write(f"Error: {f_err}\n")
+            return 2
+        except RunRootResolutionError as f_err:
+            sys.stderr.write(f"Error: {f_err}\n")
+            return self._classifyResolutionError(f_err)
+        except (StateError, EvidenceError) as f_err:
+            sys.stderr.write(f"Error: {f_err}\n")
+            return 4
+        except ExtractionError as f_err:
+            sys.stderr.write(f"Error: {f_err}\n")
+            return 5
+        except Exception as f_err:
+            sys.stderr.write(f"Error: {f_err}\n")
+            return 1
+
+
 class CompareMain(BaseMain):
     """Compare command for generating comparison bar charts across benchmark directories."""
 
