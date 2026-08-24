@@ -699,7 +699,9 @@ class SchedulerScriptRenderer:
 
         if f_worker_validator is not None:
             try:
-                if callable(f_worker_validator):
+                if isinstance(f_worker_validator, type) and hasattr(f_worker_validator, "validate"):
+                    f_validated = f_worker_validator.validate(f_worker_str)
+                elif callable(f_worker_validator):
                     f_validated = f_worker_validator(f_worker_str)
                 elif hasattr(f_worker_validator, "validate") and callable(getattr(f_worker_validator, "validate")):
                     f_validated = f_worker_validator.validate(f_worker_str)
