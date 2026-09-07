@@ -124,9 +124,13 @@ def _checkNoControlChars(f_val: str, f_field_name: str) -> None:
     if "\n" in f_val:
         raise SchedulerScriptError(f"{f_field_name} contains newline (\\n): {f_val!r}")
     if "\r" in f_val:
-        raise SchedulerScriptError(f"{f_field_name} contains carriage return (\\r): {f_val!r}")
+        raise SchedulerScriptError(
+            f"{f_field_name} contains carriage return (\\r): {f_val!r}"
+        )
     if any(ord(f_c) < 32 or ord(f_c) == 127 for f_c in f_val):
-        raise SchedulerScriptError(f"{f_field_name} contains control/unprintable characters: {f_val!r}")
+        raise SchedulerScriptError(
+            f"{f_field_name} contains control/unprintable characters: {f_val!r}"
+        )
 
 
 def _checkNoDirectiveInjection(f_val: str, f_field_name: str) -> None:
@@ -201,40 +205,54 @@ class JobSpec:
         _checkNoControlChars(f_norm_point_id, "point_id")
 
         if not isinstance(f_script_path, str) or not f_script_path.strip():
-            raise SchedulerScriptError(f"script_path must be a non-empty string, got: {f_script_path!r}")
+            raise SchedulerScriptError(
+                f"script_path must be a non-empty string, got: {f_script_path!r}"
+            )
         _checkNoControlChars(f_script_path, "script_path")
 
         if not isinstance(f_working_dir, str) or not f_working_dir.strip():
-            raise SchedulerScriptError(f"working_dir must be a non-empty string, got: {f_working_dir!r}")
+            raise SchedulerScriptError(
+                f"working_dir must be a non-empty string, got: {f_working_dir!r}"
+            )
         _checkNoControlChars(f_working_dir, "working_dir")
 
         if f_mail_user is not None:
             if not isinstance(f_mail_user, str) or not f_mail_user.strip():
-                raise SchedulerScriptError(f"mail_user must be a non-empty string or None, got: {f_mail_user!r}")
+                raise SchedulerScriptError(
+                    f"mail_user must be a non-empty string or None, got: {f_mail_user!r}"
+                )
             _checkNoControlChars(f_mail_user, "mail_user")
             _checkNoDirectiveInjection(f_mail_user, "mail_user")
 
         if f_account is not None:
             if not isinstance(f_account, str) or not f_account.strip():
-                raise SchedulerScriptError(f"account must be a non-empty string or None, got: {f_account!r}")
+                raise SchedulerScriptError(
+                    f"account must be a non-empty string or None, got: {f_account!r}"
+                )
             _checkNoControlChars(f_account, "account")
             _checkNoDirectiveInjection(f_account, "account")
 
         if f_output_path is not None:
             if not isinstance(f_output_path, str) or not f_output_path.strip():
-                raise SchedulerScriptError(f"output_path must be a non-empty string or None, got: {f_output_path!r}")
+                raise SchedulerScriptError(
+                    f"output_path must be a non-empty string or None, got: {f_output_path!r}"
+                )
             _checkNoControlChars(f_output_path, "output_path")
             _checkNoDirectiveInjection(f_output_path, "output_path")
 
         if f_error_path is not None:
             if not isinstance(f_error_path, str) or not f_error_path.strip():
-                raise SchedulerScriptError(f"error_path must be a non-empty string or None, got: {f_error_path!r}")
+                raise SchedulerScriptError(
+                    f"error_path must be a non-empty string or None, got: {f_error_path!r}"
+                )
             _checkNoControlChars(f_error_path, "error_path")
             _checkNoDirectiveInjection(f_error_path, "error_path")
 
         if f_job_name is not None:
             if not isinstance(f_job_name, str) or not f_job_name.strip():
-                raise SchedulerScriptError(f"job_name must be a non-empty string or None, got: {f_job_name!r}")
+                raise SchedulerScriptError(
+                    f"job_name must be a non-empty string or None, got: {f_job_name!r}"
+                )
             _checkNoControlChars(f_job_name, "job_name")
             _checkNoDirectiveInjection(f_job_name, "job_name")
 
@@ -242,12 +260,20 @@ class JobSpec:
         object.__setattr__(self, "m_script_path", f_script_path.strip())
         object.__setattr__(self, "m_working_dir", f_working_dir.strip())
         object.__setattr__(self, "m_resources", f_resources)
-        object.__setattr__(self, "m_mail_user", f_mail_user.strip() if f_mail_user else None)
+        object.__setattr__(
+            self, "m_mail_user", f_mail_user.strip() if f_mail_user else None
+        )
         object.__setattr__(self, "m_mail_mode", f_mail_mode)
         object.__setattr__(self, "m_account", f_account.strip() if f_account else None)
-        object.__setattr__(self, "m_output_path", f_output_path.strip() if f_output_path else None)
-        object.__setattr__(self, "m_error_path", f_error_path.strip() if f_error_path else None)
-        object.__setattr__(self, "m_job_name", f_job_name.strip() if f_job_name else None)
+        object.__setattr__(
+            self, "m_output_path", f_output_path.strip() if f_output_path else None
+        )
+        object.__setattr__(
+            self, "m_error_path", f_error_path.strip() if f_error_path else None
+        )
+        object.__setattr__(
+            self, "m_job_name", f_job_name.strip() if f_job_name else None
+        )
         object.__setattr__(self, "_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -257,7 +283,9 @@ class JobSpec:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -343,7 +371,9 @@ class JobSpec:
                 else self.m_resources
             ),
             "mail_user": self.m_mail_user,
-            "mail_mode": self.m_mail_mode.value if self.m_mail_mode is not None else None,
+            "mail_mode": self.m_mail_mode.value
+            if self.m_mail_mode is not None
+            else None,
             "account": self.m_account,
             "output_path": self.m_output_path,
             "error_path": self.m_error_path,
@@ -398,7 +428,9 @@ class JobResult:
         f_diagnostics: Optional[Sequence[str]] = None,
     ) -> None:
         if not isinstance(f_job_handle, JobHandle):
-            raise SchedulerError(f"job_handle must be JobHandle, got: {type(f_job_handle).__name__}")
+            raise SchedulerError(
+                f"job_handle must be JobHandle, got: {type(f_job_handle).__name__}"
+            )
 
         if isinstance(f_status, str):
             try:
@@ -411,7 +443,9 @@ class JobResult:
         f_diag_tuple = tuple(str(f_d) for f_d in (f_diagnostics or ()))
 
         object.__setattr__(self, "m_job_handle", f_job_handle)
-        object.__setattr__(self, "m_raw_output", str(f_raw_output) if f_raw_output is not None else "")
+        object.__setattr__(
+            self, "m_raw_output", str(f_raw_output) if f_raw_output is not None else ""
+        )
         object.__setattr__(self, "m_exit_code", int(f_exit_code))
         object.__setattr__(self, "m_status", f_norm_status)
         object.__setattr__(self, "m_diagnostics", f_diag_tuple)
@@ -424,7 +458,9 @@ class JobResult:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -462,7 +498,12 @@ class JobResult:
     @property
     def isSuccess(self) -> bool:
         return self.m_exit_code == 0 and (
-            self.m_status in (SchedulerJobState.SUCCEEDED, SchedulerJobState.QUEUED, SchedulerJobState.ACTIVE)
+            self.m_status
+            in (
+                SchedulerJobState.SUCCEEDED,
+                SchedulerJobState.QUEUED,
+                SchedulerJobState.ACTIVE,
+            )
             or str(self.m_status).lower() in ("succeeded", "queued", "active")
         )
 
@@ -475,7 +516,9 @@ class JobResult:
             "job_handle": self.m_job_handle.toDict(),
             "raw_output": self.m_raw_output,
             "exit_code": self.m_exit_code,
-            "status": self.m_status.value if isinstance(self.m_status, SchedulerJobState) else str(self.m_status),
+            "status": self.m_status.value
+            if isinstance(self.m_status, SchedulerJobState)
+            else str(self.m_status),
             "diagnostics": list(self.m_diagnostics),
             "is_success": self.is_success,
         }
@@ -503,6 +546,7 @@ class JobResult:
 # Scheduler Script Renderer
 # -------------------------------------------------------------------------
 
+
 class SchedulerScriptRenderer:
     """Scheduler-neutral job script renderer and directive validator.
 
@@ -526,7 +570,9 @@ class SchedulerScriptRenderer:
     def validateJobName(cls, f_name: Any, f_strict_token: bool = False) -> str:
         """Validate scheduler job name / correlation token string."""
         if not isinstance(f_name, str):
-            raise SchedulerScriptError(f"Job name must be a string, got: {type(f_name).__name__}")
+            raise SchedulerScriptError(
+                f"Job name must be a string, got: {type(f_name).__name__}"
+            )
         f_norm = f_name.strip()
         if not f_norm:
             raise SchedulerScriptError("Job name cannot be empty")
@@ -551,7 +597,9 @@ class SchedulerScriptRenderer:
     def validateAccount(cls, f_account: Any) -> str:
         """Validate scheduler account token string."""
         if not isinstance(f_account, str):
-            raise SchedulerScriptError(f"Account must be a string, got: {type(f_account).__name__}")
+            raise SchedulerScriptError(
+                f"Account must be a string, got: {type(f_account).__name__}"
+            )
         f_norm = f_account.strip()
         if not f_norm:
             raise SchedulerScriptError("Account cannot be empty")
@@ -567,10 +615,14 @@ class SchedulerScriptRenderer:
     validate_account = validateAccount
 
     @classmethod
-    def validateQueueOrPartition(cls, f_token: Any, f_field_name: str = "queue/partition") -> str:
+    def validateQueueOrPartition(
+        cls, f_token: Any, f_field_name: str = "queue/partition"
+    ) -> str:
         """Validate queue, partition, or QoS token string."""
         if not isinstance(f_token, str):
-            raise SchedulerScriptError(f"{f_field_name} must be a string, got: {type(f_token).__name__}")
+            raise SchedulerScriptError(
+                f"{f_field_name} must be a string, got: {type(f_token).__name__}"
+            )
         f_norm = f_token.strip()
         if not f_norm:
             raise SchedulerScriptError(f"{f_field_name} cannot be empty")
@@ -589,7 +641,9 @@ class SchedulerScriptRenderer:
     def validateMailUser(cls, f_email: Any) -> str:
         """Validate email address string for scheduler notifications."""
         if not isinstance(f_email, str):
-            raise SchedulerScriptError(f"Email must be a string, got: {type(f_email).__name__}")
+            raise SchedulerScriptError(
+                f"Email must be a string, got: {type(f_email).__name__}"
+            )
         f_norm = f_email.strip()
         if not f_norm:
             raise SchedulerScriptError("Email cannot be empty")
@@ -612,7 +666,9 @@ class SchedulerScriptRenderer:
         Rejects raw strings, cross-backend enums, reordered, case-changed, and injected values.
         """
         if not isinstance(f_backend, SchedulerKind):
-            raise SchedulerScriptError(f"Backend must be SchedulerKind, got: {type(f_backend).__name__}")
+            raise SchedulerScriptError(
+                f"Backend must be SchedulerKind, got: {type(f_backend).__name__}"
+            )
 
         if isinstance(f_mail_mode, str):
             raise SchedulerScriptError(
@@ -649,7 +705,9 @@ class SchedulerScriptRenderer:
             return ""
 
         else:
-            raise SchedulerScriptError(f"Unsupported scheduler backend for mail mode: {f_backend}")
+            raise SchedulerScriptError(
+                f"Unsupported scheduler backend for mail mode: {f_backend}"
+            )
 
     validate_mail_mode = validateMailMode
 
@@ -657,7 +715,9 @@ class SchedulerScriptRenderer:
     def validatePath(cls, f_path: Any, f_field_name: str = "path") -> str:
         """Validate absolute path token without filesystem calls."""
         if not isinstance(f_path, str):
-            raise SchedulerScriptError(f"{f_field_name} must be a string, got: {type(f_path).__name__}")
+            raise SchedulerScriptError(
+                f"{f_field_name} must be a string, got: {type(f_path).__name__}"
+            )
         f_norm = f_path.strip()
         if not f_norm:
             raise SchedulerScriptError(f"{f_field_name} cannot be empty")
@@ -665,7 +725,9 @@ class SchedulerScriptRenderer:
         _checkNoDirectiveInjection(f_path, f_field_name)
 
         if not f_norm.startswith("/"):
-            raise SchedulerScriptError(f"{f_field_name} must be an absolute path: {f_path!r}")
+            raise SchedulerScriptError(
+                f"{f_field_name} must be an absolute path: {f_path!r}"
+            )
 
         if not PATH_PATTERN.match(f_norm):
             raise SchedulerScriptError(
@@ -679,7 +741,9 @@ class SchedulerScriptRenderer:
     def validateWorkerPath(
         cls,
         f_worker_executable: Any,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
     ) -> str:
         """Validate worker executable path using injected validator without making filesystem calls."""
         if not isinstance(f_worker_executable, str):
@@ -699,11 +763,15 @@ class SchedulerScriptRenderer:
 
         if f_worker_validator is not None:
             try:
-                if isinstance(f_worker_validator, type) and hasattr(f_worker_validator, "validate"):
+                if isinstance(f_worker_validator, type) and hasattr(
+                    f_worker_validator, "validate"
+                ):
                     f_validated = f_worker_validator.validate(f_worker_str)
                 elif callable(f_worker_validator):
                     f_validated = f_worker_validator(f_worker_str)
-                elif hasattr(f_worker_validator, "validate") and callable(getattr(f_worker_validator, "validate")):
+                elif hasattr(f_worker_validator, "validate") and callable(
+                    getattr(f_worker_validator, "validate")
+                ):
                     f_validated = f_worker_validator.validate(f_worker_str)
                 else:
                     raise SchedulerScriptError(
@@ -730,17 +798,23 @@ class SchedulerScriptRenderer:
         f_worker_executable: str,
         f_manifest_path: str,
         f_point_id: Any,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
     ) -> str:
         """Construct POSIX-quoted worker execution tail: exec <worker> allocation <manifest> <point>."""
         f_valid_worker = cls.validateWorkerPath(f_worker_executable, f_worker_validator)
 
         if not isinstance(f_manifest_path, str) or not f_manifest_path.strip():
-            raise SchedulerScriptError(f"Manifest path must be a non-empty string, got: {f_manifest_path!r}")
+            raise SchedulerScriptError(
+                f"Manifest path must be a non-empty string, got: {f_manifest_path!r}"
+            )
         _checkNoControlChars(f_manifest_path, "manifest_path")
         _checkNoDirectiveInjection(f_manifest_path, "manifest_path")
         if not f_manifest_path.strip().startswith("/"):
-            raise SchedulerScriptError(f"Manifest path must be an absolute path: {f_manifest_path!r}")
+            raise SchedulerScriptError(
+                f"Manifest path must be an absolute path: {f_manifest_path!r}"
+            )
 
         if f_point_id is None:
             raise SchedulerScriptError("Point ID cannot be None")
@@ -776,23 +850,37 @@ class SchedulerScriptRenderer:
         f_worker_executable: str,
         f_manifest_path: str,
         f_point_id: Any,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
     ) -> str:
         """Render complete structured scheduler job script with strict section order and validation."""
         if not isinstance(f_backend, SchedulerKind):
-            raise SchedulerScriptError(f"Backend must be SchedulerKind, got: {type(f_backend).__name__}")
+            raise SchedulerScriptError(
+                f"Backend must be SchedulerKind, got: {type(f_backend).__name__}"
+            )
 
         f_validated_directives: List[str] = []
         f_expected_prefix = (
-            "#SBATCH" if f_backend == SchedulerKind.SLURM else "#PBS" if f_backend == SchedulerKind.PBS else ""
+            "#SBATCH"
+            if f_backend == SchedulerKind.SLURM
+            else "#PBS"
+            if f_backend == SchedulerKind.PBS
+            else ""
         )
         f_foreign_prefix = (
-            "#PBS" if f_backend == SchedulerKind.SLURM else "#SBATCH" if f_backend == SchedulerKind.PBS else ""
+            "#PBS"
+            if f_backend == SchedulerKind.SLURM
+            else "#SBATCH"
+            if f_backend == SchedulerKind.PBS
+            else ""
         )
 
         for f_idx, f_dir_line in enumerate(f_directives):
             if not isinstance(f_dir_line, str) or not f_dir_line.strip():
-                raise SchedulerScriptError(f"Directive at index {f_idx} must be a non-empty string")
+                raise SchedulerScriptError(
+                    f"Directive at index {f_idx} must be a non-empty string"
+                )
             _checkNoControlChars(f_dir_line, f"directive[{f_idx}]")
 
             f_dir_stripped = f_dir_line.strip()
@@ -841,27 +929,35 @@ class SchedulerScriptRenderer:
     render_script = renderScript
 
     @classmethod
-    def validateScript(cls, f_script: str, f_backend: Optional[SchedulerKind] = None) -> None:
+    def validateScript(
+        cls, f_script: str, f_backend: Optional[SchedulerKind] = None
+    ) -> None:
         """Validate completed script sections, directive ordering, and absence of foreign/late directives."""
         if not isinstance(f_script, str) or not f_script.strip():
             raise SchedulerScriptError("Job script content cannot be empty")
         if "\0" in f_script:
             raise SchedulerScriptError("Job script content contains NUL byte")
 
-        f_lines = [f_line.strip() for f_line in f_script.strip().splitlines() if f_line.strip()]
+        f_lines = [
+            f_line.strip() for f_line in f_script.strip().splitlines() if f_line.strip()
+        ]
         if not f_lines:
             raise SchedulerScriptError("Job script contains no executable lines")
 
         # Line 0 must be '#!/bin/bash'
         if f_lines[0] != "#!/bin/bash":
-            raise SchedulerScriptError(f"Script must start with '#!/bin/bash', got: {f_lines[0]!r}")
+            raise SchedulerScriptError(
+                f"Script must start with '#!/bin/bash', got: {f_lines[0]!r}"
+            )
 
         # Determine backend if not explicitly provided
         f_has_sbatch = any(f_line.startswith("#SBATCH") for f_line in f_lines)
         f_has_pbs = any(f_line.startswith("#PBS") for f_line in f_lines)
 
         if f_has_sbatch and f_has_pbs:
-            raise SchedulerScriptError("Script contains conflicting #SBATCH and #PBS directives")
+            raise SchedulerScriptError(
+                "Script contains conflicting #SBATCH and #PBS directives"
+            )
 
         f_detected_backend = f_backend
         if f_detected_backend is None:
@@ -873,9 +969,13 @@ class SchedulerScriptRenderer:
                 f_detected_backend = SchedulerKind.FAKE
 
         if f_detected_backend == SchedulerKind.SLURM and f_has_pbs:
-            raise SchedulerScriptError("Foreign #PBS directive detected in Slurm script")
+            raise SchedulerScriptError(
+                "Foreign #PBS directive detected in Slurm script"
+            )
         if f_detected_backend == SchedulerKind.PBS and f_has_sbatch:
-            raise SchedulerScriptError("Foreign #SBATCH directive detected in PBS script")
+            raise SchedulerScriptError(
+                "Foreign #SBATCH directive detected in PBS script"
+            )
 
         # Check section boundaries
         f_seen_set_e = False
@@ -903,10 +1003,14 @@ class SchedulerScriptRenderer:
                 f_exec_line = f_line
 
         if not f_seen_set_e:
-            raise SchedulerScriptError("Script is missing fail-fast 'set -euo pipefail' or 'set -e'")
+            raise SchedulerScriptError(
+                "Script is missing fail-fast 'set -euo pipefail' or 'set -e'"
+            )
 
         if not f_seen_exec or not f_exec_line:
-            raise SchedulerScriptError("Script is missing 'exec <worker> allocation <manifest> <point>' tail")
+            raise SchedulerScriptError(
+                "Script is missing 'exec <worker> allocation <manifest> <point>' tail"
+            )
 
         # Validate final exec line structure
         if not re.match(r"^exec\s+\S+\s+allocation\s+\S+\s+\S+$", f_exec_line):
@@ -920,6 +1024,7 @@ class SchedulerScriptRenderer:
 # -------------------------------------------------------------------------
 # Scheduler Command Runner
 # -------------------------------------------------------------------------
+
 
 class SchedulerCommandRunner:
     """Command runner for external scheduler CLI operations (submit, query, cancel, recovery)."""
@@ -957,6 +1062,7 @@ class SchedulerCommandRunner:
 # Scheduler Adapter Base
 # -------------------------------------------------------------------------
 
+
 class SchedulerAdapter:
     """Abstract base class for scheduler adapters managing submission, recovery, and evidence dispatch.
 
@@ -986,13 +1092,17 @@ class SchedulerAdapter:
         f_backend: SchedulerKind,
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
         f_timeout: Optional[float] = None,
         f_command_timeout: Optional[float] = None,
         f_profile: Optional[SiteProfile] = None,
     ) -> None:
         if not isinstance(f_backend, SchedulerKind):
-            raise SchedulerError(f"Backend must be SchedulerKind, got: {type(f_backend).__name__}")
+            raise SchedulerError(
+                f"Backend must be SchedulerKind, got: {type(f_backend).__name__}"
+            )
         self.m_backend = f_backend
         self.m_command_runner = f_command_runner or SchedulerCommandRunner()
         self.m_evidence_store = f_evidence_store
@@ -1051,11 +1161,15 @@ class SchedulerAdapter:
         return self.m_evidence_store
 
     @property
-    def workerValidator(self) -> Optional[Union[WorkerExecutableValidator, Callable[[str], str]]]:
+    def workerValidator(
+        self,
+    ) -> Optional[Union[WorkerExecutableValidator, Callable[[str], str]]]:
         return self.m_worker_validator
 
     @property
-    def worker_validator(self) -> Optional[Union[WorkerExecutableValidator, Callable[[str], str]]]:
+    def worker_validator(
+        self,
+    ) -> Optional[Union[WorkerExecutableValidator, Callable[[str], str]]]:
         return self.m_worker_validator
 
     def _runCommand(
@@ -1075,7 +1189,9 @@ class SchedulerAdapter:
                 f_timeout=f_eff_timeout,
             )
         except TypeError as f_type_err:
-            if "f_timeout" in str(f_type_err) or "unexpected keyword argument" in str(f_type_err):
+            if "f_timeout" in str(f_type_err) or "unexpected keyword argument" in str(
+                f_type_err
+            ):
                 try:
                     return self.m_command_runner.run(f_argv, f_cwd=f_cwd)
                 except TypeError:
@@ -1098,7 +1214,9 @@ class SchedulerAdapter:
     def parseSubmitOutput(self, f_stdout: str) -> str:
         """Extract exact job ID string from submission command standard output."""
         if not isinstance(f_stdout, str) or not f_stdout.strip():
-            raise SubmissionDispatchError(f"Submission output is empty or invalid: {f_stdout!r}")
+            raise SubmissionDispatchError(
+                f"Submission output is empty or invalid: {f_stdout!r}"
+            )
 
         f_clean = f_stdout.strip()
 
@@ -1141,14 +1259,18 @@ class SchedulerAdapter:
 
     parse_submit_output = parseSubmitOutput
 
-    def recoverCandidateJobIds(self, f_job_name: str, f_user: Optional[str] = None) -> List[str]:
+    def recoverCandidateJobIds(
+        self, f_job_name: str, f_user: Optional[str] = None
+    ) -> List[str]:
         """Query scheduler by exact job name / correlation token to discover candidate job IDs."""
         # Base adapter returns empty list; concrete Slurm/PBS adapters implement real query
         return []
 
     recover_candidate_job_ids = recoverCandidateJobIds
 
-    def recoverJobHandle(self, f_job_name: str, f_user: Optional[str] = None) -> Optional[JobHandle]:
+    def recoverJobHandle(
+        self, f_job_name: str, f_user: Optional[str] = None
+    ) -> Optional[JobHandle]:
         """Recover JobHandle by exact correlation token / job name.
 
         Returns:
@@ -1219,7 +1341,9 @@ class SchedulerAdapter:
         """
         # Step 1: Check existing evidence records for recovery
         if self.m_evidence_store is not None:
-            f_sub_records = self.m_evidence_store.readSubmissionRecords(f_point, f_ordinal=f_ordinal)
+            f_sub_records = self.m_evidence_store.readSubmissionRecords(
+                f_point, f_ordinal=f_ordinal
+            )
             f_rec_recorded = f_sub_records.get("submission_recorded")
             f_rec_dispatched = f_sub_records.get("submission_dispatched")
             f_rec_requested = f_sub_records.get("submission_requested")
@@ -1269,7 +1393,9 @@ class SchedulerAdapter:
 
         # Step 2: Record SUBMISSION_REQUESTED if not already recorded
         if self.m_evidence_store is not None:
-            f_existing_req = self.m_evidence_store.readSubmissionRecords(f_point, f_ordinal=f_ordinal).get("submission_requested")
+            f_existing_req = self.m_evidence_store.readSubmissionRecords(
+                f_point, f_ordinal=f_ordinal
+            ).get("submission_requested")
             if f_existing_req is None:
                 self.m_evidence_store.recordSubmissionRequested(
                     f_point=f_point,
@@ -1373,6 +1499,7 @@ class SchedulerAdapter:
 # Slurm Script Renderer
 # -------------------------------------------------------------------------
 
+
 class SlurmScriptRenderer(SchedulerScriptRenderer):
     """Slurm-specific job script renderer adhering to exact directive order and site policies.
 
@@ -1403,7 +1530,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
     def computeWalltime(cls, f_nodes: int) -> str:
         """Compute walltime string HH:MM:SS based on Slurm node formula: 2 + nodes // 3 hours."""
         if not isinstance(f_nodes, int) or f_nodes <= 0:
-            raise SchedulerScriptError(f"Nodes must be a positive integer, got: {f_nodes!r}")
+            raise SchedulerScriptError(
+                f"Nodes must be a positive integer, got: {f_nodes!r}"
+            )
         f_hours = 2 + (f_nodes // 3)
         return f"{f_hours:02d}:00:00"
 
@@ -1425,8 +1554,14 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
         """Render Slurm #SBATCH directives in exact prescribed order."""
         if f_point is None:
             raise SchedulerScriptError("Scale point cannot be None")
-        if not hasattr(f_point, "tasks") or not hasattr(f_point, "nodes") or not hasattr(f_point, "ppn"):
-            raise SchedulerScriptError(f"Scale point must have tasks, nodes, ppn, got: {f_point!r}")
+        if (
+            not hasattr(f_point, "tasks")
+            or not hasattr(f_point, "nodes")
+            or not hasattr(f_point, "ppn")
+        ):
+            raise SchedulerScriptError(
+                f"Scale point must have tasks, nodes, ppn, got: {f_point!r}"
+            )
 
         f_tasks = int(f_point.tasks)
         f_nodes = int(f_point.nodes)
@@ -1454,7 +1589,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
         # Validate walltime
         if f_walltime is not None:
             if not isinstance(f_walltime, str) or not f_walltime.strip():
-                raise SchedulerScriptError(f"walltime must be a non-empty string, got: {f_walltime!r}")
+                raise SchedulerScriptError(
+                    f"walltime must be a non-empty string, got: {f_walltime!r}"
+                )
             _checkNoControlChars(f_walltime, "walltime")
             _checkNoDirectiveInjection(f_walltime, "walltime")
             f_norm_walltime = f_walltime.strip()
@@ -1519,7 +1656,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
 
         if f_res_policy is not None:
             if getattr(f_res_policy, "partition", None) is not None:
-                f_part = cls.validateQueueOrPartition(f_res_policy.partition, "partition")
+                f_part = cls.validateQueueOrPartition(
+                    f_res_policy.partition, "partition"
+                )
                 f_directives.append(f"#SBATCH --partition={f_part}")
             if getattr(f_res_policy, "qos", None) is not None:
                 f_qos = cls.validateQueueOrPartition(f_res_policy.qos, "qos")
@@ -1553,7 +1692,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
         f_mail_user: Optional[str] = None,
         f_mail_mode: Optional[Union[SlurmMailMode, Any]] = SlurmMailMode.END_FAIL,
         f_walltime: Optional[str] = None,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
         f_point_id: Optional[Any] = None,
     ) -> str:
         """Render complete structured Slurm script from discrete parameters."""
@@ -1593,7 +1734,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
         f_spec: JobSpec,
         f_worker_executable: str,
         f_manifest_path: str,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
     ) -> str:
         """Render complete structured Slurm script from JobSpec."""
         f_dirs = cls.renderDirectives(
@@ -1605,7 +1748,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
             f_account=f_spec.account,
             f_mail_user=f_spec.mail_user,
             f_mail_mode=f_spec.mail_mode or SlurmMailMode.END_FAIL,
-            f_walltime=getattr(f_spec.resources, "walltime", None) if f_spec.resources else None,
+            f_walltime=getattr(f_spec.resources, "walltime", None)
+            if f_spec.resources
+            else None,
         )
         return cls.renderScript(
             f_backend=SchedulerKind.SLURM,
@@ -1623,6 +1768,7 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
 # -------------------------------------------------------------------------
 # PBS Script Renderer
 # -------------------------------------------------------------------------
+
 
 class PbsScriptRenderer(SchedulerScriptRenderer):
     """PBS-specific job script renderer adhering to exact Isambard directive order and resource policies.
@@ -1665,8 +1811,14 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         """Render PBS #PBS directives in exact prescribed order."""
         if f_point is None:
             raise SchedulerScriptError("Scale point cannot be None")
-        if not hasattr(f_point, "tasks") or not hasattr(f_point, "nodes") or not hasattr(f_point, "ppn"):
-            raise SchedulerScriptError(f"Scale point must have tasks, nodes, ppn, got: {f_point!r}")
+        if (
+            not hasattr(f_point, "tasks")
+            or not hasattr(f_point, "nodes")
+            or not hasattr(f_point, "ppn")
+        ):
+            raise SchedulerScriptError(
+                f"Scale point must have tasks, nodes, ppn, got: {f_point!r}"
+            )
 
         f_tasks = int(f_point.tasks)
         f_nodes = int(f_point.nodes)
@@ -1694,7 +1846,9 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         # Validate walltime: fixed 06:00:00; reject any variable or different walltime
         if f_walltime is not None:
             if not isinstance(f_walltime, str) or not f_walltime.strip():
-                raise SchedulerScriptError(f"walltime must be a non-empty string, got: {f_walltime!r}")
+                raise SchedulerScriptError(
+                    f"walltime must be a non-empty string, got: {f_walltime!r}"
+                )
             _checkNoControlChars(f_walltime, "walltime")
             _checkNoDirectiveInjection(f_walltime, "walltime")
             f_norm_walltime = f_walltime.strip()
@@ -1714,12 +1868,18 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
 
         # 1. Queue: default 'arm'
         f_queue = "arm"
-        if f_res_policy is not None and getattr(f_res_policy, "queue", None) is not None:
+        if (
+            f_res_policy is not None
+            and getattr(f_res_policy, "queue", None) is not None
+        ):
             f_queue = cls.validateQueueOrPartition(f_res_policy.queue, "queue")
 
         # 4. Memory per select chunk: default '32GB'
         f_mem = "32GB"
-        if f_res_policy is not None and getattr(f_res_policy, "memory", None) is not None:
+        if (
+            f_res_policy is not None
+            and getattr(f_res_policy, "memory", None) is not None
+        ):
             _checkNoControlChars(f_res_policy.memory, "memory")
             _checkNoDirectiveInjection(f_res_policy.memory, "memory")
             f_mem = str(f_res_policy.memory).strip()
@@ -1750,7 +1910,9 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         f_directives.append(f"#PBS -N {f_valid_job_name}")
 
         # 4. Select chunk
-        f_directives.append(f"#PBS -l select={f_nodes}:ncpus={f_ppn}:mpiprocs={f_ppn}:mem={f_mem}")
+        f_directives.append(
+            f"#PBS -l select={f_nodes}:ncpus={f_ppn}:mpiprocs={f_ppn}:mem={f_mem}"
+        )
 
         # 5. Small scale pmem / pvmem
         if f_ppn == 1:
@@ -1782,7 +1944,9 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         f_error_path: str,
         f_mail_mode: Optional[Union[PbsMailMode, Any]] = PbsMailMode.ABE,
         f_walltime: Optional[str] = None,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
         f_point_id: Optional[Any] = None,
     ) -> str:
         """Render complete structured PBS script from discrete parameters."""
@@ -1820,7 +1984,9 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         f_spec: JobSpec,
         f_worker_executable: str,
         f_manifest_path: str,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
     ) -> str:
         """Render complete structured PBS script from JobSpec."""
         f_dirs = cls.renderDirectives(
@@ -1830,7 +1996,9 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
             f_output_path=f_spec.output_path or "/tmp/out.log",
             f_error_path=f_spec.error_path or "/tmp/err.log",
             f_mail_mode=f_spec.mail_mode or PbsMailMode.ABE,
-            f_walltime=getattr(f_spec.resources, "walltime", None) if f_spec.resources else None,
+            f_walltime=getattr(f_spec.resources, "walltime", None)
+            if f_spec.resources
+            else None,
         )
         return cls.renderScript(
             f_backend=SchedulerKind.PBS,
@@ -1848,6 +2016,7 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
 # -------------------------------------------------------------------------
 # Slurm Scheduler Adapter
 # -------------------------------------------------------------------------
+
 
 class SlurmSchedulerAdapter(SchedulerAdapter):
     """Concrete Slurm scheduler adapter implementing exact commands, parsers, and recovery.
@@ -1867,7 +2036,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         self,
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
         f_timeout: Optional[float] = None,
         f_command_timeout: Optional[float] = None,
         f_profile: Optional[SiteProfile] = None,
@@ -1886,7 +2057,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     def validateJobId(cls, f_job_id: Any) -> str:
         """Validate that Job ID is a non-empty exact decimal string '^[0-9]+$'."""
         if not isinstance(f_job_id, str):
-            raise SchedulerError(f"Job ID must be a string, got: {type(f_job_id).__name__}")
+            raise SchedulerError(
+                f"Job ID must be a string, got: {type(f_job_id).__name__}"
+            )
         if not f_job_id:
             raise SchedulerError("Job ID cannot be empty")
         _checkNoControlChars(f_job_id, "job_id")
@@ -1902,7 +2075,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     def submitCommand(cls, f_script_path: str) -> List[str]:
         """Build exact sbatch submission argv: ['sbatch', '--parsable', <script_path>]."""
         if not isinstance(f_script_path, str) or not f_script_path.strip():
-            raise SchedulerError(f"Script path must be a non-empty string, got: {f_script_path!r}")
+            raise SchedulerError(
+                f"Script path must be a non-empty string, got: {f_script_path!r}"
+            )
         _checkNoControlChars(f_script_path, "script_path")
         return ["sbatch", "--parsable", f_script_path.strip()]
 
@@ -1956,7 +2131,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     recovery_active_command = recoveryActiveCommand
 
     @classmethod
-    def recoveryTerminalCommand(cls, f_job_name: str, f_start_time: Optional[str] = None) -> List[str]:
+    def recoveryTerminalCommand(
+        cls, f_job_name: str, f_start_time: Optional[str] = None
+    ) -> List[str]:
         """Build exact sacct recovery query argv: ['sacct', '--noheader', '--parsable2', f'--name={job_name}', '--format=JobIDRaw,JobName,State,ExitCode']."""
         f_valid_name = SchedulerScriptRenderer.validateJobName(f_job_name)
         f_argv = [
@@ -1973,7 +2150,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     recovery_terminal_command = recoveryTerminalCommand
 
     @classmethod
-    def mapSlurmState(cls, f_state_str: str, f_exit_code_str: Optional[str] = None) -> SchedulerJobState:
+    def mapSlurmState(
+        cls, f_state_str: str, f_exit_code_str: Optional[str] = None
+    ) -> SchedulerJobState:
         """Map raw Slurm state string and optional exit code to normalized SchedulerJobState."""
         if not isinstance(f_state_str, str) or not f_state_str.strip():
             return SchedulerJobState.UNKNOWN
@@ -2022,7 +2201,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     map_slurm_state = mapSlurmState
 
     @classmethod
-    def parseActiveQuery(cls, f_output: str, f_job_id: Optional[str] = None) -> Optional[SchedulerJobState]:
+    def parseActiveQuery(
+        cls, f_output: str, f_job_id: Optional[str] = None
+    ) -> Optional[SchedulerJobState]:
         """Parse squeue output into normalized SchedulerJobState.
 
         Returns:
@@ -2030,7 +2211,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             None if output is empty/blank (job is not in active queue).
         """
         if not isinstance(f_output, str):
-            raise SchedulerError(f"squeue output must be a string, got: {type(f_output).__name__}")
+            raise SchedulerError(
+                f"squeue output must be a string, got: {type(f_output).__name__}"
+            )
 
         f_lines = [f_l.strip() for f_l in f_output.splitlines() if f_l.strip()]
         if not f_lines:
@@ -2038,8 +2221,11 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 
         # Filter header line if present
         f_data_lines = [
-            f_l for f_l in f_lines
-            if not f_l.startswith("JOBID") and not f_l.startswith("STATE") and not f_l.startswith("ST")
+            f_l
+            for f_l in f_lines
+            if not f_l.startswith("JOBID")
+            and not f_l.startswith("STATE")
+            and not f_l.startswith("ST")
         ]
         if not f_data_lines:
             return None
@@ -2082,7 +2268,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         if len(f_unique_states) == 1:
             return f_unique_states[0]
         else:
-            raise SchedulerError(f"Conflicting active job states in squeue output: {f_candidate_states}")
+            raise SchedulerError(
+                f"Conflicting active job states in squeue output: {f_candidate_states}"
+            )
 
     parse_active_query = parseActiveQuery
     parseActiveOutput = parseActiveQuery
@@ -2100,7 +2288,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             Tuple[SchedulerJobState, Optional[int]]: (normalized_state, returncode)
         """
         if not isinstance(f_output, str):
-            raise SchedulerError(f"sacct output must be a string, got: {type(f_output).__name__}")
+            raise SchedulerError(
+                f"sacct output must be a string, got: {type(f_output).__name__}"
+            )
 
         f_lines = [f_l.strip() for f_l in f_output.splitlines() if f_l.strip()]
         if not f_lines:
@@ -2119,10 +2309,20 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
                 f_raw_id, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2]
             elif len(f_parts) == 4:
                 # JobIDRaw, JobName, State, ExitCode
-                f_raw_id, _, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2], f_parts[3]
+                f_raw_id, _, f_state_str, f_exit_str = (
+                    f_parts[0],
+                    f_parts[1],
+                    f_parts[2],
+                    f_parts[3],
+                )
             elif len(f_parts) == 5:
                 # JobIDRaw, JobName, State, ExitCode, Submit
-                f_raw_id, _, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2], f_parts[3]
+                f_raw_id, _, f_state_str, f_exit_str = (
+                    f_parts[0],
+                    f_parts[1],
+                    f_parts[2],
+                    f_parts[3],
+                )
             elif len(f_parts) == 10:
                 # JobIDRaw, State, ExitCode, Elapsed, AllocCPUs, AllocNodes, NodeList, Submit, Start, End
                 f_raw_id, f_state_str, f_exit_str = f_parts[0], f_parts[1], f_parts[2]
@@ -2135,19 +2335,30 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             if "." in f_raw_id:
                 f_prefix, f_step = f_raw_id.split(".", 1)
                 if not re.fullmatch(r"[0-9]+", f_prefix) or not f_step:
-                    raise SchedulerError(f"Malformed step row ID in sacct output: {f_raw_id!r}")
+                    raise SchedulerError(
+                        f"Malformed step row ID in sacct output: {f_raw_id!r}"
+                    )
                 if ":" in f_exit_str:
                     f_ret_s, f_sig_s = f_exit_str.split(":", 1)
-                    if not (f_ret_s.strip().lstrip("-").isdigit() and f_sig_s.strip().lstrip("-").isdigit()):
-                        raise SchedulerError(f"Malformed exit code in sacct output: {f_exit_str!r}")
+                    if not (
+                        f_ret_s.strip().lstrip("-").isdigit()
+                        and f_sig_s.strip().lstrip("-").isdigit()
+                    ):
+                        raise SchedulerError(
+                            f"Malformed exit code in sacct output: {f_exit_str!r}"
+                        )
                 elif not f_exit_str.strip().lstrip("-").isdigit():
-                    raise SchedulerError(f"Malformed exit code in sacct output: {f_exit_str!r}")
+                    raise SchedulerError(
+                        f"Malformed exit code in sacct output: {f_exit_str!r}"
+                    )
                 if f_expected_id is not None and f_prefix != f_expected_id:
                     continue
                 continue
 
             if not re.fullmatch(r"[0-9]+", f_raw_id):
-                raise SchedulerError(f"Malformed root JobIDRaw in sacct output: {f_raw_id!r}")
+                raise SchedulerError(
+                    f"Malformed root JobIDRaw in sacct output: {f_raw_id!r}"
+                )
 
             if f_expected_id is not None and f_raw_id != f_expected_id:
                 continue
@@ -2158,14 +2369,20 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
                 try:
                     f_ret = int(f_ret_s.strip())
                     f_sig = int(f_sig_s.strip())
-                    f_exit_code = f_ret if f_ret != 0 else (128 + f_sig if f_sig != 0 else 0)
+                    f_exit_code = (
+                        f_ret if f_ret != 0 else (128 + f_sig if f_sig != 0 else 0)
+                    )
                 except ValueError:
-                    raise SchedulerError(f"Malformed exit code in sacct output: {f_exit_str!r}")
+                    raise SchedulerError(
+                        f"Malformed exit code in sacct output: {f_exit_str!r}"
+                    )
             else:
                 try:
                     f_exit_code = int(f_exit_str.strip())
                 except ValueError:
-                    raise SchedulerError(f"Malformed exit code in sacct output: {f_exit_str!r}")
+                    raise SchedulerError(
+                        f"Malformed exit code in sacct output: {f_exit_str!r}"
+                    )
 
             f_norm_state = cls.mapSlurmState(f_state_str, f_exit_code_str=f_exit_str)
             f_root_candidates.append((f_norm_state, f_exit_code))
@@ -2208,7 +2425,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         try:
             f_act_res = self._runCommand(f_act_argv, f_timeout=f_effective_timeout)
             if f_act_res.is_success and f_act_res.stdout.strip():
-                f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                f_act_state = self.parseActiveQuery(
+                    f_act_res.stdout, f_job_id=f_norm_id
+                )
                 if f_act_state in (SchedulerJobState.QUEUED, SchedulerJobState.ACTIVE):
                     return (f_act_state, None)
         except Exception:
@@ -2257,24 +2476,36 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
                     f_parts = [f_p.strip() for f_p in f_clean_l.split("|")]
                     if len(f_parts) >= 2:
                         f_cand_id, f_cand_name = f_parts[0], f_parts[1]
-                        if f_cand_name == f_valid_name and re.fullmatch(r"[0-9]+", f_cand_id):
+                        if f_cand_name == f_valid_name and re.fullmatch(
+                            r"[0-9]+", f_cand_id
+                        ):
                             f_found_ids.add(f_cand_id)
         except Exception:
             pass
 
         # 2. sacct by job name
-        f_sa_argv = self.recoveryTerminalCommand(f_valid_name, f_start_time=f_start_time)
+        f_sa_argv = self.recoveryTerminalCommand(
+            f_valid_name, f_start_time=f_start_time
+        )
         try:
             f_sa_res = self._runCommand(f_sa_argv, f_timeout=self.m_command_timeout)
             if f_sa_res.is_success and f_sa_res.stdout.strip():
                 for f_line in f_sa_res.stdout.splitlines():
                     f_clean_l = f_line.strip()
-                    if not f_clean_l or f_clean_l.startswith("JobIDRaw|") or f_clean_l.startswith("JobID|"):
+                    if (
+                        not f_clean_l
+                        or f_clean_l.startswith("JobIDRaw|")
+                        or f_clean_l.startswith("JobID|")
+                    ):
                         continue
                     f_parts = [f_p.strip() for f_p in f_clean_l.split("|")]
                     if len(f_parts) >= 2:
                         f_cand_id, f_cand_name = f_parts[0], f_parts[1]
-                        if "." not in f_cand_id and f_cand_name == f_valid_name and re.fullmatch(r"[0-9]+", f_cand_id):
+                        if (
+                            "." not in f_cand_id
+                            and f_cand_name == f_valid_name
+                            and re.fullmatch(r"[0-9]+", f_cand_id)
+                        ):
                             f_found_ids.add(f_cand_id)
         except Exception:
             pass
@@ -2303,7 +2534,9 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
         f_old_runner = self.m_command_runner
         try:
             self.m_command_runner = f_active_runner
-            f_candidate_ids = self.recoverCandidateJobIds(f_valid_name, f_start_time=f_start_time)
+            f_candidate_ids = self.recoverCandidateJobIds(
+                f_valid_name, f_start_time=f_start_time
+            )
         finally:
             self.m_command_runner = f_old_runner
 
@@ -2389,9 +2622,15 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             # Active query
             f_act_argv = self.activeQueryCommand(f_norm_id)
             f_act_res = _run_with_remaining(f_act_argv)
-            if f_act_res is not None and f_act_res.is_success and f_act_res.stdout.strip():
+            if (
+                f_act_res is not None
+                and f_act_res.is_success
+                and f_act_res.stdout.strip()
+            ):
                 try:
-                    f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                    f_act_state = self.parseActiveQuery(
+                        f_act_res.stdout, f_job_id=f_norm_id
+                    )
                 except Exception:
                     f_act_state = None
 
@@ -2418,9 +2657,15 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
             # Accounting query (when job has completed or left active queue)
             f_acct_argv = self.accountingQueryCommand(f_norm_id)
             f_acct_res = _run_with_remaining(f_acct_argv)
-            if f_acct_res is not None and f_acct_res.is_success and f_acct_res.stdout.strip():
+            if (
+                f_acct_res is not None
+                and f_acct_res.is_success
+                and f_acct_res.stdout.strip()
+            ):
                 try:
-                    f_acct_state, _ = self.parseAccountingQuery(f_acct_res.stdout, f_job_id=f_norm_id)
+                    f_acct_state, _ = self.parseAccountingQuery(
+                        f_acct_res.stdout, f_job_id=f_norm_id
+                    )
                 except Exception:
                     f_acct_state = None
 
@@ -2451,6 +2696,7 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 # PBS Scheduler Adapter
 # -------------------------------------------------------------------------
 
+
 class PbsSchedulerAdapter(SchedulerAdapter):
     """Concrete PBS scheduler adapter implementing exact commands, JSON parsing, and recovery.
 
@@ -2476,7 +2722,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         self,
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
         f_timeout: Optional[float] = None,
         f_command_timeout: Optional[float] = None,
         f_profile: Optional[SiteProfile] = None,
@@ -2495,7 +2743,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     def validateJobId(cls, f_job_id: Any) -> str:
         """Validate that Job ID is a non-empty string matching '^[0-9]+(?:\\.[A-Za-z0-9._-]+)?$'."""
         if not isinstance(f_job_id, str):
-            raise SchedulerError(f"Job ID must be a string, got: {type(f_job_id).__name__}")
+            raise SchedulerError(
+                f"Job ID must be a string, got: {type(f_job_id).__name__}"
+            )
         if not f_job_id:
             raise SchedulerError("Job ID cannot be empty")
         _checkNoControlChars(f_job_id, "job_id")
@@ -2511,7 +2761,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     def submitCommand(cls, f_script_path: str) -> List[str]:
         """Build exact qsub submission argv: ['qsub', <script_path>]."""
         if not isinstance(f_script_path, str) or not f_script_path.strip():
-            raise SchedulerError(f"Script path must be a non-empty string, got: {f_script_path!r}")
+            raise SchedulerError(
+                f"Script path must be a non-empty string, got: {f_script_path!r}"
+            )
         _checkNoControlChars(f_script_path, "script_path")
         return ["qsub", f_script_path.strip()]
 
@@ -2530,7 +2782,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         Rejects invalid formats, whitespace, or multiline outputs.
         """
         if not isinstance(f_stdout, str) or not f_stdout:
-            raise SubmissionDispatchError(f"PBS submission output is empty or invalid: {f_stdout!r}")
+            raise SubmissionDispatchError(
+                f"PBS submission output is empty or invalid: {f_stdout!r}"
+            )
 
         f_clean = f_stdout
         if f_clean.endswith("\r\n"):
@@ -2539,7 +2793,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             f_clean = f_clean[:-1]
 
         if not f_clean:
-            raise SubmissionDispatchError(f"PBS submission output is empty: {f_stdout!r}")
+            raise SubmissionDispatchError(
+                f"PBS submission output is empty: {f_stdout!r}"
+            )
 
         m = re.fullmatch(r"^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_clean)
         if not m:
@@ -2604,9 +2860,28 @@ class PbsSchedulerAdapter(SchedulerAdapter):
 
         f_token = f_state_str.strip().split()[0].upper()
 
-        if f_token in ("Q", "QUEUED", "W", "WAITING", "H", "HELD", "T", "TRANSIT", "TRANSITING"):
+        if f_token in (
+            "Q",
+            "QUEUED",
+            "W",
+            "WAITING",
+            "H",
+            "HELD",
+            "T",
+            "TRANSIT",
+            "TRANSITING",
+        ):
             return SchedulerJobState.QUEUED
-        elif f_token in ("R", "RUNNING", "E", "EXITING", "B", "BEGUN", "S", "SUSPENDED"):
+        elif f_token in (
+            "R",
+            "RUNNING",
+            "E",
+            "EXITING",
+            "B",
+            "BEGUN",
+            "S",
+            "SUSPENDED",
+        ):
             return SchedulerJobState.ACTIVE
         elif f_token in ("F", "FINISHED", "C", "COMPLETED"):
             if f_exit_status is None:
@@ -2619,7 +2894,11 @@ class PbsSchedulerAdapter(SchedulerAdapter):
                 return SchedulerJobState.SUCCEEDED
             else:
                 return SchedulerJobState.FAILED
-        elif f_token.startswith("CANCELLED") or f_token in ("CA", "CANCEL", "CANCELLED"):
+        elif f_token.startswith("CANCELLED") or f_token in (
+            "CA",
+            "CANCEL",
+            "CANCELLED",
+        ):
             return SchedulerJobState.CANCELLED
         elif f_token in ("TIMEOUT", "TO"):
             return SchedulerJobState.TIMEOUT
@@ -2641,7 +2920,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             None if output is empty/blank or contains no matching job in active queue.
         """
         if not isinstance(f_output, str):
-            raise SchedulerError(f"qstat output must be a string, got: {type(f_output).__name__}")
+            raise SchedulerError(
+                f"qstat output must be a string, got: {type(f_output).__name__}"
+            )
 
         f_trimmed = f_output.strip()
         if not f_trimmed:
@@ -2653,14 +2934,18 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             raise SchedulerError(f"Malformed PBS JSON output: {f_err}") from f_err
 
         if not isinstance(f_data, dict):
-            raise SchedulerError(f"Expected PBS JSON root to be an object, got: {type(f_data).__name__}")
+            raise SchedulerError(
+                f"Expected PBS JSON root to be an object, got: {type(f_data).__name__}"
+            )
 
         f_jobs = f_data.get("Jobs")
         if f_jobs is None or (isinstance(f_jobs, dict) and len(f_jobs) == 0):
             return None
 
         if not isinstance(f_jobs, dict):
-            raise SchedulerError(f"Expected 'Jobs' field in PBS JSON to be an object, got: {type(f_jobs).__name__}")
+            raise SchedulerError(
+                f"Expected 'Jobs' field in PBS JSON to be an object, got: {type(f_jobs).__name__}"
+            )
 
         f_expected_id = str(f_job_id).strip() if f_job_id is not None else None
         f_matched_entries: List[Tuple[str, Dict[str, Any]]] = []
@@ -2672,11 +2957,15 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             if f_expected_id is not None:
                 if f_key_clean == f_expected_id:
                     if not isinstance(f_val, dict):
-                        raise SchedulerError(f"Job entry '{f_key}' in PBS JSON is not an object")
+                        raise SchedulerError(
+                            f"Job entry '{f_key}' in PBS JSON is not an object"
+                        )
                     f_matched_entries.append((f_key_clean, f_val))
             else:
                 if not isinstance(f_val, dict):
-                    raise SchedulerError(f"Job entry '{f_key}' in PBS JSON is not an object")
+                    raise SchedulerError(
+                        f"Job entry '{f_key}' in PBS JSON is not an object"
+                    )
                 f_matched_entries.append((f_key_clean, f_val))
 
         if not f_matched_entries:
@@ -2711,7 +3000,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             Tuple[SchedulerJobState, Optional[int]]: (normalized_state, exit_status)
         """
         if not isinstance(f_output, str):
-            raise SchedulerError(f"qstat output must be a string, got: {type(f_output).__name__}")
+            raise SchedulerError(
+                f"qstat output must be a string, got: {type(f_output).__name__}"
+            )
 
         f_trimmed = f_output.strip()
         if not f_trimmed:
@@ -2723,14 +3014,18 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             raise SchedulerError(f"Malformed PBS JSON output: {f_err}") from f_err
 
         if not isinstance(f_data, dict):
-            raise SchedulerError(f"Expected PBS JSON root to be an object, got: {type(f_data).__name__}")
+            raise SchedulerError(
+                f"Expected PBS JSON root to be an object, got: {type(f_data).__name__}"
+            )
 
         f_jobs = f_data.get("Jobs")
         if f_jobs is None or (isinstance(f_jobs, dict) and len(f_jobs) == 0):
             return (SchedulerJobState.UNKNOWN, None)
 
         if not isinstance(f_jobs, dict):
-            raise SchedulerError(f"Expected 'Jobs' field in PBS JSON to be an object, got: {type(f_jobs).__name__}")
+            raise SchedulerError(
+                f"Expected 'Jobs' field in PBS JSON to be an object, got: {type(f_jobs).__name__}"
+            )
 
         f_expected_id = str(f_job_id).strip() if f_job_id is not None else None
         f_matched_entries: List[Tuple[str, Dict[str, Any]]] = []
@@ -2742,11 +3037,15 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             if f_expected_id is not None:
                 if f_key_clean == f_expected_id:
                     if not isinstance(f_val, dict):
-                        raise SchedulerError(f"Job entry '{f_key}' in PBS JSON is not an object")
+                        raise SchedulerError(
+                            f"Job entry '{f_key}' in PBS JSON is not an object"
+                        )
                     f_matched_entries.append((f_key_clean, f_val))
             else:
                 if not isinstance(f_val, dict):
-                    raise SchedulerError(f"Job entry '{f_key}' in PBS JSON is not an object")
+                    raise SchedulerError(
+                        f"Job entry '{f_key}' in PBS JSON is not an object"
+                    )
                 f_matched_entries.append((f_key_clean, f_val))
 
         if not f_matched_entries:
@@ -2804,7 +3103,9 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         try:
             f_act_res = self._runCommand(f_act_argv, f_timeout=f_effective_timeout)
             if f_act_res.is_success and f_act_res.stdout.strip():
-                f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                f_act_state = self.parseActiveQuery(
+                    f_act_res.stdout, f_job_id=f_norm_id
+                )
                 if f_act_state in (SchedulerJobState.QUEUED, SchedulerJobState.ACTIVE):
                     return (f_act_state, None)
         except Exception:
@@ -2853,10 +3154,14 @@ class PbsSchedulerAdapter(SchedulerAdapter):
         try:
             f_data = json.loads(f_res.stdout)
         except Exception as f_err:
-            raise SchedulerError(f"Malformed PBS JSON output during recovery: {f_err}") from f_err
+            raise SchedulerError(
+                f"Malformed PBS JSON output during recovery: {f_err}"
+            ) from f_err
 
         if not isinstance(f_data, dict):
-            raise SchedulerError(f"Expected PBS JSON root to be an object, got: {type(f_data).__name__}")
+            raise SchedulerError(
+                f"Expected PBS JSON root to be an object, got: {type(f_data).__name__}"
+            )
 
         f_jobs = f_data.get("Jobs")
         if not f_jobs or not isinstance(f_jobs, dict):
@@ -2984,9 +3289,15 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             # Active query
             f_act_argv = self.activeQueryCommand(f_norm_id)
             f_act_res = _run_with_remaining(f_act_argv)
-            if f_act_res is not None and f_act_res.is_success and f_act_res.stdout.strip():
+            if (
+                f_act_res is not None
+                and f_act_res.is_success
+                and f_act_res.stdout.strip()
+            ):
                 try:
-                    f_act_state = self.parseActiveQuery(f_act_res.stdout, f_job_id=f_norm_id)
+                    f_act_state = self.parseActiveQuery(
+                        f_act_res.stdout, f_job_id=f_norm_id
+                    )
                 except Exception:
                     f_act_state = None
 
@@ -3014,9 +3325,15 @@ class PbsSchedulerAdapter(SchedulerAdapter):
             # Historical / accounting query
             f_acct_argv = self.accountingQueryCommand(f_norm_id)
             f_acct_res = _run_with_remaining(f_acct_argv)
-            if f_acct_res is not None and f_acct_res.is_success and f_acct_res.stdout.strip():
+            if (
+                f_acct_res is not None
+                and f_acct_res.is_success
+                and f_acct_res.stdout.strip()
+            ):
                 try:
-                    f_acct_state, _ = self.parseAccountingQuery(f_acct_res.stdout, f_job_id=f_norm_id)
+                    f_acct_state, _ = self.parseAccountingQuery(
+                        f_acct_res.stdout, f_job_id=f_norm_id
+                    )
                 except Exception:
                     f_acct_state = None
 

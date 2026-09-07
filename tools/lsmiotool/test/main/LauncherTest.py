@@ -38,7 +38,12 @@ from unittest.mock import MagicMock, patch
 from lsmiotool.lib.benchmarks import BenchmarkCommand
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import Combination, LaunchMode, ScalePoint
-from lsmiotool.lib.site import EnvironmentResolver, LauncherPolicy, SchedulerKind, SiteProfile
+from lsmiotool.lib.site import (
+    EnvironmentResolver,
+    LauncherPolicy,
+    SchedulerKind,
+    SiteProfile,
+)
 from lsmiotool.lib.worker import (
     Launcher,
     LauncherError,
@@ -152,7 +157,19 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_viking_small,
-            ["srun", "--export=ALL", "-n", "8", "-N", "8", "ior", "-v", "-w", "-r", "-i=10"],
+            [
+                "srun",
+                "--export=ALL",
+                "-n",
+                "8",
+                "-N",
+                "8",
+                "ior",
+                "-v",
+                "-w",
+                "-r",
+                "-i=10",
+            ],
         )
 
         # 2. Viking (Slurm, ppn=4): ['srun', '--export=ALL', '-n', '32', '-N', '8', ...]
@@ -161,7 +178,19 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_viking_large,
-            ["srun", "--export=ALL", "-n", "32", "-N", "8", "ior", "-v", "-w", "-r", "-i=10"],
+            [
+                "srun",
+                "--export=ALL",
+                "-n",
+                "32",
+                "-N",
+                "8",
+                "ior",
+                "-v",
+                "-w",
+                "-r",
+                "-i=10",
+            ],
         )
 
         # 3. Viking2 (Slurm, ppn=1)
@@ -170,7 +199,20 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_viking2_small,
-            ["srun", "--export=ALL", "-n", "8", "-N", "8", "lmp", "-in", "in.reaxc.hns", "-var", "x", "1"],
+            [
+                "srun",
+                "--export=ALL",
+                "-n",
+                "8",
+                "-N",
+                "8",
+                "lmp",
+                "-in",
+                "in.reaxc.hns",
+                "-var",
+                "x",
+                "1",
+            ],
         )
 
         # 4. Viking2 (Slurm, ppn=4)
@@ -179,7 +221,20 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_viking2_large,
-            ["srun", "--export=ALL", "-n", "32", "-N", "8", "lmp", "-in", "in.reaxc.hns", "-var", "x", "1"],
+            [
+                "srun",
+                "--export=ALL",
+                "-n",
+                "32",
+                "-N",
+                "8",
+                "lmp",
+                "-in",
+                "in.reaxc.hns",
+                "-var",
+                "x",
+                "1",
+            ],
         )
 
         # 5. Isambard (PBS, ppn=1): ['aprun', '-n', '8', '-N', '1', ...]
@@ -207,9 +262,13 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(f_dev_argv, ["ior", "-v", "-w", "-r", "-i=10"])
 
         # 8. Direct string "fake" / "direct" / None
-        f_fake_argv = Launcher.buildSharedArgv("fake", self.m_small_point, ["echo", "hello"])
+        f_fake_argv = Launcher.buildSharedArgv(
+            "fake", self.m_small_point, ["echo", "hello"]
+        )
         self.assertEqual(f_fake_argv, ["echo", "hello"])
-        f_none_argv = Launcher.buildSharedArgv(None, self.m_small_point, ["echo", "hello"])
+        f_none_argv = Launcher.buildSharedArgv(
+            None, self.m_small_point, ["echo", "hello"]
+        )
         self.assertEqual(f_none_argv, ["echo", "hello"])
 
     def testArcher2Partition(self) -> None:
@@ -220,7 +279,21 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_archer2_small_shared,
-            ["srun", "--export=ALL", "-n", "8", "-N", "8", "-p", "standard", "ior", "-v", "-w", "-r", "-i=10"],
+            [
+                "srun",
+                "--export=ALL",
+                "-n",
+                "8",
+                "-N",
+                "8",
+                "-p",
+                "standard",
+                "ior",
+                "-v",
+                "-w",
+                "-r",
+                "-i=10",
+            ],
         )
 
         # 2. Archer2 Shared mode (large shape: ppn=4)
@@ -332,8 +405,15 @@ class LauncherTest(unittest.TestCase):
         )
 
         # 6. Verify non-Archer2 profiles do NOT include -p standard
-        for f_prof in (self.m_viking_profile, self.m_viking2_profile, self.m_isambard_profile, self.m_dev_profile):
-            f_argv = Launcher.buildSharedArgv(f_prof, self.m_small_point, self.m_ior_command)
+        for f_prof in (
+            self.m_viking_profile,
+            self.m_viking2_profile,
+            self.m_isambard_profile,
+            self.m_dev_profile,
+        ):
+            f_argv = Launcher.buildSharedArgv(
+                f_prof, self.m_small_point, self.m_ior_command
+            )
             self.assertNotIn("-p", f_argv)
             self.assertNotIn("standard", f_argv)
 
@@ -361,7 +441,19 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_rank_argv,
-            ["srun", "--export=ALL", "-n", "8", "-N", "8", f_worker, "rank", f_manifest, "point_0", "c16_b8M"],
+            [
+                "srun",
+                "--export=ALL",
+                "-n",
+                "8",
+                "-N",
+                "8",
+                f_worker,
+                "rank",
+                f_manifest,
+                "point_0",
+                "c16_b8M",
+            ],
         )
 
         # Rank worker mode on Isambard (PBS)
@@ -375,7 +467,18 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(
             f_pbs_rank_argv,
-            ["aprun", "-n", "32", "-N", "4", f_worker, "rank", f_manifest, "point_1", "c4_b1M"],
+            [
+                "aprun",
+                "-n",
+                "32",
+                "-N",
+                "4",
+                f_worker,
+                "rank",
+                f_manifest,
+                "point_1",
+                "c4_b1M",
+            ],
         )
 
         # Rank worker mode on DEV (Fake)
@@ -562,7 +665,9 @@ class LauncherTest(unittest.TestCase):
 
         with self.assertRaises(LauncherError):
             # Non-positive tasks
-            Launcher.buildSharedArgv(self.m_viking_profile, {"tasks": 0, "ppn": 1, "nodes": 0}, ["ior"])
+            Launcher.buildSharedArgv(
+                self.m_viking_profile, {"tasks": 0, "ppn": 1, "nodes": 0}, ["ior"]
+            )
 
         with self.assertRaises(LauncherError):
             # Negative tasks
@@ -583,40 +688,74 @@ class LauncherTest(unittest.TestCase):
             Launcher.buildSharedArgv(self.m_viking_profile, self.m_small_point, "")
 
         with self.assertRaises(LauncherError):
-            Launcher.buildSharedArgv(self.m_viking_profile, self.m_small_point, ["ior", None])
+            Launcher.buildSharedArgv(
+                self.m_viking_profile, self.m_small_point, ["ior", None]
+            )
 
         with self.assertRaises(LauncherError):
-            Launcher.buildSharedArgv(self.m_viking_profile, self.m_small_point, ["ior", "arg\0with_nul"])
+            Launcher.buildSharedArgv(
+                self.m_viking_profile, self.m_small_point, ["ior", "arg\0with_nul"]
+            )
 
         # 4. Invalid rank worker arguments
         with self.assertRaises(LauncherError):
             Launcher.buildRankWorkerArgv(
-                self.m_viking_profile, self.m_small_point, "", "/tmp/m.json", "p0", "c16_b8M"
+                self.m_viking_profile,
+                self.m_small_point,
+                "",
+                "/tmp/m.json",
+                "p0",
+                "c16_b8M",
             )
 
         with self.assertRaises(LauncherError):
             Launcher.buildRankWorkerArgv(
-                self.m_viking_profile, self.m_small_point, "/bin/worker\0nul", "/tmp/m.json", "p0", "c16_b8M"
+                self.m_viking_profile,
+                self.m_small_point,
+                "/bin/worker\0nul",
+                "/tmp/m.json",
+                "p0",
+                "c16_b8M",
             )
 
         with self.assertRaises(LauncherError):
             Launcher.buildRankWorkerArgv(
-                self.m_viking_profile, self.m_small_point, "/bin/worker", "", "p0", "c16_b8M"
+                self.m_viking_profile,
+                self.m_small_point,
+                "/bin/worker",
+                "",
+                "p0",
+                "c16_b8M",
             )
 
         with self.assertRaises(LauncherError):
             Launcher.buildRankWorkerArgv(
-                self.m_viking_profile, self.m_small_point, "/bin/worker", "/tmp/m.json", None, "c16_b8M"
+                self.m_viking_profile,
+                self.m_small_point,
+                "/bin/worker",
+                "/tmp/m.json",
+                None,
+                "c16_b8M",
             )
 
         with self.assertRaises(LauncherError):
             Launcher.buildRankWorkerArgv(
-                self.m_viking_profile, self.m_small_point, "/bin/worker", "/tmp/m.json", "p0", None
+                self.m_viking_profile,
+                self.m_small_point,
+                "/bin/worker",
+                "/tmp/m.json",
+                "p0",
+                None,
             )
 
         with self.assertRaises(LauncherError):
             Launcher.buildRankWorkerArgv(
-                self.m_viking_profile, self.m_small_point, "/bin/worker", "/tmp/m.json", "p0", 12345
+                self.m_viking_profile,
+                self.m_small_point,
+                "/bin/worker",
+                "/tmp/m.json",
+                "p0",
+                12345,
             )
 
     def testAliasesAndClassMethods(self) -> None:
@@ -625,16 +764,30 @@ class LauncherTest(unittest.TestCase):
         f_mock_runner = MockProcessRunner(f_returncode=0)
 
         # camelCase and snake_case for buildSharedArgv
-        f_res1 = Launcher.buildSharedArgv(self.m_viking_profile, self.m_small_point, ["ior"])
-        f_res2 = f_inst.build_shared_argv(self.m_viking_profile, self.m_small_point, ["ior"])
+        f_res1 = Launcher.buildSharedArgv(
+            self.m_viking_profile, self.m_small_point, ["ior"]
+        )
+        f_res2 = f_inst.build_shared_argv(
+            self.m_viking_profile, self.m_small_point, ["ior"]
+        )
         self.assertEqual(f_res1, f_res2)
 
         # camelCase and snake_case for buildRankWorkerArgv
         f_res3 = Launcher.buildRankWorkerArgv(
-            self.m_viking_profile, self.m_small_point, "/bin/w", "/m.json", "p0", "c16_b8M"
+            self.m_viking_profile,
+            self.m_small_point,
+            "/bin/w",
+            "/m.json",
+            "p0",
+            "c16_b8M",
         )
         f_res4 = f_inst.build_rank_worker_argv(
-            self.m_viking_profile, self.m_small_point, "/bin/w", "/m.json", "p0", "c16_b8M"
+            self.m_viking_profile,
+            self.m_small_point,
+            "/bin/w",
+            "/m.json",
+            "p0",
+            "c16_b8M",
         )
         self.assertEqual(f_res3, f_res4)
 
@@ -675,7 +828,10 @@ class LauncherTest(unittest.TestCase):
         )
         with self.assertRaises(ProcessSpawnError):
             Launcher.launchShared(
-                self.m_viking_profile, self.m_small_point, ["ior"], f_runner=f_spawn_err_runner
+                self.m_viking_profile,
+                self.m_small_point,
+                ["ior"],
+                f_runner=f_spawn_err_runner,
             )
 
         with self.assertRaises(ProcessSpawnError):

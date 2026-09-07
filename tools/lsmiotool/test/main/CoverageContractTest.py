@@ -42,7 +42,9 @@ import unittest
 class CoverageContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.m_source_root = Path(__file__).resolve().parents[4]
-        self.m_cmake_script = self.m_source_root / "cmake" / "LsmiotoolPythonCoverage.cmake"
+        self.m_cmake_script = (
+            self.m_source_root / "cmake" / "LsmiotoolPythonCoverage.cmake"
+        )
         self.m_root_cmakelists = self.m_source_root / "CMakeLists.txt"
         self.m_test_cmakelists = self.m_source_root / "test" / "CMakeLists.txt"
 
@@ -61,7 +63,9 @@ class CoverageContractTest(unittest.TestCase):
     def testCoverageConfigureRequiresModule(self) -> None:
         root_cmake_text = self.m_root_cmakelists.read_text(encoding="utf-8")
         self.assertIn("if(LSMIO_ENABLE_COVERAGE)", root_cmake_text)
-        self.assertIn('COMMAND "${Python3_EXECUTABLE}" -c "import coverage"', root_cmake_text)
+        self.assertIn(
+            'COMMAND "${Python3_EXECUTABLE}" -c "import coverage"', root_cmake_text
+        )
         self.assertIn("FATAL_ERROR", root_cmake_text)
         self.assertIn("pip install coverage", root_cmake_text)
 
@@ -94,8 +98,12 @@ class CoverageContractTest(unittest.TestCase):
 
         # test/CMakeLists.txt defines the exact data path for both run test and report target
         self.assertIn("-Ddata=${CMAKE_BINARY_DIR}/.coverage.lsmiotool", test_cmake_text)
-        self.assertIn("-Djson=${CMAKE_BINARY_DIR}/lsmiotool-python-coverage.json", test_cmake_text)
-        self.assertIn("-Dmarker=${CMAKE_BINARY_DIR}/.coverage.lsmiotool.sha256", test_cmake_text)
+        self.assertIn(
+            "-Djson=${CMAKE_BINARY_DIR}/lsmiotool-python-coverage.json", test_cmake_text
+        )
+        self.assertIn(
+            "-Dmarker=${CMAKE_BINARY_DIR}/.coverage.lsmiotool.sha256", test_cmake_text
+        )
 
         # LsmiotoolPythonCoverage.cmake enforces absolute path checks
         self.assertIn('if(NOT IS_ABSOLUTE "${data}")', cmake_script_text)
@@ -166,15 +174,21 @@ class CoverageContractTest(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            self.assertEqual(res.returncode, 0, f"res.stderr: {res.stderr}\nres.stdout: {res.stdout}")
+            self.assertEqual(
+                res.returncode, 0, f"res.stderr: {res.stderr}\nres.stdout: {res.stdout}"
+            )
             self.assertTrue(keep_file.exists())
             self.assertEqual(keep_file.read_text(encoding="utf-8"), "must-stay")
             self.assertFalse(json_file.exists())
             self.assertTrue(data_file.exists())
             self.assertTrue(marker_file.exists())
 
-            expected_sha = hashlib.sha256(b"fresh-coverage-data-payload-12345").hexdigest()
-            self.assertEqual(marker_file.read_text(encoding="utf-8").strip(), expected_sha)
+            expected_sha = hashlib.sha256(
+                b"fresh-coverage-data-payload-12345"
+            ).hexdigest()
+            self.assertEqual(
+                marker_file.read_text(encoding="utf-8").strip(), expected_sha
+            )
 
     def testFailedRunLeavesNoCompletionMarker(self) -> None:
         with tempfile.TemporaryDirectory() as f_temp_dir:
@@ -289,7 +303,10 @@ class CoverageContractTest(unittest.TestCase):
 
             # 4. Hash mismatch (stale or altered data file)
             data_file.write_bytes(b"altered-data-bytes")
-            marker_file.write_text(hashlib.sha256(b"different-original-bytes").hexdigest(), encoding="utf-8")
+            marker_file.write_text(
+                hashlib.sha256(b"different-original-bytes").hexdigest(),
+                encoding="utf-8",
+            )
             res_mismatch = subprocess.run(
                 [
                     "cmake",
@@ -308,7 +325,9 @@ class CoverageContractTest(unittest.TestCase):
                 check=False,
             )
             self.assertNotEqual(res_mismatch.returncode, 0)
-            self.assertIn("does not match marker SHA256", " ".join(res_mismatch.stderr.split()))
+            self.assertIn(
+                "does not match marker SHA256", " ".join(res_mismatch.stderr.split())
+            )
 
     def testDefaultDotCoverageDecoyIsNeverConsumed(self) -> None:
         with tempfile.TemporaryDirectory() as f_temp_dir:
@@ -324,7 +343,9 @@ class CoverageContractTest(unittest.TestCase):
 
             data_content = b"EXPLICIT_DATA_PAYLOAD_TEST"
             data_file.write_bytes(data_content)
-            marker_file.write_text(hashlib.sha256(data_content).hexdigest(), encoding="utf-8")
+            marker_file.write_text(
+                hashlib.sha256(data_content).hexdigest(), encoding="utf-8"
+            )
 
             mock_helper_code = (
                 "import sys, pathlib, json\n"
@@ -359,7 +380,9 @@ class CoverageContractTest(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            self.assertEqual(res.returncode, 0, f"res.stderr: {res.stderr}\nres.stdout: {res.stdout}")
+            self.assertEqual(
+                res.returncode, 0, f"res.stderr: {res.stderr}\nres.stdout: {res.stdout}"
+            )
             self.assertTrue(decoy_dot_coverage.exists())
             self.assertEqual(decoy_dot_coverage.read_bytes(), decoy_content)
             self.assertEqual(decoy_dot_coverage.stat().st_mtime_ns, decoy_mtime_before)
@@ -376,7 +399,9 @@ class CoverageContractTest(unittest.TestCase):
 
             data_content = b"GENUINE_COVERAGE_RAW_DATA"
             data_file.write_bytes(data_content)
-            marker_file.write_text(hashlib.sha256(data_content).hexdigest(), encoding="utf-8")
+            marker_file.write_text(
+                hashlib.sha256(data_content).hexdigest(), encoding="utf-8"
+            )
 
             mock_helper_code = (
                 "import sys, pathlib, json\n"
@@ -409,7 +434,9 @@ class CoverageContractTest(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            self.assertEqual(res.returncode, 0, f"res.stderr: {res.stderr}\nres.stdout: {res.stdout}")
+            self.assertEqual(
+                res.returncode, 0, f"res.stderr: {res.stderr}\nres.stdout: {res.stdout}"
+            )
             self.assertTrue(json_file.exists())
             report_data = json.loads(json_file.read_text(encoding="utf-8"))
             self.assertIn("files", report_data)
@@ -423,7 +450,9 @@ class CoverageContractTest(unittest.TestCase):
 
         test_cmake_text = self.m_test_cmakelists.read_text(encoding="utf-8")
         self.assertIn("-Dsource=${LSMIO_SOURCE_DIR}/tools/lsmiotool", test_cmake_text)
-        self.assertIn("-Dentry=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool", test_cmake_text)
+        self.assertIn(
+            "-Dentry=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool", test_cmake_text
+        )
 
     def testJsonHasPerFileStatementsMissingAndPercent(self) -> None:
         sample_json_content = {

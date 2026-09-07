@@ -33,9 +33,27 @@ from enum import Enum
 import os
 import platform
 import re
-from typing import Any, Dict, Generic, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
-from lsmiotool.lib.profile import ProfileDocument, ProfileLoader, ProfileRecord, ProfileSchemaError
+from lsmiotool.lib.profile import (
+    ProfileDocument,
+    ProfileLoader,
+    ProfileRecord,
+    ProfileSchemaError,
+)
 
 
 class SchedulerKind(Enum):
@@ -101,7 +119,9 @@ class LauncherPolicy:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -156,7 +176,9 @@ class RankIdentityPolicy:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -228,7 +250,9 @@ class CancellationPolicy:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -304,7 +328,9 @@ class ResourcePolicy(Generic[MailModeT]):
                     f"scheduler must be a SchedulerKind enum, got: {type(f_scheduler).__name__}"
                 )
             if f_scheduler == SchedulerKind.SLURM:
-                if f_mail_mode is not None and not isinstance(f_mail_mode, SlurmMailMode):
+                if f_mail_mode is not None and not isinstance(
+                    f_mail_mode, SlurmMailMode
+                ):
                     raise SiteResolutionError(
                         f"Slurm scheduler cannot accept {type(f_mail_mode).__name__} ({f_mail_mode})"
                     )
@@ -337,7 +363,9 @@ class ResourcePolicy(Generic[MailModeT]):
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -410,7 +438,9 @@ class ResourcePolicy(Generic[MailModeT]):
             "partition": self.m_partition,
             "qos": self.m_qos,
             "memory": self.m_memory,
-            "mail_mode": self.m_mail_mode.value if self.m_mail_mode is not None else None,
+            "mail_mode": self.m_mail_mode.value
+            if self.m_mail_mode is not None
+            else None,
             "pmem": self.m_pmem,
             "pvmem": self.m_pvmem,
         }
@@ -483,7 +513,9 @@ class ExecutableRegistry:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     def getExecutable(self, f_name: str) -> str:
@@ -594,7 +626,9 @@ class SiteProfile:
             raise SiteResolutionError(
                 f"test_only must be a boolean, got: {f_test_only!r}"
             )
-        if not isinstance(f_install_prefix, str) or not f_install_prefix.startswith("/"):
+        if not isinstance(f_install_prefix, str) or not f_install_prefix.startswith(
+            "/"
+        ):
             raise SiteResolutionError(
                 f"install_prefix must be an absolute path, got: {f_install_prefix!r}"
             )
@@ -613,7 +647,11 @@ class SiteProfile:
 
         f_norm_roots: Dict[StorageClass, str] = {}
         for f_st_key, f_st_val in f_benchmark_roots.items():
-            f_sc = f_st_key if isinstance(f_st_key, StorageClass) else StorageClass(f_st_key)
+            f_sc = (
+                f_st_key
+                if isinstance(f_st_key, StorageClass)
+                else StorageClass(f_st_key)
+            )
             if not isinstance(f_st_val, str) or not f_st_val.startswith("/"):
                 raise SiteResolutionError(
                     f"Benchmark root for {f_sc} must be an absolute path, got: {f_st_val!r}"
@@ -628,7 +666,11 @@ class SiteProfile:
 
         f_norm_pools: Dict[StorageClass, Optional[str]] = {}
         for f_pl_key, f_pl_val in f_lustre_pools.items():
-            f_sc = f_pl_key if isinstance(f_pl_key, StorageClass) else StorageClass(f_pl_key)
+            f_sc = (
+                f_pl_key
+                if isinstance(f_pl_key, StorageClass)
+                else StorageClass(f_pl_key)
+            )
             f_norm_pools[f_sc] = f_pl_val
 
         for f_req_sc in (StorageClass.HDD, StorageClass.SSD):
@@ -669,7 +711,9 @@ class SiteProfile:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -697,7 +741,11 @@ class SiteProfile:
         return {f_k.value: f_v for f_k, f_v in self.m_benchmark_roots.items()}
 
     def getBenchmarkRoot(self, f_storage: Union[StorageClass, str]) -> str:
-        f_sc = f_storage if isinstance(f_storage, StorageClass) else StorageClass(f_storage)
+        f_sc = (
+            f_storage
+            if isinstance(f_storage, StorageClass)
+            else StorageClass(f_storage)
+        )
         if f_sc not in self.m_benchmark_roots:
             raise SiteResolutionError(f"Unknown storage class: {f_storage}")
         return self.m_benchmark_roots[f_sc]
@@ -738,7 +786,11 @@ class SiteProfile:
         return {f_k.value: f_v for f_k, f_v in self.m_lustre_pools.items()}
 
     def getLustrePool(self, f_storage: Union[StorageClass, str]) -> Optional[str]:
-        f_sc = f_storage if isinstance(f_storage, StorageClass) else StorageClass(f_storage)
+        f_sc = (
+            f_storage
+            if isinstance(f_storage, StorageClass)
+            else StorageClass(f_storage)
+        )
         if f_sc not in self.m_lustre_pools:
             raise SiteResolutionError(f"Unknown storage class: {f_storage}")
         return self.m_lustre_pools[f_sc]
@@ -777,14 +829,18 @@ class SiteProfile:
             "launcher": self.m_launcher.kind,
             "certification": self.m_certification.value,
             "test_only": self.m_test_only,
-            "benchmark_roots": {f_k.value: f_v for f_k, f_v in self.m_benchmark_roots.items()},
+            "benchmark_roots": {
+                f_k.value: f_v for f_k, f_v in self.m_benchmark_roots.items()
+            },
             "install_prefix": self.m_install_prefix,
             "executables": self.m_executables.toDict(),
             "modules": list(self.m_modules),
             "resources": {f_k: f_v.toDict() for f_k, f_v in self.m_resources.items()},
             "rank_identity": self.m_rank_identity.toDict(),
             "cancellation": self.m_cancellation.toDict(),
-            "lustre_pools": {f_k.value: f_v for f_k, f_v in self.m_lustre_pools.items()},
+            "lustre_pools": {
+                f_k.value: f_v for f_k, f_v in self.m_lustre_pools.items()
+            },
         }
 
 
@@ -809,7 +865,9 @@ class SiteProfileRegistry:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -846,6 +904,7 @@ class EnvironmentResolver:
     def _getSystemGroups(cls) -> List[str]:
         try:
             import grp
+
             f_gids = os.getgroups()
             return [grp.getgrgid(f_gid).gr_name for f_gid in f_gids]
         except Exception:
@@ -891,7 +950,9 @@ class EnvironmentResolver:
                 return f_site
             raise SiteResolutionError(f"Unknown LSMIO_ENV value: {f_lsmio_env!r}")
 
-        f_hn = (f_hostname if f_hostname is not None else platform.node()).strip().lower()
+        f_hn = (
+            (f_hostname if f_hostname is not None else platform.node()).strip().lower()
+        )
         f_raw_groups = cls._getSystemGroups() if f_groups is None else list(f_groups)
         f_grps = [str(g).strip().lower() for g in f_raw_groups]
 
@@ -941,9 +1002,7 @@ class EnvironmentResolver:
                 f"User must be a non-empty string, got: {f_user!r}"
             )
         if not isinstance(f_home, str) or not f_home.startswith("/"):
-            raise SiteResolutionError(
-                f"Home must be an absolute path, got: {f_home!r}"
-            )
+            raise SiteResolutionError(f"Home must be an absolute path, got: {f_home!r}")
 
         if "/" in f_user or ".." in f_user or "\0" in f_user:
             raise SiteResolutionError(
@@ -1057,7 +1116,9 @@ class EnvironmentResolver:
         f_roots: Dict[StorageClass, str] = {}
         for f_st_name, f_tmpl in f_record.benchmark_roots.items():
             f_sc = StorageClass(f_st_name)
-            f_roots[f_sc] = cls._expandTemplate(f_tmpl, f_resolved_user, f_resolved_home)
+            f_roots[f_sc] = cls._expandTemplate(
+                f_tmpl, f_resolved_user, f_resolved_home
+            )
 
         # Install prefix
         f_prefix = cls._expandTemplate(

@@ -66,7 +66,11 @@ class InstalledLayoutTest(unittest.TestCase):
 
     def _createValidInstalledPackage(self, f_root_dir: Optional[str] = None) -> str:
         """Create a mock installed package directory matching the full installed file set."""
-        f_pkg_dir = f_root_dir if f_root_dir is not None else os.path.join(self.m_temp_dir, "share", "lsmio", "python", "lsmiotool")
+        f_pkg_dir = (
+            f_root_dir
+            if f_root_dir is not None
+            else os.path.join(self.m_temp_dir, "share", "lsmio", "python", "lsmiotool")
+        )
         f_lib_dir = os.path.join(f_pkg_dir, "lib")
         os.makedirs(f_lib_dir, exist_ok=True)
 
@@ -75,7 +79,15 @@ class InstalledLayoutTest(unittest.TestCase):
             f_f.write('"""lsmiotool package."""\n')
 
         # Create core required lib module files
-        for f_mod in ("__init__.py", "cli.py", "main.py", "run.py", "worker.py", "version.py", "resources.py"):
+        for f_mod in (
+            "__init__.py",
+            "cli.py",
+            "main.py",
+            "run.py",
+            "worker.py",
+            "version.py",
+            "resources.py",
+        ):
             with open(os.path.join(f_lib_dir, f_mod), "w", encoding="utf-8") as f_f:
                 f_f.write(f'"""Mock {f_mod}."""\n')
 
@@ -92,7 +104,10 @@ class InstalledLayoutTest(unittest.TestCase):
         self.assertEqual(f_inst(f_pkg_dir), os.path.normpath(f_pkg_dir))
 
         # Test Path object input
-        self.assertEqual(InstalledPackageValidator.validate(Path(f_pkg_dir)), os.path.normpath(f_pkg_dir))
+        self.assertEqual(
+            InstalledPackageValidator.validate(Path(f_pkg_dir)),
+            os.path.normpath(f_pkg_dir),
+        )
 
     def testInstalledPackageValidatorRejectsMissingRoot(self) -> None:
         """Validates that a nonexistent package root raises PackageValidationError."""
@@ -103,7 +118,9 @@ class InstalledLayoutTest(unittest.TestCase):
 
     def testInstalledPackageValidatorRejectsSymlinkRoot(self) -> None:
         """Validates that a symlinked package root directory is strictly rejected."""
-        f_real_dir = self._createValidInstalledPackage(os.path.join(self.m_temp_dir, "real_pkg"))
+        f_real_dir = self._createValidInstalledPackage(
+            os.path.join(self.m_temp_dir, "real_pkg")
+        )
         f_symlink_dir = os.path.join(self.m_temp_dir, "symlink_pkg")
         os.symlink(f_real_dir, f_symlink_dir)
 
@@ -124,7 +141,9 @@ class InstalledLayoutTest(unittest.TestCase):
     def testInstalledPackageValidatorRejectsMissingRequiredFiles(self) -> None:
         """Validates that missing any required module file raises PackageValidationError."""
         for f_required_file in InstalledPackageValidator.DEFAULT_REQUIRED_FILES:
-            f_pkg_dir = os.path.join(self.m_temp_dir, f"test_missing_{f_required_file.replace('/', '_')}")
+            f_pkg_dir = os.path.join(
+                self.m_temp_dir, f"test_missing_{f_required_file.replace('/', '_')}"
+            )
             self._createValidInstalledPackage(f_pkg_dir)
 
             # Remove the specific required file
@@ -199,7 +218,9 @@ class InstalledLayoutTest(unittest.TestCase):
         # Invalid required_files sequence type
         f_pkg_dir = self._createValidInstalledPackage()
         with self.assertRaises(PackageValidationError):
-            InstalledPackageValidator.validate(f_pkg_dir, f_required_files="invalid_str")  # type: ignore
+            InstalledPackageValidator.validate(
+                f_pkg_dir, f_required_files="invalid_str"
+            )  # type: ignore
 
         # Empty entry in required_files
         with self.assertRaises(PackageValidationError):
@@ -207,7 +228,9 @@ class InstalledLayoutTest(unittest.TestCase):
 
         # NUL byte in required_files entry
         with self.assertRaises(PackageValidationError):
-            InstalledPackageValidator.validate(f_pkg_dir, f_required_files=["lib/cli.py\0"])
+            InstalledPackageValidator.validate(
+                f_pkg_dir, f_required_files=["lib/cli.py\0"]
+            )
 
     def testInstalledPackageValidatorNoFallbackToCwdOrHome(self) -> None:
         """Validates that validation never searches CWD, HOME, or PATH when a file is absent."""
@@ -218,7 +241,9 @@ class InstalledLayoutTest(unittest.TestCase):
         # Place decoy file in CWD
         f_cwd_decoy_dir = os.path.join(self.m_temp_dir, "cwd_work")
         os.makedirs(os.path.join(f_cwd_decoy_dir, "lib"), exist_ok=True)
-        with open(os.path.join(f_cwd_decoy_dir, "lib", "worker.py"), "w", encoding="utf-8") as f_f:
+        with open(
+            os.path.join(f_cwd_decoy_dir, "lib", "worker.py"), "w", encoding="utf-8"
+        ) as f_f:
             f_f.write("# decoy worker in cwd\n")
 
         os.chdir(f_cwd_decoy_dir)
@@ -237,8 +262,14 @@ class InstalledLayoutTest(unittest.TestCase):
         f_public_tmpl_path = os.path.join(f_source_dir, "lsmiotool-installed.in")
         f_worker_tmpl_path = os.path.join(f_source_dir, "lsmiotool-worker-installed.in")
 
-        self.assertTrue(os.path.isfile(f_public_tmpl_path), f"Missing public wrapper template: {f_public_tmpl_path}")
-        self.assertTrue(os.path.isfile(f_worker_tmpl_path), f"Missing worker wrapper template: {f_worker_tmpl_path}")
+        self.assertTrue(
+            os.path.isfile(f_public_tmpl_path),
+            f"Missing public wrapper template: {f_public_tmpl_path}",
+        )
+        self.assertTrue(
+            os.path.isfile(f_worker_tmpl_path),
+            f"Missing worker wrapper template: {f_worker_tmpl_path}",
+        )
 
         with open(f_public_tmpl_path, "r", encoding="utf-8") as f_f:
             f_public_content = f_f.read()
@@ -287,17 +318,30 @@ class InstalledLayoutTest(unittest.TestCase):
         self.assertTrue(f_std_layout.is_installed)
         self.assertFalse(f_std_layout.is_source)
         self.assertEqual(f_std_layout.package_root, "/usr/local/share/lsmio/python")
-        self.assertEqual(f_std_layout.profile_file, "/usr/local/share/lsmio/etc/environments.json")
+        self.assertEqual(
+            f_std_layout.profile_file, "/usr/local/share/lsmio/etc/environments.json"
+        )
         self.assertEqual(f_std_layout.asset_root, "/usr/local/share/lsmio/lmp-reaxff")
-        self.assertEqual(f_std_layout.worker_executable, "/usr/local/libexec/lsmio/lsmiotool-worker")
-        self.assertEqual(f_std_layout.version_file, "/usr/local/share/lsmio/python/lsmiotool/VERSION")
+        self.assertEqual(
+            f_std_layout.worker_executable, "/usr/local/libexec/lsmio/lsmiotool-worker"
+        )
+        self.assertEqual(
+            f_std_layout.version_file, "/usr/local/share/lsmio/python/lsmiotool/VERSION"
+        )
 
         # Custom user prefix layout: /home/user/src/usr
         f_custom_wrapper = "/home/user/src/usr/bin/lsmiotool"
         f_custom_layout = ResourceLocator.forInstalled(f_custom_wrapper, f_std_rel)
-        self.assertEqual(f_custom_layout.package_root, "/home/user/src/usr/share/lsmio/python")
-        self.assertEqual(f_custom_layout.worker_executable, "/home/user/src/usr/libexec/lsmio/lsmiotool-worker")
-        self.assertEqual(f_custom_layout.asset_root, "/home/user/src/usr/share/lsmio/lmp-reaxff")
+        self.assertEqual(
+            f_custom_layout.package_root, "/home/user/src/usr/share/lsmio/python"
+        )
+        self.assertEqual(
+            f_custom_layout.worker_executable,
+            "/home/user/src/usr/libexec/lsmio/lsmiotool-worker",
+        )
+        self.assertEqual(
+            f_custom_layout.asset_root, "/home/user/src/usr/share/lsmio/lmp-reaxff"
+        )
 
         # Worker relative layout: /usr/local/libexec/lsmio/lsmiotool-worker
         f_worker_wrapper = "/usr/local/libexec/lsmio/lsmiotool-worker"
@@ -311,17 +355,29 @@ class InstalledLayoutTest(unittest.TestCase):
         f_worker_layout = ResourceLocator.forInstalled(f_worker_wrapper, f_worker_rel)
         self.assertEqual(f_worker_layout.execution_mode, ExecutionMode.INSTALLED)
         self.assertEqual(f_worker_layout.package_root, "/usr/local/share/lsmio/python")
-        self.assertEqual(f_worker_layout.worker_executable, "/usr/local/libexec/lsmio/lsmiotool-worker")
-        self.assertEqual(f_worker_layout.asset_root, "/usr/local/share/lsmio/lmp-reaxff")
-        self.assertEqual(f_worker_layout.profile_file, "/usr/local/share/lsmio/etc/environments.json")
-        self.assertEqual(f_worker_layout.version_file, "/usr/local/share/lsmio/python/lsmiotool/VERSION")
+        self.assertEqual(
+            f_worker_layout.worker_executable,
+            "/usr/local/libexec/lsmio/lsmiotool-worker",
+        )
+        self.assertEqual(
+            f_worker_layout.asset_root, "/usr/local/share/lsmio/lmp-reaxff"
+        )
+        self.assertEqual(
+            f_worker_layout.profile_file, "/usr/local/share/lsmio/etc/environments.json"
+        )
+        self.assertEqual(
+            f_worker_layout.version_file,
+            "/usr/local/share/lsmio/python/lsmiotool/VERSION",
+        )
 
     def testInstalledPublicWrapperExecutionContract(self) -> None:
         """Tests that public installed wrapper code structure dispatches correctly in installed mode."""
         f_staged_prefix = os.path.join(self.m_temp_dir, "opt", "lsmio")
         f_bin_dir = os.path.join(f_staged_prefix, "bin")
         f_share_dir = os.path.join(f_staged_prefix, "share", "lsmio")
-        f_pkg_dir = self._createValidInstalledPackage(os.path.join(f_share_dir, "python", "lsmiotool"))
+        f_pkg_dir = self._createValidInstalledPackage(
+            os.path.join(f_share_dir, "python", "lsmiotool")
+        )
         os.makedirs(f_bin_dir, exist_ok=True)
         os.makedirs(os.path.join(f_share_dir, "etc"), exist_ok=True)
 
@@ -349,7 +405,16 @@ class InstalledLayoutTest(unittest.TestCase):
     def testInstalledLmpAssetsExactFilenamesAndNoAliases(self) -> None:
         """Asserts that LMP assets in source and installed layouts use exact upstream names with no renamed aliases."""
         f_source_dir = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tools", "bmtool", "lmp-reaxff")
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "..",
+                "tools",
+                "bmtool",
+                "lmp-reaxff",
+            )
         )
         if os.path.isdir(f_source_dir):
             f_assets = sorted(os.listdir(f_source_dir))
@@ -363,7 +428,11 @@ class InstalledLayoutTest(unittest.TestCase):
 
     def testRuntimeLayoutHasNoArtifactRole(self) -> None:
         """Asserts that RuntimeLayout has no artifact roles and ArtifactLayout has no resource roles (F-02)."""
-        from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore, validatePathContainment
+        from lsmiotool.lib.artifacts import (
+            ArtifactLayout,
+            ArtifactStore,
+            validatePathContainment,
+        )
         from lsmiotool.lib.evidence import EvidenceStore
         from lsmiotool.lib.worker import AllocationController, AllocationControllerError
 
@@ -435,6 +504,7 @@ class InstalledLayoutTest(unittest.TestCase):
 
         # 5. Using RuntimeLayout with ArtifactStore / EvidenceStore fails closed
         from lsmiotool.lib.artifacts import ArtifactError
+
         with self.assertRaises((ArtifactError, AttributeError, TypeError)):
             ArtifactStore(f_inst_layout)  # type: ignore
 

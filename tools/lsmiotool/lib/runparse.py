@@ -156,15 +156,25 @@ class ResolvedPoint:
         f_rank_results: Mapping[Tuple[int, str], Optional[EvidenceRecord]],
     ) -> None:
         if not isinstance(f_point_id, str) or not f_point_id.strip():
-            raise RunParseError(f"point_id must be a non-empty string, got: {f_point_id!r}")
+            raise RunParseError(
+                f"point_id must be a non-empty string, got: {f_point_id!r}"
+            )
         if not isinstance(f_scale_point, ScalePoint):
-            raise RunParseError(f"scale_point must be a ScalePoint, got: {f_scale_point!r}")
+            raise RunParseError(
+                f"scale_point must be a ScalePoint, got: {f_scale_point!r}"
+            )
         if not isinstance(f_ordinal, int) or f_ordinal < 0:
-            raise RunParseError(f"ordinal must be non-negative integer, got: {f_ordinal!r}")
+            raise RunParseError(
+                f"ordinal must be non-negative integer, got: {f_ordinal!r}"
+            )
         if not isinstance(f_point_dir, str) or not f_point_dir.strip():
-            raise RunParseError(f"point_dir must be a non-empty string, got: {f_point_dir!r}")
+            raise RunParseError(
+                f"point_dir must be a non-empty string, got: {f_point_dir!r}"
+            )
         if not isinstance(f_state_view, PointStateView):
-            raise RunParseError(f"state_view must be a PointStateView, got: {f_state_view!r}")
+            raise RunParseError(
+                f"state_view must be a PointStateView, got: {f_state_view!r}"
+            )
 
         super().__setattr__("m_point_id", f_point_id.strip())
         super().__setattr__("m_scale_point", f_scale_point)
@@ -182,7 +192,9 @@ class ResolvedPoint:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @staticmethod
@@ -274,7 +286,9 @@ class ResolvedPoint:
         return self.m_controller_results.get(f_key)
 
     def getRankResult(
-        self, f_global_rank: int, f_combination: Union[Combination, str, Tuple[int, str]]
+        self,
+        f_global_rank: int,
+        f_combination: Union[Combination, str, Tuple[int, str]],
     ) -> Optional[EvidenceRecord]:
         f_key = self._comboKey(f_combination)
         return self.m_rank_results.get((f_global_rank, f_key))
@@ -338,15 +352,23 @@ class ResolvedRun:
         f_evidence_store: EvidenceStore,
     ) -> None:
         if not isinstance(f_run_root, str) or not f_run_root.strip():
-            raise RunParseError(f"run_root must be a non-empty string, got: {f_run_root!r}")
+            raise RunParseError(
+                f"run_root must be a non-empty string, got: {f_run_root!r}"
+            )
         if not isinstance(f_manifest, ManifestDocument):
-            raise RunParseError(f"manifest must be a ManifestDocument, got: {f_manifest!r}")
+            raise RunParseError(
+                f"manifest must be a ManifestDocument, got: {f_manifest!r}"
+            )
         if not isinstance(f_plan, RunPlan):
             raise RunParseError(f"plan must be a RunPlan, got: {f_plan!r}")
         if not isinstance(f_run_state, RunStateView):
-            raise RunParseError(f"run_state must be a RunStateView, got: {f_run_state!r}")
+            raise RunParseError(
+                f"run_state must be a RunStateView, got: {f_run_state!r}"
+            )
         if not isinstance(f_evidence_store, EvidenceStore):
-            raise RunParseError(f"evidence_store must be an EvidenceStore, got: {f_evidence_store!r}")
+            raise RunParseError(
+                f"evidence_store must be an EvidenceStore, got: {f_evidence_store!r}"
+            )
 
         super().__setattr__("m_run_root", f_run_root)
         super().__setattr__("m_manifest", f_manifest)
@@ -363,7 +385,9 @@ class ResolvedRun:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -470,7 +494,9 @@ class ResolvedRun:
                     and f_pt.scale_point.nodes == f_point_id.nodes
                 ):
                     return f_pt
-        raise RunParseError(f"Scale point '{f_point_id}' not found in resolved run '{self.run_id}'")
+        raise RunParseError(
+            f"Scale point '{f_point_id}' not found in resolved run '{self.run_id}'"
+        )
 
     def toDict(self) -> Dict[str, Any]:
         return {
@@ -516,7 +542,9 @@ class RunRootResolver:
                 f"explicit_root must be a non-empty string, got: {f_explicit_root!r}"
             )
         if "\0" in f_explicit_root:
-            raise RunRootResolutionError(f"explicit_root contains NUL byte: {f_explicit_root!r}")
+            raise RunRootResolutionError(
+                f"explicit_root contains NUL byte: {f_explicit_root!r}"
+            )
 
         f_abs_root = os.path.abspath(f_explicit_root)
 
@@ -585,7 +613,9 @@ class RunRootResolver:
         return f_manifest
 
     @classmethod
-    def _createArtifactLayout(cls, f_abs_root: str, f_manifest: ManifestDocument) -> ArtifactLayout:
+    def _createArtifactLayout(
+        cls, f_abs_root: str, f_manifest: ManifestDocument
+    ) -> ArtifactLayout:
         """Create and containment-validate ArtifactLayout from run root and manifest."""
         f_root_basename = os.path.basename(f_abs_root)
         if f_root_basename != f_manifest.run_id:
@@ -638,7 +668,7 @@ class RunRootResolver:
             )
 
         # Build resolved points and verify evidence
-        f_is_lsmio = (f_manifest.request.target.lower() == "lsmio")
+        f_is_lsmio = f_manifest.request.target.lower() == "lsmio"
         f_resolved_points: List[ResolvedPoint] = []
 
         for f_idx, f_sp in enumerate(f_plan.scale_points):
@@ -655,7 +685,9 @@ class RunRootResolver:
             f_rank_results: Dict[Tuple[int, str], Optional[EvidenceRecord]] = {}
 
             for f_combo in f_plan.combinations:
-                f_c_res = f_evidence_store.readControllerResult(f_sp, f_combo, f_ordinal=f_idx)
+                f_c_res = f_evidence_store.readControllerResult(
+                    f_sp, f_combo, f_ordinal=f_idx
+                )
                 if f_c_res is None:
                     raise RunRootResolutionError(
                         f"Missing controller result for point {f_idx} combination {f_combo.name}"
@@ -664,7 +696,9 @@ class RunRootResolver:
 
                 if f_is_lsmio:
                     for f_rank in range(f_sp.tasks):
-                        f_r_res = f_evidence_store.readRankResult(f_sp, f_rank, f_combo, f_ordinal=f_idx)
+                        f_r_res = f_evidence_store.readRankResult(
+                            f_sp, f_rank, f_combo, f_ordinal=f_idx
+                        )
                         if f_r_res is None:
                             raise RunRootResolutionError(
                                 f"Missing rank result for point {f_idx} rank {f_rank} combination {f_combo.name}"
@@ -729,7 +763,11 @@ class RunRootResolver:
             f_norm = f_point_id.strip()
             for f_i, f_sp in enumerate(f_plan.scale_points):
                 f_dir_name = f_layout.pointDirName(f_sp, f_i)
-                if f_norm == f_dir_name or f_norm == f"tasks-{f_sp.tasks}" or f_norm == f"point-{f_i:02d}":
+                if (
+                    f_norm == f_dir_name
+                    or f_norm == f"tasks-{f_sp.tasks}"
+                    or f_norm == f"point-{f_i:02d}"
+                ):
                     f_matched_idx = f_i
                     f_matched_sp = f_sp
                     break
@@ -756,7 +794,10 @@ class RunRootResolver:
                     break
 
         if f_matched_idx is None or f_matched_sp is None:
-            f_avail = [f_layout.pointDirName(f_sp, f_i) for f_i, f_sp in enumerate(f_plan.scale_points)]
+            f_avail = [
+                f_layout.pointDirName(f_sp, f_i)
+                for f_i, f_sp in enumerate(f_plan.scale_points)
+            ]
             raise RunRootResolutionError(
                 f"Point identifier '{f_point_id}' not found in manifest scale points: {f_avail}"
             )
@@ -772,12 +813,14 @@ class RunRootResolver:
         f_pt_name = f_layout.pointDirName(f_matched_sp, f_matched_idx)
         f_pt_dir = f_layout.pointDir(f_matched_sp, f_matched_idx)
 
-        f_is_lsmio = (f_manifest.request.target.lower() == "lsmio")
+        f_is_lsmio = f_manifest.request.target.lower() == "lsmio"
         f_ctrl_results: Dict[str, Optional[EvidenceRecord]] = {}
         f_rank_results: Dict[Tuple[int, str], Optional[EvidenceRecord]] = {}
 
         for f_combo in f_plan.combinations:
-            f_c_res = f_evidence_store.readControllerResult(f_matched_sp, f_combo, f_ordinal=f_matched_idx)
+            f_c_res = f_evidence_store.readControllerResult(
+                f_matched_sp, f_combo, f_ordinal=f_matched_idx
+            )
             f_ctrl_results[f_combo.name] = f_c_res
 
             if f_is_lsmio:
@@ -809,7 +852,10 @@ class RunRootResolver:
     @classmethod
     def inferLatestRun(cls, f_benchmark_name_or_dir: str) -> str:
         """Infer and locate the latest succeeded run directory from a benchmark name or root path."""
-        if not isinstance(f_benchmark_name_or_dir, str) or not f_benchmark_name_or_dir.strip():
+        if (
+            not isinstance(f_benchmark_name_or_dir, str)
+            or not f_benchmark_name_or_dir.strip()
+        ):
             raise RunRootResolutionError(
                 f"benchmark_name_or_dir must be a non-empty string, got: {f_benchmark_name_or_dir!r}"
             )
@@ -826,14 +872,16 @@ class RunRootResolver:
 
         if f_name_lower in ("ior", "lsmio", "lmp", "lammps"):
             # Known benchmark names
-            f_candidates.extend([
-                os.path.expanduser(f"~/scratch/benchmark/{f_name_lower}"),
-                os.path.expanduser(f"~/scratch/{f_name_lower}"),
-                os.path.join(os.getcwd(), "benchmarks", f_name_lower),
-                os.path.join(os.getcwd(), "benchmark", f_name_lower),
-                os.path.join(os.getcwd(), f_name_lower),
-                os.path.expanduser(f"~/{f_name_lower}"),
-            ])
+            f_candidates.extend(
+                [
+                    os.path.expanduser(f"~/scratch/benchmark/{f_name_lower}"),
+                    os.path.expanduser(f"~/scratch/{f_name_lower}"),
+                    os.path.join(os.getcwd(), "benchmarks", f_name_lower),
+                    os.path.join(os.getcwd(), "benchmark", f_name_lower),
+                    os.path.join(os.getcwd(), f_name_lower),
+                    os.path.expanduser(f"~/{f_name_lower}"),
+                ]
+            )
         else:
             # Explicit path passed
             f_abs = os.path.abspath(f_raw)
@@ -864,7 +912,11 @@ class RunRootResolver:
                     pass
 
             # Check if f_cand has a runs/ subdirectory or is a runs/ directory
-            f_runs_dir = f_cand if os.path.basename(f_cand) == "runs" else os.path.join(f_cand, "runs")
+            f_runs_dir = (
+                f_cand
+                if os.path.basename(f_cand) == "runs"
+                else os.path.join(f_cand, "runs")
+            )
             if os.path.isdir(f_runs_dir):
                 try:
                     for f_entry in os.listdir(f_runs_dir):
@@ -872,12 +924,16 @@ class RunRootResolver:
                         f_man_path = os.path.join(f_run_path, "manifest.json")
                         try:
                             f_st = os.lstat(f_run_path)
-                            if stat.S_ISLNK(f_st.st_mode) or not stat.S_ISDIR(f_st.st_mode):
+                            if stat.S_ISLNK(f_st.st_mode) or not stat.S_ISDIR(
+                                f_st.st_mode
+                            ):
                                 continue
                             if not os.path.exists(f_man_path):
                                 continue
                             f_mst = os.lstat(f_man_path)
-                            if stat.S_ISLNK(f_mst.st_mode) or not stat.S_ISREG(f_mst.st_mode):
+                            if stat.S_ISLNK(f_mst.st_mode) or not stat.S_ISREG(
+                                f_mst.st_mode
+                            ):
                                 continue
                             f_valid_runs.append(f_run_path)
                         except OSError:
@@ -1004,7 +1060,9 @@ class IorLogExtractor:
         try:
             f_stat = os.lstat(f_abs_path)
         except OSError as f_err:
-            raise ExtractionError(f"Failed to access log file '{f_abs_path}': {f_err}") from f_err
+            raise ExtractionError(
+                f"Failed to access log file '{f_abs_path}': {f_err}"
+            ) from f_err
 
         if stat.S_ISLNK(f_stat.st_mode):
             raise ExtractionError(f"Log file must not be a symlink: '{f_abs_path}'")
@@ -1024,7 +1082,9 @@ class IorLogExtractor:
             with open(f_log_path, "r", encoding="utf-8", errors="replace") as f_f:
                 f_lines = f_f.readlines()
         except OSError as f_err:
-            raise ExtractionError(f"Failed to read log file '{f_log_path}': {f_err}") from f_err
+            raise ExtractionError(
+                f"Failed to read log file '{f_log_path}': {f_err}"
+            ) from f_err
 
         if not f_lines:
             raise ExtractionError(f"Log file is empty: '{f_log_path}'")
@@ -1040,7 +1100,9 @@ class IorLogExtractor:
                 if f_stripped.startswith("Summary of all tests"):
                     f_found_summary = True
                 continue
-            if f_stripped.startswith("Operation") and ("Max(MiB)" in f_stripped or "Max" in f_stripped):
+            if f_stripped.startswith("Operation") and (
+                "Max(MiB)" in f_stripped or "Max" in f_stripped
+            ):
                 f_head_line = f_stripped
                 continue
             if f_stripped.startswith("write"):
@@ -1052,7 +1114,12 @@ class IorLogExtractor:
             if f_head_line and f_read_line and f_write_line:
                 break
 
-        if not f_found_summary or not f_head_line or not f_write_line or not f_read_line:
+        if (
+            not f_found_summary
+            or not f_head_line
+            or not f_write_line
+            or not f_read_line
+        ):
             raise ExtractionError(
                 f"Malformed IOR output log '{f_log_path}': missing 'Summary of all tests' section or operation rows"
             )
@@ -1061,7 +1128,11 @@ class IorLogExtractor:
         f_reads = f_read_line.split()[1:]
         f_writes = f_write_line.split()[1:]
 
-        if len(f_heads) < 20 or len(f_reads) < len(f_heads) or len(f_writes) < len(f_heads):
+        if (
+            len(f_heads) < 20
+            or len(f_reads) < len(f_heads)
+            or len(f_writes) < len(f_heads)
+        ):
             raise ExtractionError(
                 f"Malformed IOR summary in log '{f_log_path}': expected >= 20 columns, got heads={len(f_heads)}, writes={len(f_writes)}, reads={len(f_reads)}"
             )
@@ -1074,23 +1145,49 @@ class IorLogExtractor:
             f_r_raw = f_reads[f_i] if f_i < len(f_reads) else ""
 
             if f_col_name in (
-                "Max(MiB)", "Min(MiB)", "Mean(MiB)", "StdDev",
-                "Max(OPs)", "Min(OPs)", "Mean(OPs)", "Mean(s)", "aggs(MiB)"
+                "Max(MiB)",
+                "Min(MiB)",
+                "Mean(MiB)",
+                "StdDev",
+                "Max(OPs)",
+                "Min(OPs)",
+                "Mean(OPs)",
+                "Mean(s)",
+                "aggs(MiB)",
             ):
                 f_res["write"][f_col_name] = parseFloat(f_w_raw)
                 f_res["read"][f_col_name] = parseFloat(f_r_raw)
             elif f_col_name in (
-                "Test#", "#Tasks", "tPN", "reps", "fPP", "reord",
-                "reordoff", "reordrand", "seed", "segcnt", "blksiz", "xsize", "RefNum"
+                "Test#",
+                "#Tasks",
+                "tPN",
+                "reps",
+                "fPP",
+                "reord",
+                "reordoff",
+                "reordrand",
+                "seed",
+                "segcnt",
+                "blksiz",
+                "xsize",
+                "RefNum",
             ):
-                f_res["write"][f_col_name] = parseInt(f_w_raw) if f_w_raw.isdigit() else f_w_raw
-                f_res["read"][f_col_name] = parseInt(f_r_raw) if f_r_raw.isdigit() else f_r_raw
+                f_res["write"][f_col_name] = (
+                    parseInt(f_w_raw) if f_w_raw.isdigit() else f_w_raw
+                )
+                f_res["read"][f_col_name] = (
+                    parseInt(f_r_raw) if f_r_raw.isdigit() else f_r_raw
+                )
             else:
                 f_res["write"][f_col_name] = f_w_raw
                 f_res["read"][f_col_name] = f_r_raw
 
-        f_res["write"]["_raw_values"] = [f_writes[i] if i < len(f_writes) else "" for i in range(26)]
-        f_res["read"]["_raw_values"] = [f_reads[i] if i < len(f_reads) else "" for i in range(26)]
+        f_res["write"]["_raw_values"] = [
+            f_writes[i] if i < len(f_writes) else "" for i in range(26)
+        ]
+        f_res["read"]["_raw_values"] = [
+            f_reads[i] if i < len(f_reads) else "" for i in range(26)
+        ]
 
         return f_res
 
@@ -1116,12 +1213,18 @@ class LsmioLogExtractor:
             f_candidates = [
                 os.path.join(f_logs_dir, f_combo.name, f"rank_{f_rank}.log"),
                 os.path.join(f_logs_dir, f"{f_combo.name}_rank_{f_rank}.log"),
-                os.path.join(f_point.pointDir, "ranks", str(f_rank), f_combo.name, "output.log"),
+                os.path.join(
+                    f_point.pointDir, "ranks", str(f_rank), f_combo.name, "output.log"
+                ),
                 os.path.join(f_logs_dir, f"rank_{f_rank}.log"),
             ]
 
             f_rank_rec = f_point.getRankResult(f_rank, f_combo)
-            if f_rank_rec and f_rank_rec.payload and "stdout_path" in f_rank_rec.payload:
+            if (
+                f_rank_rec
+                and f_rank_rec.payload
+                and "stdout_path" in f_rank_rec.payload
+            ):
                 f_candidates.insert(0, str(f_rank_rec.payload["stdout_path"]))
             if f_rank_rec and f_rank_rec.payload and "log_path" in f_rank_rec.payload:
                 f_candidates.insert(0, str(f_rank_rec.payload["log_path"]))
@@ -1142,18 +1245,24 @@ class LsmioLogExtractor:
             try:
                 f_stat = os.lstat(f_abs_path)
             except OSError as f_err:
-                raise ExtractionError(f"Failed to access rank log '{f_abs_path}': {f_err}") from f_err
+                raise ExtractionError(
+                    f"Failed to access rank log '{f_abs_path}': {f_err}"
+                ) from f_err
 
             if stat.S_ISLNK(f_stat.st_mode):
                 raise ExtractionError(f"Rank log must not be a symlink: '{f_abs_path}'")
             if not stat.S_ISREG(f_stat.st_mode):
-                raise ExtractionError(f"Rank log must be a regular file: '{f_abs_path}'")
+                raise ExtractionError(
+                    f"Rank log must be a regular file: '{f_abs_path}'"
+                )
 
             try:
                 with open(f_abs_path, "r", encoding="utf-8", errors="replace") as f_f:
                     f_lines = f_f.readlines()
             except OSError as f_err:
-                raise ExtractionError(f"Failed to read rank log '{f_abs_path}': {f_err}") from f_err
+                raise ExtractionError(
+                    f"Failed to read rank log '{f_abs_path}': {f_err}"
+                ) from f_err
 
             if not f_lines:
                 raise ExtractionError(f"Rank log is empty: '{f_abs_path}'")
@@ -1177,7 +1286,9 @@ class LsmioLogExtractor:
                         f_found_w_summary = True
                         continue
                 if f_found_w_summary and not f_first_w_line:
-                    if f_stripped.startswith("write,") or f_stripped.startswith("write"):
+                    if f_stripped.startswith("write,") or f_stripped.startswith(
+                        "write"
+                    ):
                         f_first_w_line = f_stripped
                         f_found_w_summary = False
                         continue
@@ -1290,7 +1401,9 @@ class LmpLogExtractor:
         try:
             f_stat = os.lstat(f_abs_path)
         except OSError as f_err:
-            raise ExtractionError(f"Failed to access log file '{f_abs_path}': {f_err}") from f_err
+            raise ExtractionError(
+                f"Failed to access log file '{f_abs_path}': {f_err}"
+            ) from f_err
 
         if stat.S_ISLNK(f_stat.st_mode):
             raise ExtractionError(f"Log file must not be a symlink: '{f_abs_path}'")
@@ -1310,7 +1423,9 @@ class LmpLogExtractor:
             with open(f_log_path, "r", encoding="utf-8", errors="replace") as f_f:
                 f_lines = f_f.readlines()
         except OSError as f_err:
-            raise ExtractionError(f"Failed to read log file '{f_log_path}': {f_err}") from f_err
+            raise ExtractionError(
+                f"Failed to read log file '{f_log_path}': {f_err}"
+            ) from f_err
 
         if not f_lines:
             raise ExtractionError(f"Log file is empty: '{f_log_path}'")
@@ -1380,7 +1495,9 @@ class ConsoleSummaryFormatter:
 
         for f_pt in f_resolved_run.points:
             f_pt_id = f_pt.pointId
-            f_tasks_cores = f"{f_pt.scalePoint.tasks}/{f_pt.scalePoint.nodes * f_pt.scalePoint.ppn}"
+            f_tasks_cores = (
+                f"{f_pt.scalePoint.tasks}/{f_pt.scalePoint.nodes * f_pt.scalePoint.ppn}"
+            )
 
             for f_combo in f_resolved_run.plan.combinations:
                 f_combo_data = f_extracted_data.get(f_pt_id, {}).get(f_combo.name, {})
@@ -1388,61 +1505,93 @@ class ConsoleSummaryFormatter:
                 if f_bm == "IOR":
                     for f_op in ("write", "read"):
                         f_op_data = f_combo_data.get(f_op, {})
-                        f_tp = f_op_data.get("Mean(MiB)", f_op_data.get("Max(MiB)", "N/A"))
-                        f_tp_str = f"{f_tp:.2f}" if isinstance(f_tp, (int, float)) else str(f_tp)
+                        f_tp = f_op_data.get(
+                            "Mean(MiB)", f_op_data.get("Max(MiB)", "N/A")
+                        )
+                        f_tp_str = (
+                            f"{f_tp:.2f}"
+                            if isinstance(f_tp, (int, float))
+                            else str(f_tp)
+                        )
 
-                        f_iops = f_op_data.get("Mean(OPs)", f_op_data.get("Max(OPs)", "N/A"))
-                        f_iops_str = f"{f_iops:.2f}" if isinstance(f_iops, (int, float)) else str(f_iops)
+                        f_iops = f_op_data.get(
+                            "Mean(OPs)", f_op_data.get("Max(OPs)", "N/A")
+                        )
+                        f_iops_str = (
+                            f"{f_iops:.2f}"
+                            if isinstance(f_iops, (int, float))
+                            else str(f_iops)
+                        )
 
                         f_dur = f_op_data.get("Mean(s)", "N/A")
-                        f_dur_str = f"{f_dur:.2f}s" if isinstance(f_dur, (int, float)) else str(f_dur)
+                        f_dur_str = (
+                            f"{f_dur:.2f}s"
+                            if isinstance(f_dur, (int, float))
+                            else str(f_dur)
+                        )
 
-                        f_rows.append([
-                            f_bm,
-                            f_pt_id,
-                            f_tasks_cores,
-                            f_combo.name,
-                            f_op,
-                            f_tp_str,
-                            f_iops_str,
-                            f_dur_str,
-                        ])
+                        f_rows.append(
+                            [
+                                f_bm,
+                                f_pt_id,
+                                f_tasks_cores,
+                                f_combo.name,
+                                f_op,
+                                f_tp_str,
+                                f_iops_str,
+                                f_dur_str,
+                            ]
+                        )
 
                 elif f_bm == "LSMIO":
                     for f_op in ("write", "read"):
                         f_op_data = f_combo_data.get(f_op, {})
                         f_tp = f_op_data.get("mean", f_op_data.get("bw", "N/A"))
-                        f_tp_str = f"{f_tp:.2f}" if isinstance(f_tp, (int, float)) else str(f_tp)
+                        f_tp_str = (
+                            f"{f_tp:.2f}"
+                            if isinstance(f_tp, (int, float))
+                            else str(f_tp)
+                        )
 
                         f_lat = f_op_data.get("latency", "N/A")
-                        f_lat_str = f"{f_lat:.3f}ms" if isinstance(f_lat, (int, float)) else "N/A"
+                        f_lat_str = (
+                            f"{f_lat:.3f}ms"
+                            if isinstance(f_lat, (int, float))
+                            else "N/A"
+                        )
 
-                        f_rows.append([
-                            f_bm,
-                            f_pt_id,
-                            f_tasks_cores,
-                            f_combo.name,
-                            f_op,
-                            f_tp_str,
-                            "N/A",
-                            f_lat_str,
-                        ])
+                        f_rows.append(
+                            [
+                                f_bm,
+                                f_pt_id,
+                                f_tasks_cores,
+                                f_combo.name,
+                                f_op,
+                                f_tp_str,
+                                "N/A",
+                                f_lat_str,
+                            ]
+                        )
 
                 elif f_bm in ("LMP", "LAMMPS"):
                     f_op_data = f_combo_data.get("write", {})
                     f_tp = f_op_data.get("throughput", "N/A")
-                    f_tp_str = f"{f_tp:.2f}" if isinstance(f_tp, (int, float)) else str(f_tp)
+                    f_tp_str = (
+                        f"{f_tp:.2f}" if isinstance(f_tp, (int, float)) else str(f_tp)
+                    )
 
-                    f_rows.append([
-                        f_bm,
-                        f_pt_id,
-                        f_tasks_cores,
-                        f_combo.name,
-                        "write",
-                        f_tp_str,
-                        "N/A",
-                        "N/A",
-                    ])
+                    f_rows.append(
+                        [
+                            f_bm,
+                            f_pt_id,
+                            f_tasks_cores,
+                            f_combo.name,
+                            "write",
+                            f_tp_str,
+                            "N/A",
+                            "N/A",
+                        ]
+                    )
 
         f_col_widths = [len(h) for h in f_headers]
         for f_row in f_rows:
@@ -1450,11 +1599,19 @@ class ConsoleSummaryFormatter:
                 f_col_widths[f_i] = max(f_col_widths[f_i], len(f_val))
 
         f_border = "+" + "+".join("-" * (w + 2) for w in f_col_widths) + "+"
-        f_header_line = "| " + " | ".join(f_h.ljust(f_col_widths[i]) for i, f_h in enumerate(f_headers)) + " |"
+        f_header_line = (
+            "| "
+            + " | ".join(f_h.ljust(f_col_widths[i]) for i, f_h in enumerate(f_headers))
+            + " |"
+        )
 
         f_output_lines = [f_border, f_header_line, f_border]
         for f_row in f_rows:
-            f_row_line = "| " + " | ".join(f_v.ljust(f_col_widths[i]) for i, f_v in enumerate(f_row)) + " |"
+            f_row_line = (
+                "| "
+                + " | ".join(f_v.ljust(f_col_widths[i]) for i, f_v in enumerate(f_row))
+                + " |"
+            )
             f_output_lines.append(f_row_line)
         f_output_lines.append(f_border)
 
@@ -1465,7 +1622,9 @@ class ReportGenerator:
     """Base class for benchmark report generators."""
 
     @classmethod
-    def exportCsv(cls, f_rows: Sequence[Union[str, Sequence[Any]]], f_out_file: str) -> None:
+    def exportCsv(
+        cls, f_rows: Sequence[Union[str, Sequence[Any]]], f_out_file: str
+    ) -> None:
         """Export rows to CSV file."""
         f_out_dir = os.path.dirname(os.path.abspath(f_out_file))
         os.makedirs(f_out_dir, exist_ok=True)
@@ -1514,12 +1673,16 @@ class IorReportGenerator(ReportGenerator):
 
         for f_pt in f_resolved_run.points:
             f_n_count = f_pt.scalePoint.nodes
-            f_node_str = f"{f_n_count:02d}" if str(f_n_count).isdigit() else str(f_n_count)
+            f_node_str = (
+                f"{f_n_count:02d}" if str(f_n_count).isdigit() else str(f_n_count)
+            )
 
             for f_combo in f_resolved_run.plan.combinations:
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
-                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(f_combo.name, {})
+                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
+                    f_combo.name, {}
+                )
 
                 for f_op in ("write", "read"):
                     f_op_data = f_combo_data.get(f_op, {})
@@ -1528,9 +1691,14 @@ class IorReportGenerator(ReportGenerator):
                     if "_raw_values" in f_op_data:
                         f_vals = [str(f_v) for f_v in f_op_data["_raw_values"]]
                     else:
-                        f_vals = [str(f_op_data.get(k, "")) for k in IOR_SUMMARY_COLUMNS]
+                        f_vals = [
+                            str(f_op_data.get(k, "")) for k in IOR_SUMMARY_COLUMNS
+                        ]
 
-                    f_row_str = f"{f_node_str},{f_s_count},{f_s_size},{f_op}," + ",".join(f_vals)
+                    f_row_str = (
+                        f"{f_node_str},{f_s_count},{f_s_size},{f_op},"
+                        + ",".join(f_vals)
+                    )
                     f_rows.append(f_row_str)
 
         cls.exportCsv(f_rows, f_master_file)
@@ -1581,7 +1749,9 @@ class LsmioReportGenerator(ReportGenerator):
             for f_combo in f_resolved_run.plan.combinations:
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
-                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(f_combo.name, {})
+                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
+                    f_combo.name, {}
+                )
 
                 f_w_data = f_combo_data.get("write", {})
                 f_r_data = f_combo_data.get("read", {})
@@ -1606,7 +1776,9 @@ class LsmioReportGenerator(ReportGenerator):
                     f_r_line,
                 ]
 
-                f_agg_file_path = os.path.join(f_out_dir, f_n_part, f"agg-{f_s_count}-{f_s_size}-report.csv")
+                f_agg_file_path = os.path.join(
+                    f_out_dir, f_n_part, f"agg-{f_s_count}-{f_s_size}-report.csv"
+                )
                 cls.exportCsv(f_agg_lines, f_agg_file_path)
                 f_res[f"agg-{f_n_part}-{f_s_count}-{f_s_size}"] = f_agg_file_path
 
@@ -1664,7 +1836,9 @@ class LmpReportGenerator(ReportGenerator):
             for f_combo in f_resolved_run.plan.combinations:
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
-                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(f_combo.name, {})
+                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
+                    f_combo.name, {}
+                )
 
                 f_tp = f_combo_data.get("write", {}).get("throughput", 0.0)
                 f_master_rows.append(f"{f_n_part},{f_s_count},{f_s_size},{f_tp}")
@@ -1705,13 +1879,21 @@ def extractRun(f_resolved_run: ResolvedRun) -> Dict[str, Dict[str, Any]]:
         f_data[f_pt.pointId] = {}
         for f_combo in f_resolved_run.plan.combinations:
             if f_target == "ior":
-                f_data[f_pt.pointId][f_combo.name] = IorLogExtractor.extractPointCombo(f_pt, f_combo)
+                f_data[f_pt.pointId][f_combo.name] = IorLogExtractor.extractPointCombo(
+                    f_pt, f_combo
+                )
             elif f_target == "lsmio":
-                f_data[f_pt.pointId][f_combo.name] = LsmioLogExtractor.extractPointCombo(f_pt, f_combo)
+                f_data[f_pt.pointId][f_combo.name] = (
+                    LsmioLogExtractor.extractPointCombo(f_pt, f_combo)
+                )
             elif f_target in ("lmp", "lammps"):
-                f_data[f_pt.pointId][f_combo.name] = LmpLogExtractor.extractPointCombo(f_pt, f_combo)
+                f_data[f_pt.pointId][f_combo.name] = LmpLogExtractor.extractPointCombo(
+                    f_pt, f_combo
+                )
             else:
-                raise ExtractionError(f"Unsupported benchmark target '{f_target}' for extraction")
+                raise ExtractionError(
+                    f"Unsupported benchmark target '{f_target}' for extraction"
+                )
 
     return f_data
 
@@ -1725,11 +1907,18 @@ def generateReports(
     """Dispatch report generation to the appropriate ReportGenerator."""
     f_target = f_resolved_run.target.lower()
     if f_target == "ior":
-        return IorReportGenerator.generate(f_resolved_run, f_extracted_data, f_out_dir, f_format)
+        return IorReportGenerator.generate(
+            f_resolved_run, f_extracted_data, f_out_dir, f_format
+        )
     elif f_target == "lsmio":
-        return LsmioReportGenerator.generate(f_resolved_run, f_extracted_data, f_out_dir, f_format)
+        return LsmioReportGenerator.generate(
+            f_resolved_run, f_extracted_data, f_out_dir, f_format
+        )
     elif f_target in ("lmp", "lammps"):
-        return LmpReportGenerator.generate(f_resolved_run, f_extracted_data, f_out_dir, f_format)
+        return LmpReportGenerator.generate(
+            f_resolved_run, f_extracted_data, f_out_dir, f_format
+        )
     else:
-        raise RunParseError(f"Unsupported benchmark target '{f_target}' for report generation")
-
+        raise RunParseError(
+            f"Unsupported benchmark target '{f_target}' for report generation"
+        )

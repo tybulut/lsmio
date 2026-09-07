@@ -97,8 +97,7 @@ class ModuleAuthorityTest(unittest.TestCase):
             else:
                 self.assertEqual(f_commands[0], "module purge")
                 f_loaded_modules = tuple(
-                    f_cmd.split("module load ", 1)[1]
-                    for f_cmd in f_commands[1:]
+                    f_cmd.split("module load ", 1)[1] for f_cmd in f_commands[1:]
                 )
                 self.assertEqual(f_loaded_modules, f_profile_modules)
 
@@ -189,8 +188,9 @@ class ModuleAuthorityTest(unittest.TestCase):
 
         for f_site_name in f_sites:
             f_target_env = f_env_map[f_site_name]
-            with patch("sys.stdout", new=io.StringIO()) as f_fake_out, patch.object(
-                env, "HPC_ENV", f_target_env
+            with (
+                patch("sys.stdout", new=io.StringIO()) as f_fake_out,
+                patch.object(env, "HPC_ENV", f_target_env),
             ):
                 f_main = HpcEnvMain()
                 f_main.run()

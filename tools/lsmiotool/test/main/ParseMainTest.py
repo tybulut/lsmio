@@ -55,7 +55,9 @@ class ParseMainTest(unittest.TestCase):
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-parsemain-test-")
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -110,13 +112,15 @@ class ParseMainTest(unittest.TestCase):
         f_ssd: bool = False,
         f_base_dir: str = "",
     ) -> Tuple[str, RunPlan]:
-        f_plan = self._createPlan(f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup, f_ssd=f_ssd)
+        f_plan = self._createPlan(
+            f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup, f_ssd=f_ssd
+        )
         f_runs_base = f_base_dir if f_base_dir else self.m_temp_dir
         f_art_store = ArtifactStore(f_runs_base, f_run_id)
         f_art_store.allocateRun(f_plan)
         f_evidence_store = EvidenceStore(f_art_store.layout, f_plan=f_plan)
 
-        f_is_lsmio = (f_target.lower() == "lsmio")
+        f_is_lsmio = f_target.lower() == "lsmio"
 
         for f_idx, f_sp in enumerate(f_plan.scale_points):
             f_art_store.preparePoint(f_sp, f_ordinal=f_idx)
@@ -124,12 +128,19 @@ class ParseMainTest(unittest.TestCase):
 
             f_evidence_store.recordSubmissionRequested(f_sp, "client", f_ordinal=f_idx)
             f_evidence_store.recordSubmissionDispatched(f_sp, "client", f_ordinal=f_idx)
-            f_evidence_store.recordSubmissionRecorded(f_sp, "client", f_handle=f_handle, f_ordinal=f_idx)
-            f_evidence_store.recordWorkerEvent(f_sp, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=f_idx)
+            f_evidence_store.recordSubmissionRecorded(
+                f_sp, "client", f_handle=f_handle, f_ordinal=f_idx
+            )
+            f_evidence_store.recordWorkerEvent(
+                f_sp, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=f_idx
+            )
 
             for f_combo in f_plan.combinations:
                 f_evidence_store.recordControllerResult(
-                    f_sp, f_combo, f_payload={"exit_code": 0, "status": "success"}, f_ordinal=f_idx
+                    f_sp,
+                    f_combo,
+                    f_payload={"exit_code": 0, "status": "success"},
+                    f_ordinal=f_idx,
                 )
                 if f_is_lsmio:
                     for f_rank in range(f_sp.tasks):
@@ -149,7 +160,9 @@ class ParseMainTest(unittest.TestCase):
                 f_ordinal=f_idx,
             )
 
-        f_evidence_store.recordWholeRunSucceeded("client", 1, f_payload={"summary": "all passed"})
+        f_evidence_store.recordWholeRunSucceeded(
+            "client", 1, f_payload={"summary": "all passed"}
+        )
         return f_art_store.layout.runRoot, f_plan
 
     def _writeMockLogs(self, f_run_root: str, f_plan: RunPlan) -> None:
@@ -203,7 +216,9 @@ class ParseMainTest(unittest.TestCase):
     def testParseMainSuccessExitCodeZero(self) -> None:
         """Tests successful end-to-end execution of ParseMain across LSMIO, IOR, and LAMMPS returning exit code 0."""
         # 1. LSMIO end-to-end parse
-        f_run_root_lsm, f_plan_lsm = self._setupSucceededRun("run-e2e-lsm-001", "lsmio", "local", "NATIVE-M")
+        f_run_root_lsm, f_plan_lsm = self._setupSucceededRun(
+            "run-e2e-lsm-001", "lsmio", "local", "NATIVE-M"
+        )
         self._writeMockLogs(f_run_root_lsm, f_plan_lsm)
         f_out_dir_lsm = os.path.join(self.m_temp_dir, "out_lsm")
 
@@ -217,7 +232,10 @@ class ParseMainTest(unittest.TestCase):
         self.assertEqual(f_inst_lsm.format, "csv")
         self.assertIsNotNone(f_inst_lsm.request)
 
-        with unittest.mock.patch("sys.stdout", f_stdout_capture), unittest.mock.patch("sys.stderr", f_stderr_capture):
+        with (
+            unittest.mock.patch("sys.stdout", f_stdout_capture),
+            unittest.mock.patch("sys.stderr", f_stderr_capture),
+        ):
             f_exit_code = f_inst_lsm.run()
 
         self.assertEqual(f_exit_code, 0)
@@ -226,19 +244,34 @@ class ParseMainTest(unittest.TestCase):
         self.assertIn("LSMIO", f_stdout_capture.getvalue())
         self.assertTrue(os.path.isfile(os.path.join(f_out_dir_lsm, "lsm-report.csv")))
         f_first_c = f_plan_lsm.combinations[0]
-        self.assertTrue(os.path.isfile(os.path.join(f_out_dir_lsm, "1", f"agg-{f_first_c.stripe_count}-{f_first_c.block_size}-report.csv")))
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    f_out_dir_lsm,
+                    "1",
+                    f"agg-{f_first_c.stripe_count}-{f_first_c.block_size}-report.csv",
+                )
+            )
+        )
 
         # 2. IOR end-to-end parse with JSON output
-        f_run_root_ior, f_plan_ior = self._setupSucceededRun("run-e2e-ior-002", "ior", "local", "BASE")
+        f_run_root_ior, f_plan_ior = self._setupSucceededRun(
+            "run-e2e-ior-002", "ior", "local", "BASE"
+        )
         self._writeMockLogs(f_run_root_ior, f_plan_ior)
         f_out_dir_ior = os.path.join(self.m_temp_dir, "out_ior")
 
-        f_inst_ior = ParseMain(f_run_root_ior, "--output-dir", f_out_dir_ior, "--format", "json")
+        f_inst_ior = ParseMain(
+            f_run_root_ior, "--output-dir", f_out_dir_ior, "--format", "json"
+        )
         self.assertEqual(f_inst_ior.format, "json")
 
         f_stdout_capture = io.StringIO()
         f_stderr_capture = io.StringIO()
-        with unittest.mock.patch("sys.stdout", f_stdout_capture), unittest.mock.patch("sys.stderr", f_stderr_capture):
+        with (
+            unittest.mock.patch("sys.stdout", f_stdout_capture),
+            unittest.mock.patch("sys.stderr", f_stderr_capture),
+        ):
             f_exit_code = f_inst_ior.run()
 
         self.assertEqual(f_exit_code, 0)
@@ -247,14 +280,19 @@ class ParseMainTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(f_out_dir_ior, "ior-report.json")))
 
         # 3. LAMMPS end-to-end parse
-        f_run_root_lmp, f_plan_lmp = self._setupSucceededRun("run-e2e-lmp-003", "lmp", "local", "FS")
+        f_run_root_lmp, f_plan_lmp = self._setupSucceededRun(
+            "run-e2e-lmp-003", "lmp", "local", "FS"
+        )
         self._writeMockLogs(f_run_root_lmp, f_plan_lmp)
         f_out_dir_lmp = os.path.join(self.m_temp_dir, "out_lmp")
 
         f_inst_lmp = ParseMain(f_run_root_lmp, "--output-dir", f_out_dir_lmp)
         f_stdout_capture = io.StringIO()
         f_stderr_capture = io.StringIO()
-        with unittest.mock.patch("sys.stdout", f_stdout_capture), unittest.mock.patch("sys.stderr", f_stderr_capture):
+        with (
+            unittest.mock.patch("sys.stdout", f_stdout_capture),
+            unittest.mock.patch("sys.stderr", f_stderr_capture),
+        ):
             f_exit_code = f_inst_lmp.run()
 
         self.assertEqual(f_exit_code, 0)
@@ -285,7 +323,8 @@ class ParseMainTest(unittest.TestCase):
                 f_code, 2, f"Expected exit code 2 for args {f_args}, got {f_code}"
             )
             self.assertTrue(
-                len(f_stderr.getvalue()) > 0, f"Expected stderr output for args {f_args}"
+                len(f_stderr.getvalue()) > 0,
+                f"Expected stderr output for args {f_args}",
             )
 
         # Direct invalid kwargs
@@ -364,13 +403,25 @@ class ParseMainTest(unittest.TestCase):
         f_handle0 = JobHandle("slurm", "4001")
         f_ev_int.recordSubmissionRequested(f_sp0, "client", f_ordinal=0)
         f_ev_int.recordSubmissionDispatched(f_sp0, "client", f_ordinal=0)
-        f_ev_int.recordSubmissionRecorded(f_sp0, "client", f_handle=f_handle0, f_ordinal=0)
-        f_ev_int.recordWorkerEvent(f_sp0, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0)
+        f_ev_int.recordSubmissionRecorded(
+            f_sp0, "client", f_handle=f_handle0, f_ordinal=0
+        )
+        f_ev_int.recordWorkerEvent(
+            f_sp0, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0
+        )
         for f_c in f_plan_int.combinations:
-            f_ev_int.recordControllerResult(f_sp0, f_c, f_payload={"exit_code": 0}, f_ordinal=0)
-            f_ev_int.recordRankResult(f_sp0, 0, f_c, f_payload={"exit_code": 0}, f_ordinal=0)
+            f_ev_int.recordControllerResult(
+                f_sp0, f_c, f_payload={"exit_code": 0}, f_ordinal=0
+            )
+            f_ev_int.recordRankResult(
+                f_sp0, 0, f_c, f_payload={"exit_code": 0}, f_ordinal=0
+            )
         f_ev_int.recordSchedulerObservation(
-            f_sp0, "reconciler", 1, f_payload={"state": "succeeded", "handle": f_handle0.toDict()}, f_ordinal=0
+            f_sp0,
+            "reconciler",
+            1,
+            f_payload={"state": "succeeded", "handle": f_handle0.toDict()},
+            f_ordinal=0,
         )
 
         # Prepare point 1 and record interruption
@@ -394,13 +445,25 @@ class ParseMainTest(unittest.TestCase):
         f_handle_f = JobHandle("slurm", "4002")
         f_ev_f.recordSubmissionRequested(f_sp_f, "client", f_ordinal=0)
         f_ev_f.recordSubmissionDispatched(f_sp_f, "client", f_ordinal=0)
-        f_ev_f.recordSubmissionRecorded(f_sp_f, "client", f_handle=f_handle_f, f_ordinal=0)
-        f_ev_f.recordWorkerEvent(f_sp_f, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0)
+        f_ev_f.recordSubmissionRecorded(
+            f_sp_f, "client", f_handle=f_handle_f, f_ordinal=0
+        )
+        f_ev_f.recordWorkerEvent(
+            f_sp_f, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0
+        )
         for f_c in f_plan_fail.combinations:
-            f_ev_f.recordControllerResult(f_sp_f, f_c, f_payload={"exit_code": 1}, f_ordinal=0)
-            f_ev_f.recordRankResult(f_sp_f, 0, f_c, f_payload={"exit_code": 1}, f_ordinal=0)
+            f_ev_f.recordControllerResult(
+                f_sp_f, f_c, f_payload={"exit_code": 1}, f_ordinal=0
+            )
+            f_ev_f.recordRankResult(
+                f_sp_f, 0, f_c, f_payload={"exit_code": 1}, f_ordinal=0
+            )
         f_ev_f.recordSchedulerObservation(
-            f_sp_f, "reconciler", 1, f_payload={"state": "failed", "handle": f_handle_f.toDict()}, f_ordinal=0
+            f_sp_f,
+            "reconciler",
+            1,
+            f_payload={"state": "failed", "handle": f_handle_f.toDict()},
+            f_ordinal=0,
         )
 
         f_inst3 = ParseMain(f_store_fail.layout.runRoot)
@@ -412,7 +475,9 @@ class ParseMainTest(unittest.TestCase):
     def testParseMainExtractionErrorExitCodeFive(self) -> None:
         """Tests that missing or malformed output log files return exit code 5."""
         # 1. Missing log files in a succeeded LSMIO run
-        f_run_root_lsm, _ = self._setupSucceededRun("run-ext-err-lsm-001", "lsmio", "local", "NATIVE-M")
+        f_run_root_lsm, _ = self._setupSucceededRun(
+            "run-ext-err-lsm-001", "lsmio", "local", "NATIVE-M"
+        )
         # Do NOT write mock logs
         f_inst1 = ParseMain(f_run_root_lsm)
         f_stderr = io.StringIO()
@@ -422,11 +487,15 @@ class ParseMainTest(unittest.TestCase):
         self.assertIn("Rank log file does not exist", f_stderr.getvalue())
 
         # 2. Malformed log file in a succeeded IOR run
-        f_run_root_ior, f_plan_ior = self._setupSucceededRun("run-ext-err-ior-002", "ior", "local", "BASE")
+        f_run_root_ior, f_plan_ior = self._setupSucceededRun(
+            "run-ext-err-ior-002", "ior", "local", "BASE"
+        )
         self._writeMockLogs(f_run_root_ior, f_plan_ior)
         # Create corrupted log file for combination 0
         f_pt_dir = os.path.join(f_run_root_ior, "points", "00-tasks-1", "logs")
-        with open(os.path.join(f_pt_dir, f"ior_{f_plan_ior.combinations[0].name}.stdout"), "w") as f_f:
+        with open(
+            os.path.join(f_pt_dir, f"ior_{f_plan_ior.combinations[0].name}.stdout"), "w"
+        ) as f_f:
             f_f.write("Corrupted log file without summary tables\n")
 
         f_inst2 = ParseMain(f_run_root_ior)
@@ -444,7 +513,11 @@ class ParseMainTest(unittest.TestCase):
         os.makedirs(f_runs_dir, exist_ok=True)
 
         f_run_root_ior, f_plan_ior = self._setupSucceededRun(
-            "2026-08-21T12-00-00Z-ior-local", "ior", "local", "BASE", f_base_dir=f_bm_root
+            "2026-08-21T12-00-00Z-ior-local",
+            "ior",
+            "local",
+            "BASE",
+            f_base_dir=f_bm_root,
         )
         self._writeMockLogs(f_run_root_ior, f_plan_ior)
 
@@ -457,7 +530,10 @@ class ParseMainTest(unittest.TestCase):
 
         f_stdout = io.StringIO()
         f_stderr = io.StringIO()
-        with unittest.mock.patch("sys.stdout", f_stdout), unittest.mock.patch("sys.stderr", f_stderr):
+        with (
+            unittest.mock.patch("sys.stdout", f_stdout),
+            unittest.mock.patch("sys.stderr", f_stderr),
+        ):
             f_code = f_inst_name.run()
 
         self.assertEqual(f_code, 0)
@@ -471,7 +547,10 @@ class ParseMainTest(unittest.TestCase):
 
         f_stdout = io.StringIO()
         f_stderr = io.StringIO()
-        with unittest.mock.patch("sys.stdout", f_stdout), unittest.mock.patch("sys.stderr", f_stderr):
+        with (
+            unittest.mock.patch("sys.stdout", f_stdout),
+            unittest.mock.patch("sys.stderr", f_stderr),
+        ):
             f_code = f_inst_man.run()
 
         self.assertEqual(f_code, 0)

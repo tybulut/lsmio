@@ -68,7 +68,9 @@ class EvidenceStoreTest(unittest.TestCase):
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-evidence-test-")
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -98,7 +100,9 @@ class EvidenceStoreTest(unittest.TestCase):
         shutil.rmtree(self.m_temp_dir, ignore_errors=True)
 
     def _createTestPlan(self, f_run_id: str) -> RunPlan:
-        f_req = RunRequest(f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_tokens = [f"lm-{f_i:024d}" for f_i in range(1, 10)]
         f_tok_idx = 0
 
@@ -520,7 +524,9 @@ class EvidenceStoreTest(unittest.TestCase):
         )
 
         self.assertIsNotNone(f_rank0_res)
-        self.assertIsNone(f_rank1_res)  # Absence is preserved, not synthesized as success
+        self.assertIsNone(
+            f_rank1_res
+        )  # Absence is preserved, not synthesized as success
 
         # Controller started event 1 recorded, but crashed before controller result
         self.m_evidence_store.recordWorkerEvent(
@@ -662,7 +668,9 @@ class EvidenceStoreTest(unittest.TestCase):
         self.assertEqual(f_crec.evidence_kind, EvidenceKind.CANCEL_RECORDED)
 
         # Query all submission records
-        f_all_records = self.m_evidence_store.readSubmissionRecords(f_point, f_ordinal=0)
+        f_all_records = self.m_evidence_store.readSubmissionRecords(
+            f_point, f_ordinal=0
+        )
         self.assertEqual(f_all_records["submission_requested"], f_req)
         self.assertEqual(f_all_records["submission_dispatched"], f_disp)
         self.assertEqual(f_all_records["submission_recorded"], f_rec)
@@ -682,7 +690,9 @@ class EvidenceStoreTest(unittest.TestCase):
             f_store1.layout = self.m_layout  # type: ignore
 
         # When plan is None, plan validation is skipped
-        f_unplanned_rec = f_store1.recordControlEvent("client", 1, EvidenceKind.OBSERVATION)
+        f_unplanned_rec = f_store1.recordControlEvent(
+            "client", 1, EvidenceKind.OBSERVATION
+        )
         self.assertEqual(f_unplanned_rec.sequence_number, 1)
 
     def testEvidenceSerializerEdgeCases(self) -> None:
@@ -708,7 +718,9 @@ class EvidenceStoreTest(unittest.TestCase):
             EvidenceSerializer.deserialize(12345)  # type: ignore
 
         with self.assertRaises(EvidenceSchemaError):
-            EvidenceSerializer.deserialize({"schema_version": 1})  # missing required fields
+            EvidenceSerializer.deserialize(
+                {"schema_version": 1}
+            )  # missing required fields
 
     def testEvidenceRecordValidation(self) -> None:
         """Tests EvidenceRecord input validation errors."""
@@ -783,16 +795,24 @@ class EvidenceStoreTest(unittest.TestCase):
         """Chunk 017: Verifies exact schemas, allowed/forbidden keys, type constraints, and output validation."""
         # 1. Base / Shared Payload Tests
         # Valid shared success
-        f_s1 = ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0})
+        f_s1 = ResultPayloadValidator.validateSharedPayload(
+            {"status": "success", "exit_code": 0}
+        )
         self.assertEqual(f_s1["status"], "success")
         self.assertEqual(f_s1["exit_code"], 0)
 
         # Aliases for status and returncode
-        f_s2 = ResultPayloadValidator.validateSharedPayload({"status": "completed", "returncode": 0})
+        f_s2 = ResultPayloadValidator.validateSharedPayload(
+            {"status": "completed", "returncode": 0}
+        )
         self.assertEqual(f_s2["exit_code"], 0)
-        f_s3 = ResultPayloadValidator.validateSharedPayload({"status": "SUCCEEDED", "exit_code": 0})
+        f_s3 = ResultPayloadValidator.validateSharedPayload(
+            {"status": "SUCCEEDED", "exit_code": 0}
+        )
         self.assertEqual(f_s3["status"], "SUCCEEDED")
-        f_s4 = ResultPayloadValidator.validateSharedPayload({"status": "FAILED", "exit_code": 1})
+        f_s4 = ResultPayloadValidator.validateSharedPayload(
+            {"status": "FAILED", "exit_code": 1}
+        )
         self.assertEqual(f_s4["status"], "FAILED")
 
         # Negative: Non-dict, empty dict, missing keys
@@ -801,42 +821,73 @@ class EvidenceStoreTest(unittest.TestCase):
                 ResultPayloadValidator.validateSharedPayload(f_invalid)
 
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"exit_code": 0})  # missing status
+            ResultPayloadValidator.validateSharedPayload(
+                {"exit_code": 0}
+            )  # missing status
 
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success"})  # missing exit_code
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success"}
+            )  # missing exit_code
 
         # Negative: Type mismatch (bool, string)
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": True})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": True}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "failed", "exit_code": False})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "failed", "exit_code": False}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": "0"})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": "0"}
+            )
 
         # Negative: Contradictions
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 1})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": 1}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "error": "unexpected"})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": 0, "error": "unexpected"}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "timed_out": True})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": 0, "timed_out": True}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "failed", "exit_code": 0})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "failed", "exit_code": 0}
+            )
 
         # Negative: Invalid optional field types
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "elapsed_seconds": True})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": 0, "elapsed_seconds": True}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "elapsed_seconds": -5.0})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": 0, "elapsed_seconds": -5.0}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "failed", "exit_code": 143, "signal_number": True})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "failed", "exit_code": 143, "signal_number": True}
+            )
         with self.assertRaises(EvidenceSchemaError):
-            ResultPayloadValidator.validateSharedPayload({"status": "success", "exit_code": 0, "exit_status": 2})
+            ResultPayloadValidator.validateSharedPayload(
+                {"status": "success", "exit_code": 0, "exit_status": 2}
+            )
 
         # 2. Rank Payload Validation Tests
-        f_rank_log = self.m_layout.pointRankLogPath(self.m_point, 0, "c16_b8M", f_ordinal=0)
-        f_rank_res = os.path.join(self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0), "rank_0.db")
+        f_rank_log = self.m_layout.pointRankLogPath(
+            self.m_point, 0, "c16_b8M", f_ordinal=0
+        )
+        f_rank_res = os.path.join(
+            self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0),
+            "rank_0.db",
+        )
         os.makedirs(os.path.dirname(f_rank_log), exist_ok=True)
         os.makedirs(os.path.dirname(f_rank_res), exist_ok=True)
         with open(f_rank_log, "w", encoding="utf-8") as f_f:
@@ -886,14 +937,23 @@ class EvidenceStoreTest(unittest.TestCase):
             )
 
         # Missing required success fields
-        for f_missing_key in ("exit_status", "argv", "log_path", "result_path", "timed_out"):
+        for f_missing_key in (
+            "exit_status",
+            "argv",
+            "log_path",
+            "result_path",
+            "timed_out",
+        ):
             f_bad = dict(f_valid_rank_payload)
             del f_bad[f_missing_key]
             with self.assertRaises(EvidenceSchemaError):
                 ResultPayloadValidator.validateRankPayload(f_bad, f_strict=True)
 
         # Rank file validation errors
-        f_sym_res = os.path.join(self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0), "sym_rank_0.db")
+        f_sym_res = os.path.join(
+            self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0),
+            "sym_rank_0.db",
+        )
         if os.path.exists(f_sym_res):
             os.remove(f_sym_res)
         os.symlink(f_rank_res, f_sym_res)
@@ -904,7 +964,10 @@ class EvidenceStoreTest(unittest.TestCase):
                 f_layout=self.m_layout,
             )
 
-        f_nonexistent_res = os.path.join(self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0), "nonexistent.db")
+        f_nonexistent_res = os.path.join(
+            self.m_layout.pointRankCombinationDir(self.m_point, 0, "c16_b8M", 0),
+            "nonexistent.db",
+        )
         with self.assertRaises(EvidenceSchemaError):
             ResultPayloadValidator.validateRankPayload(
                 {**f_valid_rank_payload, "result_path": f_nonexistent_res},
@@ -963,7 +1026,9 @@ class EvidenceStoreTest(unittest.TestCase):
             )
 
         # Controller output_path file validation
-        f_ctrl_out = os.path.join(self.m_layout.pointLogsDir(self.m_point, 0), "ior.stdout")
+        f_ctrl_out = os.path.join(
+            self.m_layout.pointLogsDir(self.m_point, 0), "ior.stdout"
+        )
         with open(f_ctrl_out, "w", encoding="utf-8") as f_f:
             f_f.write("ior output\n")
         f_ctrl_with_out = {**f_valid_ctrl_ior, "output_path": f_ctrl_out}
@@ -971,7 +1036,9 @@ class EvidenceStoreTest(unittest.TestCase):
             f_ctrl_with_out, f_validate_files=True, f_layout=self.m_layout
         )
 
-        f_sym_out = os.path.join(self.m_layout.pointLogsDir(self.m_point, 0), "sym_ior.stdout")
+        f_sym_out = os.path.join(
+            self.m_layout.pointLogsDir(self.m_point, 0), "sym_ior.stdout"
+        )
         if os.path.exists(f_sym_out):
             os.remove(f_sym_out)
         os.symlink(f_ctrl_out, f_sym_out)
@@ -985,7 +1052,10 @@ class EvidenceStoreTest(unittest.TestCase):
         # 4. isSuccessPayload & isFailurePayload helpers
         self.assertTrue(
             ResultPayloadValidator.isSuccessPayload(
-                f_valid_ctrl_lsmio, EvidenceKind.CONTROLLER_RESULT, f_target="lsmio", f_expected_tasks=1
+                f_valid_ctrl_lsmio,
+                EvidenceKind.CONTROLLER_RESULT,
+                f_target="lsmio",
+                f_expected_tasks=1,
             )
         )
         self.assertFalse(
@@ -1005,6 +1075,9 @@ class EvidenceStoreTest(unittest.TestCase):
                 EvidenceKind.CONTROLLER_RESULT,
             )
         )
-        self.assertFalse(ResultPayloadValidator.isSuccessPayload({}, EvidenceKind.CONTROLLER_RESULT))
-        self.assertFalse(ResultPayloadValidator.isFailurePayload({}, EvidenceKind.CONTROLLER_RESULT))
-
+        self.assertFalse(
+            ResultPayloadValidator.isSuccessPayload({}, EvidenceKind.CONTROLLER_RESULT)
+        )
+        self.assertFalse(
+            ResultPayloadValidator.isFailurePayload({}, EvidenceKind.CONTROLLER_RESULT)
+        )

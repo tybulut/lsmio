@@ -99,7 +99,9 @@ class LsmioSixCombinationIntegrationTest(unittest.TestCase):
         self.m_decoy_home = os.path.join(self.m_real_temp, "decoy_home")
         self.m_decoy_cwd = os.path.join(self.m_real_temp, "decoy_cwd")
         self.m_bin_dir = os.path.join(self.m_decoy_home, "src", "usr", "bin")
-        self.m_benchmark_root = os.path.join(self.m_decoy_home, ".lsmio-dev", "benchmark")
+        self.m_benchmark_root = os.path.join(
+            self.m_decoy_home, ".lsmio-dev", "benchmark"
+        )
 
         os.makedirs(self.m_decoy_home, exist_ok=True)
         os.makedirs(self.m_decoy_cwd, exist_ok=True)
@@ -164,7 +166,9 @@ sys.exit(0)
 
         # 3. Load profile document and resolve DEV site profile with custom paths
         self.m_etc_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_etc_path)
         self.m_site_profile = EnvironmentResolver.resolveProfile(
@@ -196,7 +200,9 @@ sys.exit(0)
             f_setup=f_setup,
         )
 
-        f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+        f_tokens = [
+            f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))
+        ]
         f_tok_idx = 0
 
         def token_gen() -> str:
@@ -243,7 +249,9 @@ sys.exit(0)
         f_env["LSMIO_RANK"] = "0"
         f_env["LSMIO_NODE"] = "int-node-0"
         f_package_parent = str(Path(__file__).resolve().parents[3])
-        f_env["PYTHONPATH"] = f_package_parent + (f":{f_env['PYTHONPATH']}" if "PYTHONPATH" in f_env else "")
+        f_env["PYTHONPATH"] = f_package_parent + (
+            f":{f_env['PYTHONPATH']}" if "PYTHONPATH" in f_env else ""
+        )
 
         if f_extra_env:
             f_env.update({str(f_k): str(f_v) for f_k, f_v in f_extra_env.items()})
@@ -297,12 +305,16 @@ sys.exit(0)
             f_combo_name = f"c{f_stripe}_b{f_block}"
 
             # a) Controller Result
-            f_ctrl_res_path = f_layout.pointControllerResultPath(f_point, f_combo_name, f_ordinal=0)
+            f_ctrl_res_path = f_layout.pointControllerResultPath(
+                f_point, f_combo_name, f_ordinal=0
+            )
             self.assertTrue(
                 os.path.exists(f_ctrl_res_path),
                 f"Missing controller-result.json for combination {f_combo_name}",
             )
-            f_ctrl_res = f_evidence_store.readControllerResult(f_point, f_combo_name, f_ordinal=0)
+            f_ctrl_res = f_evidence_store.readControllerResult(
+                f_point, f_combo_name, f_ordinal=0
+            )
             self.assertIsNotNone(f_ctrl_res)
             self.assertEqual(f_ctrl_res.payload["status"], "success")
             self.assertEqual(f_ctrl_res.payload["exit_code"], 0)
@@ -310,7 +322,9 @@ sys.exit(0)
             f_ctrl_result_paths.append(f_ctrl_res_path)
 
             # b) Rank Claim Lock
-            f_claim_path = f_layout.pointRankClaimPath(f_point, 0, f_combo_name, f_ordinal=0)
+            f_claim_path = f_layout.pointRankClaimPath(
+                f_point, 0, f_combo_name, f_ordinal=0
+            )
             self.assertTrue(
                 os.path.exists(f_claim_path),
                 f"Missing claim.lock for rank 0 and combination {f_combo_name}",
@@ -321,12 +335,16 @@ sys.exit(0)
             self.assertEqual(f_claim_data["combination"], f_combo_name)
             self.assertEqual(f_claim_data["point_id"], f_point_id)
             self.assertEqual(f_claim_data["run_id"], f_plan.run_id)
-            self.assertTrue(isinstance(f_claim_data["pid"], int) and f_claim_data["pid"] > 0)
+            self.assertTrue(
+                isinstance(f_claim_data["pid"], int) and f_claim_data["pid"] > 0
+            )
             self.assertTrue(len(f_claim_data["claimed_at_utc"]) > 0)
             f_claim_paths.append(f_claim_path)
 
             # c) Rank Log
-            f_log_path = f_layout.pointRankLogPath(f_point, 0, f_combo_name, f_ordinal=0)
+            f_log_path = f_layout.pointRankLogPath(
+                f_point, 0, f_combo_name, f_ordinal=0
+            )
             self.assertTrue(
                 os.path.exists(f_log_path),
                 f"Missing log file {f_log_path} for combination {f_combo_name}",
@@ -337,12 +355,16 @@ sys.exit(0)
             f_log_paths.append(f_log_path)
 
             # d) Rank Result Record
-            f_rank_res_path = f_layout.pointRankResultPath(f_point, 0, f_combo_name, f_ordinal=0)
+            f_rank_res_path = f_layout.pointRankResultPath(
+                f_point, 0, f_combo_name, f_ordinal=0
+            )
             self.assertTrue(
                 os.path.exists(f_rank_res_path),
                 f"Missing result.json for rank 0 and combination {f_combo_name}",
             )
-            f_rank_res = f_evidence_store.readRankResult(f_point, 0, f_combo_name, f_ordinal=0)
+            f_rank_res = f_evidence_store.readRankResult(
+                f_point, 0, f_combo_name, f_ordinal=0
+            )
             self.assertIsNotNone(f_rank_res)
             self.assertEqual(f_rank_res.payload["status"], "success")
             self.assertEqual(f_rank_res.payload["exit_code"], 0)
@@ -388,7 +410,11 @@ sys.exit(0)
         self.assertEqual(len(os.listdir(f_combos_dir)), 6)
 
         f_logs_dir = f_layout.pointLogsDir(f_point, f_ordinal=0)
-        f_log_subdirs = [d for d in os.listdir(f_logs_dir) if os.path.isdir(os.path.join(f_logs_dir, d))]
+        f_log_subdirs = [
+            d
+            for d in os.listdir(f_logs_dir)
+            if os.path.isdir(os.path.join(f_logs_dir, d))
+        ]
         self.assertEqual(len(f_log_subdirs), 6)
         self.assertEqual(
             sorted(f_log_subdirs),
@@ -452,7 +478,9 @@ sys.exit(0)
             f"First rank worker subprocess failed.\nStdout: {f_proc1.stdout}\nStderr: {f_proc1.stderr}",
         )
 
-        f_claim_path = f_layout.pointRankClaimPath("00-tasks-1", 0, f_combo_name, f_ordinal=0)
+        f_claim_path = f_layout.pointRankClaimPath(
+            "00-tasks-1", 0, f_combo_name, f_ordinal=0
+        )
         self.assertTrue(os.path.exists(f_claim_path))
         with open(f_claim_path, "r", encoding="utf-8") as f_f:
             f_orig_claim_data = json.load(f_f)
@@ -471,7 +499,8 @@ sys.exit(0)
             f"Duplicate rank worker must exit with non-zero status, got: {f_proc2.returncode}",
         )
         self.assertTrue(
-            "already been claimed" in f_proc2.stderr or "already exists" in f_proc2.stderr,
+            "already been claimed" in f_proc2.stderr
+            or "already exists" in f_proc2.stderr,
             f"Expected claim collision error in stderr, got: {f_proc2.stderr}",
         )
 
@@ -537,14 +566,18 @@ sys.exit(0)
         # 3. Later combos 3 (c4_b8M), 4 (c4_b1M), 5 (c4_b64K) were NEVER executed
         for f_later_combo in ("c4_b8M", "c4_b1M", "c4_b64K"):
             self.assertIsNone(
-                f_evidence_store.readControllerResult(f_point, f_later_combo, f_ordinal=0),
+                f_evidence_store.readControllerResult(
+                    f_point, f_later_combo, f_ordinal=0
+                ),
                 f"Combination {f_later_combo} should not have a controller result",
             )
             self.assertIsNone(
                 f_evidence_store.readRankResult(f_point, 0, f_later_combo, f_ordinal=0),
                 f"Combination {f_later_combo} should not have a rank result",
             )
-            f_later_claim = f_layout.pointRankClaimPath(f_point, 0, f_later_combo, f_ordinal=0)
+            f_later_claim = f_layout.pointRankClaimPath(
+                f_point, 0, f_later_combo, f_ordinal=0
+            )
             self.assertFalse(
                 os.path.exists(f_later_claim),
                 f"Combination {f_later_combo} should not have a claim lock",
@@ -584,14 +617,18 @@ sys.exit(0)
         )
         self.assertEqual(f_status, 1)
 
-        f_ctrl_res = f_evidence_store.readControllerResult(f_point, "c16_b8M", f_ordinal=0)
+        f_ctrl_res = f_evidence_store.readControllerResult(
+            f_point, "c16_b8M", f_ordinal=0
+        )
         self.assertIsNotNone(f_ctrl_res)
         self.assertEqual(f_ctrl_res.payload["status"], "failed")
         self.assertEqual(f_ctrl_res.payload["stage"], "rank_evidence")
         self.assertIn("Missing rank result", f_ctrl_res.payload["error"])
 
         # Subsequent combos were never executed
-        self.assertIsNone(f_evidence_store.readControllerResult(f_point, "c16_b1M", f_ordinal=0))
+        self.assertIsNone(
+            f_evidence_store.readControllerResult(f_point, "c16_b1M", f_ordinal=0)
+        )
 
         # 2. Corrupt / Malformed Rank Result Case
         f_plan2, f_layout2, f_manifest_path2 = self._createManifest(
@@ -604,7 +641,9 @@ sys.exit(0)
             def run(self, f_argv: Sequence[str], **f_kwargs: Any) -> ProcessResult:
                 if "rank" in f_argv:
                     # Write corrupted non-JSON bytes to result.json
-                    f_res_path = f_layout2.pointRankResultPath(f_point2, 0, "c16_b8M", f_ordinal=0)
+                    f_res_path = f_layout2.pointRankResultPath(
+                        f_point2, 0, "c16_b8M", f_ordinal=0
+                    )
                     os.makedirs(os.path.dirname(f_res_path), exist_ok=True)
                     with open(f_res_path, "wb") as f_f:
                         f_f.write(b"CORRUPTED_RAW_NON_JSON{:::")
@@ -619,12 +658,16 @@ sys.exit(0)
         )
         self.assertEqual(f_status2, 1)
 
-        f_ctrl_res2 = f_evidence_store2.readControllerResult(f_point2, "c16_b8M", f_ordinal=0)
+        f_ctrl_res2 = f_evidence_store2.readControllerResult(
+            f_point2, "c16_b8M", f_ordinal=0
+        )
         self.assertIsNotNone(f_ctrl_res2)
         self.assertEqual(f_ctrl_res2.payload["status"], "failed")
         self.assertEqual(f_ctrl_res2.payload["stage"], "rank_evidence")
         self.assertIn("Corrupt rank result", f_ctrl_res2.payload["error"])
-        self.assertIsNone(f_evidence_store2.readControllerResult(f_point2, "c16_b1M", f_ordinal=0))
+        self.assertIsNone(
+            f_evidence_store2.readControllerResult(f_point2, "c16_b1M", f_ordinal=0)
+        )
 
     def testSignalAndTimeoutChildHandling(self) -> None:
         """F-04b: Proves signal termination of child benchmark records signal number in rank evidence and halts controller."""
@@ -668,12 +711,16 @@ sys.exit(0)
         self.assertEqual(f_rank_res.payload["signal_number"], int(signal.SIGKILL))
 
         # Controller result should record failure
-        f_ctrl_res = f_evidence_store.readControllerResult(f_point, "c16_b8M", f_ordinal=0)
+        f_ctrl_res = f_evidence_store.readControllerResult(
+            f_point, "c16_b8M", f_ordinal=0
+        )
         self.assertIsNotNone(f_ctrl_res)
         self.assertEqual(f_ctrl_res.payload["status"], "failed")
 
         # Subsequent combos were not run
-        self.assertIsNone(f_evidence_store.readControllerResult(f_point, "c16_b1M", f_ordinal=0))
+        self.assertIsNone(
+            f_evidence_store.readControllerResult(f_point, "c16_b1M", f_ordinal=0)
+        )
 
 
 if __name__ == "__main__":

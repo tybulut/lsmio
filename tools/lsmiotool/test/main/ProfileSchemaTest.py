@@ -66,9 +66,7 @@ def _patchedTestAllPreexistingModulesAndTestsRemainPresentExactlyOnce(
         for module in test_package.lsmiotool_tests
         if module.__name__ in _PREEXISTING_MODULE_NAMES
     )
-    preexisting_test_ids = _testIds(
-        test_package._buildTestSuite(current_modules)
-    )
+    preexisting_test_ids = _testIds(test_package._buildTestSuite(current_modules))
     all_test_ids = _testIds(test_package.suite())
 
     self.assertEqual(
@@ -139,9 +137,7 @@ class ProfileSchemaTest(unittest.TestCase):
                 "lsmio": "lsmio-rocksdb-m",
             },
         )
-        self.assertEqual(
-            f_default["plots_dirs"], ["synthetic", "viking", "plots"]
-        )
+        self.assertEqual(f_default["plots_dirs"], ["synthetic", "viking", "plots"])
 
         # Check VIKING
         self.assertEqual(f_data["VIKING"]["hpc_manager"], "SLURM")
@@ -445,9 +441,10 @@ class ProfileSchemaTest(unittest.TestCase):
 
             # 2. Symlink to valid file
             f_real_path = os.path.join(f_tmpdir, "valid.json")
-            with open(self.m_env_json_path, "r", encoding="utf-8") as f_src, open(
-                f_real_path, "w", encoding="utf-8"
-            ) as f_dst:
+            with (
+                open(self.m_env_json_path, "r", encoding="utf-8") as f_src,
+                open(f_real_path, "w", encoding="utf-8") as f_dst,
+            ):
                 f_dst.write(f_src.read())
 
             f_symlink_path = os.path.join(f_tmpdir, "symlink.json")
@@ -515,15 +512,9 @@ class ProfileSchemaTest(unittest.TestCase):
             )
 
             # 6. Wrong schema_version
-            _assertInvalid(
-                {"RUN_PROFILES": {"schema_version": 2, "profiles": {}}}
-            )
-            _assertInvalid(
-                {"RUN_PROFILES": {"schema_version": "1", "profiles": {}}}
-            )
-            _assertInvalid(
-                {"RUN_PROFILES": {"schema_version": True, "profiles": {}}}
-            )
+            _assertInvalid({"RUN_PROFILES": {"schema_version": 2, "profiles": {}}})
+            _assertInvalid({"RUN_PROFILES": {"schema_version": "1", "profiles": {}}})
+            _assertInvalid({"RUN_PROFILES": {"schema_version": True, "profiles": {}}})
 
             # 7. Missing required site / extra site in profiles
             with open(self.m_env_json_path, "r", encoding="utf-8") as f_file:
@@ -581,7 +572,9 @@ class ProfileSchemaTest(unittest.TestCase):
 
             # resources missing shape field
             f_bad_res_field = copy.deepcopy(f_valid_json)
-            del f_bad_res_field["RUN_PROFILES"]["profiles"]["DEV"]["resources"]["small"]["walltime_policy"]
+            del f_bad_res_field["RUN_PROFILES"]["profiles"]["DEV"]["resources"][
+                "small"
+            ]["walltime_policy"]
             _assertInvalid(f_bad_res_field)
 
             # rank_identity missing key

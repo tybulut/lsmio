@@ -88,9 +88,7 @@ class DispatchTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-dispatch-test-")
-        self.m_executable = (
-            Path(__file__).resolve().parents[2] / "lsmiotool"
-        )
+        self.m_executable = Path(__file__).resolve().parents[2] / "lsmiotool"
         self.m_package_root = Path(__file__).resolve().parents[2]
         self.m_original_cwd = os.getcwd()
 
@@ -113,7 +111,9 @@ class DispatchTest(unittest.TestCase):
         f_real_dir = os.path.join(self.m_temp_dir, "real_pkg")
         os.makedirs(os.path.join(f_real_dir, "lib"), exist_ok=True)
         for f_name in ("__init__.py", "cli.py", "main.py", "version.py"):
-            with open(os.path.join(f_real_dir, "lib", f_name), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_real_dir, "lib", f_name), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("# dummy\n")
         f_sym_root = os.path.join(self.m_temp_dir, "sym_pkg")
         os.symlink(f_real_dir, f_sym_root)
@@ -130,7 +130,9 @@ class DispatchTest(unittest.TestCase):
         # 5. Missing required core file
         f_incomplete_pkg = os.path.join(self.m_temp_dir, "incomplete_pkg")
         os.makedirs(os.path.join(f_incomplete_pkg, "lib"), exist_ok=True)
-        with open(os.path.join(f_incomplete_pkg, "lib", "cli.py"), "w", encoding="utf-8") as f_f:
+        with open(
+            os.path.join(f_incomplete_pkg, "lib", "cli.py"), "w", encoding="utf-8"
+        ) as f_f:
             f_f.write("# dummy\n")
         # Missing main.py, version.py, __init__.py
         with self.assertRaises(PackageValidationError):
@@ -140,7 +142,9 @@ class DispatchTest(unittest.TestCase):
         f_symlink_file_pkg = os.path.join(self.m_temp_dir, "symfile_pkg")
         os.makedirs(os.path.join(f_symlink_file_pkg, "lib"), exist_ok=True)
         for f_name in ("__init__.py", "cli.py", "version.py"):
-            with open(os.path.join(f_symlink_file_pkg, "lib", f_name), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_symlink_file_pkg, "lib", f_name), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("# dummy\n")
         f_target_main = os.path.join(self.m_temp_dir, "real_main.py")
         with open(f_target_main, "w", encoding="utf-8") as f_f:
@@ -153,7 +157,9 @@ class DispatchTest(unittest.TestCase):
         f_dir_file_pkg = os.path.join(self.m_temp_dir, "dirfile_pkg")
         os.makedirs(os.path.join(f_dir_file_pkg, "lib", "main.py"), exist_ok=True)
         for f_name in ("__init__.py", "cli.py", "version.py"):
-            with open(os.path.join(f_dir_file_pkg, "lib", f_name), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_dir_file_pkg, "lib", f_name), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("# dummy\n")
         with self.assertRaises(PackageValidationError):
             SourcePackageValidator.validate(f_dir_file_pkg)
@@ -175,13 +181,17 @@ class DispatchTest(unittest.TestCase):
         f_decoy_cwd = os.path.join(self.m_temp_dir, "decoy_cwd")
         os.makedirs(os.path.join(f_decoy_cwd, "lib"), exist_ok=True)
         for f_name in ("__init__.py", "cli.py", "main.py", "version.py"):
-            with open(os.path.join(f_decoy_cwd, "lib", f_name), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_decoy_cwd, "lib", f_name), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("# dummy\n")
         os.chdir(f_decoy_cwd)
 
         # Explicit nonexistent path must fail immediately without falling back to cwd
         with self.assertRaises(PackageValidationError):
-            SourcePackageValidator.validate(os.path.join(self.m_temp_dir, "nonexistent"))
+            SourcePackageValidator.validate(
+                os.path.join(self.m_temp_dir, "nonexistent")
+            )
 
     def testEveryLegacyCommandAndGlobalSsdCompatibility(self) -> None:
         """Asserts all legacy commands maintain argument compatibility with and without global SSD."""
@@ -196,7 +206,11 @@ class DispatchTest(unittest.TestCase):
                 mock_run.assert_called_once()
 
         # compare command with global --ssd
-        with patch.object(sys, "argv", [f_exec_str, "--ssd", "compare", "bench_folder", "write", "8", "8M"]):
+        with patch.object(
+            sys,
+            "argv",
+            [f_exec_str, "--ssd", "compare", "bench_folder", "write", "8", "8M"],
+        ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
@@ -204,7 +218,9 @@ class DispatchTest(unittest.TestCase):
                 mock_run.assert_called_once()
 
         # compare command with global -s
-        with patch.object(sys, "argv", [f_exec_str, "-s", "compare", "bench_folder", "read"]):
+        with patch.object(
+            sys, "argv", [f_exec_str, "-s", "compare", "bench_folder", "read"]
+        ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
@@ -286,7 +302,9 @@ class DispatchTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 1)
-                self.assertIn("ParseLegacy: Needs two arguments:", mock_stderr.getvalue())
+                self.assertIn(
+                    "ParseLegacy: Needs two arguments:", mock_stderr.getvalue()
+                )
 
         # parse command with no additional arguments
         with patch.object(sys, "argv", [f_exec_str, "parse"]):
@@ -344,7 +362,9 @@ class DispatchTest(unittest.TestCase):
                 mock_parse_cls.assert_called_once_with("ior", "local", ssd=False)
 
         # 2. parseLegacy with global --ssd
-        with patch.object(sys, "argv", [f_exec_str, "--ssd", "parseLegacy", "lsmio", "small"]):
+        with patch.object(
+            sys, "argv", [f_exec_str, "--ssd", "parseLegacy", "lsmio", "small"]
+        ):
             with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
                 mock_inst = MagicMock()
                 mock_inst.run.return_value = 0
@@ -355,7 +375,9 @@ class DispatchTest(unittest.TestCase):
                 mock_parse_cls.assert_called_once_with("lsmio", "small", ssd=True)
 
         # 3. parseLegacy with global -s
-        with patch.object(sys, "argv", [f_exec_str, "-s", "parseLegacy", "lmp", "bake"]):
+        with patch.object(
+            sys, "argv", [f_exec_str, "-s", "parseLegacy", "lmp", "bake"]
+        ):
             with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
                 mock_inst = MagicMock()
                 mock_inst.run.return_value = 0
@@ -390,7 +412,15 @@ class DispatchTest(unittest.TestCase):
         with patch.object(
             sys,
             "argv",
-            [f_exec_str, "parse", "/path/to/manifest.json", "--output-dir", "/tmp/out", "--format", "json"],
+            [
+                f_exec_str,
+                "parse",
+                "/path/to/manifest.json",
+                "--output-dir",
+                "/tmp/out",
+                "--format",
+                "json",
+            ],
         ):
             with patch("lsmiotool.lib.main.ParseMain") as mock_parse_cls:
                 mock_inst = MagicMock()
@@ -485,9 +515,7 @@ print("LAZY_IMPORT_OK")
         f_status = f_run_main.run()
         self.assertEqual(f_status, 0)
         self.assertEqual(len(f_factory_calls), 1)
-        self.assertEqual(
-            f_factory_calls[0].get("f_worker_validator"), f_mock_validator
-        )
+        self.assertEqual(f_factory_calls[0].get("f_worker_validator"), f_mock_validator)
         f_mock_orch.execute.assert_called_once_with(
             f_request=f_req, f_site=None, f_runtime_layout=None
         )
@@ -532,7 +560,9 @@ print("LAZY_IMPORT_OK")
 
         # 1. Standard invocation
         with patch.object(sys, "argv", [f_exec_str, "run", "ior", "local"]):
-            with patch.object(RunMain, "__init__", side_effect=spy_run_main_init, autospec=True):
+            with patch.object(
+                RunMain, "__init__", side_effect=spy_run_main_init, autospec=True
+            ):
                 with patch.object(RunMain, "run", return_value=0):
                     with self.assertRaises(SystemExit) as ctx:
                         runpy.run_path(f_exec_str, run_name="__main__")
@@ -545,10 +575,20 @@ print("LAZY_IMPORT_OK")
         self.assertTrue(f_layout.is_source)
         self.assertFalse(f_layout.is_installed)
         self.assertEqual(f_layout.package_root, str(self.m_package_root))
-        self.assertEqual(f_layout.profile_file, str(self.m_package_root / "etc" / "environments.json"))
-        self.assertEqual(f_layout.asset_root, str(self.m_package_root.parent / "bmtool" / "lmp-reaxff"))
-        self.assertEqual(f_layout.worker_executable, str(self.m_package_root / "lsmiotool-worker"))
-        self.assertEqual(f_layout.version_file, str(self.m_package_root.parent.parent / "VERSION"))
+        self.assertEqual(
+            f_layout.profile_file,
+            str(self.m_package_root / "etc" / "environments.json"),
+        )
+        self.assertEqual(
+            f_layout.asset_root,
+            str(self.m_package_root.parent / "bmtool" / "lmp-reaxff"),
+        )
+        self.assertEqual(
+            f_layout.worker_executable, str(self.m_package_root / "lsmiotool-worker")
+        )
+        self.assertEqual(
+            f_layout.version_file, str(self.m_package_root.parent.parent / "VERSION")
+        )
 
         # 2. Invocation from unrelated cwd with decoy files
         f_decoy_dir = os.path.join(self.m_temp_dir, "decoy_run_cwd")
@@ -561,7 +601,9 @@ print("LAZY_IMPORT_OK")
             os.chdir(f_decoy_dir)
             f_captured_init_kwargs.clear()
             with patch.object(sys, "argv", [f_exec_str, "run", "lmp", "bake"]):
-                with patch.object(RunMain, "__init__", side_effect=spy_run_main_init, autospec=True):
+                with patch.object(
+                    RunMain, "__init__", side_effect=spy_run_main_init, autospec=True
+                ):
                     with patch.object(RunMain, "run", return_value=0):
                         with self.assertRaises(SystemExit) as ctx:
                             runpy.run_path(f_exec_str, run_name="__main__")
@@ -570,7 +612,10 @@ print("LAZY_IMPORT_OK")
             f_layout_decoy = f_captured_init_kwargs.get("f_runtime_layout")
             self.assertIsNotNone(f_layout_decoy)
             self.assertEqual(f_layout_decoy.package_root, str(self.m_package_root))
-            self.assertEqual(f_layout_decoy.worker_executable, str(self.m_package_root / "lsmiotool-worker"))
+            self.assertEqual(
+                f_layout_decoy.worker_executable,
+                str(self.m_package_root / "lsmiotool-worker"),
+            )
             self.assertNotIn("decoy", f_layout_decoy.package_root)
             self.assertNotIn("decoy", f_layout_decoy.worker_executable)
         finally:
@@ -632,14 +677,18 @@ print("LAZY_IMPORT_OK")
                     mock_run.assert_called_once()
 
         # 2. Run command syntax error: --setup=value rejected
-        with patch.object(sys, "argv", [f_exec_str, "run", "ior", "local", "--setup=BASE"]):
+        with patch.object(
+            sys, "argv", [f_exec_str, "run", "ior", "local", "--setup=BASE"]
+        ):
             with patch("sys.stderr", new_callable=io.StringIO):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 1)
 
         # 3. Run command syntax error: unknown option
-        with patch.object(sys, "argv", [f_exec_str, "run", "ior", "local", "--unknown"]):
+        with patch.object(
+            sys, "argv", [f_exec_str, "run", "ior", "local", "--unknown"]
+        ):
             with patch("sys.stderr", new_callable=io.StringIO):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
@@ -660,6 +709,7 @@ print("LAZY_IMPORT_OK")
     def testSourceAndInstalledRunDoNotCallDetectWithUserHome(self) -> None:
         """Asserts source and installed RunMain dispatch does not pass user/home to EnvironmentResolver.detect()."""
         from lsmiotool.lib.site import EnvironmentResolver, SiteProfile
+
         f_exec_str = str(self.m_executable)
 
         mock_profile = MagicMock(spec=SiteProfile)
@@ -678,16 +728,23 @@ print("LAZY_IMPORT_OK")
         # 1. Source layout through RunMain
         source_layout = ResourceLocator.forSource(f_exec_str)
         run_main_src = RunMain(
-            "ior", "local",
+            "ior",
+            "local",
             f_runtime_layout=source_layout,
         )
         f_detect_calls.clear()
         f_resolve_calls.clear()
 
         with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
-            with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
-                with patch("lsmiotool.lib.run.RunPlanner.createPlan") as mock_create_plan:
-                    mock_create_plan.side_effect = Exception("Stop after preflight profile resolution")
+            with patch.object(
+                EnvironmentResolver, "resolveProfile", side_effect=spy_resolve
+            ):
+                with patch(
+                    "lsmiotool.lib.run.RunPlanner.createPlan"
+                ) as mock_create_plan:
+                    mock_create_plan.side_effect = Exception(
+                        "Stop after preflight profile resolution"
+                    )
                     exit_code = run_main_src.run()
                     self.assertEqual(exit_code, 1)
 
@@ -713,16 +770,23 @@ print("LAZY_IMPORT_OK")
             f_version_file="/usr/local/share/lsmio/VERSION",
         )
         run_main_inst = RunMain(
-            "ior", "local",
+            "ior",
+            "local",
             f_runtime_layout=installed_layout,
         )
         f_detect_calls.clear()
         f_resolve_calls.clear()
 
         with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
-            with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
-                with patch("lsmiotool.lib.run.RunPlanner.createPlan") as mock_create_plan:
-                    mock_create_plan.side_effect = Exception("Stop after preflight profile resolution")
+            with patch.object(
+                EnvironmentResolver, "resolveProfile", side_effect=spy_resolve
+            ):
+                with patch(
+                    "lsmiotool.lib.run.RunPlanner.createPlan"
+                ) as mock_create_plan:
+                    mock_create_plan.side_effect = Exception(
+                        "Stop after preflight profile resolution"
+                    )
                     exit_code = run_main_inst.run()
                     self.assertEqual(exit_code, 1)
 
@@ -741,10 +805,18 @@ print("LAZY_IMPORT_OK")
         f_resolve_calls.clear()
         with patch.object(sys, "argv", [f_exec_str, "run", "ior", "local"]):
             with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
-                with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
-                    with patch("lsmiotool.lib.run.RunPlanner.createPlan") as mock_create_plan:
-                        mock_create_plan.side_effect = Exception("Stop after profile resolution")
-                        with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with patch.object(
+                    EnvironmentResolver, "resolveProfile", side_effect=spy_resolve
+                ):
+                    with patch(
+                        "lsmiotool.lib.run.RunPlanner.createPlan"
+                    ) as mock_create_plan:
+                        mock_create_plan.side_effect = Exception(
+                            "Stop after profile resolution"
+                        )
+                        with patch(
+                            "sys.stderr", new_callable=io.StringIO
+                        ) as mock_stderr:
                             with self.assertRaises(SystemExit) as ctx:
                                 runpy.run_path(f_exec_str, run_name="__main__")
                             self.assertEqual(ctx.exception.code, 1)
@@ -961,7 +1033,9 @@ print("LAZY_IMPORT_OK")
         self.assertIn("submission_requested", f_readme)
         self.assertIn("submission_dispatched", f_readme)
         self.assertIn("submission_recorded", f_readme)
-        self.assertIn("Written immediately before spawning the scheduler process", f_readme)
+        self.assertIn(
+            "Written immediately before spawning the scheduler process", f_readme
+        )
 
         # 2. Correlation token format and recovery
         self.assertIn("^lm-[0-9a-f]{24}$", f_readme)
@@ -972,7 +1046,10 @@ print("LAZY_IMPORT_OK")
         self.assertIn("^[0-9]+$", f_readme)
         self.assertIn("123;cluster", f_readme)
         self.assertIn("squeue --noheader --jobs=<id> --format=%i|%T", f_readme)
-        self.assertIn("sacct --noheader --parsable2 --jobs=<id> --format=JobIDRaw,JobName,State,ExitCode", f_readme)
+        self.assertIn(
+            "sacct --noheader --parsable2 --jobs=<id> --format=JobIDRaw,JobName,State,ExitCode",
+            f_readme,
+        )
         self.assertIn("scancel <id>", f_readme)
 
         # 4. Slurm credentials
@@ -998,7 +1075,10 @@ print("LAZY_IMPORT_OK")
         self.assertIn("130", f_readme)
         self.assertIn("143", f_readme)
         self.assertIn("Interruption-First Durability", f_readme)
-        self.assertIn("interruption event is durably appended to the control stream before any cancellation command", f_readme)
+        self.assertIn(
+            "interruption event is durably appended to the control stream before any cancellation command",
+            f_readme,
+        )
 
         # 8. State precedence
         self.assertIn("WHOLE_RUN_SUCCEEDED", f_readme)
@@ -1041,7 +1121,9 @@ print("LAZY_IMPORT_OK")
             self.assertIn(f"| {f_tasks} | {f_rep} | {f_buf} |", f_readme)
             # Check agreement with RunPlanner.LMP_TASK_TUNING
             f_runtime_tuning = RunPlanner.LMP_TASK_TUNING.get(f_tasks)
-            self.assertIsNotNone(f_runtime_tuning, f"Missing runtime tuning for {f_tasks} tasks")
+            self.assertIsNotNone(
+                f_runtime_tuning, f"Missing runtime tuning for {f_tasks} tasks"
+            )
             self.assertEqual(f_runtime_tuning["replication"], f_rep)
             self.assertEqual(f_runtime_tuning["buffer_size_mb"], f_buf)
 
@@ -1076,8 +1158,12 @@ print("LAZY_IMPORT_OK")
         f_last_pos = -1
         for f_combo in f_expected_combinations:
             f_pos = f_readme.find(f_combo)
-            self.assertNotEqual(f_pos, -1, f"Expected combination {f_combo} in README.md")
-            self.assertGreater(f_pos, f_last_pos, f"Combination {f_combo} appears out of order")
+            self.assertNotEqual(
+                f_pos, -1, f"Expected combination {f_combo} in README.md"
+            )
+            self.assertGreater(
+                f_pos, f_last_pos, f"Combination {f_combo} appears out of order"
+            )
             f_last_pos = f_pos
 
         # 4. Combination-private rank claims, logs, and results
@@ -1106,14 +1192,20 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-20260823-100000-abcd", "/tmp/benchmarks/run-20260823-100000-abcd")
-                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-111111111111111111111111", "1001")
+                    self.m_reporter.reportRunIdentity(
+                        "run-20260823-100000-abcd",
+                        "/tmp/benchmarks/run-20260823-100000-abcd",
+                    )
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1", "lm-111111111111111111111111", "1001"
+                    )
                     self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
                 return f_mock_view
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_succ = RunMain(
-                "ior", "local",
+                "ior",
+                "local",
                 f_orchestrator_factory=lambda **kw: FakeSuccessOrchestrator(**kw),
             )
             f_exit = f_main_succ.run()
@@ -1121,7 +1213,10 @@ print("LAZY_IMPORT_OK")
             f_out = mock_stdout.getvalue()
             self.assertIn("Run ID: run-20260823-100000-abcd\n", f_out)
             self.assertIn("Run Root: /tmp/benchmarks/run-20260823-100000-abcd\n", f_out)
-            self.assertIn("Point 00-tasks-1 Correlation Token: lm-111111111111111111111111\n", f_out)
+            self.assertIn(
+                "Point 00-tasks-1 Correlation Token: lm-111111111111111111111111\n",
+                f_out,
+            )
             self.assertIn("Point 00-tasks-1 Job ID: 1001\n", f_out)
             self.assertIn("Final State: SUCCEEDED\n", f_out)
             self.assertIn("Exit Code: 0\n", f_out)
@@ -1133,7 +1228,9 @@ print("LAZY_IMPORT_OK")
             pos_job = f_out.index("Point 00-tasks-1 Job ID: 1001")
             pos_final = f_out.index("Final State: SUCCEEDED")
             pos_exit = f_out.index("Exit Code: 0")
-            self.assertTrue(pos_id < pos_root < pos_token < pos_job < pos_final < pos_exit)
+            self.assertTrue(
+                pos_id < pos_root < pos_token < pos_job < pos_final < pos_exit
+            )
 
         # 2. Failure execution scenario
         f_mock_view_fail = MagicMock(spec=RunStateView)
@@ -1147,14 +1244,20 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-20260823-100000-fail", "/tmp/benchmarks/run-20260823-100000-fail")
-                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-111111111111111111111111", "1002")
+                    self.m_reporter.reportRunIdentity(
+                        "run-20260823-100000-fail",
+                        "/tmp/benchmarks/run-20260823-100000-fail",
+                    )
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1", "lm-111111111111111111111111", "1002"
+                    )
                     self.m_reporter.reportCompletion(OverallRunState.FAILED, 1)
                 return f_mock_view_fail
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_fail = RunMain(
-                "ior", "local",
+                "ior",
+                "local",
                 f_orchestrator_factory=lambda **kw: FakeFailureOrchestrator(**kw),
             )
             f_exit = f_main_fail.run()
@@ -1162,7 +1265,10 @@ print("LAZY_IMPORT_OK")
             f_out = mock_stdout.getvalue()
             self.assertIn("Run ID: run-20260823-100000-fail\n", f_out)
             self.assertIn("Run Root: /tmp/benchmarks/run-20260823-100000-fail\n", f_out)
-            self.assertIn("Point 00-tasks-1 Correlation Token: lm-111111111111111111111111\n", f_out)
+            self.assertIn(
+                "Point 00-tasks-1 Correlation Token: lm-111111111111111111111111\n",
+                f_out,
+            )
             self.assertIn("Point 00-tasks-1 Job ID: 1002\n", f_out)
             self.assertIn("Final State: FAILED\n", f_out)
             self.assertIn("Exit Code: 1\n", f_out)
@@ -1175,27 +1281,40 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-20260823-multi", "/tmp/benchmarks/run-20260823-multi")
+                    self.m_reporter.reportRunIdentity(
+                        "run-20260823-multi", "/tmp/benchmarks/run-20260823-multi"
+                    )
                     # Try emitting run identity again to assert deduplication
-                    self.m_reporter.reportRunIdentity("run-20260823-multi", "/tmp/benchmarks/run-20260823-multi")
-                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-aaaaaaaaaaaaaaaaaaaaaaaa", "2001")
+                    self.m_reporter.reportRunIdentity(
+                        "run-20260823-multi", "/tmp/benchmarks/run-20260823-multi"
+                    )
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1", "lm-aaaaaaaaaaaaaaaaaaaaaaaa", "2001"
+                    )
                     # Try duplicate point submission emission
-                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-aaaaaaaaaaaaaaaaaaaaaaaa", "2001")
-                    self.m_reporter.reportPointSubmission("01-tasks-2", "lm-bbbbbbbbbbbbbbbbbbbbbbbb", "2002")
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1", "lm-aaaaaaaaaaaaaaaaaaaaaaaa", "2001"
+                    )
+                    self.m_reporter.reportPointSubmission(
+                        "01-tasks-2", "lm-bbbbbbbbbbbbbbbbbbbbbbbb", "2002"
+                    )
                     self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
                     self.m_reporter.reportCompletion(OverallRunState.SUCCEEDED, 0)
                 return f_mock_view
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_multi = RunMain(
-                "ior", "small",
+                "ior",
+                "small",
                 f_orchestrator_factory=lambda **kw: FakeMultiPointOrchestrator(**kw),
             )
             f_exit = f_main_multi.run()
             self.assertEqual(f_exit, 0)
             f_out = mock_stdout.getvalue()
             self.assertEqual(f_out.count("Run ID: run-20260823-multi"), 1)
-            self.assertEqual(f_out.count("Run Root: /tmp/benchmarks/run-20260823-multi"), 1)
+            self.assertEqual(
+                f_out.count("Run Root: /tmp/benchmarks/run-20260823-multi"), 1
+            )
             self.assertEqual(f_out.count("Point 00-tasks-1 Job ID: 2001"), 1)
             self.assertEqual(f_out.count("Point 01-tasks-2 Job ID: 2002"), 1)
             self.assertEqual(f_out.count("Final State: SUCCEEDED"), 1)
@@ -1209,7 +1328,9 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-pbs-qualified", "/tmp/benchmarks/run-pbs-qualified")
+                    self.m_reporter.reportRunIdentity(
+                        "run-pbs-qualified", "/tmp/benchmarks/run-pbs-qualified"
+                    )
                     self.m_reporter.reportPointSubmission(
                         "00-tasks-1",
                         "lm-cccccccccccccccccccccccc",
@@ -1220,13 +1341,16 @@ print("LAZY_IMPORT_OK")
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_pbs = RunMain(
-                "ior", "local",
+                "ior",
+                "local",
                 f_orchestrator_factory=lambda **kw: FakePbsOrchestrator(**kw),
             )
             f_exit = f_main_pbs.run()
             self.assertEqual(f_exit, 0)
             f_out = mock_stdout.getvalue()
-            self.assertIn("Point 00-tasks-1 Job ID: 123456.isambard-pbs.epcc.ed.ac.uk\n", f_out)
+            self.assertIn(
+                "Point 00-tasks-1 Job ID: 123456.isambard-pbs.epcc.ed.ac.uk\n", f_out
+            )
 
     def testValidationBeforePlanPrintsNoFakeIdentity(self) -> None:
         """Chunk 019: Asserts pre-plan validation errors print only concise stderr with no fake run identity or Run ID on stdout."""
@@ -1238,7 +1362,11 @@ print("LAZY_IMPORT_OK")
                 f_main_lmp = RunMain("lmp", "large")
                 f_exit = f_main_lmp.run()
                 self.assertEqual(f_exit, 1)
-                self.assertEqual(mock_stdout.getvalue(), "", "Stdout must be empty on preflight error")
+                self.assertEqual(
+                    mock_stdout.getvalue(),
+                    "",
+                    "Stdout must be empty on preflight error",
+                )
                 self.assertIn("Error:", mock_stderr.getvalue())
                 self.assertIn("LMP large scale is unsupported", mock_stderr.getvalue())
                 self.assertNotIn("Run ID:", mock_stdout.getvalue())
@@ -1259,7 +1387,9 @@ print("LAZY_IMPORT_OK")
                         runpy.run_path(f_exec_str, run_name="__main__")
                     self.assertEqual(ctx.exception.code, 1)
                     self.assertEqual(mock_stdout.getvalue(), "")
-                    self.assertIn("Invalid benchmark: 'unknown_target'", mock_stderr.getvalue())
+                    self.assertIn(
+                        "Invalid benchmark: 'unknown_target'", mock_stderr.getvalue()
+                    )
                     self.assertNotIn("Run ID:", mock_stdout.getvalue())
 
     def testSignalAndIndeterminateProminentlyReportHandleRoot(self) -> None:
@@ -1276,14 +1406,19 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-sigint-cancel", "/tmp/benchmarks/run-sigint-cancel")
-                    self.m_reporter.reportPointSubmission("00-tasks-1", "lm-dddddddddddddddddddddddd", "55555")
+                    self.m_reporter.reportRunIdentity(
+                        "run-sigint-cancel", "/tmp/benchmarks/run-sigint-cancel"
+                    )
+                    self.m_reporter.reportPointSubmission(
+                        "00-tasks-1", "lm-dddddddddddddddddddddddd", "55555"
+                    )
                     self.m_reporter.reportCompletion(OverallRunState.CANCELLED, 130)
                 return f_mock_view_cancel
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_cancel = RunMain(
-                "ior", "local",
+                "ior",
+                "local",
                 f_orchestrator_factory=lambda **kw: FakeCancelOrchestrator(**kw),
             )
             f_exit = f_main_cancel.run()
@@ -1291,7 +1426,10 @@ print("LAZY_IMPORT_OK")
             f_out = mock_stdout.getvalue()
             self.assertIn("Run ID: run-sigint-cancel\n", f_out)
             self.assertIn("Run Root: /tmp/benchmarks/run-sigint-cancel\n", f_out)
-            self.assertIn("Point 00-tasks-1 Correlation Token: lm-dddddddddddddddddddddddd\n", f_out)
+            self.assertIn(
+                "Point 00-tasks-1 Correlation Token: lm-dddddddddddddddddddddddd\n",
+                f_out,
+            )
             self.assertIn("Point 00-tasks-1 Job ID: 55555\n", f_out)
             self.assertIn("Final State: CANCELLED\n", f_out)
             self.assertIn("Exit Code: 130\n", f_out)
@@ -1308,7 +1446,9 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-indet-unconfirmed", "/data/runs/run-indet-unconfirmed")
+                    self.m_reporter.reportRunIdentity(
+                        "run-indet-unconfirmed", "/data/runs/run-indet-unconfirmed"
+                    )
                     self.m_reporter.reportPointSubmission(
                         "00-tasks-1",
                         "lm-eeeeeeeeeeeeeeeeeeeeeeee",
@@ -1319,7 +1459,8 @@ print("LAZY_IMPORT_OK")
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_indet = RunMain(
-                "ior", "local",
+                "ior",
+                "local",
                 f_orchestrator_factory=lambda **kw: FakeIndetOrchestrator(**kw),
             )
             f_exit = f_main_indet.run()
@@ -1343,13 +1484,16 @@ print("LAZY_IMPORT_OK")
 
             def execute(self, *args: Any, **kwargs: Any) -> RunStateView:
                 if self.m_reporter:
-                    self.m_reporter.reportRunIdentity("run-sigterm-early", "/tmp/benchmarks/run-sigterm-early")
+                    self.m_reporter.reportRunIdentity(
+                        "run-sigterm-early", "/tmp/benchmarks/run-sigterm-early"
+                    )
                     self.m_reporter.reportCompletion(OverallRunState.INTERRUPTED, 143)
                 return f_mock_view_interrupted
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f_main_sigterm = RunMain(
-                "ior", "local",
+                "ior",
+                "local",
                 f_orchestrator_factory=lambda **kw: FakeEarlySigtermOrchestrator(**kw),
             )
             f_exit = f_main_sigterm.run()
@@ -1372,9 +1516,13 @@ print("LAZY_IMPORT_OK")
         for f_dir in (f_unrelated_cwd, f_unrelated_home):
             with open(os.path.join(f_dir, "VERSION"), "w", encoding="utf-8") as f_f:
                 f_f.write("decoy-version\n")
-            with open(os.path.join(f_dir, "in.reaxc.hns"), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_dir, "in.reaxc.hns"), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("# decoy lmp asset\n")
-            with open(os.path.join(f_dir, "lsmiotool-worker"), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_dir, "lsmiotool-worker"), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("#!/bin/sh\nexit 99\n")
             os.chmod(os.path.join(f_dir, "lsmiotool-worker"), 0o755)
 

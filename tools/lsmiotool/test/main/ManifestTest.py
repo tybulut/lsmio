@@ -53,7 +53,9 @@ class ManifestTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -79,7 +81,10 @@ class ManifestTest(unittest.TestCase):
         ]
 
         for f_target, f_scale, f_ssd, f_setup, f_prof in f_test_configs:
-            f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+            f_tokens = [
+                f"lm-{f_i:024x}"
+                for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))
+            ]
             f_tok_idx = 0
 
             def token_gen() -> str:
@@ -88,7 +93,9 @@ class ManifestTest(unittest.TestCase):
                 f_tok_idx += 1
                 return f_tok
 
-            f_req = RunRequest(f_target=f_target, f_scale=f_scale, f_ssd=f_ssd, f_setup=f_setup)
+            f_req = RunRequest(
+                f_target=f_target, f_scale=f_scale, f_ssd=f_ssd, f_setup=f_setup
+            )
             f_plan = RunPlanner.createPlan(
                 f_request=f_req,
                 f_profile=f_prof,
@@ -104,9 +111,9 @@ class ManifestTest(unittest.TestCase):
             self.assertTrue(f_json_str.endswith("\n"))
 
             # Assert 2-space indentation
-            self.assertTrue(f_json_str.startswith("{\n  \""))
-            self.assertIn("\n  \"combinations\": [", f_json_str)
-            self.assertIn("\n  \"schema_version\": 1,", f_json_str)
+            self.assertTrue(f_json_str.startswith('{\n  "'))
+            self.assertIn('\n  "combinations": [', f_json_str)
+            self.assertIn('\n  "schema_version": 1,', f_json_str)
 
             # Assert top-level keys appear in sorted alphabetical order
             f_expected_top_order = [
@@ -149,11 +156,15 @@ class ManifestTest(unittest.TestCase):
 
             # Re-serialization exact byte/string equality
             self.assertEqual(ManifestSerializer.serialize(f_doc), f_json_str)
-            self.assertEqual(ManifestSerializer.serialize(f_reconstructed_plan), f_json_str)
+            self.assertEqual(
+                ManifestSerializer.serialize(f_reconstructed_plan), f_json_str
+            )
             self.assertEqual(f_doc.toJson(), f_json_str)
 
             # Deserialization from UTF-8 bytes
-            f_doc_from_bytes = ManifestSerializer.deserialize(f_json_str.encode("utf-8"))
+            f_doc_from_bytes = ManifestSerializer.deserialize(
+                f_json_str.encode("utf-8")
+            )
             self.assertEqual(f_doc_from_bytes, f_doc)
 
             # Deserialization from dictionary
@@ -313,7 +324,14 @@ class ManifestTest(unittest.TestCase):
         f_base_dict = json.loads(ManifestSerializer.serialize(f_plan))
 
         # 1. Extra top-level keys (e.g. prohibited mutable state / job IDs)
-        for f_extra_key in ["job_id", "job_ids", "status", "state", "results", "extra_field"]:
+        for f_extra_key in [
+            "job_id",
+            "job_ids",
+            "status",
+            "state",
+            "results",
+            "extra_field",
+        ]:
             f_dict = copy.deepcopy(f_base_dict)
             f_dict[f_extra_key] = "prohibited_value"
             with self.assertRaises(ManifestValidationError) as f_ctx:
@@ -631,7 +649,10 @@ class ManifestTest(unittest.TestCase):
         ]
 
         for f_scale, f_profile, f_expected in f_cases:
-            f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+            f_tokens = [
+                f"lm-{f_i:024x}"
+                for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))
+            ]
             f_tok_idx = 0
 
             def token_gen() -> str:
@@ -640,7 +661,9 @@ class ManifestTest(unittest.TestCase):
                 f_tok_idx += 1
                 return f_tok
 
-            f_req = RunRequest(f_target="lmp", f_scale=f_scale, f_ssd=False, f_setup="LSMIO")
+            f_req = RunRequest(
+                f_target="lmp", f_scale=f_scale, f_ssd=False, f_setup="LSMIO"
+            )
             f_plan = RunPlanner.createPlan(
                 f_request=f_req,
                 f_profile=f_profile,
@@ -670,7 +693,9 @@ class ManifestTest(unittest.TestCase):
 
             # Byte stability
             self.assertEqual(ManifestSerializer.serialize(f_doc), f_json_str)
-            self.assertEqual(ManifestSerializer.serialize(f_reconstructed_plan), f_json_str)
+            self.assertEqual(
+                ManifestSerializer.serialize(f_reconstructed_plan), f_json_str
+            )
             self.assertEqual(f_doc.toJson(), f_json_str)
 
     def testNonLmpTuningIsExactlyEmpty(self) -> None:
@@ -687,7 +712,10 @@ class ManifestTest(unittest.TestCase):
         ]
 
         for f_target, f_scale, f_profile, f_setup in f_cases:
-            f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+            f_tokens = [
+                f"lm-{f_i:024x}"
+                for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))
+            ]
             f_tok_idx = 0
 
             def token_gen() -> str:
@@ -696,7 +724,9 @@ class ManifestTest(unittest.TestCase):
                 f_tok_idx += 1
                 return f_tok
 
-            f_req = RunRequest(f_target=f_target, f_scale=f_scale, f_ssd=False, f_setup=f_setup)
+            f_req = RunRequest(
+                f_target=f_target, f_scale=f_scale, f_ssd=False, f_setup=f_setup
+            )
             f_plan = RunPlanner.createPlan(
                 f_request=f_req,
                 f_profile=f_profile,
@@ -718,7 +748,9 @@ class ManifestTest(unittest.TestCase):
             self.assertEqual(f_reconstructed_plan, f_plan)
 
             self.assertEqual(ManifestSerializer.serialize(f_doc), f_json_str)
-            self.assertEqual(ManifestSerializer.serialize(f_reconstructed_plan), f_json_str)
+            self.assertEqual(
+                ManifestSerializer.serialize(f_reconstructed_plan), f_json_str
+            )
 
     def testMissingExtraMalformedNodeKeyedOrMismatchedTuningRejected(self) -> None:
         """Assert fail-closed rejection of missing, extra, malformed, node-keyed, or mismatched LMP tuning."""
@@ -784,10 +816,15 @@ class ManifestTest(unittest.TestCase):
 
         # E. LMP with extra task count not in scale points (adding "64" to small)
         f_d = copy.deepcopy(f_lmp_base_dict)
-        f_d["plan"]["lmp_task_tuning"]["64"] = {"replication": 20, "buffer_size_mb": 2048}
+        f_d["plan"]["lmp_task_tuning"]["64"] = {
+            "replication": 20,
+            "buffer_size_mb": 2048,
+        }
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestSerializer.deserialize(f_d)
-        self.assertTrue("undefined" in str(f_ctx.exception) or "match" in str(f_ctx.exception))
+        self.assertTrue(
+            "undefined" in str(f_ctx.exception) or "match" in str(f_ctx.exception)
+        )
 
         # F. Node-keyed substitutions instead of decimal tasks
         f_d = copy.deepcopy(f_lmp_base_dict)
@@ -801,7 +838,10 @@ class ManifestTest(unittest.TestCase):
         # G. Non-decimal or malformed keys (e.g. "01", "-1", "1.0", "one", "")
         for f_bad_key in ["01", "-1", "1.0", "one", "", " 1 ", "1_0"]:
             f_d = copy.deepcopy(f_lmp_base_dict)
-            f_d["plan"]["lmp_task_tuning"][f_bad_key] = {"replication": 4, "buffer_size_mb": 32}
+            f_d["plan"]["lmp_task_tuning"][f_bad_key] = {
+                "replication": 4,
+                "buffer_size_mb": 32,
+            }
             with self.assertRaises(ManifestValidationError) as f_ctx:
                 ManifestSerializer.deserialize(f_d)
             self.assertIn("invalid", str(f_ctx.exception))
@@ -841,13 +881,19 @@ class ManifestTest(unittest.TestCase):
 
         # Boolean values in replication or buffer_size_mb
         f_d = copy.deepcopy(f_lmp_base_dict)
-        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": True, "buffer_size_mb": 32}
+        f_d["plan"]["lmp_task_tuning"]["1"] = {
+            "replication": True,
+            "buffer_size_mb": 32,
+        }
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestSerializer.deserialize(f_d)
         self.assertIn("positive integer", str(f_ctx.exception))
 
         f_d = copy.deepcopy(f_lmp_base_dict)
-        f_d["plan"]["lmp_task_tuning"]["1"] = {"replication": 4, "buffer_size_mb": False}
+        f_d["plan"]["lmp_task_tuning"]["1"] = {
+            "replication": 4,
+            "buffer_size_mb": False,
+        }
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestSerializer.deserialize(f_d)
         self.assertIn("positive integer", str(f_ctx.exception))

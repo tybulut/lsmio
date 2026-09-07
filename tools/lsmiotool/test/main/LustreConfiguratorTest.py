@@ -179,9 +179,7 @@ class LustreConfiguratorTest(unittest.TestCase):
             )
 
             # Using raw tuple (stripe, block)
-            f_argv_tuple = LustreConfigurator.argv(
-                None, (f_stripe, f_block), f_target
-            )
+            f_argv_tuple = LustreConfigurator.argv(None, (f_stripe, f_block), f_target)
             self.assertEqual(
                 f_argv_tuple,
                 ["lfs", "setstripe", "-S", f_block, "-c", str(f_stripe), f_target],
@@ -199,7 +197,9 @@ class LustreConfiguratorTest(unittest.TestCase):
     def testViking2PoolSelection(self) -> None:
         """Validates correct -p <pool> selection for Viking2 SSD and HDD storage classes."""
         f_combo = self.m_combinations[0]  # (16, "8M")
-        f_target = "/mnt/scratch/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        f_target = (
+            "/mnt/scratch/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        )
 
         # 1. HDD StorageClass (explicit)
         f_argv_hdd = LustreConfigurator.buildArgv(
@@ -358,7 +358,9 @@ class LustreConfiguratorTest(unittest.TestCase):
     def testOtherSitesOmitPool(self) -> None:
         """Validates that VIKING, ISAMBARD, ARCHER2, and DEV omit the -p pool flag."""
         f_combo = self.m_combinations[0]  # (16, "8M")
-        f_target = "/mnt/lustre/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        f_target = (
+            "/mnt/lustre/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        )
 
         f_non_pool_sites = [
             ("VIKING", self.m_viking_profile),
@@ -383,7 +385,9 @@ class LustreConfiguratorTest(unittest.TestCase):
                 f_argv_str = LustreConfigurator.buildArgv(
                     f_site_name, f_combo, f_target, f_storage_class=f_sc
                 )
-                self.assertNotIn("-p", f_argv_str, f"Site string {f_site_name} must omit -p flag")
+                self.assertNotIn(
+                    "-p", f_argv_str, f"Site string {f_site_name} must omit -p flag"
+                )
                 self.assertEqual(
                     f_argv_str,
                     ["lfs", "setstripe", "-S", "8M", "-c", "16", f_target],
@@ -391,7 +395,9 @@ class LustreConfiguratorTest(unittest.TestCase):
 
                 # Pool resolution directly returns None
                 f_pool = LustreConfigurator.resolvePool(f_profile, f_storage_class=f_sc)
-                self.assertIsNone(f_pool, f"Site {f_site_name} pool must resolve to None")
+                self.assertIsNone(
+                    f_pool, f"Site {f_site_name} pool must resolve to None"
+                )
 
     def testContainmentRejectsEscapes(self) -> None:
         """Asserts rejection of path escapes (..), symlinks, and paths outside data directories."""
@@ -406,15 +412,11 @@ class LustreConfiguratorTest(unittest.TestCase):
             )
 
         with self.assertRaises(LustreConfigurationError):
-            LustreConfigurator.validateTargetDir(
-                "../points/00/data/c16/b8M", f_combo
-            )
+            LustreConfigurator.validateTargetDir("../points/00/data/c16/b8M", f_combo)
 
         # 2. Relative paths (not absolute)
         with self.assertRaises(LustreConfigurationError):
-            LustreConfigurator.validateTargetDir(
-                "data/c16/b8M", f_combo
-            )
+            LustreConfigurator.validateTargetDir("data/c16/b8M", f_combo)
 
         # 3. Root filesystem escapes
         with self.assertRaises(LustreConfigurationError):
@@ -450,7 +452,9 @@ class LustreConfiguratorTest(unittest.TestCase):
             )
 
         # 7. Symlink target rejection
-        f_real_data_dir = os.path.join(self.m_temp_dir, "real_point", "data", "c16", "b8M")
+        f_real_data_dir = os.path.join(
+            self.m_temp_dir, "real_point", "data", "c16", "b8M"
+        )
         os.makedirs(f_real_data_dir, exist_ok=True)
         f_symlink_dir = os.path.join(self.m_temp_dir, "symlink_point")
         os.symlink(os.path.join(self.m_temp_dir, "real_point"), f_symlink_dir)
@@ -472,7 +476,9 @@ class LustreConfiguratorTest(unittest.TestCase):
     def testMissingCommandFatal(self) -> None:
         """Asserts that missing lfs binary or nonzero exit code raises LustreConfigurationError."""
         f_combo = self.m_combinations[0]
-        f_target = "/mnt/scratch/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        f_target = (
+            "/mnt/scratch/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        )
 
         # 1. Nonzero exit code from runner
         f_mock_failing_runner = MockProcessRunner(
@@ -513,7 +519,9 @@ class LustreConfiguratorTest(unittest.TestCase):
     def testConfigureSuccessWithInjectedRunner(self) -> None:
         """Verifies configure() returns successful ProcessResult when runner succeeds."""
         f_combo = self.m_combinations[1]  # (16, "1M")
-        f_target = "/mnt/scratch/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b1M"
+        f_target = (
+            "/mnt/scratch/users/user/benchmark/runs/r1/points/00-tasks-1/data/c16/b1M"
+        )
 
         f_mock_success_runner = MockProcessRunner(f_returncode=0, f_stdout="stripe set")
         f_result = LustreConfigurator.configure(
@@ -586,7 +594,9 @@ class LustreConfiguratorTest(unittest.TestCase):
 
         f_inst = LustreConfigurator()
         f_argv1 = LustreConfigurator.buildArgv(self.m_viking_profile, f_combo, f_target)
-        f_argv2 = LustreConfigurator.build_argv(self.m_viking_profile, f_combo, f_target)
+        f_argv2 = LustreConfigurator.build_argv(
+            self.m_viking_profile, f_combo, f_target
+        )
         f_argv3 = LustreConfigurator.argv(self.m_viking_profile, f_combo, f_target)
         f_argv4 = f_inst.buildArgv(self.m_viking_profile, f_combo, f_target)
         f_argv5 = f_inst.argv(self.m_viking_profile, f_combo, f_target)

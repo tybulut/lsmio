@@ -91,7 +91,9 @@ class InstallRelativeLayout:
         object.__setattr__(self, "m_package_root", str(f_package_root).strip())
         object.__setattr__(self, "m_profile_file", str(f_profile_file).strip())
         object.__setattr__(self, "m_asset_root", str(f_asset_root).strip())
-        object.__setattr__(self, "m_worker_executable", str(f_worker_executable).strip())
+        object.__setattr__(
+            self, "m_worker_executable", str(f_worker_executable).strip()
+        )
         object.__setattr__(self, "m_version_file", str(f_version_file).strip())
         object.__setattr__(self, "_frozen", True)
 
@@ -106,19 +108,27 @@ class InstallRelativeLayout:
                 f"Install relative layout field '{f_name}' contains NUL byte: {f_value!r}"
             )
         f_stripped = f_value.strip()
-        if os.path.isabs(f_stripped) or f_stripped.startswith("/") or f_stripped.startswith("\\"):
+        if (
+            os.path.isabs(f_stripped)
+            or f_stripped.startswith("/")
+            or f_stripped.startswith("\\")
+        ):
             raise LayoutConfigurationError(
                 f"Install relative layout field '{f_name}' must be a relative path, got absolute path: {f_value!r}"
             )
 
     def __setattr__(self, f_name: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"InstallRelativeLayout is immutable; cannot set attribute '{f_name}'")
+            raise AttributeError(
+                f"InstallRelativeLayout is immutable; cannot set attribute '{f_name}'"
+            )
         super().__setattr__(f_name, f_value)
 
     def __delattr__(self, f_name: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"InstallRelativeLayout is immutable; cannot delete attribute '{f_name}'")
+            raise AttributeError(
+                f"InstallRelativeLayout is immutable; cannot delete attribute '{f_name}'"
+            )
         super().__delattr__(f_name)
 
     @property
@@ -192,13 +202,15 @@ class InstallRelativeLayout:
         )
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_package_root,
-            self.m_profile_file,
-            self.m_asset_root,
-            self.m_worker_executable,
-            self.m_version_file,
-        ))
+        return hash(
+            (
+                self.m_package_root,
+                self.m_profile_file,
+                self.m_asset_root,
+                self.m_worker_executable,
+                self.m_version_file,
+            )
+        )
 
 
 class RuntimeLayout:
@@ -234,11 +246,23 @@ class RuntimeLayout:
         self._validateAbsolutePath("version_file", f_version_file)
 
         object.__setattr__(self, "m_execution_mode", f_execution_mode)
-        object.__setattr__(self, "m_package_root", os.path.normpath(str(f_package_root).strip()))
-        object.__setattr__(self, "m_profile_file", os.path.normpath(str(f_profile_file).strip()))
-        object.__setattr__(self, "m_asset_root", os.path.normpath(str(f_asset_root).strip()))
-        object.__setattr__(self, "m_worker_executable", os.path.normpath(str(f_worker_executable).strip()))
-        object.__setattr__(self, "m_version_file", os.path.normpath(str(f_version_file).strip()))
+        object.__setattr__(
+            self, "m_package_root", os.path.normpath(str(f_package_root).strip())
+        )
+        object.__setattr__(
+            self, "m_profile_file", os.path.normpath(str(f_profile_file).strip())
+        )
+        object.__setattr__(
+            self, "m_asset_root", os.path.normpath(str(f_asset_root).strip())
+        )
+        object.__setattr__(
+            self,
+            "m_worker_executable",
+            os.path.normpath(str(f_worker_executable).strip()),
+        )
+        object.__setattr__(
+            self, "m_version_file", os.path.normpath(str(f_version_file).strip())
+        )
         object.__setattr__(self, "_frozen", True)
 
     @staticmethod
@@ -259,12 +283,16 @@ class RuntimeLayout:
 
     def __setattr__(self, f_name: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"RuntimeLayout is immutable; cannot set attribute '{f_name}'")
+            raise AttributeError(
+                f"RuntimeLayout is immutable; cannot set attribute '{f_name}'"
+            )
         super().__setattr__(f_name, f_value)
 
     def __delattr__(self, f_name: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"RuntimeLayout is immutable; cannot delete attribute '{f_name}'")
+            raise AttributeError(
+                f"RuntimeLayout is immutable; cannot delete attribute '{f_name}'"
+            )
         super().__delattr__(f_name)
 
     @property
@@ -365,14 +393,16 @@ class RuntimeLayout:
         )
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_execution_mode,
-            self.m_package_root,
-            self.m_profile_file,
-            self.m_asset_root,
-            self.m_worker_executable,
-            self.m_version_file,
-        ))
+        return hash(
+            (
+                self.m_execution_mode,
+                self.m_package_root,
+                self.m_profile_file,
+                self.m_asset_root,
+                self.m_worker_executable,
+                self.m_version_file,
+            )
+        )
 
 
 class ResourceLocator:
@@ -415,25 +445,45 @@ class ResourceLocator:
             # Everything before 'tools' is repo_root
             f_repo_parts = f_parts[:f_tools_idx]
             f_repo_root = "/" + "/".join(f_repo_parts) if f_repo_parts else "/"
-            f_package_root = os.path.normpath(os.path.join(f_repo_root, "tools", "lsmiotool"))
+            f_package_root = os.path.normpath(
+                os.path.join(f_repo_root, "tools", "lsmiotool")
+            )
         else:
             # If not explicitly in tools/lsmiotool, derive from entry path
             if len(f_parts) >= 2 and f_parts[-2] == "lib":
                 f_package_root = "/" + "/".join(f_parts[:-2])
-            elif len(f_parts) >= 1 and (f_parts[-1] in ("lsmiotool", "lsmiotool-worker") or "." in f_parts[-1]):
-                f_package_root = "/" + "/".join(f_parts[:-1]) if len(f_parts) > 1 else "/"
+            elif len(f_parts) >= 1 and (
+                f_parts[-1] in ("lsmiotool", "lsmiotool-worker") or "." in f_parts[-1]
+            ):
+                f_package_root = (
+                    "/" + "/".join(f_parts[:-1]) if len(f_parts) > 1 else "/"
+                )
             else:
                 f_package_root = f_norm_entry
 
             f_pkg_parts = [p for p in f_package_root.split(os.sep) if p]
-            if len(f_pkg_parts) >= 2 and f_pkg_parts[-2] == "tools" and f_pkg_parts[-1] == "lsmiotool":
-                f_repo_root = "/" + "/".join(f_pkg_parts[:-2]) if len(f_pkg_parts) > 2 else "/"
+            if (
+                len(f_pkg_parts) >= 2
+                and f_pkg_parts[-2] == "tools"
+                and f_pkg_parts[-1] == "lsmiotool"
+            ):
+                f_repo_root = (
+                    "/" + "/".join(f_pkg_parts[:-2]) if len(f_pkg_parts) > 2 else "/"
+                )
             else:
-                f_repo_root = "/" + "/".join(f_pkg_parts[:-1]) if len(f_pkg_parts) > 1 else "/"
+                f_repo_root = (
+                    "/" + "/".join(f_pkg_parts[:-1]) if len(f_pkg_parts) > 1 else "/"
+                )
 
-        f_profile_file = os.path.normpath(os.path.join(f_package_root, "etc", "environments.json"))
-        f_asset_root = os.path.normpath(os.path.join(f_repo_root, "tools", "bmtool", "lmp-reaxff"))
-        f_worker_executable = os.path.normpath(os.path.join(f_package_root, "lsmiotool-worker"))
+        f_profile_file = os.path.normpath(
+            os.path.join(f_package_root, "etc", "environments.json")
+        )
+        f_asset_root = os.path.normpath(
+            os.path.join(f_repo_root, "tools", "bmtool", "lmp-reaxff")
+        )
+        f_worker_executable = os.path.normpath(
+            os.path.join(f_package_root, "lsmiotool-worker")
+        )
         f_version_file = os.path.normpath(os.path.join(f_repo_root, "VERSION"))
 
         return RuntimeLayout(
@@ -471,13 +521,21 @@ class ResourceLocator:
         )
         f_anchor_dir = os.path.dirname(f_norm_entry)
 
-        f_package_root = cls._resolveRelativePath(f_anchor_dir, f_relative_layout.package_root, "package_root")
-        f_profile_file = cls._resolveRelativePath(f_anchor_dir, f_relative_layout.profile_file, "profile_file")
-        f_asset_root = cls._resolveRelativePath(f_anchor_dir, f_relative_layout.asset_root, "asset_root")
+        f_package_root = cls._resolveRelativePath(
+            f_anchor_dir, f_relative_layout.package_root, "package_root"
+        )
+        f_profile_file = cls._resolveRelativePath(
+            f_anchor_dir, f_relative_layout.profile_file, "profile_file"
+        )
+        f_asset_root = cls._resolveRelativePath(
+            f_anchor_dir, f_relative_layout.asset_root, "asset_root"
+        )
         f_worker_executable = cls._resolveRelativePath(
             f_anchor_dir, f_relative_layout.worker_executable, "worker_executable"
         )
-        f_version_file = cls._resolveRelativePath(f_anchor_dir, f_relative_layout.version_file, "version_file")
+        f_version_file = cls._resolveRelativePath(
+            f_anchor_dir, f_relative_layout.version_file, "version_file"
+        )
 
         return RuntimeLayout(
             f_execution_mode=ExecutionMode.INSTALLED,
@@ -489,7 +547,9 @@ class ResourceLocator:
         )
 
     @classmethod
-    def _resolveRelativePath(cls, f_anchor_dir: str, f_rel_path: str, f_field_name: str) -> str:
+    def _resolveRelativePath(
+        cls, f_anchor_dir: str, f_rel_path: str, f_field_name: str
+    ) -> str:
         """Resolve and lexically validate that a relative path does not escape the filesystem root."""
         if not isinstance(f_rel_path, str) or not f_rel_path.strip():
             raise LayoutConfigurationError(
@@ -501,7 +561,11 @@ class ResourceLocator:
             )
 
         f_stripped = f_rel_path.strip()
-        if os.path.isabs(f_stripped) or f_stripped.startswith("/") or f_stripped.startswith("\\"):
+        if (
+            os.path.isabs(f_stripped)
+            or f_stripped.startswith("/")
+            or f_stripped.startswith("\\")
+        ):
             raise LayoutConfigurationError(
                 f"Relative path for '{f_field_name}' must not be absolute: {f_rel_path!r}"
             )

@@ -71,7 +71,9 @@ class ArtifactStoreTest(unittest.TestCase):
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-artifact-test-")
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -144,7 +146,9 @@ class ArtifactStoreTest(unittest.TestCase):
 
         # Prepare point on store A
         f_point_dir_a = f_store_a.preparePoint("00-tasks-1")
-        f_file_a = os.path.join(f_store_a.layout.pointWorkDir("00-tasks-1"), "data_a.txt")
+        f_file_a = os.path.join(
+            f_store_a.layout.pointWorkDir("00-tasks-1"), "data_a.txt"
+        )
         with open(f_file_a, "w") as f_f:
             f_f.write("content_a")
 
@@ -153,15 +157,25 @@ class ArtifactStoreTest(unittest.TestCase):
 
         # Prepare point on store B
         f_point_dir_b = f_store_b.preparePoint("00-tasks-1")
-        f_file_b = os.path.join(f_store_b.layout.pointWorkDir("00-tasks-1"), "data_b.txt")
+        f_file_b = os.path.join(
+            f_store_b.layout.pointWorkDir("00-tasks-1"), "data_b.txt"
+        )
         with open(f_file_b, "w") as f_f:
             f_f.write("content_b")
 
         # Verify disjoint contents
         self.assertTrue(os.path.exists(f_file_a))
         self.assertTrue(os.path.exists(f_file_b))
-        self.assertFalse(os.path.exists(os.path.join(f_store_b.layout.pointWorkDir("00-tasks-1"), "data_a.txt")))
-        self.assertFalse(os.path.exists(os.path.join(f_store_a.layout.pointWorkDir("00-tasks-1"), "data_b.txt")))
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(f_store_b.layout.pointWorkDir("00-tasks-1"), "data_a.txt")
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(f_store_a.layout.pointWorkDir("00-tasks-1"), "data_b.txt")
+            )
+        )
 
     def testManifestByteStableNoStateOrJob(self) -> None:
         """Proves manifest creation is create-once, byte-stable, and free of mutable state or job IDs."""
@@ -187,7 +201,15 @@ class ArtifactStoreTest(unittest.TestCase):
 
         # Inspect raw JSON: assert no mutable job/state fields exist
         f_raw_json = json.loads(f_disk_bytes.decode("utf-8"))
-        f_forbidden_keys = {"job_id", "job_ids", "state", "status", "exit_code", "exit_status", "jobs"}
+        f_forbidden_keys = {
+            "job_id",
+            "job_ids",
+            "state",
+            "status",
+            "exit_code",
+            "exit_status",
+            "jobs",
+        }
         self.assertTrue(f_forbidden_keys.isdisjoint(set(f_raw_json.keys())))
         for f_sp in f_raw_json.get("points", []):
             self.assertTrue(f_forbidden_keys.isdisjoint(set(f_sp.keys())))
@@ -211,7 +233,9 @@ class ArtifactStoreTest(unittest.TestCase):
             "/tmp/arbitrary_file",
         ]
         for f_path in f_traversal_paths:
-            with self.assertRaises(ContainmentError, msg=f"Failed to reject traversal path: {f_path}"):
+            with self.assertRaises(
+                ContainmentError, msg=f"Failed to reject traversal path: {f_path}"
+            ):
                 f_store.validateContainment(f_path)
 
         # 2. Prefix collision attack (e.g. /runs/run-containment_decoy)
@@ -267,7 +291,9 @@ class ArtifactStoreTest(unittest.TestCase):
 
         # Populate work and data in p1
         f_work1_file = os.path.join(f_store.layout.pointWorkDir(f_p1), "scratch.dat")
-        f_data1_file = os.path.join(f_store.layout.pointDataSubdir(f_p1, 16, "8M"), "dataset1.bin")
+        f_data1_file = os.path.join(
+            f_store.layout.pointDataSubdir(f_p1, 16, "8M"), "dataset1.bin"
+        )
         with open(f_work1_file, "w") as f_f:
             f_f.write("temporary_work_1")
         with open(f_data1_file, "w") as f_f:
@@ -275,7 +301,9 @@ class ArtifactStoreTest(unittest.TestCase):
 
         # Populate work and data in p2
         f_work2_file = os.path.join(f_store.layout.pointWorkDir(f_p2), "scratch2.dat")
-        f_data2_file = os.path.join(f_store.layout.pointDataSubdir(f_p2, 16, "8M"), "dataset2.bin")
+        f_data2_file = os.path.join(
+            f_store.layout.pointDataSubdir(f_p2, 16, "8M"), "dataset2.bin"
+        )
         with open(f_work2_file, "w") as f_f:
             f_f.write("temporary_work_2")
         with open(f_data2_file, "w") as f_f:
@@ -364,7 +392,9 @@ class ArtifactStoreTest(unittest.TestCase):
         f_rank_combo_dir = f_store.layout.pointRankCombinationDir(f_point, 0, "c16_b8M")
         self.assertEqual(
             f_rank_combo_dir,
-            os.path.join(f_store.layout.runRoot, "points", f_point, "ranks", "0", "c16_b8M"),
+            os.path.join(
+                f_store.layout.runRoot, "points", f_point, "ranks", "0", "c16_b8M"
+            ),
         )
         f_store.validateContainment(f_rank_combo_dir)
 
@@ -446,10 +476,19 @@ class ArtifactStoreTest(unittest.TestCase):
         f_layout = ArtifactLayout(self.m_temp_dir, "run-layout-001")
         self.assertEqual(f_layout.benchmarkRoot, os.path.abspath(self.m_temp_dir))
         self.assertEqual(f_layout.runId, "run-layout-001")
-        self.assertEqual(f_layout.runsDir, os.path.join(os.path.abspath(self.m_temp_dir), "runs"))
-        self.assertEqual(f_layout.runRoot, os.path.join(os.path.abspath(self.m_temp_dir), "runs", "run-layout-001"))
-        self.assertEqual(f_layout.manifestPath, os.path.join(f_layout.runRoot, "manifest.json"))
-        self.assertEqual(f_layout.controlLockPath, os.path.join(f_layout.runRoot, "control", "lock"))
+        self.assertEqual(
+            f_layout.runsDir, os.path.join(os.path.abspath(self.m_temp_dir), "runs")
+        )
+        self.assertEqual(
+            f_layout.runRoot,
+            os.path.join(os.path.abspath(self.m_temp_dir), "runs", "run-layout-001"),
+        )
+        self.assertEqual(
+            f_layout.manifestPath, os.path.join(f_layout.runRoot, "manifest.json")
+        )
+        self.assertEqual(
+            f_layout.controlLockPath, os.path.join(f_layout.runRoot, "control", "lock")
+        )
 
         # Check the 6 standard data directories
         f_sp = ScalePoint(f_tasks=16, f_ppn=4, f_nodes=4)
@@ -457,12 +496,24 @@ class ArtifactStoreTest(unittest.TestCase):
         self.assertEqual(len(f_data_dirs), 6)
 
         f_expected_subdirs = [
-            os.path.join(f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b8M"),
-            os.path.join(f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b1M"),
-            os.path.join(f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b64K"),
-            os.path.join(f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b8M"),
-            os.path.join(f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b1M"),
-            os.path.join(f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b64K"),
+            os.path.join(
+                f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b8M"
+            ),
+            os.path.join(
+                f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b1M"
+            ),
+            os.path.join(
+                f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b64K"
+            ),
+            os.path.join(
+                f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b8M"
+            ),
+            os.path.join(
+                f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b1M"
+            ),
+            os.path.join(
+                f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b64K"
+            ),
         ]
         self.assertEqual(list(f_data_dirs), f_expected_subdirs)
 
@@ -490,8 +541,12 @@ class ArtifactStoreTest(unittest.TestCase):
             f_s = ArtifactStore(self.m_temp_dir, f_run_id)
             return f_s.allocateRun(f_plan)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=f_num_threads) as executor:
-            f_futures = [executor.submit(worker_allocate, i) for i in range(f_num_threads)]
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=f_num_threads
+        ) as executor:
+            f_futures = [
+                executor.submit(worker_allocate, i) for i in range(f_num_threads)
+            ]
             for f in concurrent.futures.as_completed(f_futures):
                 try:
                     f_res = f.result()
@@ -502,8 +557,14 @@ class ArtifactStoreTest(unittest.TestCase):
                     f_other_errors.append(e)
 
         self.assertEqual(f_other_errors, [])
-        self.assertEqual(f_success_count, 1, "Exactly one thread must win the allocation race")
-        self.assertEqual(f_collision_count, f_num_threads - 1, f"Remaining {f_num_threads - 1} threads must get RunCollisionError")
+        self.assertEqual(
+            f_success_count, 1, "Exactly one thread must win the allocation race"
+        )
+        self.assertEqual(
+            f_collision_count,
+            f_num_threads - 1,
+            f"Remaining {f_num_threads - 1} threads must get RunCollisionError",
+        )
 
         # Winner's directory exists and contains manifest.json
         f_winner_store = ArtifactStore(self.m_temp_dir, f_run_id)
@@ -639,7 +700,9 @@ class ArtifactStoreTest(unittest.TestCase):
         os.remove(f_store.layout.manifestPath)
         f_store.writeManifest(f_plan)
         f_mismatched_target_plan = RunPlanner.createPlan(
-            f_request=RunRequest(f_target="lsmio", f_scale="local", f_ssd=False, f_setup="MANAGER"),
+            f_request=RunRequest(
+                f_target="lsmio", f_scale="local", f_ssd=False, f_setup="MANAGER"
+            ),
             f_profile=self.m_viking_profile,
             f_run_id_source=lambda: f_run_id,
             f_token_source=lambda: f_plan.tokens[0],

@@ -46,7 +46,12 @@ from lsmiotool.lib.run import (
     ScalePoint,
     ScheduledPointResources,
 )
-from lsmiotool.lib.site import EnvironmentResolver, SchedulerKind, SiteProfile, StorageClass
+from lsmiotool.lib.site import (
+    EnvironmentResolver,
+    SchedulerKind,
+    SiteProfile,
+    StorageClass,
+)
 
 
 class RunPlanTest(unittest.TestCase):
@@ -54,7 +59,9 @@ class RunPlanTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -110,14 +117,20 @@ class RunPlanTest(unittest.TestCase):
         f_expected_small_tasks = [1, 2, 4, 8, 16, 24, 32, 40, 48]
         self.assertEqual(
             RunPlanner.SCALE_MATRICES["small"],
-            tuple(ScalePoint(f_tasks=f_t, f_ppn=1, f_nodes=f_t) for f_t in f_expected_small_tasks),
+            tuple(
+                ScalePoint(f_tasks=f_t, f_ppn=1, f_nodes=f_t)
+                for f_t in f_expected_small_tasks
+            ),
         )
 
         # Scale matrix for large
         f_expected_large_tasks = [4, 8, 16, 32, 64, 128, 192, 256]
         self.assertEqual(
             RunPlanner.SCALE_MATRICES["large"],
-            tuple(ScalePoint(f_tasks=f_t, f_ppn=4, f_nodes=f_t // 4) for f_t in f_expected_large_tasks),
+            tuple(
+                ScalePoint(f_tasks=f_t, f_ppn=4, f_nodes=f_t // 4)
+                for f_t in f_expected_large_tasks
+            ),
         )
 
     def testIorLsmioLmpSetups(self) -> None:
@@ -154,7 +167,9 @@ class RunPlanTest(unittest.TestCase):
             "LEVELDB",
             "MANAGER",
         ]:
-            f_req = RunRequest(f_target="lsmio", f_scale="local", f_setup=f_setup.lower())
+            f_req = RunRequest(
+                f_target="lsmio", f_scale="local", f_setup=f_setup.lower()
+            )
             f_plan = RunPlanner.createPlan(f_req, self.m_viking_profile)
             self.assertEqual(f_plan.request.setup, f_setup)
 
@@ -202,7 +217,9 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(f_clock_calls, 0)
         self.assertEqual(f_token_calls, 0)
 
-    testLmpLargeFailsClosedWithoutIdentityOrSideEffects = testLmpLargeRejectsBeforeSources
+    testLmpLargeFailsClosedWithoutIdentityOrSideEffects = (
+        testLmpLargeRejectsBeforeSources
+    )
 
     def testImmutabilityAndToDict(self) -> None:
         """Assert immutability of all records and canonical JSON schema-1 toDict serialization."""
@@ -326,7 +343,9 @@ class RunPlanTest(unittest.TestCase):
         self.assertIsNone(f_plan_archer2.scheduled_points[0].mem)
 
         # PBS (Isambard): small shape -> fixed "06:00:00", queue arm, pmem 8G, pvmem 8G, chunks=nodes, ncpus=1
-        f_plan_isambard_small = RunPlanner.createPlan(f_req_local, self.m_isambard_profile)
+        f_plan_isambard_small = RunPlanner.createPlan(
+            f_req_local, self.m_isambard_profile
+        )
         f_pt_small = f_plan_isambard_small.scheduled_points[0]
         self.assertEqual(f_pt_small.walltime, "06:00:00")
         self.assertEqual(f_pt_small.queue, "arm")
@@ -339,7 +358,9 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(f_pt_small.mpiprocs, 1)
 
         # PBS (Isambard): large shape -> fixed "06:00:00", queue arm, pmem None, pvmem None, chunks=nodes, ncpus=4
-        f_plan_isambard_large = RunPlanner.createPlan(f_req_large, self.m_isambard_profile)
+        f_plan_isambard_large = RunPlanner.createPlan(
+            f_req_large, self.m_isambard_profile
+        )
         f_pt_large = f_plan_isambard_large.scheduled_points[-1]
         self.assertEqual(f_pt_large.walltime, "06:00:00")
         self.assertEqual(f_pt_large.queue, "arm")
@@ -414,20 +435,29 @@ class RunPlanTest(unittest.TestCase):
 
         # Diagnostic LSMIO setup ENV rejected
         with self.assertRaises(PlanValidationError) as f_ctx:
-            RunPlanner.createPlan(RunRequest("lsmio", "local", f_setup="ENV"), self.m_viking_profile)
+            RunPlanner.createPlan(
+                RunRequest("lsmio", "local", f_setup="ENV"), self.m_viking_profile
+            )
         self.assertIn("ENV", str(f_ctx.exception))
 
         # Setup invalid for IOR
         with self.assertRaises(PlanValidationError):
-            RunPlanner.createPlan(RunRequest("ior", "local", f_setup="NATIVE-M"), self.m_viking_profile)
+            RunPlanner.createPlan(
+                RunRequest("ior", "local", f_setup="NATIVE-M"), self.m_viking_profile
+            )
 
         # Setup invalid for LSMIO
         with self.assertRaises(PlanValidationError):
-            RunPlanner.createPlan(RunRequest("lsmio", "local", f_setup="COLLECTIVE"), self.m_viking_profile)
+            RunPlanner.createPlan(
+                RunRequest("lsmio", "local", f_setup="COLLECTIVE"),
+                self.m_viking_profile,
+            )
 
         # Setup invalid for LMP
         with self.assertRaises(PlanValidationError):
-            RunPlanner.createPlan(RunRequest("lmp", "local", f_setup="HDF5"), self.m_viking_profile)
+            RunPlanner.createPlan(
+                RunRequest("lmp", "local", f_setup="HDF5"), self.m_viking_profile
+            )
 
     def testApprovedLmpTaskTuningForLocalBakeSmall(self) -> None:
         """Assert exact literal LMP task tuning objects in RunPlan for local, bake, and small scales."""
@@ -453,15 +483,21 @@ class RunPlanTest(unittest.TestCase):
         }
 
         # 1. Local scale plan has exact 1-task tuning
-        f_plan_local = RunPlanner.createPlan(RunRequest("lmp", "local"), self.m_viking_profile)
+        f_plan_local = RunPlanner.createPlan(
+            RunRequest("lmp", "local"), self.m_viking_profile
+        )
         self.assertEqual(f_plan_local.lmp_task_tuning, f_expected_local)
 
         # 2. Bake scale plan has exact 4-task tuning
-        f_plan_bake = RunPlanner.createPlan(RunRequest("lmp", "bake"), self.m_viking_profile)
+        f_plan_bake = RunPlanner.createPlan(
+            RunRequest("lmp", "bake"), self.m_viking_profile
+        )
         self.assertEqual(f_plan_bake.lmp_task_tuning, f_expected_bake)
 
         # 3. Small scale plan has exact 9-task tuning
-        f_plan_small = RunPlanner.createPlan(RunRequest("lmp", "small"), self.m_viking_profile)
+        f_plan_small = RunPlanner.createPlan(
+            RunRequest("lmp", "small"), self.m_viking_profile
+        )
         self.assertEqual(f_plan_small.lmp_task_tuning, f_expected_small)
 
         # 4. Direct authority query via getLmpTuning
@@ -510,12 +546,16 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(f_spec.expected_results, ("output.txt",))
 
         # RankIdentity with and without local_rank
-        f_rank_with_local = RankIdentity(f_global_rank=5, f_node_rank="node-2", f_local_rank=1)
+        f_rank_with_local = RankIdentity(
+            f_global_rank=5, f_node_rank="node-2", f_local_rank=1
+        )
         self.assertEqual(f_rank_with_local.global_rank, 5)
         self.assertEqual(f_rank_with_local.node_rank, "node-2")
         self.assertEqual(f_rank_with_local.local_rank, 1)
 
-        f_rank_no_local = RankIdentity(f_global_rank=5, f_node_rank="node-2", f_local_rank=None)
+        f_rank_no_local = RankIdentity(
+            f_global_rank=5, f_node_rank="node-2", f_local_rank=None
+        )
         self.assertEqual(f_rank_no_local.global_rank, 5)
         self.assertEqual(f_rank_no_local.node_rank, "node-2")
         self.assertIsNone(f_rank_no_local.local_rank)

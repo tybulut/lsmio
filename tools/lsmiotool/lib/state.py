@@ -197,16 +197,28 @@ class PointStateView:
         f_diagnostics: Sequence[str] = (),
     ) -> None:
         if not isinstance(f_point_id, str) or not f_point_id.strip():
-            raise StateError(f"point_id must be a non-empty string, got: {f_point_id!r}")
+            raise StateError(
+                f"point_id must be a non-empty string, got: {f_point_id!r}"
+            )
         if not isinstance(f_ordinal, int) or f_ordinal < 0:
-            raise StateError(f"ordinal must be a non-negative integer, got: {f_ordinal!r}")
+            raise StateError(
+                f"ordinal must be a non-negative integer, got: {f_ordinal!r}"
+            )
         if not isinstance(f_scale_point, ScalePoint):
-            raise StateError(f"scale_point must be ScalePoint, got: {type(f_scale_point).__name__}")
+            raise StateError(
+                f"scale_point must be ScalePoint, got: {type(f_scale_point).__name__}"
+            )
         if not isinstance(f_state, PointRunState):
-            raise StateError(f"state must be PointRunState, got: {type(f_state).__name__}")
+            raise StateError(
+                f"state must be PointRunState, got: {type(f_state).__name__}"
+            )
         if f_handle is not None and not isinstance(f_handle, JobHandle):
-            raise StateError(f"handle must be JobHandle or None, got: {type(f_handle).__name__}")
-        if f_scheduler_state is not None and not isinstance(f_scheduler_state, SchedulerJobState):
+            raise StateError(
+                f"handle must be JobHandle or None, got: {type(f_handle).__name__}"
+            )
+        if f_scheduler_state is not None and not isinstance(
+            f_scheduler_state, SchedulerJobState
+        ):
             raise StateError(
                 f"scheduler_state must be SchedulerJobState or None, got: {type(f_scheduler_state).__name__}"
             )
@@ -217,9 +229,16 @@ class PointStateView:
         super().__setattr__("m_state", f_state)
         super().__setattr__("m_handle", f_handle)
         super().__setattr__("m_scheduler_state", f_scheduler_state)
-        super().__setattr__("m_combinations_completed", tuple(str(f_c) for f_c in f_combinations_completed))
-        super().__setattr__("m_combinations_failed", tuple(str(f_c) for f_c in f_combinations_failed))
-        super().__setattr__("m_combinations_missing", tuple(str(f_c) for f_c in f_combinations_missing))
+        super().__setattr__(
+            "m_combinations_completed",
+            tuple(str(f_c) for f_c in f_combinations_completed),
+        )
+        super().__setattr__(
+            "m_combinations_failed", tuple(str(f_c) for f_c in f_combinations_failed)
+        )
+        super().__setattr__(
+            "m_combinations_missing", tuple(str(f_c) for f_c in f_combinations_missing)
+        )
         super().__setattr__("m_diagnostics", tuple(str(f_d) for f_d in f_diagnostics))
         super().__setattr__("_frozen", True)
 
@@ -230,7 +249,9 @@ class PointStateView:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -320,7 +341,9 @@ class PointStateView:
             "scale_point": self.m_scale_point.toDict(),
             "state": self.m_state.value,
             "handle": self.m_handle.toDict() if self.m_handle else None,
-            "scheduler_state": self.m_scheduler_state.value if self.m_scheduler_state else None,
+            "scheduler_state": self.m_scheduler_state.value
+            if self.m_scheduler_state
+            else None,
             "combinations_completed": list(self.m_combinations_completed),
             "combinations_failed": list(self.m_combinations_failed),
             "combinations_missing": list(self.m_combinations_missing),
@@ -380,7 +403,9 @@ class RunStateView:
         if not isinstance(f_run_id, str) or not f_run_id.strip():
             raise StateError(f"run_id must be a non-empty string, got: {f_run_id!r}")
         if not isinstance(f_state, OverallRunState):
-            raise StateError(f"state must be OverallRunState, got: {type(f_state).__name__}")
+            raise StateError(
+                f"state must be OverallRunState, got: {type(f_state).__name__}"
+            )
         if f_active_point_ordinal is not None and (
             not isinstance(f_active_point_ordinal, int) or f_active_point_ordinal < 0
         ):
@@ -404,7 +429,9 @@ class RunStateView:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -517,7 +544,9 @@ class StateReconciler:
         if not isinstance(f_plan, RunPlan):
             raise StateError(f"f_plan must be a RunPlan, got: {type(f_plan).__name__}")
         if not isinstance(f_evidence_store, EvidenceStore):
-            raise StateError(f"f_evidence_store must be EvidenceStore, got: {type(f_evidence_store).__name__}")
+            raise StateError(
+                f"f_evidence_store must be EvidenceStore, got: {type(f_evidence_store).__name__}"
+            )
 
         f_run_diagnostics: List[str] = []
         f_layout = f_evidence_store.layout
@@ -532,7 +561,8 @@ class StateReconciler:
         f_ctrl_events_dir = f_layout.controlEventsDir
         if os.path.exists(f_ctrl_events_dir):
             f_writer_dirs = [
-                f_d for f_d in os.listdir(f_ctrl_events_dir)
+                f_d
+                for f_d in os.listdir(f_ctrl_events_dir)
                 if os.path.isdir(os.path.join(f_ctrl_events_dir, f_d))
             ]
             # Lexical sort for permutation-independent determinism
@@ -546,13 +576,23 @@ class StateReconciler:
                             f_whole_run_succeeded_events.append(f_rec)
                         elif f_rec.evidence_kind == EvidenceKind.INTERRUPTED:
                             f_interrupted_events.append(f_rec)
-                except (EvidenceSequenceError, EvidenceCorruptionError, EvidenceSchemaError) as f_err:
+                except (
+                    EvidenceSequenceError,
+                    EvidenceCorruptionError,
+                    EvidenceSchemaError,
+                ) as f_err:
                     f_control_corrupt = True
-                    f_run_diagnostics.append(f"Control stream error for writer '{f_writer}': {f_err}")
+                    f_run_diagnostics.append(
+                        f"Control stream error for writer '{f_writer}': {f_err}"
+                    )
 
         # Deterministic sorting across all writers
-        f_whole_run_succeeded_events.sort(key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number))
-        f_interrupted_events.sort(key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number))
+        f_whole_run_succeeded_events.sort(
+            key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number)
+        )
+        f_interrupted_events.sort(
+            key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number)
+        )
 
         # Determine Temporal Precedence between WHOLE_RUN_SUCCEEDED and INTERRUPTED (Rule 1 & 4)
         f_has_interruption = len(f_interrupted_events) > 0
@@ -585,7 +625,7 @@ class StateReconciler:
         # 2. Reconcile Each Scale Point
         # -------------------------------------------------------------------------
         f_point_views: List[PointStateView] = []
-        f_is_lsmio = (f_plan.request.target.lower() == "lsmio")
+        f_is_lsmio = f_plan.request.target.lower() == "lsmio"
 
         for f_idx, f_scale_point in enumerate(f_plan.scale_points):
             f_point_name = f_layout.pointDirName(f_scale_point, f_idx)
@@ -596,7 +636,9 @@ class StateReconciler:
             # a) Read submission records
             f_sub_records: Dict[str, Optional[EvidenceRecord]] = {}
             try:
-                f_sub_records = f_evidence_store.readSubmissionRecords(f_scale_point, f_ordinal=f_idx)
+                f_sub_records = f_evidence_store.readSubmissionRecords(
+                    f_scale_point, f_ordinal=f_idx
+                )
             except (EvidenceError, OSError) as f_err:
                 f_corrupt_evidence = True
                 f_point_diagnostics.append(f"Submission records read error: {f_err}")
@@ -623,14 +665,19 @@ class StateReconciler:
                         f_handle = JobHandle.fromDict(f_handle_data)
                 except Exception as f_err:
                     f_corrupt_evidence = True
-                    f_point_diagnostics.append(f"Corrupt JobHandle in submission_recorded: {f_err}")
+                    f_point_diagnostics.append(
+                        f"Corrupt JobHandle in submission_recorded: {f_err}"
+                    )
 
             # b) Read scheduler observations from disk
             f_disk_observations: List[EvidenceRecord] = []
-            f_obs_base_dir = os.path.join(f_layout.pointSchedulerDir(f_scale_point, f_idx), "observations")
+            f_obs_base_dir = os.path.join(
+                f_layout.pointSchedulerDir(f_scale_point, f_idx), "observations"
+            )
             if os.path.exists(f_obs_base_dir):
                 f_obs_writers = [
-                    f_d for f_d in os.listdir(f_obs_base_dir)
+                    f_d
+                    for f_d in os.listdir(f_obs_base_dir)
                     if os.path.isdir(os.path.join(f_obs_base_dir, f_d))
                 ]
                 f_obs_writers.sort()
@@ -640,18 +687,28 @@ class StateReconciler:
                             f_scale_point, f_obs_w, f_ordinal=f_idx
                         )
                         f_disk_observations.extend(f_recs)
-                    except (EvidenceSequenceError, EvidenceCorruptionError, EvidenceSchemaError) as f_err:
+                    except (
+                        EvidenceSequenceError,
+                        EvidenceCorruptionError,
+                        EvidenceSchemaError,
+                    ) as f_err:
                         f_corrupt_evidence = True
-                        f_point_diagnostics.append(f"Observation read error for writer '{f_obs_w}': {f_err}")
+                        f_point_diagnostics.append(
+                            f"Observation read error for writer '{f_obs_w}': {f_err}"
+                        )
 
             # Sort disk observations deterministically
-            f_disk_observations.sort(key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number))
+            f_disk_observations.sort(
+                key=lambda r: (r.created_at_utc, r.writer_id, r.sequence_number)
+            )
 
             # Check handle consistency and payload validity across disk observations
             for f_obs in f_disk_observations:
                 if not isinstance(f_obs.payload, dict):
                     f_corrupt_evidence = True
-                    f_point_diagnostics.append(f"Corrupt observation payload: {f_obs.payload!r}")
+                    f_point_diagnostics.append(
+                        f"Corrupt observation payload: {f_obs.payload!r}"
+                    )
                     continue
                 f_obs_h = f_obs.payload.get("handle")
                 if isinstance(f_obs_h, dict) and f_handle is not None:
@@ -691,8 +748,14 @@ class StateReconciler:
             # c) Read Controller events and results
             f_worker_events: List[EvidenceRecord] = []
             try:
-                f_worker_events = f_evidence_store.readWorkerEvents(f_scale_point, f_ordinal=f_idx)
-            except (EvidenceSequenceError, EvidenceCorruptionError, EvidenceSchemaError) as f_err:
+                f_worker_events = f_evidence_store.readWorkerEvents(
+                    f_scale_point, f_ordinal=f_idx
+                )
+            except (
+                EvidenceSequenceError,
+                EvidenceCorruptionError,
+                EvidenceSchemaError,
+            ) as f_err:
                 f_corrupt_evidence = True
                 f_point_diagnostics.append(f"Worker events read error: {f_err}")
 
@@ -710,7 +773,9 @@ class StateReconciler:
                     )
                 except (EvidenceCorruptionError, EvidenceSchemaError) as f_err:
                     f_corrupt_evidence = True
-                    f_point_diagnostics.append(f"Corrupt controller result for {f_combo_name}: {f_err}")
+                    f_point_diagnostics.append(
+                        f"Corrupt controller result for {f_combo_name}: {f_err}"
+                    )
                     f_ctrl_res = None
 
                 if f_ctrl_res is None:
@@ -718,7 +783,8 @@ class StateReconciler:
                 else:
                     f_target_str = (
                         f_plan.request.target
-                        if hasattr(f_plan, "request") and hasattr(f_plan.request, "target")
+                        if hasattr(f_plan, "request")
+                        and hasattr(f_plan.request, "target")
                         else getattr(f_plan, "target", None)
                     )
                     f_is_succ = ResultPayloadValidator.isSuccessPayload(
@@ -738,7 +804,10 @@ class StateReconciler:
                     elif f_is_fail:
                         f_combinations_failed.append(f_combo_name)
                         f_controller_failure = True
-                        if f_failure_timestamp is None or f_ctrl_res.created_at_utc < f_failure_timestamp:
+                        if (
+                            f_failure_timestamp is None
+                            or f_ctrl_res.created_at_utc < f_failure_timestamp
+                        ):
                             f_failure_timestamp = f_ctrl_res.created_at_utc
                     else:
                         f_corrupt_evidence = True
@@ -780,7 +849,10 @@ class StateReconciler:
                             )
                             if f_r_fail:
                                 f_rank_failure = True
-                                if f_failure_timestamp is None or f_rank_res.created_at_utc < f_failure_timestamp:
+                                if (
+                                    f_failure_timestamp is None
+                                    or f_rank_res.created_at_utc < f_failure_timestamp
+                                ):
                                     f_failure_timestamp = f_rank_res.created_at_utc
                             elif not f_r_succ:
                                 f_corrupt_evidence = True
@@ -792,7 +864,11 @@ class StateReconciler:
             for f_obs in f_disk_observations:
                 f_p = f_obs.payload
                 if isinstance(f_p, dict):
-                    f_raw_st = f_p.get("state") or f_p.get("scheduler_state") or f_p.get("job_state")
+                    f_raw_st = (
+                        f_p.get("state")
+                        or f_p.get("scheduler_state")
+                        or f_p.get("job_state")
+                    )
                     f_parsed_st = None
                     if isinstance(f_raw_st, SchedulerJobState):
                         f_parsed_st = f_raw_st
@@ -801,8 +877,14 @@ class StateReconciler:
                             f_parsed_st = SchedulerJobState(f_raw_st.strip().lower())
                         except ValueError:
                             pass
-                    if f_parsed_st in (SchedulerJobState.FAILED, SchedulerJobState.TIMEOUT):
-                        if f_failure_timestamp is None or f_obs.created_at_utc < f_failure_timestamp:
+                    if f_parsed_st in (
+                        SchedulerJobState.FAILED,
+                        SchedulerJobState.TIMEOUT,
+                    ):
+                        if (
+                            f_failure_timestamp is None
+                            or f_obs.created_at_utc < f_failure_timestamp
+                        ):
                             f_failure_timestamp = f_obs.created_at_utc
 
             # Resolve SchedulerJobState (Enforcing Reduction & Terminal Non-Regression)
@@ -907,11 +989,21 @@ class StateReconciler:
 
         f_matched_val: Any = None
         for f_k, f_v in f_scheduler_observations.items():
-            if f_k == f_scale_point or f_k == f_ordinal or f_k == f_point_id or str(f_k) == str(f_ordinal):
+            if (
+                f_k == f_scale_point
+                or f_k == f_ordinal
+                or f_k == f_point_id
+                or str(f_k) == str(f_ordinal)
+            ):
                 f_matched_val = f_v
                 break
             if f_handle is not None:
-                if f_k == f_handle or f_k == f_handle.job_id or f_k == f_handle.jobId or str(f_k) == f_handle.job_id:
+                if (
+                    f_k == f_handle
+                    or f_k == f_handle.job_id
+                    or f_k == f_handle.jobId
+                    or str(f_k) == f_handle.job_id
+                ):
                     f_matched_val = f_v
                     break
 
@@ -930,7 +1022,9 @@ class StateReconciler:
             if "state" in f_res:
                 if isinstance(f_res["state"], str):
                     try:
-                        f_res["state"] = SchedulerJobState(f_res["state"].strip().lower())
+                        f_res["state"] = SchedulerJobState(
+                            f_res["state"].strip().lower()
+                        )
                     except ValueError:
                         f_res["state"] = SchedulerJobState.UNKNOWN
             return f_res
@@ -971,7 +1065,9 @@ class StateReconciler:
             if not isinstance(f_p, dict):
                 f_all_states.append(SchedulerJobState.UNKNOWN)
                 continue
-            f_raw_st = f_p.get("state") or f_p.get("scheduler_state") or f_p.get("job_state")
+            f_raw_st = (
+                f_p.get("state") or f_p.get("scheduler_state") or f_p.get("job_state")
+            )
             if isinstance(f_raw_st, SchedulerJobState):
                 f_all_states.append(f_raw_st)
             elif isinstance(f_raw_st, str):
@@ -1030,7 +1126,10 @@ class StateReconciler:
             return SchedulerJobState.FAILED
 
         # 3b. SUCCEEDED vs TIMEOUT (Rule 2: Specific timeout outranks generic scheduler success)
-        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.TIMEOUT}:
+        if f_terminal_states == {
+            SchedulerJobState.SUCCEEDED,
+            SchedulerJobState.TIMEOUT,
+        }:
             if f_point_diagnostics is not None:
                 f_point_diagnostics.append(
                     "Resolved scheduler state TIMEOUT (specific timeout outranks generic scheduler success)"
@@ -1038,7 +1137,10 @@ class StateReconciler:
             return SchedulerJobState.TIMEOUT
 
         # 3c. SUCCEEDED vs CANCELLED
-        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.CANCELLED}:
+        if f_terminal_states == {
+            SchedulerJobState.SUCCEEDED,
+            SchedulerJobState.CANCELLED,
+        }:
             if f_cancel_requested:
                 return SchedulerJobState.CANCELLED
             else:
@@ -1070,7 +1172,10 @@ class StateReconciler:
                 return SchedulerJobState.UNKNOWN
 
         # 3e. TIMEOUT vs CANCELLED
-        if f_terminal_states == {SchedulerJobState.TIMEOUT, SchedulerJobState.CANCELLED}:
+        if f_terminal_states == {
+            SchedulerJobState.TIMEOUT,
+            SchedulerJobState.CANCELLED,
+        }:
             if f_cancel_requested:
                 if f_failure_timestamp and f_cancel_req_record:
                     if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
@@ -1100,7 +1205,10 @@ class StateReconciler:
 
         # 3g. Multi-way terminal state combinations:
         # If both FAILED and TIMEOUT are in the set -> conflict between failure modes
-        if SchedulerJobState.FAILED in f_terminal_states and SchedulerJobState.TIMEOUT in f_terminal_states:
+        if (
+            SchedulerJobState.FAILED in f_terminal_states
+            and SchedulerJobState.TIMEOUT in f_terminal_states
+        ):
             if f_point_diagnostics is not None:
                 f_point_diagnostics.append(
                     "Indeterminate: Conflicting terminal scheduler observations: failed vs timeout"
@@ -1108,7 +1216,11 @@ class StateReconciler:
             return SchedulerJobState.UNKNOWN
 
         # If SUCCEEDED + FAILED + CANCELLED:
-        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.FAILED, SchedulerJobState.CANCELLED}:
+        if f_terminal_states == {
+            SchedulerJobState.SUCCEEDED,
+            SchedulerJobState.FAILED,
+            SchedulerJobState.CANCELLED,
+        }:
             if f_cancel_requested:
                 if f_failure_timestamp and f_cancel_req_record:
                     if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
@@ -1129,7 +1241,11 @@ class StateReconciler:
                 return SchedulerJobState.UNKNOWN
 
         # If SUCCEEDED + TIMEOUT + CANCELLED:
-        if f_terminal_states == {SchedulerJobState.SUCCEEDED, SchedulerJobState.TIMEOUT, SchedulerJobState.CANCELLED}:
+        if f_terminal_states == {
+            SchedulerJobState.SUCCEEDED,
+            SchedulerJobState.TIMEOUT,
+            SchedulerJobState.CANCELLED,
+        }:
             if f_cancel_requested:
                 if f_failure_timestamp and f_cancel_req_record:
                     if f_failure_timestamp <= f_cancel_req_record.created_at_utc:
@@ -1186,7 +1302,9 @@ class StateReconciler:
 
         # 2. Rule 5: Indeterminate Refinement
         if f_conflicting_handles:
-            f_point_diagnostics.append("Indeterminate: Conflicting scheduler job handles detected")
+            f_point_diagnostics.append(
+                "Indeterminate: Conflicting scheduler job handles detected"
+            )
             return PointRunState.INDETERMINATE
 
         if f_corrupt_evidence:
@@ -1227,12 +1345,19 @@ class StateReconciler:
                         return PointRunState.FAILED
                     else:
                         # Cancel request preceded failure -> cancel takes precedence if confirmed
-                        if f_cancel_recorded or f_sched_state == SchedulerJobState.CANCELLED:
+                        if (
+                            f_cancel_recorded
+                            or f_sched_state == SchedulerJobState.CANCELLED
+                        ):
                             return PointRunState.CANCELLED
                         elif f_sched_state and f_sched_state.isTerminal:
                             return PointRunState.FAILED
                         else:
-                            return PointRunState.RUNNING if f_sched_state == SchedulerJobState.ACTIVE else PointRunState.SUBMITTED
+                            return (
+                                PointRunState.RUNNING
+                                if f_sched_state == SchedulerJobState.ACTIVE
+                                else PointRunState.SUBMITTED
+                            )
                 else:
                     # Ambiguous causal order between failure and cancellation request
                     f_point_diagnostics.append(
@@ -1246,15 +1371,23 @@ class StateReconciler:
                 # Terminal but not cancelled when cancel was requested
                 if f_has_specific_failure:
                     return PointRunState.FAILED
-                f_point_diagnostics.append("Indeterminate: Terminal completion while cancellation was requested")
+                f_point_diagnostics.append(
+                    "Indeterminate: Terminal completion while cancellation was requested"
+                )
                 return PointRunState.INDETERMINATE
             else:
                 # Cancel requested, but still active/waiting confirmation
-                return PointRunState.RUNNING if f_sched_state == SchedulerJobState.ACTIVE else PointRunState.SUBMITTED
+                return (
+                    PointRunState.RUNNING
+                    if f_sched_state == SchedulerJobState.ACTIVE
+                    else PointRunState.SUBMITTED
+                )
 
         # 5. Cancellation without cancel requested -> not approved cancellation -> INDETERMINATE
         if f_sched_state == SchedulerJobState.CANCELLED and not f_cancel_requested:
-            f_point_diagnostics.append("Indeterminate: Scheduler job was cancelled without a requested cancellation record")
+            f_point_diagnostics.append(
+                "Indeterminate: Scheduler job was cancelled without a requested cancellation record"
+            )
             return PointRunState.INDETERMINATE
 
         # 6. Rule 2: Failure Precedence without cancellation
@@ -1270,15 +1403,26 @@ class StateReconciler:
                 and len(f_combinations_missing) == 0
                 and len(f_combinations_failed) == 0
             )
-            f_all_ranks = (not f_is_lsmio) or (not f_rank_missing and not f_rank_failure)
+            f_all_ranks = (not f_is_lsmio) or (
+                not f_rank_missing and not f_rank_failure
+            )
             if f_all_combos and f_all_ranks:
                 return PointRunState.SUCCEEDED
 
         # 8. Active / Running / Submitted
-        if f_sched_state == SchedulerJobState.ACTIVE or f_has_worker_events or len(f_combinations_completed) > 0:
+        if (
+            f_sched_state == SchedulerJobState.ACTIVE
+            or f_has_worker_events
+            or len(f_combinations_completed) > 0
+        ):
             return PointRunState.RUNNING
 
-        if f_sched_state == SchedulerJobState.QUEUED or f_sub_recorded or f_sub_dispatched or f_sub_requested:
+        if (
+            f_sched_state == SchedulerJobState.QUEUED
+            or f_sub_recorded
+            or f_sub_dispatched
+            or f_sub_requested
+        ):
             return PointRunState.SUBMITTED
 
         return PointRunState.NOT_STARTED
@@ -1295,7 +1439,9 @@ class StateReconciler:
         """Derives authoritative overall run state enforcing precedence across points and control events."""
         # 1. Control stream corruption -> INDETERMINATE
         if f_control_corrupt:
-            f_run_diagnostics.append("Overall INDETERMINATE due to corrupt control stream")
+            f_run_diagnostics.append(
+                "Overall INDETERMINATE due to corrupt control stream"
+            )
             return OverallRunState.INDETERMINATE
 
         # 2. Any point INDETERMINATE -> Overall INDETERMINATE
@@ -1332,7 +1478,10 @@ class StateReconciler:
                 return OverallRunState.IN_PROGRESS
 
         # 7. Not Started
-        if all(f_pv.state == PointRunState.NOT_STARTED for f_pv in f_point_views) and not f_has_interruption:
+        if (
+            all(f_pv.state == PointRunState.NOT_STARTED for f_pv in f_point_views)
+            and not f_has_interruption
+        ):
             return OverallRunState.NOT_STARTED
 
         # 8. In Progress

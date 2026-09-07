@@ -28,7 +28,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-
 import os
 import subprocess
 import sys
@@ -37,7 +36,12 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 from lsmiotool.lib import debuggable, env
 from lsmiotool.lib.env import HpcEnv
 from lsmiotool.lib.log import Console
-from lsmiotool.lib.profile import ProfileDocument, ProfileLoader, ProfileRecord, ProfileSchemaError
+from lsmiotool.lib.profile import (
+    ProfileDocument,
+    ProfileLoader,
+    ProfileRecord,
+    ProfileSchemaError,
+)
 from lsmiotool.lib.site import EnvironmentResolver, SiteProfile, SiteResolutionError
 
 
@@ -157,9 +161,7 @@ class HpcModules(debuggable.DebuggableObject):
 
     shell_output = shellOutput
 
-    def load(
-        self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]
-    ) -> None:
+    def load(self, f_hpc_env: Union[HpcEnv, SiteProfile, ProfileRecord, str]) -> None:
         """Execute all module commands for the requested HPC environment.
 
         Executes module purge and module loads in one checked Bash invocation,

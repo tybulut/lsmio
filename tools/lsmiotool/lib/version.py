@@ -37,6 +37,7 @@ from typing import Optional, Union
 
 class VersionError(Exception):
     """Exception raised when version file is missing, invalid, or cannot be read."""
+
     pass
 
 
@@ -98,9 +99,7 @@ def getVersion(f_version_file_path: Optional[Union[str, Path]] = None) -> str:
 
     f_version = f_lines[0].strip()
     if not f_version:
-        raise VersionError(
-            f"Version file contains empty version string: {f_path_str}"
-        )
+        raise VersionError(f"Version file contains empty version string: {f_path_str}")
 
     if not _SEMVER_PATTERN.match(f_version):
         raise VersionError(

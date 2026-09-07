@@ -152,9 +152,7 @@ class RunCliParserTest(unittest.TestCase):
         ]
 
         for f_argv in f_rejected_argvs:
-            with self.assertRaises(
-                RunCliParseError, msg=f"Failed to reject: {f_argv}"
-            ):
+            with self.assertRaises(RunCliParseError, msg=f"Failed to reject: {f_argv}"):
                 parseRunArguments(f_argv)
             with self.assertRaises(CliParseError):
                 parseRunArguments(f_argv)
@@ -288,24 +286,18 @@ class RunCliParserTest(unittest.TestCase):
 
     def testCaseCanonicalization(self) -> None:
         """Asserts case canonicalization for target, scale, and setup."""
-        f_req = parseRunArguments(
-            ["IOR", "LOCAL", "--setup", "hdf5", "--ssd"]
-        )
+        f_req = parseRunArguments(["IOR", "LOCAL", "--setup", "hdf5", "--ssd"])
         self.assertEqual(f_req.target, "ior")
         self.assertEqual(f_req.scale, "local")
         self.assertEqual(f_req.setup, "HDF5")
         self.assertTrue(f_req.ssd)
 
-        f_req2 = parseRunArguments(
-            ["LsMiO", "SmAlL", "--setup", "native-m"]
-        )
+        f_req2 = parseRunArguments(["LsMiO", "SmAlL", "--setup", "native-m"])
         self.assertEqual(f_req2.target, "lsmio")
         self.assertEqual(f_req2.scale, "small")
         self.assertEqual(f_req2.setup, "NATIVE-M")
 
-        f_req3 = parseRunArguments(
-            ["LMP", "BAKE", "--setup", "lsmio-mmap"]
-        )
+        f_req3 = parseRunArguments(["LMP", "BAKE", "--setup", "lsmio-mmap"])
         self.assertEqual(f_req3.target, "lmp")
         self.assertEqual(f_req3.scale, "bake")
         self.assertEqual(f_req3.setup, "LSMIO-MMAP")

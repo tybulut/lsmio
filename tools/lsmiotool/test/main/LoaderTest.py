@@ -113,8 +113,7 @@ class LoaderTest(unittest.TestCase):
             module.__name__: module for module in test_package.lsmiotool_tests
         }
         legacy_modules = tuple(
-            modules_by_name[module_name]
-            for module_name in _LEGACY_PREFIX_MODULE_NAMES
+            modules_by_name[module_name] for module_name in _LEGACY_PREFIX_MODULE_NAMES
         )
         test_ids = _testIds(test_package._buildTestSuite(legacy_modules))
 
@@ -217,9 +216,7 @@ class LoaderTest(unittest.TestCase):
             for module in test_package.lsmiotool_tests
             if module.__name__ != "lsmiotool.test.main.LoaderTest"
         )
-        preexisting_test_ids = _testIds(
-            test_package._buildTestSuite(current_modules)
-        )
+        preexisting_test_ids = _testIds(test_package._buildTestSuite(current_modules))
         all_test_ids = _testIds(test_package.suite())
 
         self.assertEqual(
@@ -233,11 +230,8 @@ class LoaderTest(unittest.TestCase):
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),
-            set(all_test_ids) - {
-                test_id
-                for test_id in all_test_ids
-                if ".LoaderTest." in test_id
-            },
+            set(all_test_ids)
+            - {test_id for test_id in all_test_ids if ".LoaderTest." in test_id},
         )
 
     def testOrdinaryDiscoveryExcludesCtestInstalledSmoke(self) -> None:

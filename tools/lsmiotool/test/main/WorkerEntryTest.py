@@ -109,7 +109,9 @@ class WorkerEntryTest(unittest.TestCase):
 
         # 2. Path object validation
         f_norm_path_obj = WorkerExecutableValidator.validate(self.m_worker_executable)
-        self.assertEqual(f_norm_path_obj, os.path.normpath(str(self.m_worker_executable)))
+        self.assertEqual(
+            f_norm_path_obj, os.path.normpath(str(self.m_worker_executable))
+        )
 
         # 3. Instance method and callable validation
         f_validator = WorkerExecutableValidator()
@@ -122,7 +124,9 @@ class WorkerEntryTest(unittest.TestCase):
             os.path.normpath(str(self.m_worker_executable)),
         )
 
-    def testWorkerValidatorRejectsMissingSymlinkWrongTypeAndNonExecutableWithoutFallback(self) -> None:
+    def testWorkerValidatorRejectsMissingSymlinkWrongTypeAndNonExecutableWithoutFallback(
+        self,
+    ) -> None:
         """Asserts rejection of symlinks, directories, missing files, non-executable files, and unreadable files without search/fallback."""
         # 1. Missing executable
         f_missing_path = os.path.join(self.m_temp_dir, "nonexistent-worker")
@@ -159,7 +163,10 @@ class WorkerEntryTest(unittest.TestCase):
             WorkerExecutableValidator.validate(f_non_exec_file)
 
         # 5. Unreadable file
-        with patch("os.access", side_effect=lambda f_path, f_mode: False if f_mode == os.R_OK else True):
+        with patch(
+            "os.access",
+            side_effect=lambda f_path, f_mode: False if f_mode == os.R_OK else True,
+        ):
             with self.assertRaises(WorkerExecutableValidationError):
                 WorkerExecutableValidator.validate(f_real_exe)
 
@@ -186,7 +193,9 @@ class WorkerEntryTest(unittest.TestCase):
         os.chdir(f_decoy_dir)
         # Passing an explicit non-existent path must fail without falling back to cwd
         with self.assertRaises(WorkerExecutableValidationError):
-            WorkerExecutableValidator.validate(os.path.join(self.m_temp_dir, "nonexistent"))
+            WorkerExecutableValidator.validate(
+                os.path.join(self.m_temp_dir, "nonexistent")
+            )
 
     def testRunPreflightUsesRealWorkerValidatorBeforeMutation(self) -> None:
         """Asserts RunMain / RunOrchestrator preflight executes WorkerExecutableValidator before making any mutations."""
@@ -238,7 +247,9 @@ class WorkerEntryTest(unittest.TestCase):
         f_worker_str = str(self.m_worker_executable)
 
         # 1. Valid allocation mode (2 args after 'allocation')
-        with patch("lsmiotool.lib.worker.AllocationController.run", return_value=0) as mock_alloc_run:
+        with patch(
+            "lsmiotool.lib.worker.AllocationController.run", return_value=0
+        ) as mock_alloc_run:
             with patch.object(
                 sys,
                 "argv",
@@ -250,11 +261,19 @@ class WorkerEntryTest(unittest.TestCase):
                 mock_alloc_run.assert_called_once()
 
         # 2. Valid rank mode (3 args after 'rank')
-        with patch("lsmiotool.lib.worker.RankWorker.run", return_value=0) as mock_rank_run:
+        with patch(
+            "lsmiotool.lib.worker.RankWorker.run", return_value=0
+        ) as mock_rank_run:
             with patch.object(
                 sys,
                 "argv",
-                [f_worker_str, "rank", "/path/to/manifest.json", "00-tasks-1", "c16_b8M"],
+                [
+                    f_worker_str,
+                    "rank",
+                    "/path/to/manifest.json",
+                    "00-tasks-1",
+                    "c16_b8M",
+                ],
             ):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_worker_str, run_name="__main__")
@@ -276,7 +295,13 @@ class WorkerEntryTest(unittest.TestCase):
         with patch.object(
             sys,
             "argv",
-            [f_worker_str, "allocation", "/path/to/manifest.json", "point-0", "extra_arg"],
+            [
+                f_worker_str,
+                "allocation",
+                "/path/to/manifest.json",
+                "point-0",
+                "extra_arg",
+            ],
         ):
             with patch("sys.stderr", new_callable=io.StringIO):
                 with self.assertRaises(SystemExit) as ctx:
@@ -299,7 +324,14 @@ class WorkerEntryTest(unittest.TestCase):
         with patch.object(
             sys,
             "argv",
-            [f_worker_str, "rank", "/path/to/manifest.json", "point-0", "c16_b8M", "extra"],
+            [
+                f_worker_str,
+                "rank",
+                "/path/to/manifest.json",
+                "point-0",
+                "c16_b8M",
+                "extra",
+            ],
         ):
             with patch("sys.stderr", new_callable=io.StringIO):
                 with self.assertRaises(SystemExit) as ctx:
@@ -403,7 +435,9 @@ class WorkerEntryTest(unittest.TestCase):
             def run(self, *f_args, **f_kwargs):
                 return 0
 
-        with patch("lsmiotool.lib.worker.AllocationController", MockAllocationController):
+        with patch(
+            "lsmiotool.lib.worker.AllocationController", MockAllocationController
+        ):
             with patch.object(
                 sys,
                 "argv",
@@ -425,7 +459,9 @@ class WorkerEntryTest(unittest.TestCase):
         os.chdir(f_unrelated_dir)
 
         # Execute allocation mode from unrelated cwd
-        with patch("lsmiotool.lib.worker.AllocationController.run", return_value=0) as mock_alloc:
+        with patch(
+            "lsmiotool.lib.worker.AllocationController.run", return_value=0
+        ) as mock_alloc:
             with patch.object(
                 sys,
                 "argv",
@@ -453,7 +489,10 @@ class WorkerEntryTest(unittest.TestCase):
         f_worker_str = str(self.m_worker_executable)
 
         # Assert no scheduler commands (srun, aprun, sbatch, qsub) are invoked during worker execution
-        with patch("subprocess.run") as mock_subproc, patch("subprocess.Popen") as mock_popen:
+        with (
+            patch("subprocess.run") as mock_subproc,
+            patch("subprocess.Popen") as mock_popen,
+        ):
             with patch("lsmiotool.lib.worker.AllocationController.run", return_value=0):
                 with patch.object(
                     sys,
@@ -475,7 +514,9 @@ class WorkerEntryTest(unittest.TestCase):
 
         # Copy actual lsmiotool python files to satisfy InstalledPackageValidator
         f_src_tool_dir = Path(__file__).resolve().parents[2]
-        shutil.copyfile(str(f_src_tool_dir / "__init__.py"), os.path.join(f_pkg_dir, "__init__.py"))
+        shutil.copyfile(
+            str(f_src_tool_dir / "__init__.py"), os.path.join(f_pkg_dir, "__init__.py")
+        )
         for f_file in (f_src_tool_dir / "lib").glob("*.py"):
             shutil.copyfile(str(f_file), os.path.join(f_lib_dir, f_file.name))
 
@@ -486,13 +527,18 @@ class WorkerEntryTest(unittest.TestCase):
         # Create etc directory with environments.json
         f_etc_dir = os.path.join(f_stage_dir, "share", "lsmio", "etc")
         os.makedirs(f_etc_dir, exist_ok=True)
-        shutil.copyfile(str(f_src_tool_dir / "etc" / "environments.json"), os.path.join(f_etc_dir, "environments.json"))
+        shutil.copyfile(
+            str(f_src_tool_dir / "etc" / "environments.json"),
+            os.path.join(f_etc_dir, "environments.json"),
+        )
 
         # Create lmp-reaxff assets directory
         f_assets_dir = os.path.join(f_stage_dir, "share", "lsmio", "lmp-reaxff")
         os.makedirs(f_assets_dir, exist_ok=True)
         for f_asset in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
-            with open(os.path.join(f_assets_dir, f_asset), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_assets_dir, f_asset), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write(f"# asset {f_asset}\n")
 
         # Create staged worker binary from template
@@ -505,13 +551,16 @@ class WorkerEntryTest(unittest.TestCase):
             f_tmpl = f_f.read()
 
         f_configured_worker = (
-            f_tmpl
-            .replace("@REL_LIBEXEC_TO_PYTHON@", "../../share/lsmio/python")
-            .replace("@REL_LIBEXEC_TO_PROFILE@", "../../share/lsmio/etc/environments.json")
+            f_tmpl.replace("@REL_LIBEXEC_TO_PYTHON@", "../../share/lsmio/python")
+            .replace(
+                "@REL_LIBEXEC_TO_PROFILE@", "../../share/lsmio/etc/environments.json"
+            )
             .replace("@REL_LIBEXEC_TO_ETC@", "../../share/lsmio/etc")
             .replace("@REL_LIBEXEC_TO_ASSETS@", "../../share/lsmio/lmp-reaxff")
             .replace("@REL_LIBEXEC_TO_WORKER@", "lsmiotool-worker")
-            .replace("@REL_LIBEXEC_TO_VERSION@", "../../share/lsmio/python/lsmiotool/VERSION")
+            .replace(
+                "@REL_LIBEXEC_TO_VERSION@", "../../share/lsmio/python/lsmiotool/VERSION"
+            )
         )
         with open(f_inst_worker, "w", encoding="utf-8") as f_f:
             f_f.write(f_configured_worker)
@@ -529,7 +578,9 @@ class WorkerEntryTest(unittest.TestCase):
         self.assertTrue(f_runtime_layout.is_installed)
         self.assertEqual(f_runtime_layout.execution_mode, ExecutionMode.INSTALLED)
         self.assertEqual(f_runtime_layout.asset_root, os.path.normpath(f_assets_dir))
-        self.assertEqual(f_runtime_layout.worker_executable, os.path.normpath(f_inst_worker))
+        self.assertEqual(
+            f_runtime_layout.worker_executable, os.path.normpath(f_inst_worker)
+        )
         self.assertFalse(hasattr(f_runtime_layout, "runRoot"))
         self.assertFalse(hasattr(f_runtime_layout, "benchmarkRoot"))
 
@@ -543,7 +594,9 @@ class WorkerEntryTest(unittest.TestCase):
             def run(self, *f_args, **f_kwargs):
                 return 0
 
-        with patch("lsmiotool.lib.worker.AllocationController", MockAllocationController):
+        with patch(
+            "lsmiotool.lib.worker.AllocationController", MockAllocationController
+        ):
             with patch.object(
                 sys,
                 "argv",
@@ -554,8 +607,12 @@ class WorkerEntryTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 0)
                 self.assertEqual(len(f_captured_alloc_kwargs), 1)
                 f_kw = f_captured_alloc_kwargs[0]
-                self.assertEqual(f_kw.get("f_worker_executable"), os.path.abspath(f_inst_worker))
-                self.assertEqual(f_kw.get("f_asset_source"), os.path.normpath(f_assets_dir))
+                self.assertEqual(
+                    f_kw.get("f_worker_executable"), os.path.abspath(f_inst_worker)
+                )
+                self.assertEqual(
+                    f_kw.get("f_asset_source"), os.path.normpath(f_assets_dir)
+                )
                 self.assertIsNone(
                     f_kw.get("f_layout"),
                     "AllocationController must receive f_layout=None from installed worker (F-02)",
@@ -575,7 +632,13 @@ class WorkerEntryTest(unittest.TestCase):
             with patch.object(
                 sys,
                 "argv",
-                [f_inst_worker, "rank", "/path/to/manifest.json", "00-tasks-1", "c16_b8M"],
+                [
+                    f_inst_worker,
+                    "rank",
+                    "/path/to/manifest.json",
+                    "00-tasks-1",
+                    "c16_b8M",
+                ],
             ):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_inst_worker, run_name="__main__")
@@ -587,6 +650,7 @@ class WorkerEntryTest(unittest.TestCase):
 
         # 4. Prove no duck-typing / cross-fallback between RuntimeLayout and ArtifactLayout
         from lsmiotool.lib.artifacts import ArtifactLayout
+
         with self.assertRaises(AttributeError):
             _ = f_runtime_layout.runRoot  # type: ignore
         with self.assertRaises(AttributeError):
@@ -609,31 +673,63 @@ class WorkerEntryTest(unittest.TestCase):
 
         # Plant decoy files
         for f_dir in (f_unrelated_cwd, f_unrelated_home):
-            with open(os.path.join(f_dir, "manifest.json"), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_dir, "manifest.json"), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("decoy\n")
 
         f_env = dict(os.environ)
         f_env["HOME"] = f_unrelated_home
 
         # 1. Zero arguments -> exit 1
-        f_p1 = subprocess.run([sys.executable, f_worker_str], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        f_p1 = subprocess.run(
+            [sys.executable, f_worker_str],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(f_p1.returncode, 1)
 
         # 2. Allocation with insufficient arguments -> exit 2
-        f_p2 = subprocess.run([sys.executable, f_worker_str, "allocation"], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        f_p2 = subprocess.run(
+            [sys.executable, f_worker_str, "allocation"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(f_p2.returncode, 2)
 
         # 3. Rank with insufficient arguments -> exit 2
-        f_p3 = subprocess.run([sys.executable, f_worker_str, "rank"], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        f_p3 = subprocess.run(
+            [sys.executable, f_worker_str, "rank"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(f_p3.returncode, 2)
 
         # 4. Unknown mode -> exit 1
-        f_p4 = subprocess.run([sys.executable, f_worker_str, "invalid_mode"], cwd=f_unrelated_cwd, env=f_env, capture_output=True, text=True)
+        f_p4 = subprocess.run(
+            [sys.executable, f_worker_str, "invalid_mode"],
+            cwd=f_unrelated_cwd,
+            env=f_env,
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(f_p4.returncode, 1)
 
         # 5. Non-existent manifest -> exit 1
         f_p5 = subprocess.run(
-            [sys.executable, f_worker_str, "allocation", "/nonexistent/manifest.json", "00-tasks-1"],
+            [
+                sys.executable,
+                f_worker_str,
+                "allocation",
+                "/nonexistent/manifest.json",
+                "00-tasks-1",
+            ],
             cwd=f_unrelated_cwd,
             env=f_env,
             capture_output=True,
@@ -644,4 +740,3 @@ class WorkerEntryTest(unittest.TestCase):
         # Assert no mutations occurred in decoy cwd/home
         self.assertEqual(os.listdir(f_unrelated_cwd), ["manifest.json"])
         self.assertEqual(os.listdir(f_unrelated_home), ["manifest.json"])
-

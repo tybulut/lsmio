@@ -265,9 +265,7 @@ class ParseMain(BaseMain):
                     "f_output_dir",
                     f_kwargs.get("output_dir", f_kwargs.get("outputDir")),
                 )
-                f_format = f_kwargs.get(
-                    "f_format", f_kwargs.get("format", "csv")
-                )
+                f_format = f_kwargs.get("f_format", f_kwargs.get("format", "csv"))
                 self.m_request = ParseRequest(
                     f_target=f_target,
                     f_output_dir=f_output_dir,
@@ -360,7 +358,9 @@ class ParseMain(BaseMain):
 
         if self.m_init_error is not None:
             sys.stderr.write(f"Error: {self.m_init_error}\n")
-            if isinstance(self.m_init_error, (ParseCliParseError, ValueError, TypeError)):
+            if isinstance(
+                self.m_init_error, (ParseCliParseError, ValueError, TypeError)
+            ):
                 return 2
             return 1
 
@@ -658,9 +658,7 @@ class RunMain(BaseMain):
                 )
             except TypeError:
                 try:
-                    f_orch = self.m_orchestrator_factory(
-                        f_worker_validator=f_validator
-                    )
+                    f_orch = self.m_orchestrator_factory(f_worker_validator=f_validator)
                 except TypeError:
                     f_orch = self.m_orchestrator_factory()
         else:
@@ -669,7 +667,10 @@ class RunMain(BaseMain):
                 f_reporter=f_reporter,
             )
 
-        if hasattr(f_orch, "m_reporter") and getattr(f_orch, "m_reporter", None) is None:
+        if (
+            hasattr(f_orch, "m_reporter")
+            and getattr(f_orch, "m_reporter", None) is None
+        ):
             try:
                 object.__setattr__(f_orch, "m_reporter", f_reporter)
             except Exception:

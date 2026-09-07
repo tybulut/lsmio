@@ -173,7 +173,12 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
             return ProcessResult(0, "IOR-3.3.0: Parallel IO Benchmark\n", "", 0.01)
 
         elif f_exe == "lmp":
-            return ProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb\n-lsmio-mmap\n-lsmio-fallback\n", "", 0.01)
+            return ProcessResult(
+                0,
+                "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb\n-lsmio-mmap\n-lsmio-fallback\n",
+                "",
+                0.01,
+            )
 
         elif f_exe.startswith("bm_"):
             return ProcessResult(0, "LSMIO Benchmark\n", "", 0.01)
@@ -193,14 +198,18 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
 
         elif f_exe == "squeue":
             if self.m_query_fail:
-                return ProcessResult(1, "", "squeue: error: Slurm controller down\n", 0.01)
+                return ProcessResult(
+                    1, "", "squeue: error: Slurm controller down\n", 0.01
+                )
             # Check if recovery query (--name=...)
             for f_arg in f_cmd:
                 if f_arg.startswith("--name="):
                     f_name = f_arg.split("=", 1)[1]
                     f_cands = self.m_recovery_candidates.get(f_name, [])
                     f_lines = [f"{f_cid}|{f_name}|RUNNING" for f_cid in f_cands]
-                    return ProcessResult(0, "\n".join(f_lines) + ("\n" if f_lines else ""), "", 0.01)
+                    return ProcessResult(
+                        0, "\n".join(f_lines) + ("\n" if f_lines else ""), "", 0.01
+                    )
             # Ordinary active query -> return empty so it falls back to accounting (completed)
             return ProcessResult(0, "", "", 0.01)
 
@@ -275,22 +284,48 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
                 return ProcessResult(0, json.dumps({"Jobs": f_jobs_dict}), "", 0.01)
             if "-x" in f_cmd:
                 f_target_id = f_cmd[-1]
-                if f_target_id in self.m_cancelled_jobs or f_target_id.split(".")[0] in self.m_cancelled_jobs:
+                if (
+                    f_target_id in self.m_cancelled_jobs
+                    or f_target_id.split(".")[0] in self.m_cancelled_jobs
+                ):
                     f_exit_status = self.m_accounting_exit_codes.get(f_target_id, 0)
-                    f_job_data = {"Job_Name": "test_job", "job_state": "CANCELLED", "Exit_status": f_exit_status}
+                    f_job_data = {
+                        "Job_Name": "test_job",
+                        "job_state": "CANCELLED",
+                        "Exit_status": f_exit_status,
+                    }
                 elif self.m_job_fail:
                     f_exit_status = self.m_accounting_exit_codes.get(f_target_id, 1)
-                    f_job_data = {"Job_Name": "test_job", "job_state": "F", "Exit_status": f_exit_status}
+                    f_job_data = {
+                        "Job_Name": "test_job",
+                        "job_state": "F",
+                        "Exit_status": f_exit_status,
+                    }
                 else:
                     f_exit_status = self.m_accounting_exit_codes.get(f_target_id, 0)
-                    f_job_data = {"Job_Name": "test_job", "job_state": "F", "Exit_status": f_exit_status}
-                return ProcessResult(0, json.dumps({"Jobs": {f_target_id: f_job_data}}), "", 0.01)
+                    f_job_data = {
+                        "Job_Name": "test_job",
+                        "job_state": "F",
+                        "Exit_status": f_exit_status,
+                    }
+                return ProcessResult(
+                    0, json.dumps({"Jobs": {f_target_id: f_job_data}}), "", 0.01
+                )
             else:
                 f_target_id = f_cmd[-1]
                 if f_target_id in self.m_active_states:
                     return ProcessResult(
                         0,
-                        json.dumps({"Jobs": {f_target_id: {"Job_Name": "test_job", "job_state": self.m_active_states[f_target_id]}}}),
+                        json.dumps(
+                            {
+                                "Jobs": {
+                                    f_target_id: {
+                                        "Job_Name": "test_job",
+                                        "job_state": self.m_active_states[f_target_id],
+                                    }
+                                }
+                            }
+                        ),
                         "",
                         0.01,
                     )
@@ -313,7 +348,9 @@ class MockProcessRunner:
         f_default_returncode: int = 0,
         f_stdout: str = "",
         f_stderr: str = "",
-        f_side_effect: Optional[Callable[[Sequence[str], Dict[str, Any]], ProcessResult]] = None,
+        f_side_effect: Optional[
+            Callable[[Sequence[str], Dict[str, Any]], ProcessResult]
+        ] = None,
     ) -> None:
         self.m_default_returncode = f_default_returncode
         self.m_stdout = f_stdout
@@ -356,7 +393,9 @@ class EndToEndRunTest(unittest.TestCase):
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-e2e-test-")
         self.m_original_cwd = os.getcwd()
         self.m_default_etc = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_etc)
         self.m_test_user = "testuser"
@@ -378,16 +417,26 @@ class EndToEndRunTest(unittest.TestCase):
 
         self.m_ior_path = os.path.join(self.m_bin_dir, "ior")
         with open(self.m_ior_path, "w", encoding="utf-8") as f_f:
-            f_f.write('#!/bin/sh\nif [ "$1" = "-v" ]; then echo "IOR-3.3.0: Parallel IO Benchmark"; exit 0; fi\nexit 0\n')
+            f_f.write(
+                '#!/bin/sh\nif [ "$1" = "-v" ]; then echo "IOR-3.3.0: Parallel IO Benchmark"; exit 0; fi\nexit 0\n'
+            )
         os.chmod(self.m_ior_path, 0o755)
 
         self.m_lmp_path = os.path.join(self.m_bin_dir, "lmp")
         with open(self.m_lmp_path, "w", encoding="utf-8") as f_f:
-            f_f.write('#!/bin/sh\nif [ "$1" = "-h" ]; then echo "LAMMPS (2 Aug 2023)"; echo "-lsmio-buf-size-mb"; echo "-lsmio-mmap"; echo "-lsmio-fallback"; exit 0; fi\nexit 0\n')
+            f_f.write(
+                '#!/bin/sh\nif [ "$1" = "-h" ]; then echo "LAMMPS (2 Aug 2023)"; echo "-lsmio-buf-size-mb"; echo "-lsmio-mmap"; echo "-lsmio-fallback"; exit 0; fi\nexit 0\n'
+            )
         os.chmod(self.m_lmp_path, 0o755)
 
         self.m_bm_paths: Dict[str, str] = {}
-        for f_name in ("bm_native", "bm_adios", "bm_rocksdb", "bm_leveldb", "bm_manager"):
+        for f_name in (
+            "bm_native",
+            "bm_adios",
+            "bm_rocksdb",
+            "bm_leveldb",
+            "bm_manager",
+        ):
             f_p = os.path.join(self.m_bin_dir, f_name)
             with open(f_p, "w", encoding="utf-8") as f_f:
                 f_f.write("#!/bin/sh\nexit 0\n")
@@ -395,21 +444,27 @@ class EndToEndRunTest(unittest.TestCase):
             self.m_bm_paths[f_name] = f_p
 
         # Create LMP assets
-        self.m_lmp_assets_dir = os.path.join(self.m_temp_dir, "share", "lsmio", "lmp-reaxff")
+        self.m_lmp_assets_dir = os.path.join(
+            self.m_temp_dir, "share", "lsmio", "lmp-reaxff"
+        )
         os.makedirs(self.m_lmp_assets_dir, exist_ok=True)
         for f_asset in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
-            with open(os.path.join(self.m_lmp_assets_dir, f_asset), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(self.m_lmp_assets_dir, f_asset), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write(f"# mock content for {f_asset}\n")
 
-        self.m_executables = ExecutableRegistry({
-            "ior": self.m_ior_path,
-            "lmp": self.m_lmp_path,
-            "bm_native": self.m_bm_paths["bm_native"],
-            "bm_adios": self.m_bm_paths["bm_adios"],
-            "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
-            "bm_leveldb": self.m_bm_paths["bm_leveldb"],
-            "bm_manager": self.m_bm_paths["bm_manager"],
-        })
+        self.m_executables = ExecutableRegistry(
+            {
+                "ior": self.m_ior_path,
+                "lmp": self.m_lmp_path,
+                "bm_native": self.m_bm_paths["bm_native"],
+                "bm_adios": self.m_bm_paths["bm_adios"],
+                "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
+                "bm_leveldb": self.m_bm_paths["bm_leveldb"],
+                "bm_manager": self.m_bm_paths["bm_manager"],
+            }
+        )
 
         # Viking profile (Slurm)
         f_base_viking = self.m_registry.getProfile("VIKING")
@@ -424,7 +479,10 @@ class EndToEndRunTest(unittest.TestCase):
             f_launcher=f_base_viking.launcher,
             f_certification=f_base_viking.certification,
             f_test_only=True,
-            f_benchmark_roots={"hdd": self.m_viking_root_hdd, "ssd": self.m_viking_root_ssd},
+            f_benchmark_roots={
+                "hdd": self.m_viking_root_hdd,
+                "ssd": self.m_viking_root_ssd,
+            },
             f_install_prefix=self.m_temp_dir,
             f_executables=self.m_executables,
             f_modules=f_base_viking.modules,
@@ -447,7 +505,10 @@ class EndToEndRunTest(unittest.TestCase):
             f_launcher=f_base_isambard.launcher,
             f_certification=f_base_isambard.certification,
             f_test_only=True,
-            f_benchmark_roots={"hdd": self.m_isambard_root_hdd, "ssd": self.m_isambard_root_ssd},
+            f_benchmark_roots={
+                "hdd": self.m_isambard_root_hdd,
+                "ssd": self.m_isambard_root_ssd,
+            },
             f_install_prefix=self.m_temp_dir,
             f_executables=self.m_executables,
             f_modules=f_base_isambard.modules,
@@ -473,7 +534,7 @@ class EndToEndRunTest(unittest.TestCase):
         f_failed: bool = False,
     ) -> None:
         """Simulate controller and rank worker execution for a scale point."""
-        f_is_lsmio = (f_plan.request.target.lower() == "lsmio")
+        f_is_lsmio = f_plan.request.target.lower() == "lsmio"
         f_ret = 1 if f_failed else 0
         f_status = "failed" if f_failed else "completed"
 
@@ -488,9 +549,13 @@ class EndToEndRunTest(unittest.TestCase):
         for f_combo in f_plan.combinations:
             if f_is_lsmio:
                 for f_r in range(f_scale_point.tasks):
-                    f_log = f_artifact_store.layout.pointRankLogPath(f_scale_point, f_r, f_combo.name, f_ordinal)
+                    f_log = f_artifact_store.layout.pointRankLogPath(
+                        f_scale_point, f_r, f_combo.name, f_ordinal
+                    )
                     f_res_path = os.path.join(
-                        f_artifact_store.layout.pointRankCombinationDir(f_scale_point, f_r, f_combo.name, f_ordinal),
+                        f_artifact_store.layout.pointRankCombinationDir(
+                            f_scale_point, f_r, f_combo.name, f_ordinal
+                        ),
                         f"rank_{f_r}.db",
                     )
                     os.makedirs(os.path.dirname(f_log), exist_ok=True)
@@ -555,7 +620,10 @@ class EndToEndRunTest(unittest.TestCase):
 
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
             # When sbatch is called, simulate worker writing results for the point
-            if f_orch.last_artifact_store is not None and f_orch.last_evidence_store is not None:
+            if (
+                f_orch.last_artifact_store is not None
+                and f_orch.last_evidence_store is not None
+            ):
                 self._simulatePointExecution(
                     f_orch.last_artifact_store,
                     f_orch.last_evidence_store,
@@ -597,29 +665,45 @@ class EndToEndRunTest(unittest.TestCase):
         # Check submission files
         f_pt = f_orch.last_plan.scale_points[0]
         f_sched_dir = f_art_store.layout.pointSchedulerDir(f_pt, 0)
-        self.assertTrue(os.path.exists(os.path.join(f_sched_dir, "submission_requested.json")))
-        self.assertTrue(os.path.exists(os.path.join(f_sched_dir, "submission_dispatched.json")))
-        self.assertTrue(os.path.exists(os.path.join(f_sched_dir, "submission_recorded.json")))
+        self.assertTrue(
+            os.path.exists(os.path.join(f_sched_dir, "submission_requested.json"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(f_sched_dir, "submission_dispatched.json"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(f_sched_dir, "submission_recorded.json"))
+        )
 
         # Check controller results for all 6 combinations
         for f_combo in f_orch.last_plan.combinations:
             f_res_path = f_art_store.layout.pointControllerResultPath(f_pt, f_combo, 0)
-            self.assertTrue(os.path.exists(f_res_path), f"Missing controller result at {f_res_path}")
+            self.assertTrue(
+                os.path.exists(f_res_path), f"Missing controller result at {f_res_path}"
+            )
 
         # Check whole_run_succeeded event
         f_ctrl_evs = f_orch.last_evidence_store.readControlEvents("control")
         self.assertTrue(
-            any(f_ev.evidence_kind == EvidenceKind.WHOLE_RUN_SUCCEEDED for f_ev in f_ctrl_evs),
+            any(
+                f_ev.evidence_kind == EvidenceKind.WHOLE_RUN_SUCCEEDED
+                for f_ev in f_ctrl_evs
+            ),
             "Expected WHOLE_RUN_SUCCEEDED event in control events",
         )
 
     def testLsmioUniqueRanks(self) -> None:
         """2. testLsmioUniqueRanks: Runs LSMIO multi-rank scale, verifies rank worker launching, individual rank claim locks, unique rank results per combination, and controller result validation."""
-        f_req = RunRequest(f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_fake_runner = FakeSchedulerCommandRunner()
 
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch.last_artifact_store is not None and f_orch.last_evidence_store is not None:
+            if (
+                f_orch.last_artifact_store is not None
+                and f_orch.last_evidence_store is not None
+            ):
                 f_idx = f_fake_runner.m_submit_idx - 1
                 f_pt = f_orch.last_plan.scale_points[f_idx]
                 if f_pt.tasks == 1:
@@ -647,9 +731,13 @@ class EndToEndRunTest(unittest.TestCase):
                             RankClaimStore.claim(f_rank_r_dir, f_r)
 
                         for f_combo in f_orch.last_plan.combinations:
-                            f_log = f_orch.last_artifact_store.layout.pointRankLogPath(f_pt, f_r, f_combo.name, f_idx)
+                            f_log = f_orch.last_artifact_store.layout.pointRankLogPath(
+                                f_pt, f_r, f_combo.name, f_idx
+                            )
                             f_res_path = os.path.join(
-                                f_orch.last_artifact_store.layout.pointRankCombinationDir(f_pt, f_r, f_combo.name, f_idx),
+                                f_orch.last_artifact_store.layout.pointRankCombinationDir(
+                                    f_pt, f_r, f_combo.name, f_idx
+                                ),
                                 f"rank_{f_r}.db",
                             )
                             os.makedirs(os.path.dirname(f_log), exist_ok=True)
@@ -721,7 +809,10 @@ class EndToEndRunTest(unittest.TestCase):
                     f_orch.last_artifact_store.layout.combinationName(f_combo),
                     "result.json",
                 )
-                self.assertTrue(os.path.exists(f_rank_res), f"Missing rank result for rank {f_r} at {f_rank_res}")
+                self.assertTrue(
+                    os.path.exists(f_rank_res),
+                    f"Missing rank result for rank {f_r} at {f_rank_res}",
+                )
                 with open(f_rank_res, "r", encoding="utf-8") as f_f:
                     f_data = json.load(f_f)
                     self.assertEqual(f_data["payload"]["rank"], f_r)
@@ -729,11 +820,16 @@ class EndToEndRunTest(unittest.TestCase):
     def testLmpSupportedAndLargeGate(self) -> None:
         """3. testLmpSupportedAndLargeGate: Runs LMP bake scale verifying asset staging and execution, and asserts LMP large scale triggers immediate atomic preflight rejection."""
         # 1. Supported LMP bake
-        f_req_bake = RunRequest(f_target="lmp", f_scale="bake", f_ssd=False, f_setup="LSMIO")
+        f_req_bake = RunRequest(
+            f_target="lmp", f_scale="bake", f_ssd=False, f_setup="LSMIO"
+        )
         f_fake_runner = FakeSchedulerCommandRunner()
 
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch.last_artifact_store is not None and f_orch.last_evidence_store is not None:
+            if (
+                f_orch.last_artifact_store is not None
+                and f_orch.last_evidence_store is not None
+            ):
                 f_idx = f_fake_runner.m_submit_idx - 1
                 f_pt = f_orch.last_plan.scale_points[f_idx]
                 self._simulatePointExecution(
@@ -767,7 +863,11 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         # Check directory count before
-        f_runs_before = set(os.listdir(self.m_viking_root_hdd)) if os.path.exists(self.m_viking_root_hdd) else set()
+        f_runs_before = (
+            set(os.listdir(self.m_viking_root_hdd))
+            if os.path.exists(self.m_viking_root_hdd)
+            else set()
+        )
 
         with self.assertRaises(PreflightError) as f_ctx:
             f_orch_large.execute(
@@ -777,8 +877,16 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertIn("LMP large scale is unsupported", str(f_ctx.exception))
 
         # Check directory count after -> no mutation
-        f_runs_after = set(os.listdir(self.m_viking_root_hdd)) if os.path.exists(self.m_viking_root_hdd) else set()
-        self.assertEqual(f_runs_before, f_runs_after, "Expected no new run directory created on LMP large rejection")
+        f_runs_after = (
+            set(os.listdir(self.m_viking_root_hdd))
+            if os.path.exists(self.m_viking_root_hdd)
+            else set()
+        )
+        self.assertEqual(
+            f_runs_before,
+            f_runs_after,
+            "Expected no new run directory created on LMP large rejection",
+        )
 
         # Check RunMain integration for LMP large returns 1
         f_main_large = RunMain(
@@ -942,8 +1050,14 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         # 1. Validation of qualified handle with server suffixes, leading zeros, and plain decimal
-        self.assertEqual(PbsSchedulerAdapter.validateJobId("123456.isambard-pbs"), "123456.isambard-pbs")
-        self.assertEqual(PbsSchedulerAdapter.validateJobId("00123456.pbs_srv-01"), "00123456.pbs_srv-01")
+        self.assertEqual(
+            PbsSchedulerAdapter.validateJobId("123456.isambard-pbs"),
+            "123456.isambard-pbs",
+        )
+        self.assertEqual(
+            PbsSchedulerAdapter.validateJobId("00123456.pbs_srv-01"),
+            "00123456.pbs_srv-01",
+        )
         self.assertEqual(PbsSchedulerAdapter.validateJobId("654321"), "654321")
 
         with self.assertRaises(SchedulerError):
@@ -958,8 +1072,13 @@ class EndToEndRunTest(unittest.TestCase):
             PbsSchedulerAdapter.validateJobId(123456)
 
         # 2. Submit output parsing retains exact qualified handle
-        self.assertEqual(f_adapter.parseSubmitOutput("123456.isambard-pbs\n"), "123456.isambard-pbs")
-        self.assertEqual(f_adapter.parseSubmitOutput("009876.pbs-server_01\n"), "009876.pbs-server_01")
+        self.assertEqual(
+            f_adapter.parseSubmitOutput("123456.isambard-pbs\n"), "123456.isambard-pbs"
+        )
+        self.assertEqual(
+            f_adapter.parseSubmitOutput("009876.pbs-server_01\n"),
+            "009876.pbs-server_01",
+        )
         with self.assertRaises(SubmissionDispatchError):
             f_adapter.parseSubmitOutput("Job submitted: 123456.isambard-pbs\n")
         with self.assertRaises(SubmissionDispatchError):
@@ -967,64 +1086,105 @@ class EndToEndRunTest(unittest.TestCase):
 
         # 3. Query commands use exact qualified handle
         f_act_cmd = PbsSchedulerAdapter.activeQueryCommand(f_qualified_id)
-        self.assertEqual(f_act_cmd, ["qstat", "-f", "-F", "json", "123456.isambard-pbs"])
+        self.assertEqual(
+            f_act_cmd, ["qstat", "-f", "-F", "json", "123456.isambard-pbs"]
+        )
 
         f_acct_cmd = PbsSchedulerAdapter.accountingQueryCommand(f_qualified_id)
-        self.assertEqual(f_acct_cmd, ["qstat", "-x", "-f", "-F", "json", "123456.isambard-pbs"])
+        self.assertEqual(
+            f_acct_cmd, ["qstat", "-x", "-f", "-F", "json", "123456.isambard-pbs"]
+        )
 
         f_cancel_cmd = PbsSchedulerAdapter.cancelCommand(f_qualified_id)
         self.assertEqual(f_cancel_cmd, ["qdel", "123456.isambard-pbs"])
 
         f_rec_cmd = PbsSchedulerAdapter.recoveryCommand("testuser")
-        self.assertEqual(f_rec_cmd, ["qstat", "-x", "-f", "-F", "json", "-u", "testuser"])
+        self.assertEqual(
+            f_rec_cmd, ["qstat", "-x", "-f", "-F", "json", "-u", "testuser"]
+        )
 
         # 4. Exact full key matching in JSON parser rejects decoys
-        f_decoy_json = json.dumps({
-            "Jobs": {
-                "123456": {"Job_Name": "test", "job_state": "R"},
-                "123456.other-pbs": {"Job_Name": "test", "job_state": "R"},
-                "123456.isambard-pbs-fake": {"Job_Name": "test", "job_state": "R"},
+        f_decoy_json = json.dumps(
+            {
+                "Jobs": {
+                    "123456": {"Job_Name": "test", "job_state": "R"},
+                    "123456.other-pbs": {"Job_Name": "test", "job_state": "R"},
+                    "123456.isambard-pbs-fake": {"Job_Name": "test", "job_state": "R"},
+                }
             }
-        })
-        self.assertIsNone(PbsSchedulerAdapter.parseActiveQuery(f_decoy_json, f_job_id=f_qualified_id))
+        )
+        self.assertIsNone(
+            PbsSchedulerAdapter.parseActiveQuery(f_decoy_json, f_job_id=f_qualified_id)
+        )
         self.assertEqual(
-            PbsSchedulerAdapter.parseAccountingQuery(f_decoy_json, f_job_id=f_qualified_id),
+            PbsSchedulerAdapter.parseAccountingQuery(
+                f_decoy_json, f_job_id=f_qualified_id
+            ),
             (SchedulerJobState.UNKNOWN, None),
         )
 
         # Exact matching matches the qualified key
-        f_exact_json = json.dumps({
-            "Jobs": {
-                "123456.isambard-pbs": {"Job_Name": "test", "job_state": "F", "Exit_status": 0}
+        f_exact_json = json.dumps(
+            {
+                "Jobs": {
+                    "123456.isambard-pbs": {
+                        "Job_Name": "test",
+                        "job_state": "F",
+                        "Exit_status": 0,
+                    }
+                }
             }
-        })
+        )
         self.assertEqual(
-            PbsSchedulerAdapter.parseAccountingQuery(f_exact_json, f_job_id=f_qualified_id),
+            PbsSchedulerAdapter.parseAccountingQuery(
+                f_exact_json, f_job_id=f_qualified_id
+            ),
             (SchedulerJobState.SUCCEEDED, 0),
         )
 
         # Negative exit signal maps to POSIX 128 + abs(sig)
-        f_signal_json = json.dumps({
-            "Jobs": {
-                "123456.isambard-pbs": {"Job_Name": "test", "job_state": "F", "Exit_status": -15}
+        f_signal_json = json.dumps(
+            {
+                "Jobs": {
+                    "123456.isambard-pbs": {
+                        "Job_Name": "test",
+                        "job_state": "F",
+                        "Exit_status": -15,
+                    }
+                }
             }
-        })
+        )
         self.assertEqual(
-            PbsSchedulerAdapter.parseAccountingQuery(f_signal_json, f_job_id=f_qualified_id),
+            PbsSchedulerAdapter.parseAccountingQuery(
+                f_signal_json, f_job_id=f_qualified_id
+            ),
             (SchedulerJobState.FAILED, 143),
         )
 
         # 5. Evidence records retain verbatim qualified JobHandle
         f_pt = f_evidence_store.plan.scale_points[0]
         f_handle = JobHandle("pbs", f_qualified_id)
-        f_evidence_store.recordSubmissionRequested(f_pt, "control", {"token": "tok1"}, f_ordinal=0)
-        f_evidence_store.recordSubmissionDispatched(f_pt, "control", {"token": "tok1"}, f_ordinal=0)
-        f_evidence_store.recordSubmissionRecorded(f_pt, "control", f_handle, {}, f_ordinal=0)
+        f_evidence_store.recordSubmissionRequested(
+            f_pt, "control", {"token": "tok1"}, f_ordinal=0
+        )
+        f_evidence_store.recordSubmissionDispatched(
+            f_pt, "control", {"token": "tok1"}, f_ordinal=0
+        )
+        f_evidence_store.recordSubmissionRecorded(
+            f_pt, "control", f_handle, {}, f_ordinal=0
+        )
         f_evidence_store.recordSchedulerObservation(
-            f_pt, "control", 1, {"handle": f_handle.toDict(), "state": "succeeded", "exit_code": 0}, f_ordinal=0
+            f_pt,
+            "control",
+            1,
+            {"handle": f_handle.toDict(), "state": "succeeded", "exit_code": 0},
+            f_ordinal=0,
         )
 
-        f_disp_path = os.path.join(f_evidence_store.layout.pointSchedulerDir(f_pt, 0), "submission_recorded.json")
+        f_disp_path = os.path.join(
+            f_evidence_store.layout.pointSchedulerDir(f_pt, 0),
+            "submission_recorded.json",
+        )
         with open(f_disp_path, "r", encoding="utf-8") as f_f:
             f_rec = json.load(f_f)
             self.assertEqual(f_rec["payload"]["handle"]["job_id"], f_qualified_id)
@@ -1038,7 +1198,10 @@ class EndToEndRunTest(unittest.TestCase):
         f_fake_runner.m_submit_job_ids = [f_qualified_id]
 
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch.last_artifact_store is not None and f_orch.last_evidence_store is not None:
+            if (
+                f_orch.last_artifact_store is not None
+                and f_orch.last_evidence_store is not None
+            ):
                 self._simulatePointExecution(
                     f_orch.last_artifact_store,
                     f_orch.last_evidence_store,
@@ -1075,15 +1238,25 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(f_view.point_states[0].handle.backend, "pbs")
 
         # 2. Command trace verifies exact qualified handle passed to every scheduler invocation
-        f_qsub_calls = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qsub"]
+        f_qsub_calls = [
+            c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qsub"
+        ]
         self.assertEqual(len(f_qsub_calls), 1)
 
-        f_qstat_active_calls = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qstat" and "-x" not in c and "-u" not in c]
+        f_qstat_active_calls = [
+            c
+            for c in f_fake_runner.m_calls
+            if os.path.basename(c[0]) == "qstat" and "-x" not in c and "-u" not in c
+        ]
         self.assertTrue(len(f_qstat_active_calls) >= 1)
         for f_c in f_qstat_active_calls:
             self.assertEqual(f_c, ["qstat", "-f", "-F", "json", f_qualified_id])
 
-        f_qstat_acct_calls = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qstat" and "-x" in c and "-u" not in c]
+        f_qstat_acct_calls = [
+            c
+            for c in f_fake_runner.m_calls
+            if os.path.basename(c[0]) == "qstat" and "-x" in c and "-u" not in c
+        ]
         self.assertTrue(len(f_qstat_acct_calls) >= 1)
         for f_c in f_qstat_acct_calls:
             self.assertEqual(f_c, ["qstat", "-x", "-f", "-F", "json", f_qualified_id])
@@ -1108,7 +1281,11 @@ class EndToEndRunTest(unittest.TestCase):
 
         # scheduler_observations
         f_obs_dir = f_art_store.layout.pointSchedulerObservationsDir(f_pt, "control", 0)
-        f_obs_files = [os.path.join(f_obs_dir, x) for x in os.listdir(f_obs_dir) if x.endswith(".json")]
+        f_obs_files = [
+            os.path.join(f_obs_dir, x)
+            for x in os.listdir(f_obs_dir)
+            if x.endswith(".json")
+        ]
         self.assertTrue(len(f_obs_files) >= 1)
         with open(f_obs_files[0], "r", encoding="utf-8") as f_f:
             f_obs_data = json.load(f_f)
@@ -1163,11 +1340,17 @@ class EndToEndRunTest(unittest.TestCase):
 
         f_spec = JobSpec(
             f_point_id=f_scale_point,
-            f_script_path=os.path.join(f_art_store.layout.pointSchedulerDir(f_scale_point, 0), "job.sh"),
+            f_script_path=os.path.join(
+                f_art_store.layout.pointSchedulerDir(f_scale_point, 0), "job.sh"
+            ),
             f_working_dir=f_art_store.layout.pointDir(f_scale_point, 0),
             f_resources=f_plan.scheduled_points[0],
-            f_output_path=os.path.join(f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.out"),
-            f_error_path=os.path.join(f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.err"),
+            f_output_path=os.path.join(
+                f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.out"
+            ),
+            f_error_path=os.path.join(
+                f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.err"
+            ),
             f_job_name=f_token,
         )
 
@@ -1183,15 +1366,26 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(f_res.job_handle.backend, "pbs")
 
         # Verify whole-user qstat was called for recovery and NO qsub call was made
-        f_qsub_calls = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qsub"]
-        self.assertEqual(len(f_qsub_calls), 0, f"Expected no duplicate qsub call, got: {f_qsub_calls}")
+        f_qsub_calls = [
+            c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qsub"
+        ]
+        self.assertEqual(
+            len(f_qsub_calls),
+            0,
+            f"Expected no duplicate qsub call, got: {f_qsub_calls}",
+        )
 
         f_rec_calls = [c for c in f_fake_runner.m_calls if "-u" in c]
         self.assertEqual(len(f_rec_calls), 1)
-        self.assertEqual(f_rec_calls[0], ["qstat", "-x", "-f", "-F", "json", "-u", getpass.getuser()])
+        self.assertEqual(
+            f_rec_calls[0], ["qstat", "-x", "-f", "-F", "json", "-u", getpass.getuser()]
+        )
 
         # Verify submission_recorded.json was written with exact qualified handle
-        f_acc_file = os.path.join(f_art_store.layout.pointSchedulerDir(f_scale_point, 0), "submission_recorded.json")
+        f_acc_file = os.path.join(
+            f_art_store.layout.pointSchedulerDir(f_scale_point, 0),
+            "submission_recorded.json",
+        )
         self.assertTrue(os.path.exists(f_acc_file))
         with open(f_acc_file, "r", encoding="utf-8") as f_f:
             f_acc_data = json.load(f_f)
@@ -1222,15 +1416,23 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         self.assertEqual(f_orch_int.exitCode, 130)
-        self.assertIn(f_view_int.state, (OverallRunState.INTERRUPTED, OverallRunState.CANCELLED))
+        self.assertIn(
+            f_view_int.state, (OverallRunState.INTERRUPTED, OverallRunState.CANCELLED)
+        )
 
         # Verify qdel was called with exact qualified handle
-        f_qdel_calls = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qdel"]
+        f_qdel_calls = [
+            c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qdel"
+        ]
         self.assertEqual(len(f_qdel_calls), 1)
         self.assertEqual(f_qdel_calls[0], ["qdel", f_qualified_id])
 
         # Verify post-qdel accounting query was polled with exact qualified handle
-        f_qstat_acct = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "qstat" and "-x" in c and "-u" not in c]
+        f_qstat_acct = [
+            c
+            for c in f_fake_runner.m_calls
+            if os.path.basename(c[0]) == "qstat" and "-x" in c and "-u" not in c
+        ]
         self.assertTrue(len(f_qstat_acct) >= 1)
         for f_c in f_qstat_acct:
             self.assertEqual(f_c, ["qstat", "-x", "-f", "-F", "json", f_qualified_id])
@@ -1270,11 +1472,13 @@ class EndToEndRunTest(unittest.TestCase):
             f_run_id_source=lambda: "shared-run-id-123",
         )
 
-        f_fake_runner.m_on_submit_callback = lambda jid, cwd: self._simulatePointExecution(
-            f_orch1.last_artifact_store,
-            f_orch1.last_evidence_store,
-            f_orch1.last_plan.scale_points[0],
-            f_orch1.last_plan,
+        f_fake_runner.m_on_submit_callback = lambda jid, cwd: (
+            self._simulatePointExecution(
+                f_orch1.last_artifact_store,
+                f_orch1.last_evidence_store,
+                f_orch1.last_plan.scale_points[0],
+                f_orch1.last_plan,
+            )
         )
 
         # Orch1 executes and allocates shared-run-id-123
@@ -1309,11 +1513,19 @@ class EndToEndRunTest(unittest.TestCase):
             f_run_id_source=lambda: "run-concurrent-distinct-2",
         )
 
-        f_fake_runner.m_on_submit_callback = lambda jid, cwd: self._simulatePointExecution(
-            f_orch1.last_artifact_store if cwd and "distinct-1" in cwd else f_orch2.last_artifact_store,
-            f_orch1.last_evidence_store if cwd and "distinct-1" in cwd else f_orch2.last_evidence_store,
-            f_orch1.last_plan.scale_points[0] if cwd and "distinct-1" in cwd else f_orch2.last_plan.scale_points[0],
-            f_orch1.last_plan if cwd and "distinct-1" in cwd else f_orch2.last_plan,
+        f_fake_runner.m_on_submit_callback = lambda jid, cwd: (
+            self._simulatePointExecution(
+                f_orch1.last_artifact_store
+                if cwd and "distinct-1" in cwd
+                else f_orch2.last_artifact_store,
+                f_orch1.last_evidence_store
+                if cwd and "distinct-1" in cwd
+                else f_orch2.last_evidence_store,
+                f_orch1.last_plan.scale_points[0]
+                if cwd and "distinct-1" in cwd
+                else f_orch2.last_plan.scale_points[0],
+                f_orch1.last_plan if cwd and "distinct-1" in cwd else f_orch2.last_plan,
+            )
         )
 
         f_view1 = f_orch1.execute(f_request=f_req, f_site=self.m_viking_profile)
@@ -1322,7 +1534,10 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(f_view1.state, OverallRunState.SUCCEEDED)
         self.assertEqual(f_view2.state, OverallRunState.SUCCEEDED)
 
-        self.assertNotEqual(f_orch1.last_artifact_store.layout.runRoot, f_orch2.last_artifact_store.layout.runRoot)
+        self.assertNotEqual(
+            f_orch1.last_artifact_store.layout.runRoot,
+            f_orch2.last_artifact_store.layout.runRoot,
+        )
         self.assertTrue(os.path.isdir(f_orch1.last_artifact_store.layout.runRoot))
         self.assertTrue(os.path.isdir(f_orch2.last_artifact_store.layout.runRoot))
 
@@ -1338,7 +1553,8 @@ class EndToEndRunTest(unittest.TestCase):
 
         # b) Preflight validation failure
         f_main_lmp = RunMain(
-            "lmp", "large",
+            "lmp",
+            "large",
             f_site=self.m_viking_profile,
             f_worker_validator=lambda f_p: self.m_worker_path,
         )
@@ -1362,7 +1578,10 @@ class EndToEndRunTest(unittest.TestCase):
         f_fake_runner_combo_fail = FakeSchedulerCommandRunner()
 
         def on_submit_combo_fail(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch_combo_fail.last_artifact_store and f_orch_combo_fail.last_evidence_store:
+            if (
+                f_orch_combo_fail.last_artifact_store
+                and f_orch_combo_fail.last_evidence_store
+            ):
                 self._simulatePointExecution(
                     f_orch_combo_fail.last_artifact_store,
                     f_orch_combo_fail.last_evidence_store,
@@ -1388,7 +1607,10 @@ class EndToEndRunTest(unittest.TestCase):
         f_fake_runner_rank_fail = FakeSchedulerCommandRunner()
 
         def on_submit_rank_fail(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch_rank_fail.last_artifact_store and f_orch_rank_fail.last_evidence_store:
+            if (
+                f_orch_rank_fail.last_artifact_store
+                and f_orch_rank_fail.last_evidence_store
+            ):
                 f_pt = f_orch_rank_fail.last_plan.scale_points[0]
                 for f_combo in f_orch_rank_fail.last_plan.combinations:
                     # Rank 0 succeeds, Rank 1 fails
@@ -1414,13 +1636,24 @@ class EndToEndRunTest(unittest.TestCase):
                         f_point=f_pt,
                         f_global_rank=1,
                         f_combination=f_combo,
-                        f_payload={"returncode": 1, "status": "failed", "global_rank": 1, "rank": 1, "combination": f_combo.name},
+                        f_payload={
+                            "returncode": 1,
+                            "status": "failed",
+                            "global_rank": 1,
+                            "rank": 1,
+                            "combination": f_combo.name,
+                        },
                         f_ordinal=0,
                     )
                     f_orch_rank_fail.last_evidence_store.recordControllerResult(
                         f_point=f_pt,
                         f_combination=f_combo,
-                        f_payload={"returncode": 1, "status": "failed", "stage": "rank_evidence", "combination": f_combo.name},
+                        f_payload={
+                            "returncode": 1,
+                            "status": "failed",
+                            "stage": "rank_evidence",
+                            "combination": f_combo.name,
+                        },
                         f_ordinal=0,
                     )
 
@@ -1476,11 +1709,17 @@ class EndToEndRunTest(unittest.TestCase):
 
         f_spec = JobSpec(
             f_point_id=f_scale_point,
-            f_script_path=os.path.join(f_art_store.layout.pointSchedulerDir(f_scale_point, 0), "job.sh"),
+            f_script_path=os.path.join(
+                f_art_store.layout.pointSchedulerDir(f_scale_point, 0), "job.sh"
+            ),
             f_working_dir=f_art_store.layout.pointDir(f_scale_point, 0),
             f_resources=f_plan.scheduled_points[0],
-            f_output_path=os.path.join(f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.out"),
-            f_error_path=os.path.join(f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.err"),
+            f_output_path=os.path.join(
+                f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.out"
+            ),
+            f_error_path=os.path.join(
+                f_art_store.layout.pointLogsDir(f_scale_point, 0), "job.err"
+            ),
             f_job_name=f_token,
         )
 
@@ -1496,11 +1735,20 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(f_res.job_handle.backend, "slurm")
 
         # Verify NO sbatch call was made (only squeue/sacct recovery queries)
-        f_sbatch_calls = [c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "sbatch"]
-        self.assertEqual(len(f_sbatch_calls), 0, f"Expected no duplicate sbatch call, got: {f_sbatch_calls}")
+        f_sbatch_calls = [
+            c for c in f_fake_runner.m_calls if os.path.basename(c[0]) == "sbatch"
+        ]
+        self.assertEqual(
+            len(f_sbatch_calls),
+            0,
+            f"Expected no duplicate sbatch call, got: {f_sbatch_calls}",
+        )
 
         # Verify submission_recorded.json was written
-        f_acc_file = os.path.join(f_art_store.layout.pointSchedulerDir(f_scale_point, 0), "submission_recorded.json")
+        f_acc_file = os.path.join(
+            f_art_store.layout.pointSchedulerDir(f_scale_point, 0),
+            "submission_recorded.json",
+        )
         self.assertTrue(os.path.exists(f_acc_file))
 
     def testSignalOrders(self) -> None:
@@ -1527,8 +1775,15 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         self.assertEqual(f_orch_int.exitCode, 130)
-        self.assertIn(f_view_int.state, (OverallRunState.INTERRUPTED, OverallRunState.CANCELLED))
-        self.assertTrue(any(f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_orch_int.last_evidence_store.readControlEvents("control")))
+        self.assertIn(
+            f_view_int.state, (OverallRunState.INTERRUPTED, OverallRunState.CANCELLED)
+        )
+        self.assertTrue(
+            any(
+                f_e.evidence_kind == EvidenceKind.INTERRUPTED
+                for f_e in f_orch_int.last_evidence_store.readControlEvents("control")
+            )
+        )
 
         # 2. SIGTERM during polling -> exit code 143, state INTERRUPTED or CANCELLED
         f_sig_coord_term = SignalCoordinator()
@@ -1551,8 +1806,15 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         self.assertEqual(f_orch_term.exitCode, 143)
-        self.assertIn(f_view_term.state, (OverallRunState.INTERRUPTED, OverallRunState.CANCELLED))
-        self.assertTrue(any(f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_orch_term.last_evidence_store.readControlEvents("control")))
+        self.assertIn(
+            f_view_term.state, (OverallRunState.INTERRUPTED, OverallRunState.CANCELLED)
+        )
+        self.assertTrue(
+            any(
+                f_e.evidence_kind == EvidenceKind.INTERRUPTED
+                for f_e in f_orch_term.last_evidence_store.readControlEvents("control")
+            )
+        )
 
         # 3. Whole run succeeded marker BEFORE signal -> precedence remains SUCCEEDED, exit code 0
         f_plan = RunPlanner.createPlan(
@@ -1571,15 +1833,39 @@ class EndToEndRunTest(unittest.TestCase):
             f_plan,
             f_ordinal=0,
         )
-        f_evidence_store.recordSubmissionRequested(f_point=f_plan.scale_points[0], f_writer_id="control", f_payload={"token": f_plan.tokens[0]}, f_ordinal=0)
-        f_evidence_store.recordSubmissionDispatched(f_point=f_plan.scale_points[0], f_writer_id="control", f_payload={"token": f_plan.tokens[0]}, f_ordinal=0)
-        f_evidence_store.recordSubmissionRecorded(f_point=f_plan.scale_points[0], f_writer_id="control", f_handle=JobHandle("slurm", "10001"), f_payload={}, f_ordinal=0)
-        f_evidence_store.recordSchedulerObservation(
-            f_point=f_plan.scale_points[0], f_writer_id="control", f_sequence=1,
-            f_payload={"handle": {"backend": "slurm", "job_id": "10001"}, "state": "succeeded", "exit_code": 0},
+        f_evidence_store.recordSubmissionRequested(
+            f_point=f_plan.scale_points[0],
+            f_writer_id="control",
+            f_payload={"token": f_plan.tokens[0]},
             f_ordinal=0,
         )
-        f_evidence_store.recordWholeRunSucceeded("control", 1, {"run_id": "test-run-precedence"})
+        f_evidence_store.recordSubmissionDispatched(
+            f_point=f_plan.scale_points[0],
+            f_writer_id="control",
+            f_payload={"token": f_plan.tokens[0]},
+            f_ordinal=0,
+        )
+        f_evidence_store.recordSubmissionRecorded(
+            f_point=f_plan.scale_points[0],
+            f_writer_id="control",
+            f_handle=JobHandle("slurm", "10001"),
+            f_payload={},
+            f_ordinal=0,
+        )
+        f_evidence_store.recordSchedulerObservation(
+            f_point=f_plan.scale_points[0],
+            f_writer_id="control",
+            f_sequence=1,
+            f_payload={
+                "handle": {"backend": "slurm", "job_id": "10001"},
+                "state": "succeeded",
+                "exit_code": 0,
+            },
+            f_ordinal=0,
+        )
+        f_evidence_store.recordWholeRunSucceeded(
+            "control", 1, {"run_id": "test-run-precedence"}
+        )
 
         # Now simulate a late signal received after whole run succeeded
         f_reconciled = StateReconciler.reconcile(f_plan, f_evidence_store)
@@ -1600,19 +1886,35 @@ class EndToEndRunTest(unittest.TestCase):
 
         # 2. Installed layout
         f_inst_prefix = os.path.join(self.m_temp_dir, "usr")
-        f_inst_pkg_dir = os.path.join(f_inst_prefix, "share", "lsmio", "python", "lsmiotool")
+        f_inst_pkg_dir = os.path.join(
+            f_inst_prefix, "share", "lsmio", "python", "lsmiotool"
+        )
         f_inst_lib_dir = os.path.join(f_inst_pkg_dir, "lib")
         os.makedirs(f_inst_lib_dir, exist_ok=True)
 
-        with open(os.path.join(f_inst_pkg_dir, "__init__.py"), "w", encoding="utf-8") as f_f:
+        with open(
+            os.path.join(f_inst_pkg_dir, "__init__.py"), "w", encoding="utf-8"
+        ) as f_f:
             f_f.write('"""lsmiotool installed package."""\n')
 
-        for f_mod in ("__init__.py", "cli.py", "main.py", "run.py", "worker.py", "version.py", "resources.py"):
-            with open(os.path.join(f_inst_lib_dir, f_mod), "w", encoding="utf-8") as f_f:
+        for f_mod in (
+            "__init__.py",
+            "cli.py",
+            "main.py",
+            "run.py",
+            "worker.py",
+            "version.py",
+            "resources.py",
+        ):
+            with open(
+                os.path.join(f_inst_lib_dir, f_mod), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write(f'"""Mock {f_mod}."""\n')
 
         # Installed worker
-        f_inst_worker = os.path.join(f_inst_prefix, "libexec", "lsmio", "lsmiotool-worker")
+        f_inst_worker = os.path.join(
+            f_inst_prefix, "libexec", "lsmio", "lsmiotool-worker"
+        )
         os.makedirs(os.path.dirname(f_inst_worker), exist_ok=True)
         with open(f_inst_worker, "w", encoding="utf-8") as f_f:
             f_f.write("#!/bin/sh\nexit 0\n")
@@ -1644,9 +1946,12 @@ class EndToEndRunTest(unittest.TestCase):
         with self.assertRaises(PackageValidationError):
             InstalledPackageValidator.validate(f_nonexistent)
 
-    def testForegroundPollingQueuedActiveDelayedAccountingTimeoutNoBusyLoop(self) -> None:
+    def testForegroundPollingQueuedActiveDelayedAccountingTimeoutNoBusyLoop(
+        self,
+    ) -> None:
         """Covers queued -> active -> delayed accounting -> terminal, errors/timeouts, and no busy loop."""
         f_sleep_records: List[float] = []
+
         def sleep_spy(f_s: float) -> None:
             f_sleep_records.append(f_s)
 
@@ -1656,6 +1961,7 @@ class EndToEndRunTest(unittest.TestCase):
 
         # Phase 1: Queued (poll 1) -> Active (poll 2) -> Active (poll 3) -> Terminal (poll 4)
         f_poll_step = 0
+
         def fake_runner_phased(f_argv: Sequence[str], **f_kwargs: Any) -> ProcessResult:
             nonlocal f_poll_step
             f_cmd = list(f_argv)
@@ -1677,7 +1983,12 @@ class EndToEndRunTest(unittest.TestCase):
                 if f_poll_step <= 3:
                     # Not yet completed in accounting
                     return ProcessResult(0, "", "", 0.01)
-                return ProcessResult(0, "JobIDRaw|JobName|State|ExitCode\n99001|lm-job|COMPLETED|0:0\n", "", 0.01)
+                return ProcessResult(
+                    0,
+                    "JobIDRaw|JobName|State|ExitCode\n99001|lm-job|COMPLETED|0:0\n",
+                    "",
+                    0.01,
+                )
             return f_orig_run(f_argv, **f_kwargs)
 
         f_fake_runner.run = fake_runner_phased  # type: ignore
@@ -1689,7 +2000,11 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch.last_artifact_store and f_orch.last_evidence_store and f_orch.last_plan:
+            if (
+                f_orch.last_artifact_store
+                and f_orch.last_evidence_store
+                and f_orch.last_plan
+            ):
                 self._simulatePointExecution(
                     f_orch.last_artifact_store,
                     f_orch.last_evidence_store,
@@ -1720,13 +2035,17 @@ class EndToEndRunTest(unittest.TestCase):
         f_fake_runner_err.m_submit_job_ids = ["99002"]
         f_orig_err_run = f_fake_runner_err.run
 
-        def fake_runner_timeout(f_argv: Sequence[str], **f_kwargs: Any) -> ProcessResult:
+        def fake_runner_timeout(
+            f_argv: Sequence[str], **f_kwargs: Any
+        ) -> ProcessResult:
             f_cmd = list(f_argv)
             f_exe = os.path.basename(f_cmd[0])
             if f_exe == "sbatch":
                 return ProcessResult(0, "99002\n", "", 0.01)
             elif f_exe in ("squeue", "sacct"):
-                return ProcessResult(124, "", "command timed out after grace period\n", 0.01)
+                return ProcessResult(
+                    124, "", "command timed out after grace period\n", 0.01
+                )
             return f_orig_err_run(f_argv, **f_kwargs)
 
         f_fake_runner_err.run = fake_runner_timeout  # type: ignore
@@ -1745,7 +2064,9 @@ class EndToEndRunTest(unittest.TestCase):
 
         self.assertEqual(f_view_err.state, OverallRunState.INDETERMINATE)
         self.assertEqual(f_view_err.point_states[0].state, PointRunState.INDETERMINATE)
-        self.assertEqual(len(f_sleep_records), 0, "No busy loop or sleep on query timeout")
+        self.assertEqual(
+            len(f_sleep_records), 0, "No busy loop or sleep on query timeout"
+        )
 
     def testEndToEndConflictAndCorruptObservations(self) -> None:
         """Chunk 018: End-to-end validation of corrupt observations, missing accounting, conflicting handles, cancel causality, and repeated observations."""
@@ -1760,16 +2081,22 @@ class EndToEndRunTest(unittest.TestCase):
         f_evidence_store = EvidenceStore(f_art_store.layout, f_plan)
         f_pt = f_plan.scale_points[0]
         f_h = JobHandle("slurm", "99101")
-        f_evidence_store.recordSubmissionRecorded(f_pt, "control", f_handle=f_h, f_ordinal=0)
+        f_evidence_store.recordSubmissionRecorded(
+            f_pt, "control", f_handle=f_h, f_ordinal=0
+        )
 
         # Write corrupt observation file (1.json)
-        f_obs_dir = os.path.join(f_art_store.layout.pointSchedulerDir(f_pt, 0), "observations", "bad_writer")
+        f_obs_dir = os.path.join(
+            f_art_store.layout.pointSchedulerDir(f_pt, 0), "observations", "bad_writer"
+        )
         os.makedirs(f_obs_dir, exist_ok=True)
         with open(os.path.join(f_obs_dir, "1.json"), "w", encoding="utf-8") as f_f:
             f_f.write("{invalid_json_corrupted")
 
         f_view_corrupt = StateReconciler.reconcile(f_plan, f_evidence_store)
-        self.assertEqual(f_view_corrupt.point_states[0].state, PointRunState.INDETERMINATE)
+        self.assertEqual(
+            f_view_corrupt.point_states[0].state, PointRunState.INDETERMINATE
+        )
         self.assertEqual(f_view_corrupt.state, OverallRunState.INDETERMINATE)
 
         # 2. Conflicting handles across observation records resolves to INDETERMINATE
@@ -1782,12 +2109,23 @@ class EndToEndRunTest(unittest.TestCase):
         f_art_store2.allocateRun(f_plan2)
         f_evidence_store2 = EvidenceStore(f_art_store2.layout, f_plan2)
         f_pt2 = f_plan2.scale_points[0]
-        f_evidence_store2.recordSubmissionRecorded(f_pt2, "control", f_handle=JobHandle("slurm", "99102"), f_ordinal=0)
+        f_evidence_store2.recordSubmissionRecorded(
+            f_pt2, "control", f_handle=JobHandle("slurm", "99102"), f_ordinal=0
+        )
         f_evidence_store2.recordSchedulerObservation(
-            f_pt2, "w1", 1, f_payload={"state": "active", "handle": {"backend": "slurm", "job_id": "88888"}}, f_ordinal=0
+            f_pt2,
+            "w1",
+            1,
+            f_payload={
+                "state": "active",
+                "handle": {"backend": "slurm", "job_id": "88888"},
+            },
+            f_ordinal=0,
         )
         f_view_conflict = StateReconciler.reconcile(f_plan2, f_evidence_store2)
-        self.assertEqual(f_view_conflict.point_states[0].state, PointRunState.INDETERMINATE)
+        self.assertEqual(
+            f_view_conflict.point_states[0].state, PointRunState.INDETERMINATE
+        )
 
         # 3. Repeated identical observations on disk stably resolve
         f_plan3 = RunPlanner.createPlan(
@@ -1799,11 +2137,22 @@ class EndToEndRunTest(unittest.TestCase):
         f_art_store3.allocateRun(f_plan3)
         f_evidence_store3 = EvidenceStore(f_art_store3.layout, f_plan3)
         f_pt3 = f_plan3.scale_points[0]
-        f_evidence_store3.recordSubmissionRecorded(f_pt3, "control", f_handle=JobHandle("slurm", "99103"), f_ordinal=0)
-        self._simulatePointExecution(f_art_store3, f_evidence_store3, f_pt3, f_plan3, f_ordinal=0)
+        f_evidence_store3.recordSubmissionRecorded(
+            f_pt3, "control", f_handle=JobHandle("slurm", "99103"), f_ordinal=0
+        )
+        self._simulatePointExecution(
+            f_art_store3, f_evidence_store3, f_pt3, f_plan3, f_ordinal=0
+        )
         for f_i in range(1, 6):
             f_evidence_store3.recordSchedulerObservation(
-                f_pt3, "reconciler", f_i, f_payload={"state": "succeeded", "handle": {"backend": "slurm", "job_id": "99103"}}, f_ordinal=0
+                f_pt3,
+                "reconciler",
+                f_i,
+                f_payload={
+                    "state": "succeeded",
+                    "handle": {"backend": "slurm", "job_id": "99103"},
+                },
+                f_ordinal=0,
             )
         f_evidence_store3.recordWholeRunSucceeded("control", 1)
         f_view_repeat = StateReconciler.reconcile(f_plan3, f_evidence_store3)
@@ -1827,7 +2176,11 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         def on_submit_succ(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch_succ.last_artifact_store and f_orch_succ.last_evidence_store and f_orch_succ.last_plan:
+            if (
+                f_orch_succ.last_artifact_store
+                and f_orch_succ.last_evidence_store
+                and f_orch_succ.last_plan
+            ):
                 self._simulatePointExecution(
                     f_orch_succ.last_artifact_store,
                     f_orch_succ.last_evidence_store,
@@ -1850,8 +2203,13 @@ class EndToEndRunTest(unittest.TestCase):
         # Assert stdout report contents match the execution exactly
         f_succ_lines = f_reporter_succ.lines
         self.assertEqual(f_succ_lines[0], f"Run ID: {f_view_succ.run_id}")
-        self.assertEqual(f_succ_lines[1], f"Run Root: {os.path.abspath(f_orch_succ.last_run_root)}")
-        self.assertEqual(f_succ_lines[2], f"Point 00-tasks-1 Correlation Token: {f_orch_succ.last_plan.tokens[0]}")
+        self.assertEqual(
+            f_succ_lines[1], f"Run Root: {os.path.abspath(f_orch_succ.last_run_root)}"
+        )
+        self.assertEqual(
+            f_succ_lines[2],
+            f"Point 00-tasks-1 Correlation Token: {f_orch_succ.last_plan.tokens[0]}",
+        )
         self.assertEqual(f_succ_lines[3], "Point 00-tasks-1 Job ID: 3301")
         self.assertEqual(f_succ_lines[4], "Final State: SUCCEEDED")
         self.assertEqual(f_succ_lines[5], "Exit Code: 0")
@@ -1883,8 +2241,13 @@ class EndToEndRunTest(unittest.TestCase):
 
         f_fail_lines = f_reporter_fail.lines
         self.assertEqual(f_fail_lines[0], f"Run ID: {f_view_fail.run_id}")
-        self.assertEqual(f_fail_lines[1], f"Run Root: {os.path.abspath(f_orch_fail.last_run_root)}")
-        self.assertEqual(f_fail_lines[2], f"Point 00-tasks-1 Correlation Token: {f_orch_fail.last_plan.tokens[0]}")
+        self.assertEqual(
+            f_fail_lines[1], f"Run Root: {os.path.abspath(f_orch_fail.last_run_root)}"
+        )
+        self.assertEqual(
+            f_fail_lines[2],
+            f"Point 00-tasks-1 Correlation Token: {f_orch_fail.last_plan.tokens[0]}",
+        )
         self.assertEqual(f_fail_lines[3], "Point 00-tasks-1 Job ID: 3302")
         self.assertEqual(f_fail_lines[4], "Final State: FAILED")
         self.assertEqual(f_fail_lines[5], "Exit Code: 1")
@@ -1908,7 +2271,11 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         def on_submit_ior_hdd(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch_ior_hdd.last_artifact_store and f_orch_ior_hdd.last_evidence_store and f_orch_ior_hdd.last_plan:
+            if (
+                f_orch_ior_hdd.last_artifact_store
+                and f_orch_ior_hdd.last_evidence_store
+                and f_orch_ior_hdd.last_plan
+            ):
                 self._simulatePointExecution(
                     f_orch_ior_hdd.last_artifact_store,
                     f_orch_ior_hdd.last_evidence_store,
@@ -1926,9 +2293,17 @@ class EndToEndRunTest(unittest.TestCase):
         )
         self.assertEqual(f_view_ior_hdd.state, OverallRunState.SUCCEEDED)
         self.assertEqual(f_orch_ior_hdd.exitCode, 0)
-        self.assertEqual(f_reporter_ior_hdd.lines[0], f"Run ID: {f_view_ior_hdd.run_id}")
-        self.assertEqual(f_reporter_ior_hdd.lines[1], f"Run Root: {os.path.abspath(f_orch_ior_hdd.last_run_root)}")
-        self.assertEqual(f_reporter_ior_hdd.lines[2], f"Point 00-tasks-1 Correlation Token: {f_orch_ior_hdd.last_plan.tokens[0]}")
+        self.assertEqual(
+            f_reporter_ior_hdd.lines[0], f"Run ID: {f_view_ior_hdd.run_id}"
+        )
+        self.assertEqual(
+            f_reporter_ior_hdd.lines[1],
+            f"Run Root: {os.path.abspath(f_orch_ior_hdd.last_run_root)}",
+        )
+        self.assertEqual(
+            f_reporter_ior_hdd.lines[2],
+            f"Point 00-tasks-1 Correlation Token: {f_orch_ior_hdd.last_plan.tokens[0]}",
+        )
         self.assertEqual(f_reporter_ior_hdd.lines[3], "Point 00-tasks-1 Job ID: 10101")
         self.assertEqual(f_reporter_ior_hdd.lines[4], "Final State: SUCCEEDED")
         self.assertEqual(f_reporter_ior_hdd.lines[5], "Exit Code: 0")
@@ -1948,7 +2323,11 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         def on_submit_ior_ssd(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch_ior_ssd.last_artifact_store and f_orch_ior_ssd.last_evidence_store and f_orch_ior_ssd.last_plan:
+            if (
+                f_orch_ior_ssd.last_artifact_store
+                and f_orch_ior_ssd.last_evidence_store
+                and f_orch_ior_ssd.last_plan
+            ):
                 f_idx = f_runner_ior_ssd.m_submit_idx - 1
                 self._simulatePointExecution(
                     f_orch_ior_ssd.last_artifact_store,
@@ -1991,7 +2370,11 @@ class EndToEndRunTest(unittest.TestCase):
         )
 
         def on_submit_lsmio(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_orch_lsmio.last_artifact_store and f_orch_lsmio.last_evidence_store and f_orch_lsmio.last_plan:
+            if (
+                f_orch_lsmio.last_artifact_store
+                and f_orch_lsmio.last_evidence_store
+                and f_orch_lsmio.last_plan
+            ):
                 f_idx = f_runner_lsmio.m_submit_idx - 1
                 f_pt = f_orch_lsmio.last_plan.scale_points[f_idx]
                 self._simulatePointExecution(
@@ -2011,13 +2394,19 @@ class EndToEndRunTest(unittest.TestCase):
         )
         self.assertEqual(f_view_lsmio.state, OverallRunState.SUCCEEDED)
         self.assertEqual(f_orch_lsmio.exitCode, 0)
-        self.assertIn("Point 00-tasks-1 Job ID: 20101.isambard-pbs", f_reporter_lsmio.lines)
-        self.assertIn("Point 03-tasks-8 Job ID: 20104.isambard-pbs", f_reporter_lsmio.lines)
+        self.assertIn(
+            "Point 00-tasks-1 Job ID: 20101.isambard-pbs", f_reporter_lsmio.lines
+        )
+        self.assertIn(
+            "Point 03-tasks-8 Job ID: 20104.isambard-pbs", f_reporter_lsmio.lines
+        )
 
         # --- SSD: LSMIO local with ROCKSDB and ADIOS setups ---
         for f_lsmio_setup in ("ROCKSDB", "ADIOS"):
             f_runner_alt = FakeSchedulerCommandRunner()
-            f_runner_alt.m_submit_job_ids = [f"20201.isambard-pbs-{f_lsmio_setup.lower()}"]
+            f_runner_alt.m_submit_job_ids = [
+                f"20201.isambard-pbs-{f_lsmio_setup.lower()}"
+            ]
             f_orch_alt = RunOrchestrator(
                 f_profile_resolver=self.m_registry,
                 f_command_runner=f_runner_alt,
@@ -2028,7 +2417,11 @@ class EndToEndRunTest(unittest.TestCase):
             )
 
             def on_submit_alt(f_jid: str, f_cwd: Optional[str]) -> None:
-                if f_orch_alt.last_artifact_store and f_orch_alt.last_evidence_store and f_orch_alt.last_plan:
+                if (
+                    f_orch_alt.last_artifact_store
+                    and f_orch_alt.last_evidence_store
+                    and f_orch_alt.last_plan
+                ):
                     self._simulatePointExecution(
                         f_orch_alt.last_artifact_store,
                         f_orch_alt.last_evidence_store,
@@ -2040,7 +2433,9 @@ class EndToEndRunTest(unittest.TestCase):
             f_runner_alt.m_on_submit_callback = on_submit_alt
 
             f_view_alt = f_orch_alt.execute(
-                f_request=RunRequest("lsmio", "local", f_ssd=True, f_setup=f_lsmio_setup),
+                f_request=RunRequest(
+                    "lsmio", "local", f_ssd=True, f_setup=f_lsmio_setup
+                ),
                 f_site=self.m_isambard_profile,
                 f_worker_executable=self.m_worker_path,
             )
@@ -2062,7 +2457,11 @@ class EndToEndRunTest(unittest.TestCase):
             )
 
             def on_submit_lmp(f_jid: str, f_cwd: Optional[str]) -> None:
-                if f_orch_lmp.last_artifact_store and f_orch_lmp.last_evidence_store and f_orch_lmp.last_plan:
+                if (
+                    f_orch_lmp.last_artifact_store
+                    and f_orch_lmp.last_evidence_store
+                    and f_orch_lmp.last_plan
+                ):
                     self._simulatePointExecution(
                         f_orch_lmp.last_artifact_store,
                         f_orch_lmp.last_evidence_store,
@@ -2087,7 +2486,6 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertGreater(len(f_runner_ior_hdd.m_calls), 0)
         self.assertGreater(len(f_runner_ior_ssd.m_calls), 0)
         self.assertGreater(len(f_runner_lsmio.m_calls), 0)
-
 
 
 if __name__ == "__main__":

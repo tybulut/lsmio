@@ -227,14 +227,20 @@ class ModuleRendererTest(unittest.TestCase):
 
         for f_bad_token in f_adversarial_tokens:
             # Direct token validation
-            with self.assertRaises(ModuleRenderError, msg=f"Should reject {f_bad_token!r}"):
+            with self.assertRaises(
+                ModuleRenderError, msg=f"Should reject {f_bad_token!r}"
+            ):
                 ModuleSetup.validateModule(f_bad_token)
 
             # In a list of modules
-            with self.assertRaises(ModuleRenderError, msg=f"Should reject list with {f_bad_token!r}"):
+            with self.assertRaises(
+                ModuleRenderError, msg=f"Should reject list with {f_bad_token!r}"
+            ):
                 ModuleSetup.renderCommands([f_bad_token])
 
-            with self.assertRaises(ModuleRenderError, msg=f"Should reject list with {f_bad_token!r}"):
+            with self.assertRaises(
+                ModuleRenderError, msg=f"Should reject list with {f_bad_token!r}"
+            ):
                 ModuleSetup.render([f_bad_token])
 
         # Non-string types
@@ -270,22 +276,27 @@ class ModuleRendererTest(unittest.TestCase):
     def testFailurePreventsExec(self) -> None:
         """Validates shell fail-fast semantics (set -e stops execution before controller exec)."""
         # 1. Successful execution scenario: mock module load succeeds and reaches exec
-        f_success_script = """#!/bin/bash
+        f_success_script = (
+            """#!/bin/bash
 set -e
 # Mock module function that succeeds
 module() {
     return 0
 }
-""" + ModuleSetup.render("VIKING") + """
+"""
+            + ModuleSetup.render("VIKING")
+            + """
 echo "CONTROLLER_EXECUTED_SUCCESSFULLY"
 """
+        )
         f_res_success = self.m_runner.run(["/bin/bash", "-c", f_success_script])
         self.assertTrue(f_res_success.is_success)
         self.assertEqual(f_res_success.returncode, 0)
         self.assertIn("CONTROLLER_EXECUTED_SUCCESSFULLY", f_res_success.stdout)
 
         # 2. Failing execution scenario: mock module load fails and halts script immediately
-        f_failing_script = """#!/bin/bash
+        f_failing_script = (
+            """#!/bin/bash
 set -e
 # Mock module function where purge succeeds but load fails
 module() {
@@ -295,9 +306,12 @@ module() {
     fi
     return 0
 }
-""" + ModuleSetup.render("VIKING") + """
+"""
+            + ModuleSetup.render("VIKING")
+            + """
 echo "CONTROLLER_EXECUTED_UNEXPECTEDLY"
 """
+        )
         f_res_failing = self.m_runner.run(["/bin/bash", "-c", f_failing_script])
         self.assertFalse(f_res_failing.is_success)
         self.assertNotEqual(f_res_failing.returncode, 0)
@@ -306,7 +320,8 @@ echo "CONTROLLER_EXECUTED_UNEXPECTEDLY"
         self.assertIn("Module load failed", f_res_failing.stderr)
 
         # 3. Failing purge scenario: purge itself fails and halts script immediately
-        f_failing_purge = """#!/bin/bash
+        f_failing_purge = (
+            """#!/bin/bash
 set -e
 # Mock module function where purge fails
 module() {
@@ -316,9 +331,12 @@ module() {
     fi
     return 0
 }
-""" + ModuleSetup.render("VIKING") + """
+"""
+            + ModuleSetup.render("VIKING")
+            + """
 echo "CONTROLLER_EXECUTED_UNEXPECTEDLY"
 """
+        )
         f_res_purge = self.m_runner.run(["/bin/bash", "-c", f_failing_purge])
         self.assertFalse(f_res_purge.is_success)
         self.assertEqual(f_res_purge.returncode, 2)

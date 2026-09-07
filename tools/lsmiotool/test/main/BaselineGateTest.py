@@ -48,7 +48,9 @@ class BaselineGateTest(unittest.TestCase):
         unsuccessful.wasSuccessful.return_value = False
 
         with patch.object(
-            lsmiotool_test.unittest.TextTestRunner, "run", side_effect=[successful, unsuccessful]
+            lsmiotool_test.unittest.TextTestRunner,
+            "run",
+            side_effect=[successful, unsuccessful],
         ) as mock_run:
             statuses = [
                 lsmiotool_test.run_and_report(),
@@ -93,7 +95,9 @@ class BaselineGateTest(unittest.TestCase):
     def testNoLoginSession(self) -> None:
         log_path = Path(__file__).resolve().parents[2] / "lib" / "log.py"
 
-        with patch("os.getlogin", side_effect=OSError("no login session")) as mock_login:
+        with patch(
+            "os.getlogin", side_effect=OSError("no login session")
+        ) as mock_login:
             with patch("getpass.getuser", return_value="service-user"):
                 module_globals = runpy.run_path(str(log_path))
 

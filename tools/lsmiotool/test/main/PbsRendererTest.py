@@ -104,7 +104,9 @@ class PbsRendererTest(unittest.TestCase):
             )
 
             # Assert complete script structure
-            f_lines = [f_l.strip() for f_l in f_script.strip().splitlines() if f_l.strip()]
+            f_lines = [
+                f_l.strip() for f_l in f_script.strip().splitlines() if f_l.strip()
+            ]
 
             # 1. Shebang
             self.assertEqual(f_lines[0], "#!/bin/bash")
@@ -170,7 +172,9 @@ class PbsRendererTest(unittest.TestCase):
                 f_mail_mode=PbsMailMode.ABE,
             )
 
-            f_lines = [f_l.strip() for f_l in f_script.strip().splitlines() if f_l.strip()]
+            f_lines = [
+                f_l.strip() for f_l in f_script.strip().splitlines() if f_l.strip()
+            ]
 
             # 1. Shebang
             self.assertEqual(f_lines[0], "#!/bin/bash")
@@ -243,7 +247,10 @@ class PbsRendererTest(unittest.TestCase):
             "   ",
         ]
         for f_raw in f_raw_strings:
-            with self.assertRaises(SchedulerScriptError, msg=f"Raw mail string {f_raw!r} should be rejected"):
+            with self.assertRaises(
+                SchedulerScriptError,
+                msg=f"Raw mail string {f_raw!r} should be rejected",
+            ):
                 PbsScriptRenderer.renderDirectives(
                     f_point=f_point,
                     f_profile=self.m_isambard_profile,
@@ -261,7 +268,10 @@ class PbsRendererTest(unittest.TestCase):
             "abe; rm -rf /",
         ]
         for f_inj in f_injected_strings:
-            with self.assertRaises(SchedulerScriptError, msg=f"Injected string {f_inj!r} should be rejected"):
+            with self.assertRaises(
+                SchedulerScriptError,
+                msg=f"Injected string {f_inj!r} should be rejected",
+            ):
                 PbsScriptRenderer.renderDirectives(
                     f_point=f_point,
                     f_profile=self.m_isambard_profile,
@@ -431,7 +441,10 @@ class PbsRendererTest(unittest.TestCase):
             "06:00:01",
         ]
         for f_bad_wt in f_bad_walltimes:
-            with self.assertRaises(SchedulerScriptError, msg=f"Should reject variable walltime: {f_bad_wt!r}"):
+            with self.assertRaises(
+                SchedulerScriptError,
+                msg=f"Should reject variable walltime: {f_bad_wt!r}",
+            ):
                 PbsScriptRenderer.renderDirectives(
                     f_point=f_point_1,
                     f_profile=self.m_isambard_profile,

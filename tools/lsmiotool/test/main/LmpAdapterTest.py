@@ -172,9 +172,15 @@ class LmpAdapterTest(unittest.TestCase):
             f_asset_dir = os.path.join(f_temp_base, "lmp-reaxff")
             os.makedirs(f_asset_dir, exist_ok=True)
 
-            f_content_in = b"# LAMMPS input file for ReaxFF HNS benchmark\nvariable rep index 4\n"
-            f_content_data = b"# LAMMPS data file for HNS equilibrium structure\n1000 atoms\n"
-            f_content_ffield = b"# ReaxFF force field parameters for HNS\nReaxFF parameters\n"
+            f_content_in = (
+                b"# LAMMPS input file for ReaxFF HNS benchmark\nvariable rep index 4\n"
+            )
+            f_content_data = (
+                b"# LAMMPS data file for HNS equilibrium structure\n1000 atoms\n"
+            )
+            f_content_ffield = (
+                b"# ReaxFF force field parameters for HNS\nReaxFF parameters\n"
+            )
 
             with open(os.path.join(f_asset_dir, "in.reaxc.hns"), "wb") as f_f:
                 f_f.write(f_content_in)
@@ -194,7 +200,9 @@ class LmpAdapterTest(unittest.TestCase):
             self.assertEqual(f_validated_hashes, f_expected_hashes)
 
             # 2. Test stageAssets for combination 1
-            f_work_dir_combo1 = os.path.join(f_temp_base, "runs", "run-1", "points", "p0", "work", "c16_b8M")
+            f_work_dir_combo1 = os.path.join(
+                f_temp_base, "runs", "run-1", "points", "p0", "work", "c16_b8M"
+            )
             f_hashes_combo1 = self.m_adapter.stageAssets(f_asset_dir, f_work_dir_combo1)
             self.assertEqual(f_hashes_combo1, f_expected_hashes)
 
@@ -209,7 +217,9 @@ class LmpAdapterTest(unittest.TestCase):
                     self.assertEqual(f_f.read(), f_exp_content)
 
             # 3. Test stageAssets for combination 2
-            f_work_dir_combo2 = os.path.join(f_temp_base, "runs", "run-1", "points", "p0", "work", "c16_b1M")
+            f_work_dir_combo2 = os.path.join(
+                f_temp_base, "runs", "run-1", "points", "p0", "work", "c16_b1M"
+            )
             f_hashes_combo2 = self.m_adapter.stageAssets(f_asset_dir, f_work_dir_combo2)
             self.assertEqual(f_hashes_combo2, f_expected_hashes)
 
@@ -250,8 +260,15 @@ class LmpAdapterTest(unittest.TestCase):
         )
 
         f_forbidden_tokens = [
-            "-k", "-sf", "-pk", "kk", "-nocite", "dump", "-v dump",
-            "in.reaxff.hns", "data.hns",
+            "-k",
+            "-sf",
+            "-pk",
+            "kk",
+            "-nocite",
+            "dump",
+            "-v dump",
+            "in.reaxff.hns",
+            "data.hns",
         ]
         for f_tok in f_forbidden_tokens:
             self.assertNotIn(f_tok, f_cmd.argv)
@@ -330,7 +347,9 @@ class LmpAdapterTest(unittest.TestCase):
             with open(f_unreadable_path, "wb") as f_f:
                 f_f.write(f_content)
 
-            with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+            with patch(
+                "builtins.open", side_effect=PermissionError("Permission denied")
+            ):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm:
                     self.m_adapter.validateAssets(f_asset_dir)
                 self.assertIn("cannot be read", str(f_cm.exception))
@@ -423,7 +442,9 @@ class LmpAdapterTest(unittest.TestCase):
 
                 # Staging uses explicit asset directory
                 f_hashes = self.m_adapter.stageAssets(f_asset_dir, f_work_dir)
-                self.assertEqual(f_hashes["in.reaxc.hns"], hashlib.sha256(f_real_in).hexdigest())
+                self.assertEqual(
+                    f_hashes["in.reaxc.hns"], hashlib.sha256(f_real_in).hexdigest()
+                )
 
                 # Verify staged files contain genuine content, NOT decoy content
                 with open(os.path.join(f_work_dir, "in.reaxc.hns"), "rb") as f_f:
@@ -450,6 +471,7 @@ class LmpAdapterTest(unittest.TestCase):
 
     def testProbeFailures(self) -> None:
         """Verify fail-closed handling for missing or unsupported LMP binaries and flag mismatches."""
+
         # 1. Runner raises FileNotFoundError
         def mockMissingBinary(f_argv: Sequence[str]) -> MockProcessResult:
             raise FileNotFoundError("Executable not found: /path/to/missing_lmp")
@@ -462,7 +484,9 @@ class LmpAdapterTest(unittest.TestCase):
 
         # 2. Runner returns non-zero exit code
         def mockFailingRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=127, stdout="", stderr="lmp: command not found")
+            return MockProcessResult(
+                returncode=127, stdout="", stderr="lmp: command not found"
+            )
 
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
@@ -472,7 +496,9 @@ class LmpAdapterTest(unittest.TestCase):
 
         # 3. Runner output indicates unsupported capability
         def mockUnsupportedRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=0, stdout="lmp: unsupported option -h", stderr="")
+            return MockProcessResult(
+                returncode=0, stdout="lmp: unsupported option -h", stderr=""
+            )
 
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
@@ -503,7 +529,9 @@ class LmpAdapterTest(unittest.TestCase):
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
                 f_executable=self.m_executable,
-                f_runner=lambda argv: MockProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-fallback", ""),
+                f_runner=lambda argv: MockProcessResult(
+                    0, "LAMMPS (2 Aug 2023)\n-lsmio-fallback", ""
+                ),
                 f_setup="LSMIO",
             )
 
@@ -511,7 +539,9 @@ class LmpAdapterTest(unittest.TestCase):
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
                 f_executable=self.m_executable,
-                f_runner=lambda argv: MockProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb", ""),
+                f_runner=lambda argv: MockProcessResult(
+                    0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb", ""
+                ),
                 f_setup="LSMIO-MMAP",
             )
 
@@ -519,13 +549,17 @@ class LmpAdapterTest(unittest.TestCase):
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
                 f_executable=self.m_executable,
-                f_runner=lambda argv: MockProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb", ""),
+                f_runner=lambda argv: MockProcessResult(
+                    0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb", ""
+                ),
                 f_setup="FS",
             )
 
     def testUnverifiedNoVersionClaim(self) -> None:
         """Prove unprobeable binaries remain recorded as configured/unverified, and verified when flags present."""
-        f_state = self.m_adapter.probeCapability(f_executable=self.m_executable, f_runner=None)
+        f_state = self.m_adapter.probeCapability(
+            f_executable=self.m_executable, f_runner=None
+        )
         self.assertEqual(f_state, CapabilityState.CONFIGURED)
         self.assertEqual(f_state, ProbeState.CONFIGURED)
         self.assertTrue(f_state.is_configured)
@@ -536,7 +570,9 @@ class LmpAdapterTest(unittest.TestCase):
         # Setup LSMIO
         f_verified_lsmio = self.m_adapter.probeCapability(
             f_executable=self.m_executable,
-            f_runner=lambda argv: MockProcessResult(0, "LAMMPS\n-lsmio-buf-size-mb\n", ""),
+            f_runner=lambda argv: MockProcessResult(
+                0, "LAMMPS\n-lsmio-buf-size-mb\n", ""
+            ),
             f_setup="LSMIO",
         )
         self.assertEqual(f_verified_lsmio, CapabilityState.VERIFIED)
@@ -544,7 +580,9 @@ class LmpAdapterTest(unittest.TestCase):
         # Setup LSMIO-MMAP
         f_verified_mmap = self.m_adapter.probeCapability(
             f_executable=self.m_executable,
-            f_runner=lambda argv: MockProcessResult(0, "LAMMPS\n-lsmio-buf-size-mb\n-lsmio-mmap\n", ""),
+            f_runner=lambda argv: MockProcessResult(
+                0, "LAMMPS\n-lsmio-buf-size-mb\n-lsmio-mmap\n", ""
+            ),
             f_setup="LSMIO-MMAP",
         )
         self.assertEqual(f_verified_mmap, CapabilityState.VERIFIED)
@@ -641,10 +679,13 @@ class LmpAdapterTest(unittest.TestCase):
             f_hashes = self.m_adapter.stageAssets(f_layout, f_staged_work)
             self.assertEqual(len(f_hashes), 3)
             self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "in.reaxc.hns")))
-            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "data.hns-equil")))
-            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "ffield.reax.hns")))
+            self.assertTrue(
+                os.path.isfile(os.path.join(f_staged_work, "data.hns-equil"))
+            )
+            self.assertTrue(
+                os.path.isfile(os.path.join(f_staged_work, "ffield.reax.hns"))
+            )
 
 
 if __name__ == "__main__":
     unittest.main()
-

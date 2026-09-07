@@ -83,7 +83,9 @@ class RunParseTest(unittest.TestCase):
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-runparse-test-")
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -135,12 +137,14 @@ class RunParseTest(unittest.TestCase):
         f_setup: str = "NATIVE-M",
         f_ssd: bool = False,
     ) -> Tuple[str, RunPlan, EvidenceStore]:
-        f_plan = self._createPlan(f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup, f_ssd=f_ssd)
+        f_plan = self._createPlan(
+            f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup, f_ssd=f_ssd
+        )
         f_art_store = ArtifactStore(self.m_temp_dir, f_run_id)
         f_art_store.allocateRun(f_plan)
         f_evidence_store = EvidenceStore(f_art_store.layout, f_plan=f_plan)
 
-        f_is_lsmio = (f_target.lower() == "lsmio")
+        f_is_lsmio = f_target.lower() == "lsmio"
 
         for f_idx, f_sp in enumerate(f_plan.scale_points):
             f_art_store.preparePoint(f_sp, f_ordinal=f_idx)
@@ -148,12 +152,19 @@ class RunParseTest(unittest.TestCase):
 
             f_evidence_store.recordSubmissionRequested(f_sp, "client", f_ordinal=f_idx)
             f_evidence_store.recordSubmissionDispatched(f_sp, "client", f_ordinal=f_idx)
-            f_evidence_store.recordSubmissionRecorded(f_sp, "client", f_handle=f_handle, f_ordinal=f_idx)
-            f_evidence_store.recordWorkerEvent(f_sp, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=f_idx)
+            f_evidence_store.recordSubmissionRecorded(
+                f_sp, "client", f_handle=f_handle, f_ordinal=f_idx
+            )
+            f_evidence_store.recordWorkerEvent(
+                f_sp, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=f_idx
+            )
 
             for f_combo in f_plan.combinations:
                 f_evidence_store.recordControllerResult(
-                    f_sp, f_combo, f_payload={"exit_code": 0, "status": "success"}, f_ordinal=f_idx
+                    f_sp,
+                    f_combo,
+                    f_payload={"exit_code": 0, "status": "success"},
+                    f_ordinal=f_idx,
                 )
                 if f_is_lsmio:
                     for f_rank in range(f_sp.tasks):
@@ -173,13 +184,17 @@ class RunParseTest(unittest.TestCase):
                 f_ordinal=f_idx,
             )
 
-        f_evidence_store.recordWholeRunSucceeded("client", 1, f_payload={"summary": "all passed"})
+        f_evidence_store.recordWholeRunSucceeded(
+            "client", 1, f_payload={"summary": "all passed"}
+        )
         return f_art_store.layout.runRoot, f_plan, f_evidence_store
 
     def testExplicitSucceededPaths(self) -> None:
         """Validates RunRootResolver.resolve() and select() on mock valid succeeded run roots."""
         # 1. Test LSMIO succeeded run
-        f_run_root_lsmio, f_plan_lsmio, _ = self._setupSucceededRun("run-lsmio-success-001", "lsmio", "local")
+        f_run_root_lsmio, f_plan_lsmio, _ = self._setupSucceededRun(
+            "run-lsmio-success-001", "lsmio", "local"
+        )
         f_resolved = RunRootResolver.resolve(f_run_root_lsmio)
 
         self.assertIsInstance(f_resolved, ResolvedRun)
@@ -226,7 +241,9 @@ class RunParseTest(unittest.TestCase):
         self.assertIsNotNone(f_pt.getRankResult(0, f_first_combo.name))
 
         # 2. Test IOR succeeded run with bake (multiple points)
-        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-success-002", "ior", "bake", "BASE")
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun(
+            "run-ior-success-002", "ior", "bake", "BASE"
+        )
         f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
         self.assertEqual(f_resolved_ior.target, "ior")
         self.assertEqual(f_resolved_ior.scale, "bake")
@@ -301,12 +318,20 @@ class RunParseTest(unittest.TestCase):
         f_handle_inc = JobHandle("slurm", "2001")
         f_ev_inc.recordSubmissionRequested(f_sp_inc, "client", f_ordinal=0)
         f_ev_inc.recordSubmissionDispatched(f_sp_inc, "client", f_ordinal=0)
-        f_ev_inc.recordSubmissionRecorded(f_sp_inc, "client", f_handle=f_handle_inc, f_ordinal=0)
-        f_ev_inc.recordWorkerEvent(f_sp_inc, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0)
+        f_ev_inc.recordSubmissionRecorded(
+            f_sp_inc, "client", f_handle=f_handle_inc, f_ordinal=0
+        )
+        f_ev_inc.recordWorkerEvent(
+            f_sp_inc, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0
+        )
         # Record only 3 out of 6 combinations
         for f_c in f_plan_inc.combinations[:3]:
-            f_ev_inc.recordControllerResult(f_sp_inc, f_c, f_payload={"exit_code": 0}, f_ordinal=0)
-            f_ev_inc.recordRankResult(f_sp_inc, 0, f_c, f_payload={"exit_code": 0}, f_ordinal=0)
+            f_ev_inc.recordControllerResult(
+                f_sp_inc, f_c, f_payload={"exit_code": 0}, f_ordinal=0
+            )
+            f_ev_inc.recordRankResult(
+                f_sp_inc, 0, f_c, f_payload={"exit_code": 0}, f_ordinal=0
+            )
 
         with self.assertRaises(RunRootResolutionError) as f_ctx:
             RunRootResolver.resolve(f_store_inc.layout.runRoot)
@@ -322,14 +347,26 @@ class RunParseTest(unittest.TestCase):
         f_handle_fail = JobHandle("slurm", "2002")
         f_ev_fail.recordSubmissionRequested(f_sp_fail, "client", f_ordinal=0)
         f_ev_fail.recordSubmissionDispatched(f_sp_fail, "client", f_ordinal=0)
-        f_ev_fail.recordSubmissionRecorded(f_sp_fail, "client", f_handle=f_handle_fail, f_ordinal=0)
-        f_ev_fail.recordWorkerEvent(f_sp_fail, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0)
+        f_ev_fail.recordSubmissionRecorded(
+            f_sp_fail, "client", f_handle=f_handle_fail, f_ordinal=0
+        )
+        f_ev_fail.recordWorkerEvent(
+            f_sp_fail, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0
+        )
         for f_idx, f_c in enumerate(f_plan_fail.combinations):
             f_exit = 1 if f_idx == 0 else 0
-            f_ev_fail.recordControllerResult(f_sp_fail, f_c, f_payload={"exit_code": f_exit}, f_ordinal=0)
-            f_ev_fail.recordRankResult(f_sp_fail, 0, f_c, f_payload={"exit_code": f_exit}, f_ordinal=0)
+            f_ev_fail.recordControllerResult(
+                f_sp_fail, f_c, f_payload={"exit_code": f_exit}, f_ordinal=0
+            )
+            f_ev_fail.recordRankResult(
+                f_sp_fail, 0, f_c, f_payload={"exit_code": f_exit}, f_ordinal=0
+            )
         f_ev_fail.recordSchedulerObservation(
-            f_sp_fail, "reconciler", 1, f_payload={"state": "failed", "handle": f_handle_fail.toDict()}, f_ordinal=0
+            f_sp_fail,
+            "reconciler",
+            1,
+            f_payload={"state": "failed", "handle": f_handle_fail.toDict()},
+            f_ordinal=0,
         )
 
         with self.assertRaises(RunRootResolutionError) as f_ctx:
@@ -346,13 +383,25 @@ class RunParseTest(unittest.TestCase):
         f_handle_nm = JobHandle("slurm", "2003")
         f_ev_nm.recordSubmissionRequested(f_sp_nm, "client", f_ordinal=0)
         f_ev_nm.recordSubmissionDispatched(f_sp_nm, "client", f_ordinal=0)
-        f_ev_nm.recordSubmissionRecorded(f_sp_nm, "client", f_handle=f_handle_nm, f_ordinal=0)
-        f_ev_nm.recordWorkerEvent(f_sp_nm, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0)
+        f_ev_nm.recordSubmissionRecorded(
+            f_sp_nm, "client", f_handle=f_handle_nm, f_ordinal=0
+        )
+        f_ev_nm.recordWorkerEvent(
+            f_sp_nm, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0
+        )
         for f_c in f_plan_nomark.combinations:
-            f_ev_nm.recordControllerResult(f_sp_nm, f_c, f_payload={"exit_code": 0}, f_ordinal=0)
-            f_ev_nm.recordRankResult(f_sp_nm, 0, f_c, f_payload={"exit_code": 0}, f_ordinal=0)
+            f_ev_nm.recordControllerResult(
+                f_sp_nm, f_c, f_payload={"exit_code": 0}, f_ordinal=0
+            )
+            f_ev_nm.recordRankResult(
+                f_sp_nm, 0, f_c, f_payload={"exit_code": 0}, f_ordinal=0
+            )
         f_ev_nm.recordSchedulerObservation(
-            f_sp_nm, "reconciler", 1, f_payload={"state": "succeeded", "handle": f_handle_nm.toDict()}, f_ordinal=0
+            f_sp_nm,
+            "reconciler",
+            1,
+            f_payload={"state": "succeeded", "handle": f_handle_nm.toDict()},
+            f_ordinal=0,
         )
 
         with self.assertRaises(RunRootResolutionError) as f_ctx:
@@ -373,17 +422,32 @@ class RunParseTest(unittest.TestCase):
         f_handle0 = JobHandle("slurm", "3001")
         f_evidence_store.recordSubmissionRequested(f_sp0, "client", f_ordinal=0)
         f_evidence_store.recordSubmissionDispatched(f_sp0, "client", f_ordinal=0)
-        f_evidence_store.recordSubmissionRecorded(f_sp0, "client", f_handle=f_handle0, f_ordinal=0)
-        f_evidence_store.recordWorkerEvent(f_sp0, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0)
+        f_evidence_store.recordSubmissionRecorded(
+            f_sp0, "client", f_handle=f_handle0, f_ordinal=0
+        )
+        f_evidence_store.recordWorkerEvent(
+            f_sp0, 1, EvidenceKind.CONTROLLER_STARTED, f_ordinal=0
+        )
         for f_combo in f_plan.combinations:
             f_evidence_store.recordControllerResult(
-                f_sp0, f_combo, f_payload={"exit_code": 0, "status": "success"}, f_ordinal=0
+                f_sp0,
+                f_combo,
+                f_payload={"exit_code": 0, "status": "success"},
+                f_ordinal=0,
             )
             f_evidence_store.recordRankResult(
-                f_sp0, 0, f_combo, f_payload={"exit_code": 0, "status": "success"}, f_ordinal=0
+                f_sp0,
+                0,
+                f_combo,
+                f_payload={"exit_code": 0, "status": "success"},
+                f_ordinal=0,
             )
         f_evidence_store.recordSchedulerObservation(
-            f_sp0, "reconciler", 1, f_payload={"state": "succeeded", "handle": f_handle0.toDict()}, f_ordinal=0
+            f_sp0,
+            "reconciler",
+            1,
+            f_payload={"state": "succeeded", "handle": f_handle0.toDict()},
+            f_ordinal=0,
         )
 
         # Point 1 (tasks=2) is prepared but interrupted
@@ -392,10 +456,14 @@ class RunParseTest(unittest.TestCase):
         f_handle1 = JobHandle("slurm", "3002")
         f_evidence_store.recordSubmissionRequested(f_sp1, "client", f_ordinal=1)
         f_evidence_store.recordSubmissionDispatched(f_sp1, "client", f_ordinal=1)
-        f_evidence_store.recordSubmissionRecorded(f_sp1, "client", f_handle=f_handle1, f_ordinal=1)
+        f_evidence_store.recordSubmissionRecorded(
+            f_sp1, "client", f_handle=f_handle1, f_ordinal=1
+        )
 
         # Record interruption event in control stream
-        f_evidence_store.recordInterruption("client", 1, f_payload={"reason": "SIGINT received"})
+        f_evidence_store.recordInterruption(
+            "client", 1, f_payload={"reason": "SIGINT received"}
+        )
 
         f_run_root = f_art_store.layout.runRoot
 
@@ -429,7 +497,9 @@ class RunParseTest(unittest.TestCase):
     def testMalformedForeignSymlink(self) -> None:
         """Asserts symlinked root, missing manifest, malformed JSON, and foreign schema raise RunRootResolutionError."""
         # 1. Setup valid run first
-        f_real_root, f_plan, _ = self._setupSucceededRun("run-real-001", "lsmio", "local")
+        f_real_root, f_plan, _ = self._setupSucceededRun(
+            "run-real-001", "lsmio", "local"
+        )
 
         # Symlink to run root directory
         f_symlink_root = os.path.join(self.m_temp_dir, "runs", "symlink-run-001")
@@ -497,7 +567,9 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("schema_version must be integer 1", str(f_ctx.exception))
 
         # 8. Mismatched run_id in manifest vs folder name
-        f_mismatched_root = os.path.join(self.m_temp_dir, "runs", "folder-name-different-001")
+        f_mismatched_root = os.path.join(
+            self.m_temp_dir, "runs", "folder-name-different-001"
+        )
         os.makedirs(f_mismatched_root, exist_ok=True)
         with open(os.path.join(f_real_root, "manifest.json"), "r") as f_f:
             f_man_dict = json.load(f_f)
@@ -547,7 +619,9 @@ class RunParseTest(unittest.TestCase):
 
     def testResolvedRunAndPointImmutability(self) -> None:
         """Asserts ResolvedRun and ResolvedPoint instances are strictly immutable."""
-        f_run_root, f_plan, _ = self._setupSucceededRun("run-immut-001", "lsmio", "local")
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-immut-001", "lsmio", "local"
+        )
         f_resolved = RunRootResolver.resolve(f_run_root)
         f_pt = f_resolved.points[0]
 
@@ -571,7 +645,9 @@ class RunParseTest(unittest.TestCase):
 
     def testPointIdentifierLookups(self) -> None:
         """Asserts point lookup helper methods handle various identifier representations and fail on invalid ones."""
-        f_run_root, f_plan, _ = self._setupSucceededRun("run-lookup-001", "lsmio", "bake")
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-lookup-001", "lsmio", "bake"
+        )
         f_resolved = RunRootResolver.resolve(f_run_root)
 
         # Lookup by ordinal int
@@ -609,7 +685,9 @@ class RunParseTest(unittest.TestCase):
 
     def testIorLogExtractor(self) -> None:
         """Tests extraction of 26 summary metrics for write and read operations from IOR output logs."""
-        f_run_root, f_plan, _ = self._setupSucceededRun("run-ior-extract-001", "ior", "local", "BASE")
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-ior-extract-001", "ior", "local", "BASE"
+        )
         f_resolved = RunRootResolver.resolve(f_run_root)
         f_pt = f_resolved.points[0]
         f_combo = f_plan.combinations[0]
@@ -691,7 +769,9 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("missing 'Summary of all tests'", str(f_ctx.exception))
 
         # 5. Symlink log file rejected
-        f_sym_log_path = os.path.join(f_logs_dir, f"ior_{f_plan.combinations[2].name}.stdout")
+        f_sym_log_path = os.path.join(
+            f_logs_dir, f"ior_{f_plan.combinations[2].name}.stdout"
+        )
         os.symlink(f_log_path, f_sym_log_path)
         with self.assertRaises(ExtractionError) as f_ctx:
             IorLogExtractor.extractPointCombo(f_pt, f_plan.combinations[2])
@@ -699,7 +779,9 @@ class RunParseTest(unittest.TestCase):
 
     def testLsmioLogExtractorWithFsumStability(self) -> None:
         """Tests iteration and summary metric extraction across multi-rank logs with math.fsum stability."""
-        f_run_root, f_plan, _ = self._setupSucceededRun("run-lsmio-fsum-001", "lsmio", "bake", "NATIVE-M")
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-lsmio-fsum-001", "lsmio", "bake", "NATIVE-M"
+        )
         f_resolved = RunRootResolver.resolve(f_run_root)
         # Point 2 has 4 tasks
         f_pt = f_resolved.getPoint(2)
@@ -714,8 +796,20 @@ class RunParseTest(unittest.TestCase):
 
         # Create rank logs for ranks 0..3
         for f_rank in range(4):
-            f_w_iters = [100.1 + f_rank * 10.0, 100.2 + f_rank * 10.0, 100.3 + f_rank * 10.0, 100.4 + f_rank * 10.0, 100.5 + f_rank * 10.0]
-            f_r_iters = [200.1 + f_rank * 10.0, 200.2 + f_rank * 10.0, 200.3 + f_rank * 10.0, 200.4 + f_rank * 10.0, 200.5 + f_rank * 10.0]
+            f_w_iters = [
+                100.1 + f_rank * 10.0,
+                100.2 + f_rank * 10.0,
+                100.3 + f_rank * 10.0,
+                100.4 + f_rank * 10.0,
+                100.5 + f_rank * 10.0,
+            ]
+            f_r_iters = [
+                200.1 + f_rank * 10.0,
+                200.2 + f_rank * 10.0,
+                200.3 + f_rank * 10.0,
+                200.4 + f_rank * 10.0,
+                200.5 + f_rank * 10.0,
+            ]
             f_all_w_iters.extend(f_w_iters)
             f_all_r_iters.extend(f_r_iters)
 
@@ -726,10 +820,12 @@ class RunParseTest(unittest.TestCase):
             ]
             for f_val in f_w_iters:
                 f_rank_log_lines.append(f"iwrite,{f_val}")
-            f_rank_log_lines.extend([
-                "Bench-READ:",
-                "read,3000.50,0.35,1024,1024,5",
-            ])
+            f_rank_log_lines.extend(
+                [
+                    "Bench-READ:",
+                    "read,3000.50,0.35,1024,1024,5",
+                ]
+            )
             for f_val in f_r_iters:
                 f_rank_log_lines.append(f"iread,{f_val}")
 
@@ -772,7 +868,9 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("Rank log file does not exist", str(f_ctx.exception))
 
         # Symlink rank log rejected
-        f_sym_combo_dir = os.path.join(f_pt.pointDir, "logs", f_plan.combinations[2].name)
+        f_sym_combo_dir = os.path.join(
+            f_pt.pointDir, "logs", f_plan.combinations[2].name
+        )
         os.makedirs(f_sym_combo_dir, exist_ok=True)
         for f_r_idx in range(4):
             os.symlink(
@@ -785,7 +883,9 @@ class RunParseTest(unittest.TestCase):
 
     def testLmpLogExtractor(self) -> None:
         """Tests throughput metric extraction from LAMMPS stdout logs."""
-        f_run_root, f_plan, _ = self._setupSucceededRun("run-lmp-extract-001", "lmp", "local", "FS")
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-lmp-extract-001", "lmp", "local", "FS"
+        )
         f_resolved = RunRootResolver.resolve(f_run_root)
         f_pt = f_resolved.points[0]
         f_combo0 = f_plan.combinations[0]
@@ -837,7 +937,9 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("could not extract write throughput metric", str(f_ctx.exception))
 
         # 5. Symlink log file rejected
-        f_sym_path = os.path.join(f_logs_dir, f"lmp_{f_plan.combinations[3].name}.stdout")
+        f_sym_path = os.path.join(
+            f_logs_dir, f"lmp_{f_plan.combinations[3].name}.stdout"
+        )
         os.symlink(f_log_path0, f_sym_path)
         with self.assertRaises(ExtractionError) as f_ctx:
             LmpLogExtractor.extractPointCombo(f_pt, f_plan.combinations[3])
@@ -849,22 +951,80 @@ class RunParseTest(unittest.TestCase):
         os.makedirs(f_out_dir, exist_ok=True)
 
         # 1. IOR Master Report CSV (30 columns)
-        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-report-001", "ior", "local", "BASE")
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun(
+            "run-ior-report-001", "ior", "local", "BASE"
+        )
         f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
         f_extracted_ior = {
             f_resolved_ior.points[0].pointId: {
                 f_c.name: {
                     "write": {
-                        "_raw_values": ["100.0", "90.0", "95.0", "2.0", "100.0", "90.0", "95.0", "2.0", "1.0", "NA", "NA", "0", "1", "1", "1", "0", "0", "1", "0", "0", "1", "1048576", "1048576", "1.0", "POSIX", "0"]
+                        "_raw_values": [
+                            "100.0",
+                            "90.0",
+                            "95.0",
+                            "2.0",
+                            "100.0",
+                            "90.0",
+                            "95.0",
+                            "2.0",
+                            "1.0",
+                            "NA",
+                            "NA",
+                            "0",
+                            "1",
+                            "1",
+                            "1",
+                            "0",
+                            "0",
+                            "1",
+                            "0",
+                            "0",
+                            "1",
+                            "1048576",
+                            "1048576",
+                            "1.0",
+                            "POSIX",
+                            "0",
+                        ]
                     },
                     "read": {
-                        "_raw_values": ["200.0", "180.0", "190.0", "3.0", "200.0", "180.0", "190.0", "3.0", "0.5", "NA", "NA", "0", "1", "1", "1", "0", "0", "1", "0", "0", "1", "1048576", "1048576", "1.0", "POSIX", "0"]
+                        "_raw_values": [
+                            "200.0",
+                            "180.0",
+                            "190.0",
+                            "3.0",
+                            "200.0",
+                            "180.0",
+                            "190.0",
+                            "3.0",
+                            "0.5",
+                            "NA",
+                            "NA",
+                            "0",
+                            "1",
+                            "1",
+                            "1",
+                            "0",
+                            "0",
+                            "1",
+                            "0",
+                            "0",
+                            "1",
+                            "1048576",
+                            "1048576",
+                            "1.0",
+                            "POSIX",
+                            "0",
+                        ]
                     },
                 }
                 for f_c in f_plan_ior.combinations
             }
         }
-        f_ior_files = IorReportGenerator.generate(f_resolved_ior, f_extracted_ior, f_out_dir, f_format="csv")
+        f_ior_files = IorReportGenerator.generate(
+            f_resolved_ior, f_extracted_ior, f_out_dir, f_format="csv"
+        )
         self.assertIn("ior-report.csv", f_ior_files)
         f_ior_csv_path = f_ior_files["ior-report.csv"]
         self.assertTrue(os.path.isfile(f_ior_csv_path))
@@ -875,28 +1035,48 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(len(f_ior_rows), 12)
         for f_row in f_ior_rows:
             f_cols = f_row.split(",")
-            self.assertEqual(len(f_cols), 30, f"Expected 30 columns in IOR row: {f_row}")
+            self.assertEqual(
+                len(f_cols), 30, f"Expected 30 columns in IOR row: {f_row}"
+            )
 
         # 2. LSMIO Stage 1 (9 columns) & Stage 2 Master (12 columns)
-        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun("run-lsm-report-001", "lsmio", "local", "NATIVE-M")
+        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
+            "run-lsm-report-001", "lsmio", "local", "NATIVE-M"
+        )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
             f_resolved_lsm.points[0].pointId: {
                 f_c.name: {
-                    "write": {"first_line": "write,1200.0,0.85,1024,1024,5", "max": 1300.0, "min": 1100.0, "mean": 1200.0},
-                    "read": {"first_line": "read,2400.0,0.42,1024,1024,5", "max": 2500.0, "min": 2300.0, "mean": 2400.0},
+                    "write": {
+                        "first_line": "write,1200.0,0.85,1024,1024,5",
+                        "max": 1300.0,
+                        "min": 1100.0,
+                        "mean": 1200.0,
+                    },
+                    "read": {
+                        "first_line": "read,2400.0,0.42,1024,1024,5",
+                        "max": 2500.0,
+                        "min": 2300.0,
+                        "mean": 2400.0,
+                    },
                 }
                 for f_c in f_plan_lsm.combinations
             }
         }
-        f_lsm_files = LsmioReportGenerator.generate(f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="csv")
+        f_lsm_files = LsmioReportGenerator.generate(
+            f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="csv"
+        )
         self.assertIn("lsm-report.csv", f_lsm_files)
 
         # Verify Stage 1 files (agg-<stripe_count>-<stripe_size>-report.csv)
         f_stage1_header = "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter,max(MiB/s),min(MiB/s),mean(MiB/s)"
         for f_c in f_plan_lsm.combinations:
-            f_stage1_path = os.path.join(f_out_dir, "1", f"agg-{f_c.stripe_count}-{f_c.block_size}-report.csv")
-            self.assertTrue(os.path.isfile(f_stage1_path), f"Missing Stage 1 file: {f_stage1_path}")
+            f_stage1_path = os.path.join(
+                f_out_dir, "1", f"agg-{f_c.stripe_count}-{f_c.block_size}-report.csv"
+            )
+            self.assertTrue(
+                os.path.isfile(f_stage1_path), f"Missing Stage 1 file: {f_stage1_path}"
+            )
             with open(f_stage1_path, "r") as f_f:
                 f_lines = [l.strip() for l in f_f if l.strip()]
             self.assertEqual(len(f_lines), 3)
@@ -912,10 +1092,14 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(len(f_lsm_rows), 12)
         for f_row in f_lsm_rows:
             f_cols = f_row.split(",")
-            self.assertEqual(len(f_cols), 12, f"Expected 12 columns in LSMIO row: {f_row}")
+            self.assertEqual(
+                len(f_cols), 12, f"Expected 12 columns in LSMIO row: {f_row}"
+            )
 
         # 3. LAMMPS Master Report CSV (4 columns)
-        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun("run-lmp-report-001", "lmp", "local", "FS")
+        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun(
+            "run-lmp-report-001", "lmp", "local", "FS"
+        )
         f_resolved_lmp = RunRootResolver.resolve(f_run_root_lmp)
         f_extracted_lmp = {
             f_resolved_lmp.points[0].pointId: {
@@ -923,7 +1107,9 @@ class RunParseTest(unittest.TestCase):
                 for f_c in f_plan_lmp.combinations
             }
         }
-        f_lmp_files = LmpReportGenerator.generate(f_resolved_lmp, f_extracted_lmp, f_out_dir, f_format="csv")
+        f_lmp_files = LmpReportGenerator.generate(
+            f_resolved_lmp, f_extracted_lmp, f_out_dir, f_format="csv"
+        )
         self.assertIn("lmp-report.csv", f_lmp_files)
         f_lmp_csv_path = f_lmp_files["lmp-report.csv"]
 
@@ -940,7 +1126,9 @@ class RunParseTest(unittest.TestCase):
         os.makedirs(f_out_dir, exist_ok=True)
 
         # 1. IOR JSON
-        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-json-001", "ior", "local", "BASE")
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun(
+            "run-ior-json-001", "ior", "local", "BASE"
+        )
         f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
         f_extracted_ior = {
             f_resolved_ior.points[0].pointId: {
@@ -948,7 +1136,9 @@ class RunParseTest(unittest.TestCase):
                 for f_c in f_plan_ior.combinations
             }
         }
-        f_ior_files = IorReportGenerator.generate(f_resolved_ior, f_extracted_ior, f_out_dir, f_format="json")
+        f_ior_files = IorReportGenerator.generate(
+            f_resolved_ior, f_extracted_ior, f_out_dir, f_format="json"
+        )
         self.assertIn("ior-report.json", f_ior_files)
         with open(f_ior_files["ior-report.json"], "r") as f_f:
             f_json_ior = json.load(f_f)
@@ -957,7 +1147,9 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(len(f_json_ior["points"]), 1)
 
         # 2. LSMIO JSON
-        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun("run-lsm-json-001", "lsmio", "local", "NATIVE-M")
+        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
+            "run-lsm-json-001", "lsmio", "local", "NATIVE-M"
+        )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
             f_resolved_lsm.points[0].pointId: {
@@ -965,7 +1157,9 @@ class RunParseTest(unittest.TestCase):
                 for f_c in f_plan_lsm.combinations
             }
         }
-        f_lsm_files = LsmioReportGenerator.generate(f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="json")
+        f_lsm_files = LsmioReportGenerator.generate(
+            f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="json"
+        )
         self.assertIn("lsm-report.json", f_lsm_files)
         with open(f_lsm_files["lsm-report.json"], "r") as f_f:
             f_json_lsm = json.load(f_f)
@@ -973,7 +1167,9 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(f_json_lsm["run_id"], "run-lsm-json-001")
 
         # 3. LAMMPS JSON
-        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun("run-lmp-json-001", "lmp", "local", "FS")
+        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun(
+            "run-lmp-json-001", "lmp", "local", "FS"
+        )
         f_resolved_lmp = RunRootResolver.resolve(f_run_root_lmp)
         f_extracted_lmp = {
             f_resolved_lmp.points[0].pointId: {
@@ -981,7 +1177,9 @@ class RunParseTest(unittest.TestCase):
                 for f_c in f_plan_lmp.combinations
             }
         }
-        f_lmp_files = LmpReportGenerator.generate(f_resolved_lmp, f_extracted_lmp, f_out_dir, f_format="json")
+        f_lmp_files = LmpReportGenerator.generate(
+            f_resolved_lmp, f_extracted_lmp, f_out_dir, f_format="json"
+        )
         self.assertIn("lmp-report.json", f_lmp_files)
         with open(f_lmp_files["lmp-report.json"], "r") as f_f:
             f_json_lmp = json.load(f_f)
@@ -991,18 +1189,30 @@ class RunParseTest(unittest.TestCase):
     def testConsoleSummaryFormatterTableOutput(self) -> None:
         """Tests formatted ASCII summary table generation for IOR, LSMIO, and LAMMPS."""
         # 1. IOR Table
-        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun("run-ior-table-001", "ior", "local", "BASE")
+        f_run_root_ior, f_plan_ior, _ = self._setupSucceededRun(
+            "run-ior-table-001", "ior", "local", "BASE"
+        )
         f_resolved_ior = RunRootResolver.resolve(f_run_root_ior)
         f_extracted_ior = {
             f_resolved_ior.points[0].pointId: {
                 f_c.name: {
-                    "write": {"Mean(MiB)": 1100.25, "Mean(OPs)": 1100.25, "Mean(s)": 1.50},
-                    "read": {"Mean(MiB)": 2200.50, "Mean(OPs)": 2200.50, "Mean(s)": 0.75},
+                    "write": {
+                        "Mean(MiB)": 1100.25,
+                        "Mean(OPs)": 1100.25,
+                        "Mean(s)": 1.50,
+                    },
+                    "read": {
+                        "Mean(MiB)": 2200.50,
+                        "Mean(OPs)": 2200.50,
+                        "Mean(s)": 0.75,
+                    },
                 }
                 for f_c in f_plan_ior.combinations
             }
         }
-        f_tbl_ior = ConsoleSummaryFormatter.formatSummaryTable(f_resolved_ior, f_extracted_ior)
+        f_tbl_ior = ConsoleSummaryFormatter.formatSummaryTable(
+            f_resolved_ior, f_extracted_ior
+        )
         self.assertIn("Benchmark", f_tbl_ior)
         self.assertIn("Point ID", f_tbl_ior)
         self.assertIn("Tasks/Cores", f_tbl_ior)
@@ -1016,7 +1226,9 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("2200.50", f_tbl_ior)
 
         # 2. LSMIO Table
-        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun("run-lsm-table-001", "lsmio", "local", "NATIVE-M")
+        f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
+            "run-lsm-table-001", "lsmio", "local", "NATIVE-M"
+        )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
             f_resolved_lsm.points[0].pointId: {
@@ -1027,14 +1239,18 @@ class RunParseTest(unittest.TestCase):
                 for f_c in f_plan_lsm.combinations
             }
         }
-        f_tbl_lsm = ConsoleSummaryFormatter.formatSummaryTable(f_resolved_lsm, f_extracted_lsm)
+        f_tbl_lsm = ConsoleSummaryFormatter.formatSummaryTable(
+            f_resolved_lsm, f_extracted_lsm
+        )
         self.assertIn("LSMIO", f_tbl_lsm)
         self.assertIn("1250.75", f_tbl_lsm)
         self.assertIn("2450.25", f_tbl_lsm)
         self.assertIn("0.850ms", f_tbl_lsm)
 
         # 3. LAMMPS Table
-        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun("run-lmp-table-001", "lmp", "local", "FS")
+        f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun(
+            "run-lmp-table-001", "lmp", "local", "FS"
+        )
         f_resolved_lmp = RunRootResolver.resolve(f_run_root_lmp)
         f_extracted_lmp = {
             f_resolved_lmp.points[0].pointId: {
@@ -1042,7 +1258,9 @@ class RunParseTest(unittest.TestCase):
                 for f_c in f_plan_lmp.combinations
             }
         }
-        f_tbl_lmp = ConsoleSummaryFormatter.formatSummaryTable(f_resolved_lmp, f_extracted_lmp)
+        f_tbl_lmp = ConsoleSummaryFormatter.formatSummaryTable(
+            f_resolved_lmp, f_extracted_lmp
+        )
         self.assertIn("LMP", f_tbl_lmp)
         self.assertIn("876.54", f_tbl_lmp)
 

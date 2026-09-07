@@ -117,7 +117,9 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
 
     @property
     def m_cancel_calls(self) -> List[List[str]]:
-        return [c for c in self.m_calls if os.path.basename(c[0]) in ("scancel", "qdel")]
+        return [
+            c for c in self.m_calls if os.path.basename(c[0]) in ("scancel", "qdel")
+        ]
 
     def run(
         self,
@@ -134,7 +136,12 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
             return ProcessResult(0, "IOR-3.3.0: Parallel IO Benchmark\n", "", 0.01)
 
         elif f_exe == "lmp":
-            return ProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb\n-lsmio-mmap\n-lsmio-fallback\n", "", 0.01)
+            return ProcessResult(
+                0,
+                "LAMMPS (2 Aug 2023)\n-lsmio-buf-size-mb\n-lsmio-mmap\n-lsmio-fallback\n",
+                "",
+                0.01,
+            )
 
         elif f_exe.startswith("bm_"):
             return ProcessResult(0, "LSMIO Benchmark\n", "", 0.01)
@@ -154,14 +161,18 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
 
         elif f_exe == "squeue":
             if self.m_query_fail:
-                return ProcessResult(1, "", "squeue: error: Slurm controller down\n", 0.01)
+                return ProcessResult(
+                    1, "", "squeue: error: Slurm controller down\n", 0.01
+                )
             # Check if recovery query (--name=...)
             for f_arg in f_cmd:
                 if f_arg.startswith("--name="):
                     f_name = f_arg.split("=", 1)[1]
                     f_cands = self.m_recovery_candidates.get(f_name, [])
                     f_lines = [f"{f_cid}|{f_name}|RUNNING" for f_cid in f_cands]
-                    return ProcessResult(0, "\n".join(f_lines) + ("\n" if f_lines else ""), "", 0.01)
+                    return ProcessResult(
+                        0, "\n".join(f_lines) + ("\n" if f_lines else ""), "", 0.01
+                    )
             if self.m_on_query_callback is not None:
                 self.m_on_query_callback(f_cmd)
             if self.m_active_running_count > 0:
@@ -231,13 +242,18 @@ class FakeSchedulerCommandRunner(SchedulerCommandRunner):
             if "-x" in f_cmd:
                 f_query_id = f_cmd[-1]
                 f_base_id = f_query_id.split(".")[0]
-                if f_base_id in self.m_cancelled_jobs or f_query_id in self.m_cancelled_jobs:
+                if (
+                    f_base_id in self.m_cancelled_jobs
+                    or f_query_id in self.m_cancelled_jobs
+                ):
                     f_job_data = {"job_state": "F", "Exit_status": 271}
                 elif self.m_job_fail:
                     f_job_data = {"job_state": "F", "Exit_status": 1}
                 else:
                     f_job_data = {"job_state": "F", "Exit_status": 0}
-                return ProcessResult(0, json.dumps({"Jobs": {f_query_id: f_job_data}}), "", 0.01)
+                return ProcessResult(
+                    0, json.dumps({"Jobs": {f_query_id: f_job_data}}), "", 0.01
+                )
             else:
                 # Active query -> empty Jobs object
                 return ProcessResult(0, json.dumps({"Jobs": {}}), "", 0.01)
@@ -271,7 +287,9 @@ class RunOrchestratorTest(unittest.TestCase):
         os.environ["SB_EMAIL"] = "user@example.com"
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-orchestrator-test-")
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -305,37 +323,51 @@ class RunOrchestratorTest(unittest.TestCase):
 
         self.m_ior_path = os.path.join(self.m_bin_dir, "ior")
         with open(self.m_ior_path, "w") as f_f:
-            f_f.write('#!/bin/sh\nif [ "$1" = "-v" ]; then echo "IOR-3.3.0: Parallel IO Benchmark"; exit 0; fi\nexit 0\n')
+            f_f.write(
+                '#!/bin/sh\nif [ "$1" = "-v" ]; then echo "IOR-3.3.0: Parallel IO Benchmark"; exit 0; fi\nexit 0\n'
+            )
         os.chmod(self.m_ior_path, 0o755)
 
         self.m_lmp_path = os.path.join(self.m_bin_dir, "lmp")
         with open(self.m_lmp_path, "w") as f_f:
-            f_f.write('#!/bin/sh\nif [ "$1" = "-h" ]; then echo "LAMMPS (2 Aug 2023)"; echo "-lsmio-buf-size-mb"; echo "-lsmio-mmap"; echo "-lsmio-fallback"; exit 0; fi\nexit 0\n')
+            f_f.write(
+                '#!/bin/sh\nif [ "$1" = "-h" ]; then echo "LAMMPS (2 Aug 2023)"; echo "-lsmio-buf-size-mb"; echo "-lsmio-mmap"; echo "-lsmio-fallback"; exit 0; fi\nexit 0\n'
+            )
         os.chmod(self.m_lmp_path, 0o755)
 
         self.m_bm_paths: Dict[str, str] = {}
-        for f_name in ("bm_native", "bm_adios", "bm_rocksdb", "bm_leveldb", "bm_manager"):
+        for f_name in (
+            "bm_native",
+            "bm_adios",
+            "bm_rocksdb",
+            "bm_leveldb",
+            "bm_manager",
+        ):
             f_p = os.path.join(self.m_bin_dir, f_name)
             with open(f_p, "w") as f_f:
                 f_f.write("#!/bin/sh\nexit 0\n")
             os.chmod(f_p, 0o755)
             self.m_bm_paths[f_name] = f_p
 
-        self.m_lmp_assets_dir = os.path.join(self.m_temp_dir, "share", "lsmio", "lmp-reaxff")
+        self.m_lmp_assets_dir = os.path.join(
+            self.m_temp_dir, "share", "lsmio", "lmp-reaxff"
+        )
         os.makedirs(self.m_lmp_assets_dir, exist_ok=True)
         for f_asset in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
             with open(os.path.join(self.m_lmp_assets_dir, f_asset), "w") as f_f:
                 f_f.write(f"# asset content for {f_asset}\n")
 
-        self.m_executables = ExecutableRegistry({
-            "ior": self.m_ior_path,
-            "lmp": self.m_lmp_path,
-            "bm_native": self.m_bm_paths["bm_native"],
-            "bm_adios": self.m_bm_paths["bm_adios"],
-            "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
-            "bm_leveldb": self.m_bm_paths["bm_leveldb"],
-            "bm_manager": self.m_bm_paths["bm_manager"],
-        })
+        self.m_executables = ExecutableRegistry(
+            {
+                "ior": self.m_ior_path,
+                "lmp": self.m_lmp_path,
+                "bm_native": self.m_bm_paths["bm_native"],
+                "bm_adios": self.m_bm_paths["bm_adios"],
+                "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
+                "bm_leveldb": self.m_bm_paths["bm_leveldb"],
+                "bm_manager": self.m_bm_paths["bm_manager"],
+            }
+        )
 
         self.m_viking_profile = SiteProfile(
             f_name=f_base_viking.name,
@@ -343,7 +375,10 @@ class RunOrchestratorTest(unittest.TestCase):
             f_launcher=f_base_viking.launcher,
             f_certification=f_base_viking.certification,
             f_test_only=True,
-            f_benchmark_roots={"hdd": self.m_viking_root_hdd, "ssd": self.m_viking_root_ssd},
+            f_benchmark_roots={
+                "hdd": self.m_viking_root_hdd,
+                "ssd": self.m_viking_root_ssd,
+            },
             f_install_prefix=self.m_temp_dir,
             f_executables=self.m_executables,
             f_modules=f_base_viking.modules,
@@ -359,7 +394,10 @@ class RunOrchestratorTest(unittest.TestCase):
             f_launcher=f_base_isambard.launcher,
             f_certification=f_base_isambard.certification,
             f_test_only=True,
-            f_benchmark_roots={"hdd": self.m_isambard_root_hdd, "ssd": self.m_isambard_root_ssd},
+            f_benchmark_roots={
+                "hdd": self.m_isambard_root_hdd,
+                "ssd": self.m_isambard_root_ssd,
+            },
             f_install_prefix=self.m_temp_dir,
             f_executables=self.m_executables,
             f_modules=f_base_isambard.modules,
@@ -390,13 +428,16 @@ class RunOrchestratorTest(unittest.TestCase):
         f_failed: bool = False,
     ) -> None:
         """Helper to write controller results and LSMIO rank results for all combinations in a point."""
-        f_is_lsmio = (f_plan.request.target.lower() == "lsmio")
+        f_is_lsmio = f_plan.request.target.lower() == "lsmio"
         for f_combo in f_plan.combinations:
             f_ret = 1 if f_failed else 0
             f_evidence_store.recordControllerResult(
                 f_point=f_scale_point,
                 f_combination=f_combo,
-                f_payload={"returncode": f_ret, "status": "failed" if f_failed else "completed"},
+                f_payload={
+                    "returncode": f_ret,
+                    "status": "failed" if f_failed else "completed",
+                },
                 f_ordinal=f_ordinal,
             )
             if f_is_lsmio:
@@ -405,7 +446,10 @@ class RunOrchestratorTest(unittest.TestCase):
                         f_point=f_scale_point,
                         f_global_rank=f_r,
                         f_combination=f_combo,
-                        f_payload={"returncode": f_ret, "status": "failed" if f_failed else "completed"},
+                        f_payload={
+                            "returncode": f_ret,
+                            "status": "failed" if f_failed else "completed",
+                        },
                         f_ordinal=f_ordinal,
                     )
 
@@ -575,7 +619,9 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(f_run_id_called, 0, "run_id_source must not be called")
         self.assertEqual(f_token_called, 0, "token_source must not be called")
         self.assertEqual(f_clock_called, 0, "clock must not be called")
-        self.assertEqual(len(self.m_fake_runner.m_calls), 0, "No scheduler commands should be run")
+        self.assertEqual(
+            len(self.m_fake_runner.m_calls), 0, "No scheduler commands should be run"
+        )
 
     def testLocalOneJob(self) -> None:
         """Validates single-job local scale execution."""
@@ -682,13 +728,19 @@ class RunOrchestratorTest(unittest.TestCase):
         f_store.allocateRun(f_plan)
         f_store.preparePoint(f_plan.scale_points[0], f_plan.combinations, f_ordinal=0)
         f_ev_store = EvidenceStore(f_store.layout, f_plan)
-        f_ev_store.recordSubmissionRequested(f_plan.scale_points[0], "control", f_ordinal=0)
-        f_ev_store.recordSubmissionDispatched(f_plan.scale_points[0], "control", f_ordinal=0)
+        f_ev_store.recordSubmissionRequested(
+            f_plan.scale_points[0], "control", f_ordinal=0
+        )
+        f_ev_store.recordSubmissionDispatched(
+            f_plan.scale_points[0], "control", f_ordinal=0
+        )
 
         f_token = f_plan.tokens[0]
         self.m_fake_runner.m_recovery_candidates[f_token] = ["99991"]
 
-        self._mockWritePointResults(f_ev_store, f_plan.scale_points[0], f_plan, f_ordinal=0)
+        self._mockWritePointResults(
+            f_ev_store, f_plan.scale_points[0], f_plan, f_ordinal=0
+        )
 
         f_orch_recovered = RunOrchestrator(
             f_profile_resolver=self.m_registry,
@@ -696,13 +748,17 @@ class RunOrchestratorTest(unittest.TestCase):
             f_poll_interval=0.01,
         )
 
-        f_submit_calls_before = len([f_c for f_c in self.m_fake_runner.m_calls if f_c[0] == "sbatch"])
+        f_submit_calls_before = len(
+            [f_c for f_c in self.m_fake_runner.m_calls if f_c[0] == "sbatch"]
+        )
         f_view = f_orch_recovered.recoverRun(
             f_plan,
             f_broot,
             f_worker_executable=self.m_worker_path,
         )
-        f_submit_calls_after = len([f_c for f_c in self.m_fake_runner.m_calls if f_c[0] == "sbatch"])
+        f_submit_calls_after = len(
+            [f_c for f_c in self.m_fake_runner.m_calls if f_c[0] == "sbatch"]
+        )
 
         self.assertEqual(
             f_submit_calls_before,
@@ -715,13 +771,23 @@ class RunOrchestratorTest(unittest.TestCase):
         # ---------------------------------------------------------------------
         # Scenario B: Dispatched exists, 0 recovery candidates -> fails closed
         # ---------------------------------------------------------------------
-        f_plan_b = RunPlanner.createPlan(RunRequest("ior", "local"), self.m_viking_profile)
-        f_store_b = ArtifactStore(self.m_viking_profile.benchmark_roots["hdd"], f_plan_b.run_id)
+        f_plan_b = RunPlanner.createPlan(
+            RunRequest("ior", "local"), self.m_viking_profile
+        )
+        f_store_b = ArtifactStore(
+            self.m_viking_profile.benchmark_roots["hdd"], f_plan_b.run_id
+        )
         f_store_b.allocateRun(f_plan_b)
-        f_store_b.preparePoint(f_plan_b.scale_points[0], f_plan_b.combinations, f_ordinal=0)
+        f_store_b.preparePoint(
+            f_plan_b.scale_points[0], f_plan_b.combinations, f_ordinal=0
+        )
         f_ev_store_b = EvidenceStore(f_store_b.layout, f_plan_b)
-        f_ev_store_b.recordSubmissionRequested(f_plan_b.scale_points[0], "control", f_ordinal=0)
-        f_ev_store_b.recordSubmissionDispatched(f_plan_b.scale_points[0], "control", f_ordinal=0)
+        f_ev_store_b.recordSubmissionRequested(
+            f_plan_b.scale_points[0], "control", f_ordinal=0
+        )
+        f_ev_store_b.recordSubmissionDispatched(
+            f_plan_b.scale_points[0], "control", f_ordinal=0
+        )
 
         self.m_fake_runner.m_recovery_candidates[f_plan_b.tokens[0]] = []
 
@@ -741,15 +807,28 @@ class RunOrchestratorTest(unittest.TestCase):
         # ---------------------------------------------------------------------
         # Scenario C: Dispatched exists, >1 recovery candidates -> indeterminate fail closed
         # ---------------------------------------------------------------------
-        f_plan_c = RunPlanner.createPlan(RunRequest("ior", "local"), self.m_viking_profile)
-        f_store_c = ArtifactStore(self.m_viking_profile.benchmark_roots["hdd"], f_plan_c.run_id)
+        f_plan_c = RunPlanner.createPlan(
+            RunRequest("ior", "local"), self.m_viking_profile
+        )
+        f_store_c = ArtifactStore(
+            self.m_viking_profile.benchmark_roots["hdd"], f_plan_c.run_id
+        )
         f_store_c.allocateRun(f_plan_c)
-        f_store_c.preparePoint(f_plan_c.scale_points[0], f_plan_c.combinations, f_ordinal=0)
+        f_store_c.preparePoint(
+            f_plan_c.scale_points[0], f_plan_c.combinations, f_ordinal=0
+        )
         f_ev_store_c = EvidenceStore(f_store_c.layout, f_plan_c)
-        f_ev_store_c.recordSubmissionRequested(f_plan_c.scale_points[0], "control", f_ordinal=0)
-        f_ev_store_c.recordSubmissionDispatched(f_plan_c.scale_points[0], "control", f_ordinal=0)
+        f_ev_store_c.recordSubmissionRequested(
+            f_plan_c.scale_points[0], "control", f_ordinal=0
+        )
+        f_ev_store_c.recordSubmissionDispatched(
+            f_plan_c.scale_points[0], "control", f_ordinal=0
+        )
 
-        self.m_fake_runner.m_recovery_candidates[f_plan_c.tokens[0]] = ["99992", "99993"]
+        self.m_fake_runner.m_recovery_candidates[f_plan_c.tokens[0]] = [
+            "99992",
+            "99993",
+        ]
 
         f_orch_c = RunOrchestrator(
             f_profile_resolver=self.m_registry,
@@ -781,7 +860,9 @@ class RunOrchestratorTest(unittest.TestCase):
         with open(f_sentinel_path, "wb") as f_f:
             f_f.write(b"existing-winner-data-123")
 
-        f_submit_calls_before = len([c for c in self.m_fake_runner.m_calls if c[0] == "sbatch"])
+        f_submit_calls_before = len(
+            [c for c in self.m_fake_runner.m_calls if c[0] == "sbatch"]
+        )
 
         f_orch = RunOrchestrator(
             f_profile_resolver=self.m_registry,
@@ -799,13 +880,17 @@ class RunOrchestratorTest(unittest.TestCase):
 
         self.assertIn("failed to allocate run", str(f_ctx.exception).lower())
         # Zero scheduler submit commands
-        f_submit_calls_after = len([c for c in self.m_fake_runner.m_calls if c[0] == "sbatch"])
+        f_submit_calls_after = len(
+            [c for c in self.m_fake_runner.m_calls if c[0] == "sbatch"]
+        )
         self.assertEqual(f_submit_calls_after, f_submit_calls_before)
 
         # Zero point preparation, script, or evidence modifications
         with open(f_sentinel_path, "rb") as f_f:
             self.assertEqual(f_f.read(), b"existing-winner-data-123")
-        self.assertFalse(os.path.exists(os.path.join(f_store.layout.runRoot, "points", "00-tasks-1")))
+        self.assertFalse(
+            os.path.exists(os.path.join(f_store.layout.runRoot, "points", "00-tasks-1"))
+        )
 
     def testArtifactFactoryExistingRootCannotBypassAllocation(self) -> None:
         """Asserts custom artifact store factory returning existing root cannot bypass allocation collision check."""
@@ -849,11 +934,17 @@ class RunOrchestratorTest(unittest.TestCase):
 
         # Pre-seed dispatch evidence
         f_ev_store = EvidenceStore(f_store.layout, f_plan)
-        f_ev_store.recordSubmissionRequested(f_plan.scale_points[0], "control", f_ordinal=0)
-        f_ev_store.recordSubmissionDispatched(f_plan.scale_points[0], "control", f_ordinal=0)
+        f_ev_store.recordSubmissionRequested(
+            f_plan.scale_points[0], "control", f_ordinal=0
+        )
+        f_ev_store.recordSubmissionDispatched(
+            f_plan.scale_points[0], "control", f_ordinal=0
+        )
         f_token = f_plan.tokens[0]
         self.m_fake_runner.m_recovery_candidates[f_token] = ["88881"]
-        self._mockWritePointResults(f_ev_store, f_plan.scale_points[0], f_plan, f_ordinal=0)
+        self._mockWritePointResults(
+            f_ev_store, f_plan.scale_points[0], f_plan, f_ordinal=0
+        )
 
         # 1. Lock contention test
         f_lock = f_store.getControlLock()
@@ -918,8 +1009,12 @@ class RunOrchestratorTest(unittest.TestCase):
             f_worker_executable=self.m_worker_path,
         )
         self.assertNotEqual(f_view_1.state, OverallRunState.SUCCEEDED)
-        f_submit_calls = [f_c for f_c in f_runner_submit_fail.m_calls if f_c[0] == "sbatch"]
-        self.assertEqual(len(f_submit_calls), 1, "Must not submit point 2 after point 1 submit fails")
+        f_submit_calls = [
+            f_c for f_c in f_runner_submit_fail.m_calls if f_c[0] == "sbatch"
+        ]
+        self.assertEqual(
+            len(f_submit_calls), 1, "Must not submit point 2 after point 1 submit fails"
+        )
 
         # Boundary 2: Query failure during polling
         f_runner_query_fail = FakeSchedulerCommandRunner()
@@ -937,8 +1032,14 @@ class RunOrchestratorTest(unittest.TestCase):
             f_worker_executable=self.m_worker_path,
         )
         self.assertNotEqual(f_view_2.state, OverallRunState.SUCCEEDED)
-        f_submit_calls_2 = [f_c for f_c in f_runner_query_fail.m_calls if f_c[0] == "sbatch"]
-        self.assertEqual(len(f_submit_calls_2), 1, "Must not submit point 2 after query failure on point 1")
+        f_submit_calls_2 = [
+            f_c for f_c in f_runner_query_fail.m_calls if f_c[0] == "sbatch"
+        ]
+        self.assertEqual(
+            len(f_submit_calls_2),
+            1,
+            "Must not submit point 2 after query failure on point 1",
+        )
 
         # Boundary 3: Job execution failure (sacct reports FAILED)
         f_runner_job_fail = FakeSchedulerCommandRunner()
@@ -957,8 +1058,14 @@ class RunOrchestratorTest(unittest.TestCase):
         )
         self.assertNotEqual(f_view_3.state, OverallRunState.SUCCEEDED)
         self.assertEqual(f_view_3.point_states[0].state, PointRunState.FAILED)
-        f_submit_calls_3 = [f_c for f_c in f_runner_job_fail.m_calls if f_c[0] == "sbatch"]
-        self.assertEqual(len(f_submit_calls_3), 1, "Must not submit point 2 after point 1 execution fails")
+        f_submit_calls_3 = [
+            f_c for f_c in f_runner_job_fail.m_calls if f_c[0] == "sbatch"
+        ]
+        self.assertEqual(
+            len(f_submit_calls_3),
+            1,
+            "Must not submit point 2 after point 1 execution fails",
+        )
 
     def testMarkerOnlyAfterComplete(self) -> None:
         """Asserts WHOLE_RUN_SUCCEEDED is recorded ONLY after all points complete successfully."""
@@ -1002,7 +1109,9 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertNotEqual(f_view.state, OverallRunState.SUCCEEDED)
         f_ctrl_events = f_orch.last_evidence_store.readControlEvents("control")
         f_success_markers = [
-            f_e for f_e in f_ctrl_events if f_e.evidence_kind == EvidenceKind.WHOLE_RUN_SUCCEEDED
+            f_e
+            for f_e in f_ctrl_events
+            if f_e.evidence_kind == EvidenceKind.WHOLE_RUN_SUCCEEDED
         ]
         self.assertEqual(len(f_success_markers), 0)
 
@@ -1176,7 +1285,9 @@ class RunOrchestratorTest(unittest.TestCase):
             return self.m_viking_profile
 
         with patch.object(EnvironmentResolver, "detect", side_effect=spy_detect):
-            with patch.object(EnvironmentResolver, "resolveProfile", side_effect=spy_resolve):
+            with patch.object(
+                EnvironmentResolver, "resolveProfile", side_effect=spy_resolve
+            ):
                 f_view = f_orch.execute(
                     RunRequest("ior", "local"),
                     f_site=None,
@@ -1240,7 +1351,9 @@ class RunOrchestratorTest(unittest.TestCase):
         # 2. Explicit string name
         with patch.object(EnvironmentResolver, "detect", f_detect_mock):
             with patch.object(
-                EnvironmentResolver, "resolveProfile", return_value=self.m_viking_profile
+                EnvironmentResolver,
+                "resolveProfile",
+                return_value=self.m_viking_profile,
             ) as mock_resolve:
                 f_view_2 = f_orch.execute(
                     RunRequest("ior", "local"),
@@ -1324,7 +1437,9 @@ class RunOrchestratorTest(unittest.TestCase):
         with patch.object(
             EnvironmentResolver,
             "detect",
-            side_effect=SiteResolutionError("Ambiguous site detection: matched ['VIKING', 'VIKING2']"),
+            side_effect=SiteResolutionError(
+                "Ambiguous site detection: matched ['VIKING', 'VIKING2']"
+            ),
         ):
             with self.assertRaises(PreflightError) as ctx:
                 f_orch.execute(
@@ -1346,7 +1461,9 @@ class RunOrchestratorTest(unittest.TestCase):
                     f_worker_executable=self.m_worker_path,
                     f_test_mode=False,
                 )
-            self.assertIn("DEV environment requires explicit test_mode=True", str(ctx.exception))
+            self.assertIn(
+                "DEV environment requires explicit test_mode=True", str(ctx.exception)
+            )
             f_run_id_spy.assert_not_called()
             f_store_factory_spy.assert_not_called()
 
@@ -1457,7 +1574,10 @@ class RunOrchestratorTest(unittest.TestCase):
                 self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
                 spy_detect_dev.assert_called_once_with(f_test_mode=True)
                 spy_resolve_dev.assert_called_once_with(
-                    "DEV", f_user=self.m_test_user, f_home=self.m_test_home, f_env_file=None
+                    "DEV",
+                    f_user=self.m_test_user,
+                    f_home=self.m_test_home,
+                    f_env_file=None,
                 )
 
     def testSlurmCredentialsBeforeAllMutation(self) -> None:
@@ -1469,7 +1589,10 @@ class RunOrchestratorTest(unittest.TestCase):
             f_launcher=f_base_viking2.launcher,
             f_certification=f_base_viking2.certification,
             f_test_only=True,
-            f_benchmark_roots={"hdd": self.m_viking_root_hdd, "ssd": self.m_viking_root_ssd},
+            f_benchmark_roots={
+                "hdd": self.m_viking_root_hdd,
+                "ssd": self.m_viking_root_ssd,
+            },
             f_install_prefix=f_base_viking2.install_prefix,
             f_executables=f_base_viking2.executables,
             f_modules=f_base_viking2.modules,
@@ -1486,7 +1609,10 @@ class RunOrchestratorTest(unittest.TestCase):
             f_launcher=f_base_archer2.launcher,
             f_certification=f_base_archer2.certification,
             f_test_only=True,
-            f_benchmark_roots={"hdd": self.m_viking_root_hdd, "ssd": self.m_viking_root_ssd},
+            f_benchmark_roots={
+                "hdd": self.m_viking_root_hdd,
+                "ssd": self.m_viking_root_ssd,
+            },
             f_install_prefix=f_base_archer2.install_prefix,
             f_executables=f_base_archer2.executables,
             f_modules=f_base_archer2.modules,
@@ -1516,10 +1642,16 @@ class RunOrchestratorTest(unittest.TestCase):
             {"SB_ACCOUNT": "e281", "SB_EMAIL": "u\n@epcc.ed.ac.uk"},
             {"SB_ACCOUNT": "e281", "SB_EMAIL": "u\0@epcc.ed.ac.uk"},
             {"SB_ACCOUNT": "e281", "SB_EMAIL": "u\r@epcc.ed.ac.uk"},
-            {"SB_ACCOUNT": "e281\n#SBATCH --export=ALL", "SB_EMAIL": "user@epcc.ed.ac.uk"},
+            {
+                "SB_ACCOUNT": "e281\n#SBATCH --export=ALL",
+                "SB_EMAIL": "user@epcc.ed.ac.uk",
+            },
             {"SB_ACCOUNT": "e281#SBATCH", "SB_EMAIL": "user@epcc.ed.ac.uk"},
             {"SB_ACCOUNT": "e281#PBS", "SB_EMAIL": "user@epcc.ed.ac.uk"},
-            {"SB_ACCOUNT": "e281", "SB_EMAIL": "user@epcc.ed.ac.uk\n#SBATCH --mail-type=ALL"},
+            {
+                "SB_ACCOUNT": "e281",
+                "SB_EMAIL": "user@epcc.ed.ac.uk\n#SBATCH --mail-type=ALL",
+            },
             {"SB_ACCOUNT": "e281", "SB_EMAIL": "user@epcc.ed.ac.uk#SBATCH"},
             {"SB_ACCOUNT": "-start-dash", "SB_EMAIL": "user@epcc.ed.ac.uk"},
             {"SB_ACCOUNT": "my account with spaces", "SB_EMAIL": "user@epcc.ed.ac.uk"},
@@ -1572,14 +1704,28 @@ class RunOrchestratorTest(unittest.TestCase):
                     )
 
                 # Verify ZERO mutations occurred
-                self.assertEqual(len(os.listdir(f_root)), 0, "No run root directories should be created")
-                self.assertEqual(len(f_fake_runner.m_calls), 0, "No scheduler commands should be executed")
+                self.assertEqual(
+                    len(os.listdir(f_root)),
+                    0,
+                    "No run root directories should be created",
+                )
+                self.assertEqual(
+                    len(f_fake_runner.m_calls),
+                    0,
+                    "No scheduler commands should be executed",
+                )
                 self.assertEqual(f_clock_calls, 0, "Clock should not be called")
-                self.assertEqual(f_run_id_calls, 0, "Run ID source should not be called")
+                self.assertEqual(
+                    f_run_id_calls, 0, "Run ID source should not be called"
+                )
                 self.assertEqual(f_token_calls, 0, "Token source should not be called")
                 self.assertIsNone(f_orch.last_plan, "last_plan must remain None")
-                self.assertIsNone(f_orch.last_artifact_store, "last_artifact_store must remain None")
-                self.assertIsNone(f_orch.last_run_root, "last_run_root must remain None")
+                self.assertIsNone(
+                    f_orch.last_artifact_store, "last_artifact_store must remain None"
+                )
+                self.assertIsNone(
+                    f_orch.last_run_root, "last_run_root must remain None"
+                )
 
     def testCredentialsReachEverySlurmPointUnchanged(self) -> None:
         """Verifies valid credentials reach every point script and JobSpec without entering immutable plan."""
@@ -1621,12 +1767,16 @@ class RunOrchestratorTest(unittest.TestCase):
 
         f_layout = f_orch.last_artifact_store.layout
         for f_idx, f_pt in enumerate(f_orch.last_plan.scale_points):
-            f_script_path = os.path.join(f_layout.pointSchedulerDir(f_pt, f_idx), "job.sh")
+            f_script_path = os.path.join(
+                f_layout.pointSchedulerDir(f_pt, f_idx), "job.sh"
+            )
             self.assertTrue(os.path.exists(f_script_path))
             with open(f_script_path, "r", encoding="utf-8") as f_f:
                 f_script_content = f_f.read()
             self.assertIn("#SBATCH --account=e281_prj", f_script_content)
-            self.assertIn("#SBATCH --mail-user=researcher@epcc.ed.ac.uk", f_script_content)
+            self.assertIn(
+                "#SBATCH --mail-user=researcher@epcc.ed.ac.uk", f_script_content
+            )
             self.assertIn("#SBATCH --mail-type=END,FAIL", f_script_content)
 
         # Verify immutable plan and manifest do NOT contain credentials
@@ -1712,7 +1862,8 @@ class RunOrchestratorTest(unittest.TestCase):
         # Check PBS job script content
         f_pbs_layout = f_orch_pbs_2.last_artifact_store.layout
         f_pbs_script_path = os.path.join(
-            f_pbs_layout.pointSchedulerDir(f_orch_pbs_2.last_plan.scale_points[0], 0), "job.sh"
+            f_pbs_layout.pointSchedulerDir(f_orch_pbs_2.last_plan.scale_points[0], 0),
+            "job.sh",
         )
         with open(f_pbs_script_path, "r", encoding="utf-8") as f_f:
             f_pbs_content = f_f.read()
@@ -1808,15 +1959,17 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(f_token_calls, 0)
 
         # 2. Missing benchmark executable
-        f_bad_executables = ExecutableRegistry({
-            "ior": os.path.join(self.m_temp_dir, "bin", "missing_ior"),
-            "lmp": self.m_lmp_path,
-            "bm_native": self.m_bm_paths["bm_native"],
-            "bm_adios": self.m_bm_paths["bm_adios"],
-            "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
-            "bm_leveldb": self.m_bm_paths["bm_leveldb"],
-            "bm_manager": self.m_bm_paths["bm_manager"],
-        })
+        f_bad_executables = ExecutableRegistry(
+            {
+                "ior": os.path.join(self.m_temp_dir, "bin", "missing_ior"),
+                "lmp": self.m_lmp_path,
+                "bm_native": self.m_bm_paths["bm_native"],
+                "bm_adios": self.m_bm_paths["bm_adios"],
+                "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
+                "bm_leveldb": self.m_bm_paths["bm_leveldb"],
+                "bm_manager": self.m_bm_paths["bm_manager"],
+            }
+        )
         f_bad_prof = SiteProfile(
             f_name=self.m_viking_profile.name,
             f_scheduler=self.m_viking_profile.scheduler,
@@ -1843,7 +1996,9 @@ class RunOrchestratorTest(unittest.TestCase):
 
         # 3. Failing IOR probe (nonzero exit / unsupported)
         f_failing_runner = FakeSchedulerCommandRunner()
-        f_failing_runner.run = lambda argv, **kw: ProcessResult(1, "", "IOR: failed probe", 0.01)  # type: ignore
+        f_failing_runner.run = lambda argv, **kw: ProcessResult(
+            1, "", "IOR: failed probe", 0.01
+        )  # type: ignore
 
         f_orch_probe_fail = RunOrchestrator(
             f_profile_resolver=self.m_registry,
@@ -1862,7 +2017,9 @@ class RunOrchestratorTest(unittest.TestCase):
 
         # 4. Failing LMP probe (missing required setup flag)
         f_bad_lmp_runner = FakeSchedulerCommandRunner()
-        f_bad_lmp_runner.run = lambda argv, **kw: ProcessResult(0, "LAMMPS (2 Aug 2023)\n-lsmio-fallback\n", "", 0.01)  # type: ignore
+        f_bad_lmp_runner.run = lambda argv, **kw: ProcessResult(
+            0, "LAMMPS (2 Aug 2023)\n-lsmio-fallback\n", "", 0.01
+        )  # type: ignore
 
         f_orch_lmp_fail = RunOrchestrator(
             f_profile_resolver=self.m_registry,
@@ -1971,15 +2128,17 @@ class RunOrchestratorTest(unittest.TestCase):
         )
 
         def make_prof_with_ior(f_path: str) -> SiteProfile:
-            f_exes = ExecutableRegistry({
-                "ior": f_path,
-                "lmp": self.m_lmp_path,
-                "bm_native": self.m_bm_paths["bm_native"],
-                "bm_adios": self.m_bm_paths["bm_adios"],
-                "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
-                "bm_leveldb": self.m_bm_paths["bm_leveldb"],
-                "bm_manager": self.m_bm_paths["bm_manager"],
-            })
+            f_exes = ExecutableRegistry(
+                {
+                    "ior": f_path,
+                    "lmp": self.m_lmp_path,
+                    "bm_native": self.m_bm_paths["bm_native"],
+                    "bm_adios": self.m_bm_paths["bm_adios"],
+                    "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
+                    "bm_leveldb": self.m_bm_paths["bm_leveldb"],
+                    "bm_manager": self.m_bm_paths["bm_manager"],
+                }
+            )
             return SiteProfile(
                 f_name=self.m_viking_profile.name,
                 f_scheduler=self.m_viking_profile.scheduler,
@@ -2000,7 +2159,9 @@ class RunOrchestratorTest(unittest.TestCase):
         with self.assertRaises(PreflightError) as f_ctx:
             f_orch.execute(
                 RunRequest("ior", "local"),
-                f_site=make_prof_with_ior(os.path.join(self.m_temp_dir, "missing_binary")),
+                f_site=make_prof_with_ior(
+                    os.path.join(self.m_temp_dir, "missing_binary")
+                ),
                 f_worker_executable=self.m_worker_path,
             )
         self.assertIn("does not exist", str(f_ctx.exception))
@@ -2067,7 +2228,9 @@ class RunOrchestratorTest(unittest.TestCase):
             return "run-lmp-assets-001"
 
         # 1. Missing asset file raises PreflightError with zero mutations
-        f_bad_asset_root = os.path.join(self.m_temp_dir, "bad_prefix", "share", "lsmio", "lmp-reaxff")
+        f_bad_asset_root = os.path.join(
+            self.m_temp_dir, "bad_prefix", "share", "lsmio", "lmp-reaxff"
+        )
         os.makedirs(f_bad_asset_root, exist_ok=True)
         with open(os.path.join(f_bad_asset_root, "in.reaxc.hns"), "w") as f_f:
             f_f.write("mock")
@@ -2114,6 +2277,7 @@ class RunOrchestratorTest(unittest.TestCase):
     def testInjectedSleepReceivesProfileIntervals(self) -> None:
         """Injected sleeper receives exact profile poll intervals during active polling."""
         f_sleep_calls: List[float] = []
+
         def sleep_spy(f_s: float) -> None:
             f_sleep_calls.append(f_s)
 
@@ -2125,6 +2289,7 @@ class RunOrchestratorTest(unittest.TestCase):
 
         # Track query count to transition from ACTIVE -> COMPLETED after 2 sleep intervals
         f_query_count = 0
+
         def fake_run(f_argv: Sequence[str], **f_kwargs: Any) -> ProcessResult:
             nonlocal f_query_count
             f_cmd = list(f_argv)
@@ -2152,7 +2317,11 @@ class RunOrchestratorTest(unittest.TestCase):
         f_current_orch = f_orch
 
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
-            if f_current_orch and f_current_orch.last_evidence_store and f_current_orch.last_plan:
+            if (
+                f_current_orch
+                and f_current_orch.last_evidence_store
+                and f_current_orch.last_plan
+            ):
                 self._mockWritePointResults(
                     f_current_orch.last_evidence_store,
                     f_current_orch.last_plan.scale_points[0],
@@ -2193,6 +2362,7 @@ class RunOrchestratorTest(unittest.TestCase):
     def testQueryFailureErrorOrTimeoutImmediatelyBecomesIndeterminate(self) -> None:
         """Query failure/error/timeout or UNKNOWN immediately fails closed without 3-unknown retries."""
         f_sleep_calls: List[float] = []
+
         def sleep_spy(f_s: float) -> None:
             f_sleep_calls.append(f_s)
 
@@ -2227,7 +2397,9 @@ class RunOrchestratorTest(unittest.TestCase):
         # Immediately terminates as INDETERMINATE, does NOT retry with 3 unknowns
         self.assertEqual(f_view.state, OverallRunState.INDETERMINATE)
         self.assertEqual(f_view.point_states[0].state, PointRunState.INDETERMINATE)
-        self.assertEqual(len(f_sleep_calls), 0, "Must not sleep/retry on query failure/UNKNOWN")
+        self.assertEqual(
+            len(f_sleep_calls), 0, "Must not sleep/retry on query failure/UNKNOWN"
+        )
         self.assertEqual(f_orch.exitCode, 1)
 
         # Confirm no whole_run_succeeded marker is written
@@ -2284,8 +2456,14 @@ class RunOrchestratorTest(unittest.TestCase):
         # Check that squeue used --jobs=77001 and sacct used --jobs=77001
         f_squeue_calls = [f_c for f_c in f_query_argvs if f_c[0] == "squeue"]
         f_sacct_calls = [f_c for f_c in f_query_argvs if f_c[0] == "sacct"]
-        self.assertTrue(any("--jobs=77001" in f_arg for f_call in f_squeue_calls for f_arg in f_call))
-        self.assertTrue(any("--jobs=77001" in f_arg for f_call in f_sacct_calls for f_arg in f_call))
+        self.assertTrue(
+            any(
+                "--jobs=77001" in f_arg for f_call in f_squeue_calls for f_arg in f_call
+            )
+        )
+        self.assertTrue(
+            any("--jobs=77001" in f_arg for f_call in f_sacct_calls for f_arg in f_call)
+        )
 
     def testNoLaterPointAfterUnknown(self) -> None:
         """Later scale points are never submitted when an earlier point encounters UNKNOWN."""
@@ -2323,7 +2501,9 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(f_view.state, OverallRunState.INDETERMINATE)
         self.assertEqual(f_view.point_states[0].state, PointRunState.INDETERMINATE)
         # Scale points 1, 2, 3 must NOT be submitted
-        self.assertEqual(len(f_submitted_jids), 1, "Only point 0 should have been submitted")
+        self.assertEqual(
+            len(f_submitted_jids), 1, "Only point 0 should have been submitted"
+        )
         self.assertEqual(f_submitted_jids, ["88001"])
 
     def testInterruptionBeforeExecutionStopsWithoutSubmitting(self) -> None:
@@ -2353,7 +2533,9 @@ class RunOrchestratorTest(unittest.TestCase):
         f_store = f_orch.last_evidence_store
         self.assertIsNotNone(f_store)
         f_events = f_store.readControlEvents("control")
-        self.assertTrue(any(f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_events))
+        self.assertTrue(
+            any(f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_events)
+        )
 
     def testInterruptionDuringActivePollingCancelsExactHandle(self) -> None:
         """Asserts that signal during active polling cancels exact handle with exit code 130."""
@@ -2382,7 +2564,9 @@ class RunOrchestratorTest(unittest.TestCase):
 
         self.assertIsNotNone(f_view)
         self.assertEqual(f_orch.exitCode, 130)
-        self.assertIn(f_view.state, (OverallRunState.CANCELLED, OverallRunState.INTERRUPTED))
+        self.assertIn(
+            f_view.state, (OverallRunState.CANCELLED, OverallRunState.INTERRUPTED)
+        )
         # Ensure cancel command was executed
         self.assertTrue(len(f_runner.m_cancel_calls) >= 1)
 
@@ -2400,7 +2584,9 @@ class RunOrchestratorTest(unittest.TestCase):
         def fake_cancel(f_cmd: Sequence[str]) -> None:
             if f_orch.last_evidence_store is not None:
                 f_events = f_orch.last_evidence_store.readControlEvents("control")
-                f_has_int = any(f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_events)
+                f_has_int = any(
+                    f_e.evidence_kind == EvidenceKind.INTERRUPTED for f_e in f_events
+                )
                 f_interruption_existed.append(f_has_int)
 
         f_runner.m_on_query_callback = fake_query
@@ -2423,11 +2609,15 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertIsNotNone(f_view)
         self.assertEqual(f_orch.exitCode, 143)
         self.assertEqual(len(f_interruption_existed), 1)
-        self.assertTrue(f_interruption_existed[0], "Interruption record must be durable before cancel command runs")
+        self.assertTrue(
+            f_interruption_existed[0],
+            "Interruption record must be durable before cancel command runs",
+        )
 
     def testRunReporterCustomCallbackAndStream(self) -> None:
         """Chunk 019: Tests RunReporter stream and callback integration, resilient stream failure, and properties."""
         f_called = []
+
         def my_cb(line: str) -> None:
             f_called.append(line)
 
@@ -2461,6 +2651,7 @@ class RunOrchestratorTest(unittest.TestCase):
         class BrokenStream:
             def write(self, s: str) -> None:
                 raise IOError("disk full or pipe broken")
+
             def flush(self) -> None:
                 raise IOError("flush error")
 
@@ -2480,6 +2671,7 @@ class RunOrchestratorTest(unittest.TestCase):
         )
 
         f_submitted = []
+
         def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
             f_submitted.append(f_jid)
             f_idx = len(f_submitted) - 1
@@ -2506,7 +2698,9 @@ class RunOrchestratorTest(unittest.TestCase):
         # Verify reporter lines
         f_out = f_reporter.output
         self.assertEqual(f_out.count(f"Run ID: {f_view.run_id}"), 1)
-        self.assertEqual(f_out.count(f"Run Root: {os.path.abspath(f_orch.last_run_root)}"), 1)
+        self.assertEqual(
+            f_out.count(f"Run Root: {os.path.abspath(f_orch.last_run_root)}"), 1
+        )
         self.assertEqual(f_out.count("Point 00-tasks-1 Job ID: 2001"), 1)
         self.assertEqual(f_out.count("Point 01-tasks-2 Job ID: 2002"), 1)
         self.assertEqual(f_out.count("Final State: SUCCEEDED"), 1)
@@ -2553,7 +2747,9 @@ class RunOrchestratorTest(unittest.TestCase):
         f_lines = f_reporter.lines
         self.assertIn(f"Run ID: {f_plan.run_id}", f_lines)
         self.assertIn(f"Run Root: {os.path.abspath(f_store.layout.runRoot)}", f_lines)
-        self.assertIn(f"Point 00-tasks-1 Correlation Token: {f_plan.tokens[0]}", f_lines)
+        self.assertIn(
+            f"Point 00-tasks-1 Correlation Token: {f_plan.tokens[0]}", f_lines
+        )
         self.assertIn("Point 00-tasks-1 Job ID: 998877", f_lines)
         self.assertIn("Final State: SUCCEEDED", f_lines)
         self.assertIn("Exit Code: 0", f_lines)
@@ -2589,5 +2785,6 @@ class RunOrchestratorTest(unittest.TestCase):
 
         self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
         f_lines = f_reporter.lines
-        self.assertIn("Point 00-tasks-1 Job ID: 123456.isambard-pbs.epcc.ed.ac.uk", f_lines)
-
+        self.assertIn(
+            "Point 00-tasks-1 Job ID: 123456.isambard-pbs.epcc.ed.ac.uk", f_lines
+        )

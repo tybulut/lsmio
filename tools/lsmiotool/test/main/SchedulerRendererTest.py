@@ -140,7 +140,9 @@ class FakeRecoverableAdapter(SchedulerAdapter):
         f_backend: SchedulerKind,
         f_command_runner: Optional[SchedulerCommandRunner] = None,
         f_evidence_store: Optional[EvidenceStore] = None,
-        f_worker_validator: Optional[Union[WorkerExecutableValidator, Callable[[str], str]]] = None,
+        f_worker_validator: Optional[
+            Union[WorkerExecutableValidator, Callable[[str], str]]
+        ] = None,
         f_mock_candidates: Optional[List[str]] = None,
     ) -> None:
         super().__init__(
@@ -149,9 +151,13 @@ class FakeRecoverableAdapter(SchedulerAdapter):
             f_evidence_store=f_evidence_store,
             f_worker_validator=f_worker_validator,
         )
-        self.m_mock_candidates = f_mock_candidates if f_mock_candidates is not None else []
+        self.m_mock_candidates = (
+            f_mock_candidates if f_mock_candidates is not None else []
+        )
 
-    def recoverCandidateJobIds(self, f_job_name: str, f_user: Optional[str] = None) -> List[str]:
+    def recoverCandidateJobIds(
+        self, f_job_name: str, f_user: Optional[str] = None
+    ) -> List[str]:
         return list(self.m_mock_candidates)
 
 
@@ -250,7 +256,9 @@ class SchedulerRendererTest(unittest.TestCase):
         # Line 10: module purge
         # Line 11+: module load ...
         # Final line: exec <worker> allocation <manifest> <point>
-        f_lines = [f_l.strip() for f_l in f_script_viking2.strip().splitlines() if f_l.strip()]
+        f_lines = [
+            f_l.strip() for f_l in f_script_viking2.strip().splitlines() if f_l.strip()
+        ]
         self.assertEqual(f_lines[0], "#!/bin/bash")
         self.assertEqual(f_lines[1:9], f_slurm_directives)
         self.assertEqual(f_lines[9], "set -euo pipefail")
@@ -279,7 +287,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f_manifest_path=self.m_manifest_path,
             f_point_id=self.m_point_id,
         )
-        f_pbs_lines = [f_l.strip() for f_l in f_script_isambard.strip().splitlines() if f_l.strip()]
+        f_pbs_lines = [
+            f_l.strip() for f_l in f_script_isambard.strip().splitlines() if f_l.strip()
+        ]
         self.assertEqual(f_pbs_lines[0], "#!/bin/bash")
         self.assertEqual(f_pbs_lines[1:8], f_pbs_directives)
         self.assertEqual(f_pbs_lines[8], "set -euo pipefail")
@@ -298,7 +308,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f_manifest_path=self.m_manifest_path,
             f_point_id=self.m_point_id,
         )
-        f_dev_lines = [f_l.strip() for f_l in f_script_dev.strip().splitlines() if f_l.strip()]
+        f_dev_lines = [
+            f_l.strip() for f_l in f_script_dev.strip().splitlines() if f_l.strip()
+        ]
         self.assertEqual(f_dev_lines[0], "#!/bin/bash")
         self.assertEqual(f_dev_lines[1], "set -euo pipefail")
         self.assertNotIn("module", f_script_dev)
@@ -346,7 +358,9 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertTrue(f_result.is_success)
 
         # Verify submission records on disk
-        f_records = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+        f_records = self.m_evidence_store.readSubmissionRecords(
+            self.m_point, f_ordinal=0
+        )
         self.assertIsNotNone(f_records.get("submission_requested"))
         self.assertIsNotNone(f_records.get("submission_dispatched"))
         self.assertIsNotNone(f_records.get("submission_recorded"))
@@ -366,7 +380,9 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(f_rec.evidence_kind, EvidenceKind.SUBMISSION_RECORDED)
 
         # Verify dispatched payload: contains pre-spawn metadata only (NO post-return result)
-        self.assertEqual(f_disp.payload["argv"], ["sbatch", "--parsable", f_script_path])
+        self.assertEqual(
+            f_disp.payload["argv"], ["sbatch", "--parsable", f_script_path]
+        )
         self.assertEqual(f_disp.payload["job_name"], self.m_token)
         self.assertEqual(f_disp.payload["correlation_token"], self.m_token)
         self.assertEqual(f_disp.payload["script_path"], f_script_path)
@@ -384,7 +400,9 @@ class SchedulerRendererTest(unittest.TestCase):
 
         # Verify runner was invoked with exact submit command
         self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
-        self.assertEqual(f_mock_runner.m_invoked_argv[0], ["sbatch", "--parsable", f_script_path])
+        self.assertEqual(
+            f_mock_runner.m_invoked_argv[0], ["sbatch", "--parsable", f_script_path]
+        )
 
     def testDispatchEvidenceExistsAtRunnerEntry(self) -> None:
         """Validates that submission_dispatched exists in evidence store at the exact instant the process runner is entered."""
@@ -392,11 +410,15 @@ class SchedulerRendererTest(unittest.TestCase):
 
         def entry_handler(f_argv: Sequence[str]) -> ProcessResult:
             # Inspect evidence store at runner entry
-            f_recs = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+            f_recs = self.m_evidence_store.readSubmissionRecords(
+                self.m_point, f_ordinal=0
+            )
             f_evidence_at_entry["requested"] = f_recs.get("submission_requested")
             f_evidence_at_entry["dispatched"] = f_recs.get("submission_dispatched")
             f_evidence_at_entry["recorded"] = f_recs.get("submission_recorded")
-            return ProcessResult(f_returncode=0, f_stdout="998877\n", f_stderr="", f_elapsed_seconds=0.01)
+            return ProcessResult(
+                f_returncode=0, f_stdout="998877\n", f_stderr="", f_elapsed_seconds=0.01
+            )
 
         f_mock_runner = MockProcessRunner(f_custom_handler=entry_handler)
         f_adapter = SchedulerAdapter(
@@ -424,26 +446,43 @@ class SchedulerRendererTest(unittest.TestCase):
         )
 
         # Assert evidence state at the exact moment runner was called:
-        self.assertIsNotNone(f_evidence_at_entry.get("requested"), "submission_requested must exist at runner entry")
-        self.assertIsNotNone(f_evidence_at_entry.get("dispatched"), "submission_dispatched must exist at runner entry")
-        self.assertIsNone(f_evidence_at_entry.get("recorded"), "submission_recorded must NOT exist before runner completes")
+        self.assertIsNotNone(
+            f_evidence_at_entry.get("requested"),
+            "submission_requested must exist at runner entry",
+        )
+        self.assertIsNotNone(
+            f_evidence_at_entry.get("dispatched"),
+            "submission_dispatched must exist at runner entry",
+        )
+        self.assertIsNone(
+            f_evidence_at_entry.get("recorded"),
+            "submission_recorded must NOT exist before runner completes",
+        )
 
         f_disp_entry = f_evidence_at_entry["dispatched"]
         self.assertEqual(f_disp_entry.sequence_number, 2)
-        self.assertEqual(f_disp_entry.payload["argv"], ["sbatch", "--parsable", f_script_path])
+        self.assertEqual(
+            f_disp_entry.payload["argv"], ["sbatch", "--parsable", f_script_path]
+        )
         self.assertEqual(f_disp_entry.payload["job_name"], self.m_token)
         self.assertEqual(f_disp_entry.payload["correlation_token"], self.m_token)
         self.assertNotIn("returncode", f_disp_entry.payload)
         self.assertNotIn("stdout", f_disp_entry.payload)
 
         # Assert post-run evidence state:
-        f_post_recs = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+        f_post_recs = self.m_evidence_store.readSubmissionRecords(
+            self.m_point, f_ordinal=0
+        )
         self.assertIsNotNone(f_post_recs.get("submission_recorded"))
         self.assertEqual(f_post_recs["submission_recorded"].sequence_number, 3)
-        self.assertEqual(f_post_recs["submission_recorded"].payload["handle"]["job_id"], "998877")
+        self.assertEqual(
+            f_post_recs["submission_recorded"].payload["handle"]["job_id"], "998877"
+        )
         self.assertEqual(f_res.job_handle.job_id, "998877")
 
-    def testCrashBeforeRequestBeforeDispatchAfterDispatchAfterAcceptanceAfterHandle(self) -> None:
+    def testCrashBeforeRequestBeforeDispatchAfterDispatchAfterAcceptanceAfterHandle(
+        self,
+    ) -> None:
         """Verifies submit counts and recovery behavior across all 5 lifecycle crash points."""
         f_scale_points = self.m_plan.scale_points
 
@@ -455,10 +494,19 @@ class SchedulerRendererTest(unittest.TestCase):
             f_command_runner=SchedulerCommandRunner(f_runner_1),
             f_evidence_store=self.m_evidence_store,
         )
-        f_spec_1 = JobSpec(f_point_id=f_point_1, f_script_path="/tmp/job1.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000001")
+        f_spec_1 = JobSpec(
+            f_point_id=f_point_1,
+            f_script_path="/tmp/job1.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-000000000000000000000001",
+        )
         f_res_1 = f_adapter_1.dispatchSubmission(f_point_1, f_spec_1, f_ordinal=0)
         self.assertEqual(f_res_1.job_handle.job_id, "100001")
-        self.assertEqual(len(f_runner_1.m_invoked_argv), 1, "Crash point 1: expected exactly 1 submit invocation")
+        self.assertEqual(
+            len(f_runner_1.m_invoked_argv),
+            1,
+            "Crash point 1: expected exactly 1 submit invocation",
+        )
         f_recs_1 = self.m_evidence_store.readSubmissionRecords(f_point_1, f_ordinal=0)
         self.assertIsNotNone(f_recs_1["submission_requested"])
         self.assertIsNotNone(f_recs_1["submission_dispatched"])
@@ -469,7 +517,10 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionRequested(
             f_point=f_point_2,
             f_writer_id="control",
-            f_payload={"script_path": "/tmp/job2.sh", "job_name": "lm-000000000000000000000002"},
+            f_payload={
+                "script_path": "/tmp/job2.sh",
+                "job_name": "lm-000000000000000000000002",
+            },
             f_ordinal=1,
         )
         f_runner_2 = MockProcessRunner(f_returncode=0, f_stdout="100002\n")
@@ -478,10 +529,19 @@ class SchedulerRendererTest(unittest.TestCase):
             f_command_runner=SchedulerCommandRunner(f_runner_2),
             f_evidence_store=self.m_evidence_store,
         )
-        f_spec_2 = JobSpec(f_point_id=f_point_2, f_script_path="/tmp/job2.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000002")
+        f_spec_2 = JobSpec(
+            f_point_id=f_point_2,
+            f_script_path="/tmp/job2.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-000000000000000000000002",
+        )
         f_res_2 = f_adapter_2.dispatchSubmission(f_point_2, f_spec_2, f_ordinal=1)
         self.assertEqual(f_res_2.job_handle.job_id, "100002")
-        self.assertEqual(len(f_runner_2.m_invoked_argv), 1, "Crash point 2: expected exactly 1 submit invocation")
+        self.assertEqual(
+            len(f_runner_2.m_invoked_argv),
+            1,
+            "Crash point 2: expected exactly 1 submit invocation",
+        )
         f_recs_2 = self.m_evidence_store.readSubmissionRecords(f_point_2, f_ordinal=1)
         self.assertIsNotNone(f_recs_2["submission_dispatched"])
         self.assertIsNotNone(f_recs_2["submission_recorded"])
@@ -491,13 +551,19 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionRequested(
             f_point=f_point_3,
             f_writer_id="control",
-            f_payload={"script_path": "/tmp/job3.sh", "job_name": "lm-000000000000000000000003"},
+            f_payload={
+                "script_path": "/tmp/job3.sh",
+                "job_name": "lm-000000000000000000000003",
+            },
             f_ordinal=2,
         )
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_3,
             f_writer_id="control",
-            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job3.sh"], "job_name": "lm-000000000000000000000003"},
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job3.sh"],
+                "job_name": "lm-000000000000000000000003",
+            },
             f_ordinal=2,
         )
         f_runner_3 = MockProcessRunner(f_returncode=0, f_stdout="NEVER_CALLED")
@@ -507,23 +573,38 @@ class SchedulerRendererTest(unittest.TestCase):
             f_evidence_store=self.m_evidence_store,
             f_mock_candidates=[],  # 0 jobs in scheduler
         )
-        f_spec_3 = JobSpec(f_point_id=f_point_3, f_script_path="/tmp/job3.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000003")
+        f_spec_3 = JobSpec(
+            f_point_id=f_point_3,
+            f_script_path="/tmp/job3.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-000000000000000000000003",
+        )
         with self.assertRaises(SubmissionDispatchError):
             f_adapter_3.dispatchSubmission(f_point_3, f_spec_3, f_ordinal=2)
-        self.assertEqual(len(f_runner_3.m_invoked_argv), 0, "Crash point 3: expected 0 submit invocations")
+        self.assertEqual(
+            len(f_runner_3.m_invoked_argv),
+            0,
+            "Crash point 3: expected 0 submit invocations",
+        )
 
         # Crash Point 4: After Dispatch, After Acceptance, Before Recorded Handle (dispatched exists, scheduler has 1 job) -> adopts handle, 0 submits
         f_point_4 = f_scale_points[3]
         self.m_evidence_store.recordSubmissionRequested(
             f_point=f_point_4,
             f_writer_id="control",
-            f_payload={"script_path": "/tmp/job4.sh", "job_name": "lm-000000000000000000000004"},
+            f_payload={
+                "script_path": "/tmp/job4.sh",
+                "job_name": "lm-000000000000000000000004",
+            },
             f_ordinal=3,
         )
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_4,
             f_writer_id="control",
-            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job4.sh"], "job_name": "lm-000000000000000000000004"},
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job4.sh"],
+                "job_name": "lm-000000000000000000000004",
+            },
             f_ordinal=3,
         )
         f_runner_4 = MockProcessRunner(f_returncode=0, f_stdout="NEVER_CALLED")
@@ -533,33 +614,53 @@ class SchedulerRendererTest(unittest.TestCase):
             f_evidence_store=self.m_evidence_store,
             f_mock_candidates=["100004"],  # 1 job accepted by scheduler
         )
-        f_spec_4 = JobSpec(f_point_id=f_point_4, f_script_path="/tmp/job4.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000004")
+        f_spec_4 = JobSpec(
+            f_point_id=f_point_4,
+            f_script_path="/tmp/job4.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-000000000000000000000004",
+        )
         f_res_4 = f_adapter_4.dispatchSubmission(f_point_4, f_spec_4, f_ordinal=3)
         self.assertEqual(f_res_4.job_handle.job_id, "100004")
-        self.assertEqual(len(f_runner_4.m_invoked_argv), 0, "Crash point 4: expected 0 submit invocations")
+        self.assertEqual(
+            len(f_runner_4.m_invoked_argv),
+            0,
+            "Crash point 4: expected 0 submit invocations",
+        )
         f_recs_4 = self.m_evidence_store.readSubmissionRecords(f_point_4, f_ordinal=3)
         self.assertIsNotNone(f_recs_4["submission_recorded"])
-        self.assertEqual(f_recs_4["submission_recorded"].payload["handle"]["job_id"], "100004")
+        self.assertEqual(
+            f_recs_4["submission_recorded"].payload["handle"]["job_id"], "100004"
+        )
 
         # Crash Point 5: After Recorded Handle (recorded exists) -> returns handle directly, 0 submits
         f_point_5 = f_scale_points[4]
         self.m_evidence_store.recordSubmissionRequested(
             f_point=f_point_5,
             f_writer_id="control",
-            f_payload={"script_path": "/tmp/job5.sh", "job_name": "lm-000000000000000000000005"},
+            f_payload={
+                "script_path": "/tmp/job5.sh",
+                "job_name": "lm-000000000000000000000005",
+            },
             f_ordinal=4,
         )
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_5,
             f_writer_id="control",
-            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job5.sh"], "job_name": "lm-000000000000000000000005"},
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job5.sh"],
+                "job_name": "lm-000000000000000000000005",
+            },
             f_ordinal=4,
         )
         self.m_evidence_store.recordSubmissionRecorded(
             f_point=f_point_5,
             f_writer_id="control",
             f_handle=JobHandle("slurm", "100005"),
-            f_payload={"raw_output": "100005", "job_name": "lm-000000000000000000000005"},
+            f_payload={
+                "raw_output": "100005",
+                "job_name": "lm-000000000000000000000005",
+            },
             f_ordinal=4,
         )
         f_runner_5 = MockProcessRunner(f_returncode=0, f_stdout="NEVER_CALLED")
@@ -568,10 +669,19 @@ class SchedulerRendererTest(unittest.TestCase):
             f_command_runner=SchedulerCommandRunner(f_runner_5),
             f_evidence_store=self.m_evidence_store,
         )
-        f_spec_5 = JobSpec(f_point_id=f_point_5, f_script_path="/tmp/job5.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-000000000000000000000005")
+        f_spec_5 = JobSpec(
+            f_point_id=f_point_5,
+            f_script_path="/tmp/job5.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-000000000000000000000005",
+        )
         f_res_5 = f_adapter_5.dispatchSubmission(f_point_5, f_spec_5, f_ordinal=4)
         self.assertEqual(f_res_5.job_handle.job_id, "100005")
-        self.assertEqual(len(f_runner_5.m_invoked_argv), 0, "Crash point 5: expected 0 submit invocations")
+        self.assertEqual(
+            len(f_runner_5.m_invoked_argv),
+            0,
+            "Crash point 5: expected 0 submit invocations",
+        )
 
     def testRequestedOnlyMaySubmitOnce(self) -> None:
         """Verifies that pre-existing submission_requested without submission_dispatched submits exactly once."""
@@ -611,8 +721,21 @@ class SchedulerRendererTest(unittest.TestCase):
 
         # 1. Zero candidate jobs -> INDETERMINATE error, 0 submit calls
         f_p0 = f_scale_points[0]
-        self.m_evidence_store.recordSubmissionRequested(f_point=f_p0, f_writer_id="control", f_payload={"job_name": "lm-001"}, f_ordinal=0)
-        self.m_evidence_store.recordSubmissionDispatched(f_point=f_p0, f_writer_id="control", f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": "lm-001"}, f_ordinal=0)
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_p0,
+            f_writer_id="control",
+            f_payload={"job_name": "lm-001"},
+            f_ordinal=0,
+        )
+        self.m_evidence_store.recordSubmissionDispatched(
+            f_point=f_p0,
+            f_writer_id="control",
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job.sh"],
+                "job_name": "lm-001",
+            },
+            f_ordinal=0,
+        )
 
         f_runner_zero = MockProcessRunner(f_returncode=0, f_stdout="")
         f_adapter_zero = FakeRecoverableAdapter(
@@ -621,7 +744,12 @@ class SchedulerRendererTest(unittest.TestCase):
             f_evidence_store=self.m_evidence_store,
             f_mock_candidates=[],
         )
-        f_spec_0 = JobSpec(f_point_id=f_p0, f_script_path="/tmp/job.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-001")
+        f_spec_0 = JobSpec(
+            f_point_id=f_p0,
+            f_script_path="/tmp/job.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-001",
+        )
         with self.assertRaises(SubmissionDispatchError) as f_ctx0:
             f_adapter_zero.dispatchSubmission(f_p0, f_spec_0, f_ordinal=0)
         self.assertIn("0 candidate jobs", str(f_ctx0.exception))
@@ -629,8 +757,21 @@ class SchedulerRendererTest(unittest.TestCase):
 
         # 2. Exactly One candidate job -> Adopts handle, records submission_recorded, 0 submit calls
         f_p1 = f_scale_points[1]
-        self.m_evidence_store.recordSubmissionRequested(f_point=f_p1, f_writer_id="control", f_payload={"job_name": "lm-002"}, f_ordinal=1)
-        self.m_evidence_store.recordSubmissionDispatched(f_point=f_p1, f_writer_id="control", f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": "lm-002"}, f_ordinal=1)
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_p1,
+            f_writer_id="control",
+            f_payload={"job_name": "lm-002"},
+            f_ordinal=1,
+        )
+        self.m_evidence_store.recordSubmissionDispatched(
+            f_point=f_p1,
+            f_writer_id="control",
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job.sh"],
+                "job_name": "lm-002",
+            },
+            f_ordinal=1,
+        )
 
         f_runner_one = MockProcessRunner(f_returncode=0, f_stdout="")
         f_adapter_one = FakeRecoverableAdapter(
@@ -639,18 +780,38 @@ class SchedulerRendererTest(unittest.TestCase):
             f_evidence_store=self.m_evidence_store,
             f_mock_candidates=["445566"],
         )
-        f_spec_1 = JobSpec(f_point_id=f_p1, f_script_path="/tmp/job.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-002")
+        f_spec_1 = JobSpec(
+            f_point_id=f_p1,
+            f_script_path="/tmp/job.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-002",
+        )
         f_res_one = f_adapter_one.dispatchSubmission(f_p1, f_spec_1, f_ordinal=1)
         self.assertEqual(f_res_one.job_handle.job_id, "445566")
         self.assertEqual(len(f_runner_one.m_invoked_argv), 0)
         f_recs_1 = self.m_evidence_store.readSubmissionRecords(f_p1, f_ordinal=1)
         self.assertIsNotNone(f_recs_1["submission_recorded"])
-        self.assertEqual(f_recs_1["submission_recorded"].payload["handle"]["job_id"], "445566")
+        self.assertEqual(
+            f_recs_1["submission_recorded"].payload["handle"]["job_id"], "445566"
+        )
 
         # 3. Many candidate jobs (>1 distinct IDs) -> INDETERMINATE error, 0 submit calls
         f_p2 = f_scale_points[2]
-        self.m_evidence_store.recordSubmissionRequested(f_point=f_p2, f_writer_id="control", f_payload={"job_name": "lm-003"}, f_ordinal=2)
-        self.m_evidence_store.recordSubmissionDispatched(f_point=f_p2, f_writer_id="control", f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": "lm-003"}, f_ordinal=2)
+        self.m_evidence_store.recordSubmissionRequested(
+            f_point=f_p2,
+            f_writer_id="control",
+            f_payload={"job_name": "lm-003"},
+            f_ordinal=2,
+        )
+        self.m_evidence_store.recordSubmissionDispatched(
+            f_point=f_p2,
+            f_writer_id="control",
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job.sh"],
+                "job_name": "lm-003",
+            },
+            f_ordinal=2,
+        )
 
         f_runner_many = MockProcessRunner(f_returncode=0, f_stdout="")
         f_adapter_many = FakeRecoverableAdapter(
@@ -659,7 +820,12 @@ class SchedulerRendererTest(unittest.TestCase):
             f_evidence_store=self.m_evidence_store,
             f_mock_candidates=["888001", "888002"],
         )
-        f_spec_2 = JobSpec(f_point_id=f_p2, f_script_path="/tmp/job.sh", f_working_dir=self.m_temp_dir.name, f_job_name="lm-003")
+        f_spec_2 = JobSpec(
+            f_point_id=f_p2,
+            f_script_path="/tmp/job.sh",
+            f_working_dir=self.m_temp_dir.name,
+            f_job_name="lm-003",
+        )
         with self.assertRaises(SubmissionDispatchError) as f_ctx2:
             f_adapter_many.dispatchSubmission(f_p2, f_spec_2, f_ordinal=2)
         self.assertIn("multiple distinct candidate jobs", str(f_ctx2.exception))
@@ -709,7 +875,9 @@ class SchedulerRendererTest(unittest.TestCase):
         )
 
         # Verify requested exists and dispatched does not
-        f_pre_records = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+        f_pre_records = self.m_evidence_store.readSubmissionRecords(
+            self.m_point, f_ordinal=0
+        )
         self.assertIsNotNone(f_pre_records.get("submission_requested"))
         self.assertIsNone(f_pre_records.get("submission_dispatched"))
         self.assertIsNone(f_pre_records.get("submission_recorded"))
@@ -741,10 +909,14 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
 
         # Dispatched and recorded should now exist
-        f_post_records = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+        f_post_records = self.m_evidence_store.readSubmissionRecords(
+            self.m_point, f_ordinal=0
+        )
         self.assertIsNotNone(f_post_records.get("submission_dispatched"))
         self.assertIsNotNone(f_post_records.get("submission_recorded"))
-        self.assertEqual(f_post_records["submission_recorded"].payload["handle"]["job_id"], "987654")
+        self.assertEqual(
+            f_post_records["submission_recorded"].payload["handle"]["job_id"], "987654"
+        )
 
     def testDispatchWithoutHandleMustRecover(self) -> None:
         """Verifies recovery when dispatched output exists without recorded handle."""
@@ -758,7 +930,10 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=self.m_point,
             f_writer_id="control",
-            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job.sh"], "job_name": self.m_token},
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job.sh"],
+                "job_name": self.m_token,
+            },
             f_ordinal=0,
         )
 
@@ -792,22 +967,32 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(len(f_mock_runner.m_invoked_argv), 0)
 
         # Recorded handle should be saved
-        f_records = self.m_evidence_store.readSubmissionRecords(self.m_point, f_ordinal=0)
+        f_records = self.m_evidence_store.readSubmissionRecords(
+            self.m_point, f_ordinal=0
+        )
         self.assertIsNotNone(f_records.get("submission_recorded"))
-        self.assertEqual(f_records["submission_recorded"].payload["handle"]["job_id"], "777888")
+        self.assertEqual(
+            f_records["submission_recorded"].payload["handle"]["job_id"], "777888"
+        )
 
         # 2. Recovery with 0 candidates: raises SubmissionDispatchError without calling submit
         f_point_2 = self.m_plan.scale_points[1]
         self.m_evidence_store.recordSubmissionRequested(
             f_point=f_point_2,
             f_writer_id="control",
-            f_payload={"script_path": "/tmp/job2.sh", "job_name": "lm-000000000000000000000002"},
+            f_payload={
+                "script_path": "/tmp/job2.sh",
+                "job_name": "lm-000000000000000000000002",
+            },
             f_ordinal=1,
         )
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_2,
             f_writer_id="control",
-            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job2.sh"], "job_name": "lm-000000000000000000000002"},
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job2.sh"],
+                "job_name": "lm-000000000000000000000002",
+            },
             f_ordinal=1,
         )
 
@@ -837,13 +1022,19 @@ class SchedulerRendererTest(unittest.TestCase):
         self.m_evidence_store.recordSubmissionRequested(
             f_point=f_point_3,
             f_writer_id="control",
-            f_payload={"script_path": "/tmp/job3.sh", "job_name": "lm-000000000000000000000003"},
+            f_payload={
+                "script_path": "/tmp/job3.sh",
+                "job_name": "lm-000000000000000000000003",
+            },
             f_ordinal=2,
         )
         self.m_evidence_store.recordSubmissionDispatched(
             f_point=f_point_3,
             f_writer_id="control",
-            f_payload={"argv": ["sbatch", "--parsable", "/tmp/job3.sh"], "job_name": "lm-000000000000000000000003"},
+            f_payload={
+                "argv": ["sbatch", "--parsable", "/tmp/job3.sh"],
+                "job_name": "lm-000000000000000000000003",
+            },
             f_ordinal=2,
         )
 
@@ -872,10 +1063,13 @@ class SchedulerRendererTest(unittest.TestCase):
         """Proves renderer calls injected validator without filesystem stat/exists calls (spy verified)."""
         f_validator_mock = MagicMock(return_value="/approved/bin/worker")
 
-        with patch("os.stat") as f_mock_stat, patch("os.lstat") as f_mock_lstat, patch(
-            "os.path.exists"
-        ) as f_mock_exists, patch("os.path.isfile") as f_mock_isfile, patch("os.access") as f_mock_access:
-
+        with (
+            patch("os.stat") as f_mock_stat,
+            patch("os.lstat") as f_mock_lstat,
+            patch("os.path.exists") as f_mock_exists,
+            patch("os.path.isfile") as f_mock_isfile,
+            patch("os.access") as f_mock_access,
+        ):
             f_script = SchedulerScriptRenderer.renderScript(
                 f_backend=SchedulerKind.SLURM,
                 f_directives=["#SBATCH --job-name=lm-abcdef0123456789abcdef01"],
@@ -887,7 +1081,9 @@ class SchedulerRendererTest(unittest.TestCase):
             )
 
             # Injected validator was called with input worker path
-            f_validator_mock.validate.assert_not_called() if not hasattr(f_validator_mock, "validate") else None
+            f_validator_mock.validate.assert_not_called() if not hasattr(
+                f_validator_mock, "validate"
+            ) else None
             f_validator_mock.assert_called_once_with("/input/bin/worker")
 
             # Resulting script uses approved worker path
@@ -916,11 +1112,15 @@ class SchedulerRendererTest(unittest.TestCase):
 
         # 3. Slurm rejects PbsMailMode.ABE
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateMailMode(SchedulerKind.SLURM, PbsMailMode.ABE)
+            SchedulerScriptRenderer.validateMailMode(
+                SchedulerKind.SLURM, PbsMailMode.ABE
+            )
 
         # 4. PBS rejects SlurmMailMode.END_FAIL
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateMailMode(SchedulerKind.PBS, SlurmMailMode.END_FAIL)
+            SchedulerScriptRenderer.validateMailMode(
+                SchedulerKind.PBS, SlurmMailMode.END_FAIL
+            )
 
         # 5. Raw string 'END,FAIL' rejected
         with self.assertRaises(SchedulerScriptError):
@@ -939,7 +1139,9 @@ class SchedulerRendererTest(unittest.TestCase):
 
         # 8. Injected control text / newlines rejected
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateMailMode(SchedulerKind.SLURM, "END,FAIL\n#SBATCH --account=evil")
+            SchedulerScriptRenderer.validateMailMode(
+                SchedulerKind.SLURM, "END,FAIL\n#SBATCH --account=evil"
+            )
 
     def testShlexQuoteLiteralRoundTrip(self) -> None:
         """Tests adversarial worker/manifest paths with spaces, quotes, and metacharacters."""
@@ -1042,12 +1244,26 @@ class SchedulerRendererTest(unittest.TestCase):
         """Tests validation of account, mail, module, and path tokens."""
         # 1. Valid tokens
         self.assertEqual(SchedulerScriptRenderer.validateAccount("e281"), "e281")
-        self.assertEqual(SchedulerScriptRenderer.validateAccount("proj_123.sub-1"), "proj_123.sub-1")
-        self.assertEqual(SchedulerScriptRenderer.validateQueueOrPartition("standard"), "standard")
-        self.assertEqual(SchedulerScriptRenderer.validateQueueOrPartition("arm-gpu_01"), "arm-gpu_01")
-        self.assertEqual(SchedulerScriptRenderer.validateMailUser("alice.bob+test@dept.univ.ac.uk"), "alice.bob+test@dept.univ.ac.uk")
-        self.assertEqual(SchedulerScriptRenderer.validatePath("/mnt/lustre/users/test/output.log"), "/mnt/lustre/users/test/output.log")
-        self.assertEqual(SchedulerScriptRenderer.validatePath("/tmp/out%j.log"), "/tmp/out%j.log")
+        self.assertEqual(
+            SchedulerScriptRenderer.validateAccount("proj_123.sub-1"), "proj_123.sub-1"
+        )
+        self.assertEqual(
+            SchedulerScriptRenderer.validateQueueOrPartition("standard"), "standard"
+        )
+        self.assertEqual(
+            SchedulerScriptRenderer.validateQueueOrPartition("arm-gpu_01"), "arm-gpu_01"
+        )
+        self.assertEqual(
+            SchedulerScriptRenderer.validateMailUser("alice.bob+test@dept.univ.ac.uk"),
+            "alice.bob+test@dept.univ.ac.uk",
+        )
+        self.assertEqual(
+            SchedulerScriptRenderer.validatePath("/mnt/lustre/users/test/output.log"),
+            "/mnt/lustre/users/test/output.log",
+        )
+        self.assertEqual(
+            SchedulerScriptRenderer.validatePath("/tmp/out%j.log"), "/tmp/out%j.log"
+        )
 
         # 2. Invalid account tokens
         with self.assertRaises(SchedulerScriptError):
@@ -1090,7 +1306,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} p0\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_foreign_pbs, f_backend=SchedulerKind.SLURM)
+            SchedulerScriptRenderer.validateScript(
+                f_foreign_pbs, f_backend=SchedulerKind.SLURM
+            )
 
         # 2. Foreign #SBATCH directive in PBS script
         f_foreign_sbatch = (
@@ -1101,7 +1319,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} p0\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_foreign_sbatch, f_backend=SchedulerKind.PBS)
+            SchedulerScriptRenderer.validateScript(
+                f_foreign_sbatch, f_backend=SchedulerKind.PBS
+            )
 
         # 3. Late directive after 'set -euo pipefail'
         f_late_directive_1 = (
@@ -1112,7 +1332,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} p0\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_late_directive_1, f_backend=SchedulerKind.SLURM)
+            SchedulerScriptRenderer.validateScript(
+                f_late_directive_1, f_backend=SchedulerKind.SLURM
+            )
 
         # 4. Late directive after module preamble
         f_late_directive_2 = (
@@ -1125,7 +1347,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} p0\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_late_directive_2, f_backend=SchedulerKind.SLURM)
+            SchedulerScriptRenderer.validateScript(
+                f_late_directive_2, f_backend=SchedulerKind.SLURM
+            )
 
         # 5. Late directive after exec tail
         f_late_directive_3 = (
@@ -1136,7 +1360,9 @@ class SchedulerRendererTest(unittest.TestCase):
             "#SBATCH --output=/tmp/out.log\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_late_directive_3, f_backend=SchedulerKind.SLURM)
+            SchedulerScriptRenderer.validateScript(
+                f_late_directive_3, f_backend=SchedulerKind.SLURM
+            )
 
         # 6. Missing fail-fast 'set -euo pipefail' or 'set -e'
         f_missing_set_e = (
@@ -1145,7 +1371,9 @@ class SchedulerRendererTest(unittest.TestCase):
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} p0\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_missing_set_e, f_backend=SchedulerKind.SLURM)
+            SchedulerScriptRenderer.validateScript(
+                f_missing_set_e, f_backend=SchedulerKind.SLURM
+            )
 
         # 7. Missing exec tail
         f_missing_exec = (
@@ -1155,7 +1383,9 @@ class SchedulerRendererTest(unittest.TestCase):
             "echo done\n"
         )
         with self.assertRaises(SchedulerScriptError):
-            SchedulerScriptRenderer.validateScript(f_missing_exec, f_backend=SchedulerKind.SLURM)
+            SchedulerScriptRenderer.validateScript(
+                f_missing_exec, f_backend=SchedulerKind.SLURM
+            )
 
     def testJobSpecAndResultDomainModels(self) -> None:
         """Verifies immutability, properties, and dictionary serialization for JobSpec and JobResult."""
@@ -1221,7 +1451,9 @@ class SchedulerRendererTest(unittest.TestCase):
     def testEverySchedulerCallCarriesExactGraceTimeout(self) -> None:
         """Verifies that every scheduler adapter call derives and carries the exact grace_seconds timeout."""
         # 1. Profile derivation
-        f_profile = EnvironmentResolver.resolveProfile("VIKING", f_user="testuser", f_home="/tmp")
+        f_profile = EnvironmentResolver.resolveProfile(
+            "VIKING", f_user="testuser", f_home="/tmp"
+        )
         self.assertEqual(f_profile.cancellation.grace_seconds, 120)
 
         f_runner = MockProcessRunner(f_returncode=0, f_stdout="123456\n")
@@ -1276,8 +1508,12 @@ class SchedulerRendererTest(unittest.TestCase):
             self.assertEqual(f_kw.get("f_timeout"), 120.0)
 
         # 5. PbsSchedulerAdapter derives and passes exact timeout
-        f_isambard_profile = EnvironmentResolver.resolveProfile("ISAMBARD", f_user="testuser", f_home="/tmp")
-        f_pbs_runner = MockProcessRunner(f_returncode=0, f_stdout="555444.isambard-pbs\n")
+        f_isambard_profile = EnvironmentResolver.resolveProfile(
+            "ISAMBARD", f_user="testuser", f_home="/tmp"
+        )
+        f_pbs_runner = MockProcessRunner(
+            f_returncode=0, f_stdout="555444.isambard-pbs\n"
+        )
         f_pbs_adapter = PbsSchedulerAdapter(
             f_command_runner=SchedulerCommandRunner(f_pbs_runner),
             f_profile=f_isambard_profile,
@@ -1289,7 +1525,9 @@ class SchedulerRendererTest(unittest.TestCase):
         # Recovery query on PBS carries exact timeout
         f_pbs_runner.m_invoked_kwargs.clear()
         f_pbs_runner.m_stdout = json.dumps({"Jobs": {}})
-        f_pbs_adapter.recoverCandidateJobIds("lm-000000000000000000000001", f_user="testuser")
+        f_pbs_adapter.recoverCandidateJobIds(
+            "lm-000000000000000000000001", f_user="testuser"
+        )
         self.assertEqual(len(f_pbs_runner.m_invoked_kwargs), 1)
         self.assertEqual(f_pbs_runner.m_invoked_kwargs[0].get("f_timeout"), 120.0)
 

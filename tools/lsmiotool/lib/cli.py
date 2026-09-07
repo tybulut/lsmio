@@ -256,9 +256,7 @@ class RunCliParser:
             )
 
         if len(f_post_run_tokens) < 2:
-            raise RunCliParseError(
-                "Missing required positional argument: <scale>"
-            )
+            raise RunCliParseError("Missing required positional argument: <scale>")
 
         # Validate scale (positional 1)
         f_scale_tok = f_post_run_tokens[1]
@@ -346,9 +344,7 @@ class ParseRequest:
         f_format: str = "csv",
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
-            raise ValueError(
-                f"target must be a non-empty string, got: {f_target!r}"
-            )
+            raise ValueError(f"target must be a non-empty string, got: {f_target!r}")
         if f_output_dir is not None and (
             not isinstance(f_output_dir, str) or not f_output_dir.strip()
         ):
@@ -356,14 +352,10 @@ class ParseRequest:
                 f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
             )
         if not isinstance(f_format, str) or not f_format.strip():
-            raise ValueError(
-                f"format must be a non-empty string, got: {f_format!r}"
-            )
+            raise ValueError(f"format must be a non-empty string, got: {f_format!r}")
         f_norm_format = f_format.strip().lower()
         if f_norm_format not in {"csv", "json"}:
-            raise ValueError(
-                f"format must be 'csv' or 'json', got: {f_format!r}"
-            )
+            raise ValueError(f"format must be 'csv' or 'json', got: {f_format!r}")
 
         super().__setattr__("m_target", f_target.strip())
         super().__setattr__(
@@ -375,9 +367,7 @@ class ParseRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -481,9 +471,7 @@ class ParseCliParser:
             f_tokens_copy.pop(0)
 
         if not f_tokens_copy:
-            raise ParseCliParseError(
-                "Missing required positional argument: <target>"
-            )
+            raise ParseCliParseError("Missing required positional argument: <target>")
 
         f_target_tok = f_tokens_copy[0]
         if f_target_tok.startswith("-"):
@@ -523,13 +511,9 @@ class ParseCliParser:
                 f_idx += 2
             elif f_tok == "--format":
                 if f_format_seen:
-                    raise ParseCliParseError(
-                        "Duplicate '--format' option specified."
-                    )
+                    raise ParseCliParseError("Duplicate '--format' option specified.")
                 if f_idx + 1 >= len(f_remaining_tokens):
-                    raise ParseCliParseError(
-                        "Missing value after '--format' option."
-                    )
+                    raise ParseCliParseError("Missing value after '--format' option.")
                 f_val = f_remaining_tokens[f_idx + 1]
                 if f_val.startswith("-"):
                     raise ParseCliParseError(

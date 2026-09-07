@@ -63,7 +63,9 @@ class ParseCliParserTest(unittest.TestCase):
         self.assertEqual(f_req_path.target, f_run_root)
 
         # 3. Explicit manifest.json path
-        f_manifest_path = "/path/to/benchmark/runs/2026-08-21T12-00-00Z-ior-local/manifest.json"
+        f_manifest_path = (
+            "/path/to/benchmark/runs/2026-08-21T12-00-00Z-ior-local/manifest.json"
+        )
         f_req_man = parseParseArguments([f_manifest_path])
         self.assertEqual(f_req_man.target, f_manifest_path)
 
@@ -193,7 +195,8 @@ class ParseCliParserTest(unittest.TestCase):
 
         for f_argv in f_missing_values:
             with self.assertRaises(
-                ParseCliParseError, msg=f"Failed to reject missing option value: {f_argv}"
+                ParseCliParseError,
+                msg=f"Failed to reject missing option value: {f_argv}",
             ):
                 parseParseArguments(f_argv)
 
@@ -252,7 +255,9 @@ class ParseCliParserTest(unittest.TestCase):
         f_req1 = ParseRequest(f_target="ior", f_output_dir="/tmp/out", f_format="json")
         f_req2 = ParseRequest(f_target="ior", f_output_dir="/tmp/out", f_format="json")
         f_req3 = ParseRequest(f_target="ior", f_output_dir=None, f_format="csv")
-        f_req4 = ParseRequest(f_target="lsmio", f_output_dir="/tmp/out", f_format="json")
+        f_req4 = ParseRequest(
+            f_target="lsmio", f_output_dir="/tmp/out", f_format="json"
+        )
 
         # Equality
         self.assertEqual(f_req1, f_req2)

@@ -55,7 +55,9 @@ class IorAdapterTest(unittest.TestCase):
         self.m_adapter = IorAdapter()
         self.m_executable = "/opt/ior/bin/ior"
         self.m_work_dir = "/benchmark/runs/run-123/points/00-tasks-1/work/c16_b8M"
-        self.m_out_path = "/benchmark/runs/run-123/points/00-tasks-1/data/c16/b8M/ior.base"
+        self.m_out_path = (
+            "/benchmark/runs/run-123/points/00-tasks-1/data/c16/b8M/ior.base"
+        )
 
     def testUpstreamLiteralParityEveryMode(self) -> None:
         """Validate exact upstream-golden argv for all 6 setups across all 3 block sizes (18 combinations total)."""
@@ -157,6 +159,7 @@ class IorAdapterTest(unittest.TestCase):
 
     def testProbeFailures(self) -> None:
         """Verify fail-closed handling for missing or unsupported IOR binaries."""
+
         # 1. Runner raises FileNotFoundError
         def mockMissingBinary(f_argv: Sequence[str]) -> MockProcessResult:
             raise FileNotFoundError("Executable not found: /path/to/missing_ior")
@@ -169,7 +172,9 @@ class IorAdapterTest(unittest.TestCase):
 
         # 2. Runner returns non-zero exit code
         def mockFailingRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=127, stdout="", stderr="ior: command not found")
+            return MockProcessResult(
+                returncode=127, stdout="", stderr="ior: command not found"
+            )
 
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
@@ -179,7 +184,9 @@ class IorAdapterTest(unittest.TestCase):
 
         # 3. Runner output indicates unsupported capability / error
         def mockUnsupportedRunner(f_argv: Sequence[str]) -> MockProcessResult:
-            return MockProcessResult(returncode=0, stdout="IOR: unsupported option -v", stderr="")
+            return MockProcessResult(
+                returncode=0, stdout="IOR: unsupported option -v", stderr=""
+            )
 
         with self.assertRaises(BenchmarkProbeError):
             self.m_adapter.probeCapability(
@@ -208,7 +215,9 @@ class IorAdapterTest(unittest.TestCase):
     def testUnverifiedNoVersionClaim(self) -> None:
         """Prove unprobeable binaries remain recorded as configured/unverified."""
         # When runner is None, returns CapabilityState.CONFIGURED without claiming version
-        f_state = self.m_adapter.probeCapability(f_executable=self.m_executable, f_runner=None)
+        f_state = self.m_adapter.probeCapability(
+            f_executable=self.m_executable, f_runner=None
+        )
         self.assertEqual(f_state, CapabilityState.CONFIGURED)
         self.assertEqual(f_state, ProbeState.CONFIGURED)
         self.assertTrue(f_state.is_configured)
@@ -218,7 +227,9 @@ class IorAdapterTest(unittest.TestCase):
         # When runner successfully returns valid IOR output, returns CapabilityState.VERIFIED
         def mockSuccessRunner(f_argv: Sequence[str]) -> MockProcessResult:
             self.assertEqual(f_argv, [self.m_executable, "-v"])
-            return MockProcessResult(returncode=0, stdout="IOR-3.3.0: Parallel IO Benchmark", stderr="")
+            return MockProcessResult(
+                returncode=0, stdout="IOR-3.3.0: Parallel IO Benchmark", stderr=""
+            )
 
         f_verified_state = self.m_adapter.probeCapability(
             f_executable=self.m_executable,
@@ -232,7 +243,9 @@ class IorAdapterTest(unittest.TestCase):
         """Verify argv tokens with spaces remain discrete arguments and are not word-split."""
         f_exe_with_spaces = "/opt/my tools/bin/ior executable"
         f_work_dir_with_spaces = "/scratch/user run/points/00 tasks/work dir"
-        f_out_path_with_spaces = "/scratch/user run/points/00 tasks/data/ior output file.dat"
+        f_out_path_with_spaces = (
+            "/scratch/user run/points/00 tasks/data/ior output file.dat"
+        )
 
         f_cmd = self.m_adapter.buildCommand(
             f_executable=f_exe_with_spaces,

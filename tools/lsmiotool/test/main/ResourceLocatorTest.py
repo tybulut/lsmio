@@ -79,12 +79,20 @@ class ResourceLocatorTest(unittest.TestCase):
         self.assertFalse(f_layout1.isInstalled)
         self.assertEqual(f_layout1.package_root, "/mock/repo/tools/lsmiotool")
         self.assertEqual(f_layout1.packageRoot, "/mock/repo/tools/lsmiotool")
-        self.assertEqual(f_layout1.profile_file, "/mock/repo/tools/lsmiotool/etc/environments.json")
-        self.assertEqual(f_layout1.profileFile, "/mock/repo/tools/lsmiotool/etc/environments.json")
+        self.assertEqual(
+            f_layout1.profile_file, "/mock/repo/tools/lsmiotool/etc/environments.json"
+        )
+        self.assertEqual(
+            f_layout1.profileFile, "/mock/repo/tools/lsmiotool/etc/environments.json"
+        )
         self.assertEqual(f_layout1.asset_root, "/mock/repo/tools/bmtool/lmp-reaxff")
         self.assertEqual(f_layout1.assetRoot, "/mock/repo/tools/bmtool/lmp-reaxff")
-        self.assertEqual(f_layout1.worker_executable, "/mock/repo/tools/lsmiotool/lsmiotool-worker")
-        self.assertEqual(f_layout1.workerExecutable, "/mock/repo/tools/lsmiotool/lsmiotool-worker")
+        self.assertEqual(
+            f_layout1.worker_executable, "/mock/repo/tools/lsmiotool/lsmiotool-worker"
+        )
+        self.assertEqual(
+            f_layout1.workerExecutable, "/mock/repo/tools/lsmiotool/lsmiotool-worker"
+        )
         self.assertEqual(f_layout1.version_file, "/mock/repo/VERSION")
         self.assertEqual(f_layout1.versionFile, "/mock/repo/VERSION")
 
@@ -101,11 +109,24 @@ class ResourceLocatorTest(unittest.TestCase):
         # Path with spaces
         f_spaces_entry = "/mock path/with spaces/repo/tools/lsmiotool/lsmiotool"
         f_layout_spaces = ResourceLocator.forSource(f_spaces_entry)
-        self.assertEqual(f_layout_spaces.package_root, "/mock path/with spaces/repo/tools/lsmiotool")
-        self.assertEqual(f_layout_spaces.profile_file, "/mock path/with spaces/repo/tools/lsmiotool/etc/environments.json")
-        self.assertEqual(f_layout_spaces.asset_root, "/mock path/with spaces/repo/tools/bmtool/lmp-reaxff")
-        self.assertEqual(f_layout_spaces.worker_executable, "/mock path/with spaces/repo/tools/lsmiotool/lsmiotool-worker")
-        self.assertEqual(f_layout_spaces.version_file, "/mock path/with spaces/repo/VERSION")
+        self.assertEqual(
+            f_layout_spaces.package_root, "/mock path/with spaces/repo/tools/lsmiotool"
+        )
+        self.assertEqual(
+            f_layout_spaces.profile_file,
+            "/mock path/with spaces/repo/tools/lsmiotool/etc/environments.json",
+        )
+        self.assertEqual(
+            f_layout_spaces.asset_root,
+            "/mock path/with spaces/repo/tools/bmtool/lmp-reaxff",
+        )
+        self.assertEqual(
+            f_layout_spaces.worker_executable,
+            "/mock path/with spaces/repo/tools/lsmiotool/lsmiotool-worker",
+        )
+        self.assertEqual(
+            f_layout_spaces.version_file, "/mock path/with spaces/repo/VERSION"
+        )
 
         # Relative invocation path
         f_orig_cwd = os.getcwd()
@@ -114,8 +135,16 @@ class ResourceLocatorTest(unittest.TestCase):
             f_cur_cwd = os.getcwd()
             f_rel_entry = "./tools/lsmiotool/lsmiotool"
             f_layout_rel = ResourceLocator.forSource(f_rel_entry)
-            self.assertEqual(f_layout_rel.package_root, os.path.normpath(os.path.join(f_cur_cwd, "tools/lsmiotool")))
-            self.assertEqual(f_layout_rel.worker_executable, os.path.normpath(os.path.join(f_cur_cwd, "tools/lsmiotool/lsmiotool-worker")))
+            self.assertEqual(
+                f_layout_rel.package_root,
+                os.path.normpath(os.path.join(f_cur_cwd, "tools/lsmiotool")),
+            )
+            self.assertEqual(
+                f_layout_rel.worker_executable,
+                os.path.normpath(
+                    os.path.join(f_cur_cwd, "tools/lsmiotool/lsmiotool-worker")
+                ),
+            )
         finally:
             os.chdir(f_orig_cwd)
 
@@ -136,9 +165,14 @@ class ResourceLocatorTest(unittest.TestCase):
         self.assertFalse(f_layout.is_source)
         self.assertFalse(f_layout.isSource)
         self.assertEqual(f_layout.package_root, "/usr/local/share/lsmio/python")
-        self.assertEqual(f_layout.profile_file, "/usr/local/share/lsmio/python/lsmiotool/etc/environments.json")
+        self.assertEqual(
+            f_layout.profile_file,
+            "/usr/local/share/lsmio/python/lsmiotool/etc/environments.json",
+        )
         self.assertEqual(f_layout.asset_root, "/usr/local/share/lsmio/lmp-reaxff")
-        self.assertEqual(f_layout.worker_executable, "/usr/local/libexec/lsmio/lsmiotool-worker")
+        self.assertEqual(
+            f_layout.worker_executable, "/usr/local/libexec/lsmio/lsmiotool-worker"
+        )
         self.assertEqual(f_layout.version_file, "/usr/local/share/lsmio/python/VERSION")
 
         # Private wrapper with deeper anchor
@@ -150,13 +184,25 @@ class ResourceLocatorTest(unittest.TestCase):
             f_worker_executable="lsmiotool-worker",
             f_version_file="../../share/lsmio/python/VERSION",
         )
-        f_layout_private = ResourceLocator.forInstalled(f_private_wrapper, f_private_rel_layout)
+        f_layout_private = ResourceLocator.forInstalled(
+            f_private_wrapper, f_private_rel_layout
+        )
         self.assertEqual(f_layout_private.execution_mode, ExecutionMode.INSTALLED)
         self.assertEqual(f_layout_private.package_root, "/opt/lsmio/share/lsmio/python")
-        self.assertEqual(f_layout_private.profile_file, "/opt/lsmio/share/lsmio/python/lsmiotool/etc/environments.json")
-        self.assertEqual(f_layout_private.asset_root, "/opt/lsmio/share/lsmio/lmp-reaxff")
-        self.assertEqual(f_layout_private.worker_executable, "/opt/lsmio/libexec/lsmio/lsmiotool-worker")
-        self.assertEqual(f_layout_private.version_file, "/opt/lsmio/share/lsmio/python/VERSION")
+        self.assertEqual(
+            f_layout_private.profile_file,
+            "/opt/lsmio/share/lsmio/python/lsmiotool/etc/environments.json",
+        )
+        self.assertEqual(
+            f_layout_private.asset_root, "/opt/lsmio/share/lsmio/lmp-reaxff"
+        )
+        self.assertEqual(
+            f_layout_private.worker_executable,
+            "/opt/lsmio/libexec/lsmio/lsmiotool-worker",
+        )
+        self.assertEqual(
+            f_layout_private.version_file, "/opt/lsmio/share/lsmio/python/VERSION"
+        )
 
         # Non-default GNUInstallDirs
         f_custom_wrapper = "/custom/prefix/custom_bin/lsmiotool"
@@ -168,8 +214,13 @@ class ResourceLocatorTest(unittest.TestCase):
             f_version_file="../custom_data/python/VERSION",
         )
         f_layout_custom = ResourceLocator.forInstalled(f_custom_wrapper, f_custom_rel)
-        self.assertEqual(f_layout_custom.package_root, "/custom/prefix/custom_data/python")
-        self.assertEqual(f_layout_custom.worker_executable, "/custom/prefix/custom_exec/lsmiotool-worker")
+        self.assertEqual(
+            f_layout_custom.package_root, "/custom/prefix/custom_data/python"
+        )
+        self.assertEqual(
+            f_layout_custom.worker_executable,
+            "/custom/prefix/custom_exec/lsmiotool-worker",
+        )
 
     def testSourceInstalledNeverCrossFallback(self) -> None:
         """Proves zero fallback between source and installed modes."""
@@ -181,11 +232,15 @@ class ResourceLocatorTest(unittest.TestCase):
         # Call forInstalled on an anchor that does NOT exist on disk
         f_installed_entry = "/opt/never_installed/bin/lsmiotool"
         f_rel_layout = self._createSampleInstalledLayout()
-        f_installed_layout = ResourceLocator.forInstalled(f_installed_entry, f_rel_layout)
+        f_installed_layout = ResourceLocator.forInstalled(
+            f_installed_entry, f_rel_layout
+        )
 
         # Asserts it stays strictly in installed mode and does NOT fall back to fake_repo
         self.assertEqual(f_installed_layout.execution_mode, ExecutionMode.INSTALLED)
-        self.assertTrue(f_installed_layout.package_root.startswith("/opt/never_installed"))
+        self.assertTrue(
+            f_installed_layout.package_root.startswith("/opt/never_installed")
+        )
         self.assertNotIn("fake_repo", f_installed_layout.package_root)
 
         # Call forSource on a non-existent source entry while an installed tree exists
@@ -199,11 +254,24 @@ class ResourceLocatorTest(unittest.TestCase):
         """Verifies path construction succeeds on non-existent paths without disk dependencies."""
         f_nonexistent_source = "/does/not/exist/anywhere/tools/lsmiotool/lsmiotool"
         f_source_layout = ResourceLocator.forSource(f_nonexistent_source)
-        self.assertEqual(f_source_layout.package_root, "/does/not/exist/anywhere/tools/lsmiotool")
-        self.assertEqual(f_source_layout.profile_file, "/does/not/exist/anywhere/tools/lsmiotool/etc/environments.json")
-        self.assertEqual(f_source_layout.asset_root, "/does/not/exist/anywhere/tools/bmtool/lmp-reaxff")
-        self.assertEqual(f_source_layout.worker_executable, "/does/not/exist/anywhere/tools/lsmiotool/lsmiotool-worker")
-        self.assertEqual(f_source_layout.version_file, "/does/not/exist/anywhere/VERSION")
+        self.assertEqual(
+            f_source_layout.package_root, "/does/not/exist/anywhere/tools/lsmiotool"
+        )
+        self.assertEqual(
+            f_source_layout.profile_file,
+            "/does/not/exist/anywhere/tools/lsmiotool/etc/environments.json",
+        )
+        self.assertEqual(
+            f_source_layout.asset_root,
+            "/does/not/exist/anywhere/tools/bmtool/lmp-reaxff",
+        )
+        self.assertEqual(
+            f_source_layout.worker_executable,
+            "/does/not/exist/anywhere/tools/lsmiotool/lsmiotool-worker",
+        )
+        self.assertEqual(
+            f_source_layout.version_file, "/does/not/exist/anywhere/VERSION"
+        )
 
     def testReturnsNonexistentConstructedPathsWithoutFallback(self) -> None:
         """Verifies path construction succeeds on non-existent paths without disk dependencies."""
@@ -214,44 +282,47 @@ class ResourceLocatorTest(unittest.TestCase):
             f_nonexistent_installed,
             self._createSampleInstalledLayout(),
         )
-        self.assertEqual(f_installed_layout.package_root, "/completely/fake/install/share/lsmio/python")
-        self.assertEqual(f_installed_layout.worker_executable, "/completely/fake/install/libexec/lsmio/lsmiotool-worker")
+        self.assertEqual(
+            f_installed_layout.package_root,
+            "/completely/fake/install/share/lsmio/python",
+        )
+        self.assertEqual(
+            f_installed_layout.worker_executable,
+            "/completely/fake/install/libexec/lsmio/lsmiotool-worker",
+        )
 
-    def testNoFilesystemValidationCallsIncludingResolveStatExistsOrSymlink(self) -> None:
+    def testNoFilesystemValidationCallsIncludingResolveStatExistsOrSymlink(
+        self,
+    ) -> None:
         """Spies on all filesystem introspection functions to prove ZERO calls occur during layout derivation."""
-        with patch("os.stat") as f_mock_stat, patch("os.lstat") as f_mock_lstat, patch(
-            "os.path.exists"
-        ) as f_mock_exists, patch("os.path.isfile") as f_mock_isfile, patch(
-            "os.path.isdir"
-        ) as f_mock_isdir, patch(
-            "os.path.islink"
-        ) as f_mock_islink, patch(
-            "os.access"
-        ) as f_mock_access, patch(
-            "builtins.open"
-        ) as f_mock_open, patch.object(
-            pathlib.Path, "stat"
-        ) as f_mock_path_stat, patch.object(
-            pathlib.Path, "lstat"
-        ) as f_mock_path_lstat, patch.object(
-            pathlib.Path, "exists"
-        ) as f_mock_path_exists, patch.object(
-            pathlib.Path, "is_file"
-        ) as f_mock_path_isfile, patch.object(
-            pathlib.Path, "is_dir"
-        ) as f_mock_path_isdir, patch.object(
-            pathlib.Path, "is_symlink"
-        ) as f_mock_path_issymlink, patch.object(
-            pathlib.Path, "resolve"
-        ) as f_mock_path_resolve:
-
+        with (
+            patch("os.stat") as f_mock_stat,
+            patch("os.lstat") as f_mock_lstat,
+            patch("os.path.exists") as f_mock_exists,
+            patch("os.path.isfile") as f_mock_isfile,
+            patch("os.path.isdir") as f_mock_isdir,
+            patch("os.path.islink") as f_mock_islink,
+            patch("os.access") as f_mock_access,
+            patch("builtins.open") as f_mock_open,
+            patch.object(pathlib.Path, "stat") as f_mock_path_stat,
+            patch.object(pathlib.Path, "lstat") as f_mock_path_lstat,
+            patch.object(pathlib.Path, "exists") as f_mock_path_exists,
+            patch.object(pathlib.Path, "is_file") as f_mock_path_isfile,
+            patch.object(pathlib.Path, "is_dir") as f_mock_path_isdir,
+            patch.object(pathlib.Path, "is_symlink") as f_mock_path_issymlink,
+            patch.object(pathlib.Path, "resolve") as f_mock_path_resolve,
+        ):
             # Execute forSource
-            f_source_layout = ResourceLocator.forSource("/mock/repo/tools/lsmiotool/lsmiotool")
+            f_source_layout = ResourceLocator.forSource(
+                "/mock/repo/tools/lsmiotool/lsmiotool"
+            )
             self.assertIsNotNone(f_source_layout)
 
             # Execute forInstalled
             f_rel_layout = self._createSampleInstalledLayout()
-            f_installed_layout = ResourceLocator.forInstalled("/usr/local/bin/lsmiotool", f_rel_layout)
+            f_installed_layout = ResourceLocator.forInstalled(
+                "/usr/local/bin/lsmiotool", f_rel_layout
+            )
             self.assertIsNotNone(f_installed_layout)
 
             # Assert ZERO calls to all filesystem introspection functions
@@ -293,9 +364,15 @@ class ResourceLocatorTest(unittest.TestCase):
             # Call forSource on an explicit path
             f_layout = ResourceLocator.forSource("/real/repo/tools/lsmiotool/lsmiotool")
             self.assertEqual(f_layout.package_root, "/real/repo/tools/lsmiotool")
-            self.assertEqual(f_layout.profile_file, "/real/repo/tools/lsmiotool/etc/environments.json")
+            self.assertEqual(
+                f_layout.profile_file,
+                "/real/repo/tools/lsmiotool/etc/environments.json",
+            )
             self.assertEqual(f_layout.asset_root, "/real/repo/tools/bmtool/lmp-reaxff")
-            self.assertEqual(f_layout.worker_executable, "/real/repo/tools/lsmiotool/lsmiotool-worker")
+            self.assertEqual(
+                f_layout.worker_executable,
+                "/real/repo/tools/lsmiotool/lsmiotool-worker",
+            )
             self.assertEqual(f_layout.version_file, "/real/repo/VERSION")
             self.assertNotIn("decoy", f_layout.package_root)
             self.assertNotIn("decoy", f_layout.worker_executable)
@@ -326,7 +403,9 @@ class ResourceLocatorTest(unittest.TestCase):
         if os.path.exists("/tmp"):
             os.chdir("/tmp")
             f_src_layout3 = ResourceLocator.forSource(f_source_entry)
-            f_inst_layout3 = ResourceLocator.forInstalled(f_installed_entry, f_rel_layout)
+            f_inst_layout3 = ResourceLocator.forInstalled(
+                f_installed_entry, f_rel_layout
+            )
             self.assertEqual(f_src_layout1, f_src_layout3)
             self.assertEqual(f_inst_layout1, f_inst_layout3)
 
@@ -476,7 +555,9 @@ class ResourceLocatorTest(unittest.TestCase):
         with self.assertRaises(LayoutConfigurationError):
             ResourceLocator.forInstalled("/usr/bin/lsmiotool", None)  # type: ignore
         with self.assertRaises(LayoutConfigurationError):
-            ResourceLocator.forInstalled("/usr/bin/lsmiotool\0", self._createSampleInstalledLayout())
+            ResourceLocator.forInstalled(
+                "/usr/bin/lsmiotool\0", self._createSampleInstalledLayout()
+            )
 
         # RuntimeLayout with non-absolute path
         with self.assertRaises(LayoutConfigurationError):

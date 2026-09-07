@@ -34,7 +34,18 @@ import hashlib
 import os
 import re
 import stat
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 
 class CapabilityState(Enum):
@@ -100,7 +111,9 @@ class BenchmarkCommand:
         f_is_rank_local: bool = False,
     ) -> None:
         if not f_argv:
-            raise BenchmarkConfigurationError("BenchmarkCommand argv sequence must not be empty")
+            raise BenchmarkConfigurationError(
+                "BenchmarkCommand argv sequence must not be empty"
+            )
 
         f_clean_argv: List[str] = []
         for f_idx, f_arg in enumerate(f_argv):
@@ -160,7 +173,9 @@ class BenchmarkCommand:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -234,13 +249,15 @@ class BenchmarkCommand:
         )
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_argv,
-            self.m_stdout_path,
-            self.m_stderr_path,
-            self.m_working_dir,
-            self.m_is_rank_local,
-        ))
+        return hash(
+            (
+                self.m_argv,
+                self.m_stdout_path,
+                self.m_stderr_path,
+                self.m_working_dir,
+                self.m_is_rank_local,
+            )
+        )
 
 
 class BenchmarkAdapter(ABC):
@@ -358,12 +375,16 @@ class IorAdapter(BenchmarkAdapter):
                 f"Executable must be a non-empty string, got: {f_executable!r}"
             )
         if "\0" in f_executable:
-            raise BenchmarkConfigurationError(f"Executable contains NUL byte: {f_executable!r}")
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
 
         f_norm_executable = f_executable.strip()
 
         if not isinstance(f_setup, str) or not f_setup.strip():
-            raise BenchmarkConfigurationError(f"Setup must be a non-empty string, got: {f_setup!r}")
+            raise BenchmarkConfigurationError(
+                f"Setup must be a non-empty string, got: {f_setup!r}"
+            )
         f_norm_setup = f_setup.strip().upper()
         if f_norm_setup not in self.ALLOWED_SETUPS:
             raise BenchmarkConfigurationError(
@@ -384,14 +405,18 @@ class IorAdapter(BenchmarkAdapter):
             elif isinstance(f_combination, str):
                 f_combo_str = f_combination.strip()
                 if "_b" in f_combo_str:
-                    f_resolved_block_size = f_combo_str.split("_b", 1)[1].strip().upper()
+                    f_resolved_block_size = (
+                        f_combo_str.split("_b", 1)[1].strip().upper()
+                    )
                 else:
                     f_resolved_block_size = f_combo_str.upper()
             elif isinstance(f_combination, (tuple, list)) and len(f_combination) >= 2:
                 f_resolved_block_size = str(f_combination[1]).strip().upper()
 
         if f_resolved_block_size is None:
-            raise BenchmarkConfigurationError("Block size must be specified directly or via combination")
+            raise BenchmarkConfigurationError(
+                "Block size must be specified directly or via combination"
+            )
 
         if f_resolved_block_size not in self.SEGMENT_MAP:
             raise BenchmarkConfigurationError(
@@ -405,7 +430,9 @@ class IorAdapter(BenchmarkAdapter):
                 f"Working directory must be a non-empty string, got: {f_working_dir!r}"
             )
         if "\0" in f_working_dir:
-            raise BenchmarkConfigurationError(f"Working directory contains NUL byte: {f_working_dir!r}")
+            raise BenchmarkConfigurationError(
+                f"Working directory contains NUL byte: {f_working_dir!r}"
+            )
         f_norm_working_dir = os.path.normpath(f_working_dir.strip())
 
         # Resolve output path
@@ -415,7 +442,9 @@ class IorAdapter(BenchmarkAdapter):
                     f"Output path must be a non-empty string, got: {f_output_path!r}"
                 )
             if "\0" in f_output_path:
-                raise BenchmarkConfigurationError(f"Output path contains NUL byte: {f_output_path!r}")
+                raise BenchmarkConfigurationError(
+                    f"Output path contains NUL byte: {f_output_path!r}"
+                )
             f_outpath = os.path.normpath(f_output_path.strip())
         else:
             f_outpath = os.path.join(f_norm_working_dir, f"ior.{f_norm_setup.lower()}")
@@ -427,10 +456,14 @@ class IorAdapter(BenchmarkAdapter):
                     f"Stdout path must be a non-empty string, got: {f_stdout_path!r}"
                 )
             if "\0" in f_stdout_path:
-                raise BenchmarkConfigurationError(f"Stdout path contains NUL byte: {f_stdout_path!r}")
+                raise BenchmarkConfigurationError(
+                    f"Stdout path contains NUL byte: {f_stdout_path!r}"
+                )
             f_norm_stdout = os.path.normpath(f_stdout_path.strip())
         else:
-            f_norm_stdout = os.path.join(f_norm_working_dir, f"ior.{f_norm_setup.lower()}.stdout.log")
+            f_norm_stdout = os.path.join(
+                f_norm_working_dir, f"ior.{f_norm_setup.lower()}.stdout.log"
+            )
 
         if f_stderr_path is not None:
             if not isinstance(f_stderr_path, str) or not f_stderr_path.strip():
@@ -438,10 +471,14 @@ class IorAdapter(BenchmarkAdapter):
                     f"Stderr path must be a non-empty string, got: {f_stderr_path!r}"
                 )
             if "\0" in f_stderr_path:
-                raise BenchmarkConfigurationError(f"Stderr path contains NUL byte: {f_stderr_path!r}")
+                raise BenchmarkConfigurationError(
+                    f"Stderr path contains NUL byte: {f_stderr_path!r}"
+                )
             f_norm_stderr = os.path.normpath(f_stderr_path.strip())
         else:
-            f_norm_stderr = os.path.join(f_norm_working_dir, f"ior.{f_norm_setup.lower()}.stderr.log")
+            f_norm_stderr = os.path.join(
+                f_norm_working_dir, f"ior.{f_norm_setup.lower()}.stderr.log"
+            )
 
         # Validate that no rank placeholders are present in paths or executable
         for f_check_str, f_desc in (
@@ -496,7 +533,9 @@ class IorAdapter(BenchmarkAdapter):
                 f"Executable must be a non-empty string, got: {f_executable!r}"
             )
         if "\0" in f_executable:
-            raise BenchmarkConfigurationError(f"Executable contains NUL byte: {f_executable!r}")
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
 
         f_norm_executable = f_executable.strip()
 
@@ -561,7 +600,11 @@ class IorAdapter(BenchmarkAdapter):
             )
 
         f_lower_out = f_output_text.lower()
-        if "unsupported" in f_lower_out or "invalid option" in f_lower_out or "command not found" in f_lower_out:
+        if (
+            "unsupported" in f_lower_out
+            or "invalid option" in f_lower_out
+            or "command not found" in f_lower_out
+        ):
             raise BenchmarkProbeError(
                 f"IOR executable {f_norm_executable!r} reported unsupported capability: {f_output_text.strip()}"
             )
@@ -572,7 +615,11 @@ class IorAdapter(BenchmarkAdapter):
             )
 
         # Check for IOR signature or version pattern
-        f_ior_match = re.search(r"IOR[- ](\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9_.-]*)?)", f_output_text, re.IGNORECASE)
+        f_ior_match = re.search(
+            r"IOR[- ](\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9_.-]*)?)",
+            f_output_text,
+            re.IGNORECASE,
+        )
         if f_ior_match or "ior" in f_lower_out or "version" in f_lower_out:
             return CapabilityState.VERIFIED
 
@@ -646,7 +693,9 @@ class LsmioLaunchSpec:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -746,22 +795,27 @@ class LsmioLaunchSpec:
     def __hash__(self) -> int:
         f_combo_key = (
             (self.m_combination.stripe_count, self.m_combination.block_size)
-            if hasattr(self.m_combination, "stripe_count") and hasattr(self.m_combination, "block_size")
+            if hasattr(self.m_combination, "stripe_count")
+            and hasattr(self.m_combination, "block_size")
             else str(self.m_combination)
         )
         f_point_key = (
             (self.m_point.tasks, self.m_point.ppn, self.m_point.nodes)
-            if hasattr(self.m_point, "tasks") and hasattr(self.m_point, "ppn") and hasattr(self.m_point, "nodes")
+            if hasattr(self.m_point, "tasks")
+            and hasattr(self.m_point, "ppn")
+            and hasattr(self.m_point, "nodes")
             else str(self.m_point)
         )
-        return hash((
-            self.m_setup,
-            self.m_executable,
-            f_combo_key,
-            f_point_key,
-            self.m_is_rank_local,
-            self.m_is_bound,
-        ))
+        return hash(
+            (
+                self.m_setup,
+                self.m_executable,
+                f_combo_key,
+                f_point_key,
+                self.m_is_rank_local,
+                self.m_is_bound,
+            )
+        )
 
 
 class LsmioBoundCommand(BenchmarkCommand):
@@ -884,11 +938,13 @@ class LsmioBoundCommand(BenchmarkCommand):
         )
 
     def __hash__(self) -> int:
-        return hash((
-            super().__hash__(),
-            self.m_result_path,
-            self.m_output_path,
-        ))
+        return hash(
+            (
+                super().__hash__(),
+                self.m_result_path,
+                self.m_output_path,
+            )
+        )
 
 
 class LsmioAdapter(BenchmarkAdapter):
@@ -1064,7 +1120,11 @@ class LsmioAdapter(BenchmarkAdapter):
         and zero duplicate detection.
         """
         # 1. Validate spec
-        if not hasattr(f_spec, "setup") or not hasattr(f_spec, "combination") or not hasattr(f_spec, "point"):
+        if (
+            not hasattr(f_spec, "setup")
+            or not hasattr(f_spec, "combination")
+            or not hasattr(f_spec, "point")
+        ):
             raise BenchmarkConfigurationError(
                 f"f_spec must have setup, combination, and point attributes, got: {type(f_spec).__name__}"
             )
@@ -1138,22 +1198,42 @@ class LsmioAdapter(BenchmarkAdapter):
             f_combo_name = (
                 f_layout.combinationName(f_combo_desc)
                 if hasattr(f_layout, "combinationName")
-                else (f_combo_desc.name if hasattr(f_combo_desc, "name") else str(f_combo_desc))
+                else (
+                    f_combo_desc.name
+                    if hasattr(f_combo_desc, "name")
+                    else str(f_combo_desc)
+                )
             )
             f_logs_dir = f_layout.pointLogsDir(f_point_desc, f_ordinal)
-            f_log_path = os.path.join(f_logs_dir, f_combo_name, f"rank_{f_global_rank}.log")
+            f_log_path = os.path.join(
+                f_logs_dir, f_combo_name, f"rank_{f_global_rank}.log"
+            )
 
         f_result_path = f_layout.pointRankResultPath(
             f_point_desc, f_global_rank, f_combo_desc, f_ordinal
         )
 
-        f_work_dir = f_layout.pointCombinationWorkDir(f_point_desc, f_combo_desc, f_ordinal)
+        f_work_dir = f_layout.pointCombinationWorkDir(
+            f_point_desc, f_combo_desc, f_ordinal
+        )
 
-        f_stripe = getattr(f_combo_desc, "stripe_count", 16) if hasattr(f_combo_desc, "stripe_count") else 16
-        f_bs_name = getattr(f_combo_desc, "block_size", "8M") if hasattr(f_combo_desc, "block_size") else "8M"
+        f_stripe = (
+            getattr(f_combo_desc, "stripe_count", 16)
+            if hasattr(f_combo_desc, "stripe_count")
+            else 16
+        )
+        f_bs_name = (
+            getattr(f_combo_desc, "block_size", "8M")
+            if hasattr(f_combo_desc, "block_size")
+            else "8M"
+        )
 
-        f_data_dir = f_layout.pointDataSubdir(f_point_desc, f_stripe, f_bs_name, f_ordinal)
-        f_output_path = os.path.join(f_data_dir, f"lsmio-rank-{f_global_rank}-{f_setup.lower()}.db")
+        f_data_dir = f_layout.pointDataSubdir(
+            f_point_desc, f_stripe, f_bs_name, f_ordinal
+        )
+        f_output_path = os.path.join(
+            f_data_dir, f"lsmio-rank-{f_global_rank}-{f_setup.lower()}.db"
+        )
 
         # 5. Block sizing and key count
         f_block_bytes, f_key_count = self.getBlockParameters(str(f_bs_name))
@@ -1168,18 +1248,20 @@ class LsmioAdapter(BenchmarkAdapter):
         if f_setup in ("PLUGIN", "PLUGIN-M"):
             f_argv.append("--lsmio-plugin")
 
-        f_argv.extend([
-            "-i",
-            "10",
-            "-o",
-            f_output_path,
-            "--lsmio-ts",
-            str(f_block_bytes),
-            "--lsmio-bs",
-            str(f_block_bytes),
-            "--key-count",
-            str(f_key_count),
-        ])
+        f_argv.extend(
+            [
+                "-i",
+                "10",
+                "-o",
+                f_output_path,
+                "--lsmio-ts",
+                str(f_block_bytes),
+                "--lsmio-bs",
+                str(f_block_bytes),
+                "--key-count",
+                str(f_key_count),
+            ]
+        )
 
         return LsmioBoundCommand(
             f_argv=f_argv,
@@ -1212,12 +1294,16 @@ class LsmioAdapter(BenchmarkAdapter):
                 f"Executable must be a non-empty string, got: {f_executable!r}"
             )
         if "\0" in f_executable:
-            raise BenchmarkConfigurationError(f"Executable contains NUL byte: {f_executable!r}")
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
 
         f_norm_executable = f_executable.strip()
 
         if not isinstance(f_setup, str) or not f_setup.strip():
-            raise BenchmarkConfigurationError(f"Setup must be a non-empty string, got: {f_setup!r}")
+            raise BenchmarkConfigurationError(
+                f"Setup must be a non-empty string, got: {f_setup!r}"
+            )
         f_norm_setup = f_setup.strip().upper()
         if f_norm_setup == "ENV":
             raise BenchmarkConfigurationError(
@@ -1242,14 +1328,18 @@ class LsmioAdapter(BenchmarkAdapter):
             elif isinstance(f_combination, str):
                 f_combo_str = f_combination.strip()
                 if "_b" in f_combo_str:
-                    f_resolved_block_size = f_combo_str.split("_b", 1)[1].strip().upper()
+                    f_resolved_block_size = (
+                        f_combo_str.split("_b", 1)[1].strip().upper()
+                    )
                 else:
                     f_resolved_block_size = f_combo_str.upper()
             elif isinstance(f_combination, (tuple, list)) and len(f_combination) >= 2:
                 f_resolved_block_size = str(f_combination[1]).strip().upper()
 
         if f_resolved_block_size is None:
-            raise BenchmarkConfigurationError("Block size must be specified directly or via combination")
+            raise BenchmarkConfigurationError(
+                "Block size must be specified directly or via combination"
+            )
 
         if f_resolved_block_size not in self.BLOCK_SIZE_MAP:
             raise BenchmarkConfigurationError(
@@ -1263,7 +1353,9 @@ class LsmioAdapter(BenchmarkAdapter):
                 f"Working directory must be a non-empty string, got: {f_working_dir!r}"
             )
         if "\0" in f_working_dir:
-            raise BenchmarkConfigurationError(f"Working directory contains NUL byte: {f_working_dir!r}")
+            raise BenchmarkConfigurationError(
+                f"Working directory contains NUL byte: {f_working_dir!r}"
+            )
         f_norm_working_dir = os.path.normpath(f_working_dir.strip())
 
         if f_output_path is not None:
@@ -1272,7 +1364,9 @@ class LsmioAdapter(BenchmarkAdapter):
                     f"Output path must be a non-empty string, got: {f_output_path!r}"
                 )
             if "\0" in f_output_path:
-                raise BenchmarkConfigurationError(f"Output path contains NUL byte: {f_output_path!r}")
+                raise BenchmarkConfigurationError(
+                    f"Output path contains NUL byte: {f_output_path!r}"
+                )
             f_outpath = os.path.normpath(f_output_path.strip())
         else:
             f_outpath = os.path.join(
@@ -1286,10 +1380,14 @@ class LsmioAdapter(BenchmarkAdapter):
                     f"Stdout path must be a non-empty string, got: {f_stdout_path!r}"
                 )
             if "\0" in f_stdout_path:
-                raise BenchmarkConfigurationError(f"Stdout path contains NUL byte: {f_stdout_path!r}")
+                raise BenchmarkConfigurationError(
+                    f"Stdout path contains NUL byte: {f_stdout_path!r}"
+                )
             f_norm_stdout = os.path.normpath(f_stdout_path.strip())
         else:
-            f_norm_stdout = os.path.join(f_norm_working_dir, f"rank_{f_global_rank}.log")
+            f_norm_stdout = os.path.join(
+                f_norm_working_dir, f"rank_{f_global_rank}.log"
+            )
 
         if f_stderr_path is not None:
             if not isinstance(f_stderr_path, str) or not f_stderr_path.strip():
@@ -1297,7 +1395,9 @@ class LsmioAdapter(BenchmarkAdapter):
                     f"Stderr path must be a non-empty string, got: {f_stderr_path!r}"
                 )
             if "\0" in f_stderr_path:
-                raise BenchmarkConfigurationError(f"Stderr path contains NUL byte: {f_stderr_path!r}")
+                raise BenchmarkConfigurationError(
+                    f"Stderr path contains NUL byte: {f_stderr_path!r}"
+                )
             f_norm_stderr = os.path.normpath(f_stderr_path.strip())
         else:
             f_norm_stderr = f_norm_stdout
@@ -1307,18 +1407,20 @@ class LsmioAdapter(BenchmarkAdapter):
             f_argv.extend(["-m", "-g"])
         if f_norm_setup in ("PLUGIN", "PLUGIN-M"):
             f_argv.append("--lsmio-plugin")
-        f_argv.extend([
-            "-i",
-            "10",
-            "-o",
-            f_outpath,
-            "--lsmio-ts",
-            str(f_block_bytes),
-            "--lsmio-bs",
-            str(f_block_bytes),
-            "--key-count",
-            str(f_key_count),
-        ])
+        f_argv.extend(
+            [
+                "-i",
+                "10",
+                "-o",
+                f_outpath,
+                "--lsmio-ts",
+                str(f_block_bytes),
+                "--lsmio-bs",
+                str(f_block_bytes),
+                "--key-count",
+                str(f_key_count),
+            ]
+        )
 
         return LsmioBoundCommand(
             f_argv=f_argv,
@@ -1346,7 +1448,9 @@ class LsmioAdapter(BenchmarkAdapter):
                 f"Executable must be a non-empty string, got: {f_executable!r}"
             )
         if "\0" in f_executable:
-            raise BenchmarkConfigurationError(f"Executable contains NUL byte: {f_executable!r}")
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
 
         f_norm_executable = f_executable.strip()
 
@@ -1548,12 +1652,16 @@ class LmpAdapter(BenchmarkAdapter):
                 f"Executable must be a non-empty string, got: {f_executable!r}"
             )
         if "\0" in f_executable:
-            raise BenchmarkConfigurationError(f"Executable contains NUL byte: {f_executable!r}")
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
         f_norm_executable = f_executable.strip()
 
         # Validate setup
         if not isinstance(f_setup, str) or not f_setup.strip():
-            raise BenchmarkConfigurationError(f"Setup must be a non-empty string, got: {f_setup!r}")
+            raise BenchmarkConfigurationError(
+                f"Setup must be a non-empty string, got: {f_setup!r}"
+            )
         f_norm_setup = f_setup.strip().upper()
         if f_norm_setup not in self.ALLOWED_SETUPS:
             raise BenchmarkConfigurationError(
@@ -1586,7 +1694,9 @@ class LmpAdapter(BenchmarkAdapter):
                 or f_kwargs.get("buffer")
             )
         if f_buf is None and f_tuning is not None and isinstance(f_tuning, Mapping):
-            f_buf = f_tuning.get("buffer_size_mb", f_tuning.get("buf", f_tuning.get("buffer")))
+            f_buf = f_tuning.get(
+                "buffer_size_mb", f_tuning.get("buf", f_tuning.get("buffer"))
+            )
 
         if f_norm_setup in ("LSMIO", "LSMIO-MMAP"):
             if f_buf is None:
@@ -1701,7 +1811,9 @@ class LmpAdapter(BenchmarkAdapter):
                 f"Executable must be a non-empty string, got: {f_executable!r}"
             )
         if "\0" in f_executable:
-            raise BenchmarkConfigurationError(f"Executable contains NUL byte: {f_executable!r}")
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
 
         f_norm_executable = f_executable.strip()
 
@@ -1770,7 +1882,11 @@ class LmpAdapter(BenchmarkAdapter):
             )
 
         f_lower_out = f_output_text.lower()
-        if "unsupported" in f_lower_out or "invalid option" in f_lower_out or "command not found" in f_lower_out:
+        if (
+            "unsupported" in f_lower_out
+            or "invalid option" in f_lower_out
+            or "command not found" in f_lower_out
+        ):
             raise BenchmarkProbeError(
                 f"LMP executable {f_norm_executable!r} reported unsupported capability: {f_output_text.strip()}"
             )

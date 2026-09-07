@@ -39,7 +39,18 @@ import signal
 import stat
 import sys
 import time
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 from lsmiotool.lib.site import (
     CancellationPolicy,
@@ -199,7 +210,13 @@ class LaunchMode(Enum):
 class LaunchSpec:
     """Immutable benchmark launch specification."""
 
-    __slots__ = ("m_mode", "m_executable_or_worker", "m_arguments", "m_expected_results", "_frozen")
+    __slots__ = (
+        "m_mode",
+        "m_executable_or_worker",
+        "m_arguments",
+        "m_expected_results",
+        "_frozen",
+    )
 
     def __init__(
         self,
@@ -216,7 +233,9 @@ class LaunchSpec:
         elif isinstance(f_mode, LaunchMode):
             f_norm_mode = f_mode
         else:
-            raise PlanValidationError(f"LaunchMode must be LaunchMode or str, got: {f_mode!r}")
+            raise PlanValidationError(
+                f"LaunchMode must be LaunchMode or str, got: {f_mode!r}"
+            )
 
         if not isinstance(f_executable_or_worker, str) or not f_executable_or_worker:
             raise PlanValidationError(
@@ -226,7 +245,9 @@ class LaunchSpec:
         super().__setattr__("m_mode", f_norm_mode)
         super().__setattr__("m_executable_or_worker", f_executable_or_worker)
         super().__setattr__("m_arguments", tuple(str(f_a) for f_a in f_arguments))
-        super().__setattr__("m_expected_results", tuple(str(f_r) for f_r in f_expected_results))
+        super().__setattr__(
+            "m_expected_results", tuple(str(f_r) for f_r in f_expected_results)
+        )
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -236,7 +257,9 @@ class LaunchSpec:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -297,7 +320,9 @@ class RankIdentity:
             raise PlanValidationError(
                 f"global_rank must be a non-negative integer, got: {f_global_rank!r}"
             )
-        if not isinstance(f_node_rank, (str, int)) or (isinstance(f_node_rank, str) and not f_node_rank):
+        if not isinstance(f_node_rank, (str, int)) or (
+            isinstance(f_node_rank, str) and not f_node_rank
+        ):
             raise PlanValidationError(
                 f"node_rank must be a non-empty string or integer, got: {f_node_rank!r}"
             )
@@ -319,7 +344,9 @@ class RankIdentity:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -375,13 +402,21 @@ class RunRequest:
         f_setup: Optional[str] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
-            raise PlanValidationError(f"target must be a non-empty string, got: {f_target!r}")
+            raise PlanValidationError(
+                f"target must be a non-empty string, got: {f_target!r}"
+            )
         if not isinstance(f_scale, str) or not f_scale.strip():
-            raise PlanValidationError(f"scale must be a non-empty string, got: {f_scale!r}")
+            raise PlanValidationError(
+                f"scale must be a non-empty string, got: {f_scale!r}"
+            )
         if not isinstance(f_ssd, bool):
             raise PlanValidationError(f"ssd must be a boolean, got: {f_ssd!r}")
-        if f_setup is not None and (not isinstance(f_setup, str) or not f_setup.strip()):
-            raise PlanValidationError(f"setup must be a non-empty string or None, got: {f_setup!r}")
+        if f_setup is not None and (
+            not isinstance(f_setup, str) or not f_setup.strip()
+        ):
+            raise PlanValidationError(
+                f"setup must be a non-empty string or None, got: {f_setup!r}"
+            )
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
@@ -396,7 +431,9 @@ class RunRequest:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -473,17 +510,29 @@ class Combination:
         f_segment_count: int,
     ) -> None:
         if not isinstance(f_processes, int) or f_processes <= 0:
-            raise PlanValidationError(f"processes must be a positive integer, got: {f_processes!r}")
+            raise PlanValidationError(
+                f"processes must be a positive integer, got: {f_processes!r}"
+            )
         if not isinstance(f_block_size, str) or not f_block_size.strip():
-            raise PlanValidationError(f"block_size must be a non-empty string, got: {f_block_size!r}")
+            raise PlanValidationError(
+                f"block_size must be a non-empty string, got: {f_block_size!r}"
+            )
         if not isinstance(f_stripe_count, int) or f_stripe_count <= 0:
-            raise PlanValidationError(f"stripe_count must be a positive integer, got: {f_stripe_count!r}")
+            raise PlanValidationError(
+                f"stripe_count must be a positive integer, got: {f_stripe_count!r}"
+            )
         if not isinstance(f_block_bytes, int) or f_block_bytes <= 0:
-            raise PlanValidationError(f"block_bytes must be a positive integer, got: {f_block_bytes!r}")
+            raise PlanValidationError(
+                f"block_bytes must be a positive integer, got: {f_block_bytes!r}"
+            )
         if not isinstance(f_key_count, int) or f_key_count <= 0:
-            raise PlanValidationError(f"key_count must be a positive integer, got: {f_key_count!r}")
+            raise PlanValidationError(
+                f"key_count must be a positive integer, got: {f_key_count!r}"
+            )
         if not isinstance(f_segment_count, int) or f_segment_count <= 0:
-            raise PlanValidationError(f"segment_count must be a positive integer, got: {f_segment_count!r}")
+            raise PlanValidationError(
+                f"segment_count must be a positive integer, got: {f_segment_count!r}"
+            )
 
         super().__setattr__("m_processes", f_processes)
         super().__setattr__("m_block_size", f_block_size.strip())
@@ -500,7 +549,9 @@ class Combination:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -571,7 +622,9 @@ class ScalePoint:
 
     def __init__(self, f_tasks: int, f_ppn: int, f_nodes: int) -> None:
         if not isinstance(f_tasks, int) or f_tasks <= 0:
-            raise PlanValidationError(f"tasks must be a positive integer, got: {f_tasks!r}")
+            raise PlanValidationError(
+                f"tasks must be a positive integer, got: {f_tasks!r}"
+            )
         if not isinstance(f_ppn, int) or f_ppn not in {1, 4}:
             raise PlanValidationError(f"ppn must be 1 or 4, got: {f_ppn!r}")
         if f_tasks % f_ppn != 0:
@@ -595,7 +648,9 @@ class ScalePoint:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -630,7 +685,9 @@ class ScalePoint:
         }
 
     def __repr__(self) -> str:
-        return f"ScalePoint(tasks={self.m_tasks}, ppn={self.m_ppn}, nodes={self.m_nodes})"
+        return (
+            f"ScalePoint(tasks={self.m_tasks}, ppn={self.m_ppn}, nodes={self.m_nodes})"
+        )
 
     def __eq__(self, f_other: Any) -> bool:
         if isinstance(f_other, ScalePoint):
@@ -675,13 +732,25 @@ class ScheduledPointResources:
         f_pvmem: Optional[str] = None,
     ) -> None:
         if not isinstance(f_walltime, str) or not f_walltime.strip():
-            raise PlanValidationError(f"walltime must be a non-empty string, got: {f_walltime!r}")
-        if f_select_chunks is not None and (not isinstance(f_select_chunks, int) or f_select_chunks <= 0):
-            raise PlanValidationError(f"select_chunks must be a positive integer or None, got: {f_select_chunks!r}")
+            raise PlanValidationError(
+                f"walltime must be a non-empty string, got: {f_walltime!r}"
+            )
+        if f_select_chunks is not None and (
+            not isinstance(f_select_chunks, int) or f_select_chunks <= 0
+        ):
+            raise PlanValidationError(
+                f"select_chunks must be a positive integer or None, got: {f_select_chunks!r}"
+            )
         if f_ncpus is not None and (not isinstance(f_ncpus, int) or f_ncpus <= 0):
-            raise PlanValidationError(f"ncpus must be a positive integer or None, got: {f_ncpus!r}")
-        if f_mpiprocs is not None and (not isinstance(f_mpiprocs, int) or f_mpiprocs <= 0):
-            raise PlanValidationError(f"mpiprocs must be a positive integer or None, got: {f_mpiprocs!r}")
+            raise PlanValidationError(
+                f"ncpus must be a positive integer or None, got: {f_ncpus!r}"
+            )
+        if f_mpiprocs is not None and (
+            not isinstance(f_mpiprocs, int) or f_mpiprocs <= 0
+        ):
+            raise PlanValidationError(
+                f"mpiprocs must be a positive integer or None, got: {f_mpiprocs!r}"
+            )
 
         super().__setattr__("m_walltime", f_walltime.strip())
         super().__setattr__("m_select_chunks", f_select_chunks)
@@ -703,7 +772,9 @@ class ScheduledPointResources:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -822,11 +893,17 @@ class RunPlan:
         f_lmp_task_tuning: Optional[Mapping[str, Mapping[str, int]]] = None,
     ) -> None:
         if not isinstance(f_run_id, str) or not f_run_id.strip():
-            raise PlanValidationError(f"run_id must be a non-empty string, got: {f_run_id!r}")
+            raise PlanValidationError(
+                f"run_id must be a non-empty string, got: {f_run_id!r}"
+            )
         if not isinstance(f_request, RunRequest):
-            raise PlanValidationError(f"request must be a RunRequest, got: {f_request!r}")
+            raise PlanValidationError(
+                f"request must be a RunRequest, got: {f_request!r}"
+            )
         if not isinstance(f_profile, SiteProfile):
-            raise PlanValidationError(f"profile must be a SiteProfile, got: {f_profile!r}")
+            raise PlanValidationError(
+                f"profile must be a SiteProfile, got: {f_profile!r}"
+            )
         if not f_scale_points:
             raise PlanValidationError("scale_points must not be empty")
         if not f_combinations:
@@ -839,7 +916,10 @@ class RunPlan:
             raise PlanValidationError(
                 f"tokens count ({len(f_tokens)}) must equal scale_points count ({len(f_scale_points)})"
             )
-        if not isinstance(f_manifest_timestamp, str) or not f_manifest_timestamp.strip():
+        if (
+            not isinstance(f_manifest_timestamp, str)
+            or not f_manifest_timestamp.strip()
+        ):
             raise PlanValidationError(
                 f"manifest_timestamp must be a non-empty string, got: {f_manifest_timestamp!r}"
             )
@@ -911,7 +991,9 @@ class RunPlan:
                     )
         else:
             if f_lmp_task_tuning is not None and len(f_lmp_task_tuning) > 0:
-                raise PlanValidationError("lmp_task_tuning must be empty for non-LMP target")
+                raise PlanValidationError(
+                    "lmp_task_tuning must be empty for non-LMP target"
+                )
             f_eff_tuning = {}
 
         super().__setattr__("m_run_id", f_run_id.strip())
@@ -932,7 +1014,9 @@ class RunPlan:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -1140,7 +1224,9 @@ class RunPlanner:
     def getLmpTuning(cls, f_tasks: int) -> Dict[str, int]:
         """Return {"replication": REP, "buffer_size_mb": BUF} dict for the given LMP task count."""
         if not isinstance(f_tasks, int) or isinstance(f_tasks, bool) or f_tasks <= 0:
-            raise PlanValidationError(f"f_tasks must be a positive integer, got: {f_tasks!r}")
+            raise PlanValidationError(
+                f"f_tasks must be a positive integer, got: {f_tasks!r}"
+            )
         if f_tasks not in cls.LMP_TASK_TUNING:
             raise PlanValidationError(
                 f"LMP tuning is not defined for task count {f_tasks}"
@@ -1159,9 +1245,13 @@ class RunPlanner:
         """Validate request and site profile constraints, then generate an immutable RunPlan."""
         # 1. Pure validation of request and profile types and vocabulary BEFORE invoking any sources
         if not isinstance(f_request, RunRequest):
-            raise PlanValidationError(f"f_request must be RunRequest, got: {f_request!r}")
+            raise PlanValidationError(
+                f"f_request must be RunRequest, got: {f_request!r}"
+            )
         if not isinstance(f_profile, SiteProfile):
-            raise PlanValidationError(f"f_profile must be SiteProfile, got: {f_profile!r}")
+            raise PlanValidationError(
+                f"f_profile must be SiteProfile, got: {f_profile!r}"
+            )
 
         f_target = f_request.target.strip().lower()
         if f_target not in cls.DEFAULT_SETUPS:
@@ -1219,11 +1309,10 @@ class RunPlanner:
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_resource_policy.walltime_policy == "fixed_06:00:00":
                 f_walltime = "06:00:00"
-            elif (
-                isinstance(f_resource_policy.walltime_policy, str)
-                and f_resource_policy.walltime_policy.startswith("fixed_")
-            ):
-                f_walltime = f_resource_policy.walltime_policy[len("fixed_"):]
+            elif isinstance(
+                f_resource_policy.walltime_policy, str
+            ) and f_resource_policy.walltime_policy.startswith("fixed_"):
+                f_walltime = f_resource_policy.walltime_policy[len("fixed_") :]
             else:
                 f_walltime = "00:00:00"
 
@@ -1235,7 +1324,9 @@ class RunPlanner:
                     f_ncpus=f_sp.ppn,
                     f_mpiprocs=f_sp.ppn,
                     f_mem=f_resource_policy.memory,
-                    f_mail_mode=f_resource_policy.mail_mode.value if f_resource_policy.mail_mode else None,
+                    f_mail_mode=f_resource_policy.mail_mode.value
+                    if f_resource_policy.mail_mode
+                    else None,
                     f_queue=f_resource_policy.queue,
                     f_partition=f_resource_policy.partition,
                     f_qos=f_resource_policy.qos,
@@ -1249,7 +1340,9 @@ class RunPlanner:
                     f_ncpus=None,
                     f_mpiprocs=None,
                     f_mem=f_resource_policy.memory,
-                    f_mail_mode=f_resource_policy.mail_mode.value if f_resource_policy.mail_mode else None,
+                    f_mail_mode=f_resource_policy.mail_mode.value
+                    if f_resource_policy.mail_mode
+                    else None,
                     f_queue=f_resource_policy.queue,
                     f_partition=f_resource_policy.partition,
                     f_qos=f_resource_policy.qos,
@@ -1275,7 +1368,9 @@ class RunPlanner:
 
         # 6. Now generate correlation tokens, run ID, and manifest timestamp
         if f_token_source is None:
-            f_eff_token_source: Callable[[], str] = lambda: f"lm-{secrets.token_hex(12)}"
+            f_eff_token_source: Callable[[], str] = lambda: (
+                f"lm-{secrets.token_hex(12)}"
+            )
         else:
             f_eff_token_source = f_token_source
 
@@ -1295,25 +1390,30 @@ class RunPlanner:
             f_tokens.append(f_token)
 
         if f_run_id_source is None:
-            f_eff_run_id_source: Callable[[], str] = (
-                lambda: f"run-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(6)}"
+            f_eff_run_id_source: Callable[[], str] = lambda: (
+                f"run-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(6)}"
             )
         else:
             f_eff_run_id_source = f_run_id_source
 
         f_run_id = f_eff_run_id_source()
         if not isinstance(f_run_id, str) or not f_run_id.strip():
-            raise PlanValidationError(f"run_id must be a non-empty string, got: {f_run_id!r}")
+            raise PlanValidationError(
+                f"run_id must be a non-empty string, got: {f_run_id!r}"
+            )
 
         if f_clock is None:
-            f_eff_clock: Callable[[], str] = (
-                lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            )
+            f_eff_clock: Callable[[], str] = lambda: datetime.now(
+                timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
         else:
             f_eff_clock = f_clock
 
         f_manifest_timestamp = f_eff_clock()
-        if not isinstance(f_manifest_timestamp, str) or not f_manifest_timestamp.strip():
+        if (
+            not isinstance(f_manifest_timestamp, str)
+            or not f_manifest_timestamp.strip()
+        ):
             raise PlanValidationError(
                 f"manifest_timestamp must be a non-empty string, got: {f_manifest_timestamp!r}"
             )
@@ -1376,7 +1476,11 @@ class ManifestDocument:
         f_points: Sequence[ScheduledPointResources],
         f_tokens: Sequence[str],
     ) -> None:
-        if not isinstance(f_schema_version, int) or isinstance(f_schema_version, bool) or f_schema_version != 1:
+        if (
+            not isinstance(f_schema_version, int)
+            or isinstance(f_schema_version, bool)
+            or f_schema_version != 1
+        ):
             raise ManifestValidationError(
                 f"schema_version must be integer 1, got: {f_schema_version!r}"
             )
@@ -1408,9 +1512,7 @@ class ManifestDocument:
                 f"site must be a SiteProfile, got: {f_site!r}"
             )
         if not isinstance(f_plan, Mapping):
-            raise ManifestValidationError(
-                f"plan must be a mapping, got: {f_plan!r}"
-            )
+            raise ManifestValidationError(f"plan must be a mapping, got: {f_plan!r}")
         if not f_scale_points:
             raise ManifestValidationError("scale_points must not be empty")
         if not f_combinations:
@@ -1453,7 +1555,9 @@ class ManifestDocument:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -1576,7 +1680,13 @@ class ManifestSerializer:
     }
 
     REQUIRED_REQUEST_KEYS: Set[str] = {"target", "scale", "ssd", "setup"}
-    REQUIRED_PLAN_KEYS: Set[str] = {"target", "scale", "storage", "setup", "lmp_task_tuning"}
+    REQUIRED_PLAN_KEYS: Set[str] = {
+        "target",
+        "scale",
+        "storage",
+        "setup",
+        "lmp_task_tuning",
+    }
     REQUIRED_SCALE_POINT_KEYS: Set[str] = {"tasks", "ppn", "nodes"}
     REQUIRED_COMBINATION_KEYS: Set[str] = {
         "processes",
@@ -1634,8 +1744,13 @@ class ManifestSerializer:
     def serialize(cls, f_plan: Union[RunPlan, ManifestDocument]) -> str:
         """Serialize a RunPlan or ManifestDocument into canonical schema-version-1 JSON."""
         if isinstance(f_plan, RunPlan):
-            if not isinstance(f_plan.manifest_timestamp, str) or not f_plan.manifest_timestamp.strip():
-                raise ManifestValidationError("manifest_timestamp must be a non-empty string")
+            if (
+                not isinstance(f_plan.manifest_timestamp, str)
+                or not f_plan.manifest_timestamp.strip()
+            ):
+                raise ManifestValidationError(
+                    "manifest_timestamp must be a non-empty string"
+                )
             if not cls.ISO_UTC_PATTERN.match(f_plan.manifest_timestamp):
                 raise ManifestValidationError(
                     f"created_at_utc '{f_plan.manifest_timestamp}' must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ"
@@ -1680,7 +1795,9 @@ class ManifestSerializer:
         return cls.serialize(f_doc)
 
     @classmethod
-    def deserialize(cls, f_source: Union[str, bytes, Dict[str, Any]]) -> ManifestDocument:
+    def deserialize(
+        cls, f_source: Union[str, bytes, Dict[str, Any]]
+    ) -> ManifestDocument:
         """Deserialize and fail-closed validate JSON string, bytes, or dict into a ManifestDocument."""
         if isinstance(f_source, bytes):
             try:
@@ -1804,11 +1921,17 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 f"Unexpected extra keys in plan: {sorted(f_extra_plan)}"
             )
-        if not isinstance(f_plan_raw["target"], str) or not f_plan_raw["target"].strip():
+        if (
+            not isinstance(f_plan_raw["target"], str)
+            or not f_plan_raw["target"].strip()
+        ):
             raise ManifestValidationError("plan.target must be a non-empty string")
         if not isinstance(f_plan_raw["scale"], str) or not f_plan_raw["scale"].strip():
             raise ManifestValidationError("plan.scale must be a non-empty string")
-        if not isinstance(f_plan_raw["storage"], str) or f_plan_raw["storage"] not in {"hdd", "ssd"}:
+        if not isinstance(f_plan_raw["storage"], str) or f_plan_raw["storage"] not in {
+            "hdd",
+            "ssd",
+        }:
             raise ManifestValidationError("plan.storage must be 'hdd' or 'ssd'")
         if not isinstance(f_plan_raw["setup"], str) or not f_plan_raw["setup"].strip():
             raise ManifestValidationError("plan.setup must be a non-empty string")
@@ -1849,7 +1972,11 @@ class ManifestSerializer:
                     )
                 for f_inner_f in ("replication", "buffer_size_mb"):
                     f_val = f_v[f_inner_f]
-                    if not isinstance(f_val, int) or isinstance(f_val, bool) or f_val <= 0:
+                    if (
+                        not isinstance(f_val, int)
+                        or isinstance(f_val, bool)
+                        or f_val <= 0
+                    ):
                         raise ManifestValidationError(
                             f"plan.lmp_task_tuning['{f_k}'].{f_inner_f} must be a positive integer, got: {f_val!r}"
                         )
@@ -1883,8 +2010,14 @@ class ManifestSerializer:
                 raise ManifestValidationError(
                     f"Unexpected extra keys in scale_points[{f_idx}]: {sorted(f_extra_sp)}"
                 )
-            if isinstance(f_sp_item["tasks"], bool) or isinstance(f_sp_item["ppn"], bool) or isinstance(f_sp_item["nodes"], bool):
-                raise ManifestValidationError(f"scale_points[{f_idx}] values must be integers, not booleans")
+            if (
+                isinstance(f_sp_item["tasks"], bool)
+                or isinstance(f_sp_item["ppn"], bool)
+                or isinstance(f_sp_item["nodes"], bool)
+            ):
+                raise ManifestValidationError(
+                    f"scale_points[{f_idx}] values must be integers, not booleans"
+                )
             try:
                 f_scale_points.append(
                     ScalePoint(
@@ -1928,7 +2061,13 @@ class ManifestSerializer:
                 raise ManifestValidationError(
                     f"Unexpected extra keys in combinations[{f_idx}]: {sorted(f_extra_c)}"
                 )
-            for f_int_key in ("processes", "stripe_count", "block_bytes", "key_count", "segment_count"):
+            for f_int_key in (
+                "processes",
+                "stripe_count",
+                "block_bytes",
+                "key_count",
+                "segment_count",
+            ):
                 if isinstance(f_c_item[f_int_key], bool):
                     raise ManifestValidationError(
                         f"combinations[{f_idx}].{f_int_key} must be integer, not boolean"
@@ -2042,16 +2181,31 @@ class ManifestSerializer:
 
         if not isinstance(f_site_raw["name"], str) or not f_site_raw["name"].strip():
             raise ManifestValidationError("site.name must be a non-empty string")
-        if not isinstance(f_site_raw["scheduler"], str) or f_site_raw["scheduler"] not in {"slurm", "pbs", "fake"}:
-            raise ManifestValidationError(f"Invalid site.scheduler: {f_site_raw.get('scheduler')!r}")
-        if not isinstance(f_site_raw["launcher"], str) or not f_site_raw["launcher"].strip():
+        if not isinstance(f_site_raw["scheduler"], str) or f_site_raw[
+            "scheduler"
+        ] not in {"slurm", "pbs", "fake"}:
+            raise ManifestValidationError(
+                f"Invalid site.scheduler: {f_site_raw.get('scheduler')!r}"
+            )
+        if (
+            not isinstance(f_site_raw["launcher"], str)
+            or not f_site_raw["launcher"].strip()
+        ):
             raise ManifestValidationError("site.launcher must be a non-empty string")
-        if not isinstance(f_site_raw["certification"], str) or f_site_raw["certification"] not in {"configured", "certified"}:
-            raise ManifestValidationError(f"Invalid site.certification: {f_site_raw.get('certification')!r}")
+        if not isinstance(f_site_raw["certification"], str) or f_site_raw[
+            "certification"
+        ] not in {"configured", "certified"}:
+            raise ManifestValidationError(
+                f"Invalid site.certification: {f_site_raw.get('certification')!r}"
+            )
         if not isinstance(f_site_raw["test_only"], bool):
             raise ManifestValidationError("site.test_only must be a boolean")
-        if not isinstance(f_site_raw["install_prefix"], str) or not f_site_raw["install_prefix"].startswith("/"):
-            raise ManifestValidationError("site.install_prefix must be an absolute path")
+        if not isinstance(f_site_raw["install_prefix"], str) or not f_site_raw[
+            "install_prefix"
+        ].startswith("/"):
+            raise ManifestValidationError(
+                "site.install_prefix must be an absolute path"
+            )
 
         # Validate benchmark_roots
         f_bm_roots = f_site_raw["benchmark_roots"]
@@ -2060,10 +2214,14 @@ class ManifestSerializer:
         f_bm_keys = set(f_bm_roots.keys())
         f_missing_bm = cls.REQUIRED_BENCHMARK_ROOT_KEYS - f_bm_keys
         if f_missing_bm:
-            raise ManifestValidationError(f"Missing keys in site.benchmark_roots: {sorted(f_missing_bm)}")
+            raise ManifestValidationError(
+                f"Missing keys in site.benchmark_roots: {sorted(f_missing_bm)}"
+            )
         f_extra_bm = f_bm_keys - cls.REQUIRED_BENCHMARK_ROOT_KEYS
         if f_extra_bm:
-            raise ManifestValidationError(f"Unexpected extra keys in site.benchmark_roots: {sorted(f_extra_bm)}")
+            raise ManifestValidationError(
+                f"Unexpected extra keys in site.benchmark_roots: {sorted(f_extra_bm)}"
+            )
         for f_sc_name, f_sc_path in f_bm_roots.items():
             if not isinstance(f_sc_path, str) or not f_sc_path.startswith("/"):
                 raise ManifestValidationError(
@@ -2077,10 +2235,14 @@ class ManifestSerializer:
         f_lp_keys = set(f_l_pools.keys())
         f_missing_lp = cls.REQUIRED_LUSTRE_POOL_KEYS - f_lp_keys
         if f_missing_lp:
-            raise ManifestValidationError(f"Missing keys in site.lustre_pools: {sorted(f_missing_lp)}")
+            raise ManifestValidationError(
+                f"Missing keys in site.lustre_pools: {sorted(f_missing_lp)}"
+            )
         f_extra_lp = f_lp_keys - cls.REQUIRED_LUSTRE_POOL_KEYS
         if f_extra_lp:
-            raise ManifestValidationError(f"Unexpected extra keys in site.lustre_pools: {sorted(f_extra_lp)}")
+            raise ManifestValidationError(
+                f"Unexpected extra keys in site.lustre_pools: {sorted(f_extra_lp)}"
+            )
         for f_lp_name, f_lp_val in f_l_pools.items():
             if f_lp_val is not None and not isinstance(f_lp_val, str):
                 raise ManifestValidationError(
@@ -2094,10 +2256,14 @@ class ManifestSerializer:
         f_ex_keys = set(f_ex_raw.keys())
         f_missing_ex = ExecutableRegistry.REQUIRED_EXECUTABLES - f_ex_keys
         if f_missing_ex:
-            raise ManifestValidationError(f"Missing keys in site.executables: {sorted(f_missing_ex)}")
+            raise ManifestValidationError(
+                f"Missing keys in site.executables: {sorted(f_missing_ex)}"
+            )
         f_extra_ex = f_ex_keys - ExecutableRegistry.REQUIRED_EXECUTABLES
         if f_extra_ex:
-            raise ManifestValidationError(f"Unexpected extra keys in site.executables: {sorted(f_extra_ex)}")
+            raise ManifestValidationError(
+                f"Unexpected extra keys in site.executables: {sorted(f_extra_ex)}"
+            )
         for f_ex_name, f_ex_path in f_ex_raw.items():
             if not isinstance(f_ex_path, str) or not f_ex_path.startswith("/"):
                 raise ManifestValidationError(
@@ -2119,10 +2285,14 @@ class ManifestSerializer:
         f_res_keys = set(f_res_raw.keys())
         f_missing_res = cls.REQUIRED_RESOURCE_SHAPES - f_res_keys
         if f_missing_res:
-            raise ManifestValidationError(f"Missing keys in site.resources: {sorted(f_missing_res)}")
+            raise ManifestValidationError(
+                f"Missing keys in site.resources: {sorted(f_missing_res)}"
+            )
         f_extra_res = f_res_keys - cls.REQUIRED_RESOURCE_SHAPES
         if f_extra_res:
-            raise ManifestValidationError(f"Unexpected extra keys in site.resources: {sorted(f_extra_res)}")
+            raise ManifestValidationError(
+                f"Unexpected extra keys in site.resources: {sorted(f_extra_res)}"
+            )
         f_resources_dict: Dict[str, ResourcePolicy] = {}
         for f_shp, f_shp_raw in f_res_raw.items():
             if not isinstance(f_shp_raw, dict):
@@ -2172,7 +2342,9 @@ class ManifestSerializer:
                     f_pvmem=f_shp_raw["pvmem"],
                 )
             except Exception as f_err:
-                raise ManifestValidationError(f"Invalid resource policy for shape '{f_shp}': {f_err}")
+                raise ManifestValidationError(
+                    f"Invalid resource policy for shape '{f_shp}': {f_err}"
+                )
 
         # Validate rank_identity
         f_ri_raw = f_site_raw["rank_identity"]
@@ -2181,10 +2353,14 @@ class ManifestSerializer:
         f_ri_keys = set(f_ri_raw.keys())
         f_missing_ri = cls.REQUIRED_RANK_IDENTITY_KEYS - f_ri_keys
         if f_missing_ri:
-            raise ManifestValidationError(f"Missing keys in site.rank_identity: {sorted(f_missing_ri)}")
+            raise ManifestValidationError(
+                f"Missing keys in site.rank_identity: {sorted(f_missing_ri)}"
+            )
         f_extra_ri = f_ri_keys - cls.REQUIRED_RANK_IDENTITY_KEYS
         if f_extra_ri:
-            raise ManifestValidationError(f"Unexpected extra keys in site.rank_identity: {sorted(f_extra_ri)}")
+            raise ManifestValidationError(
+                f"Unexpected extra keys in site.rank_identity: {sorted(f_extra_ri)}"
+            )
         try:
             f_rank_identity = RankIdentityPolicy(
                 f_global_rank=f_ri_raw["global"],
@@ -2201,12 +2377,20 @@ class ManifestSerializer:
         f_canc_keys = set(f_canc_raw.keys())
         f_missing_canc = cls.REQUIRED_CANCELLATION_KEYS - f_canc_keys
         if f_missing_canc:
-            raise ManifestValidationError(f"Missing keys in site.cancellation: {sorted(f_missing_canc)}")
+            raise ManifestValidationError(
+                f"Missing keys in site.cancellation: {sorted(f_missing_canc)}"
+            )
         f_extra_canc = f_canc_keys - cls.REQUIRED_CANCELLATION_KEYS
         if f_extra_canc:
-            raise ManifestValidationError(f"Unexpected extra keys in site.cancellation: {sorted(f_extra_canc)}")
-        if isinstance(f_canc_raw["poll_interval_seconds"], bool) or isinstance(f_canc_raw["grace_seconds"], bool):
-            raise ManifestValidationError("site.cancellation values must be integers, not booleans")
+            raise ManifestValidationError(
+                f"Unexpected extra keys in site.cancellation: {sorted(f_extra_canc)}"
+            )
+        if isinstance(f_canc_raw["poll_interval_seconds"], bool) or isinstance(
+            f_canc_raw["grace_seconds"], bool
+        ):
+            raise ManifestValidationError(
+                "site.cancellation values must be integers, not booleans"
+            )
         try:
             f_cancellation = CancellationPolicy(
                 f_poll_interval_seconds=f_canc_raw["poll_interval_seconds"],
@@ -2373,7 +2557,9 @@ def validateBenchmarkExecutable(f_exe_path: str) -> str:
     if f_exe_path is None:
         raise PreflightError("Benchmark executable path cannot be None.")
     if not isinstance(f_exe_path, str):
-        raise PreflightError(f"Benchmark executable path must be a string, got: {type(f_exe_path).__name__}")
+        raise PreflightError(
+            f"Benchmark executable path must be a string, got: {type(f_exe_path).__name__}"
+        )
     f_path_str = f_exe_path.strip()
     if not f_path_str:
         raise PreflightError("Benchmark executable path cannot be empty.")
@@ -2407,9 +2593,7 @@ def validateBenchmarkExecutable(f_exe_path: str) -> str:
         )
 
     if not os.access(f_abs_path, os.R_OK):
-        raise PreflightError(
-            f"Benchmark executable is not readable: {f_abs_path}"
-        )
+        raise PreflightError(f"Benchmark executable is not readable: {f_abs_path}")
 
     return f_abs_path
 
@@ -2439,7 +2623,11 @@ def _forExistingRun(
         else:
             if os.path.basename(f_raw_path) == f_plan.run_id:
                 f_runs_dir = os.path.dirname(f_raw_path)
-                f_broot = os.path.dirname(f_runs_dir) if os.path.basename(f_runs_dir) == "runs" else f_runs_dir
+                f_broot = (
+                    os.path.dirname(f_runs_dir)
+                    if os.path.basename(f_runs_dir) == "runs"
+                    else f_runs_dir
+                )
                 f_layout = ArtifactLayout(f_broot, f_plan.run_id)
             else:
                 f_layout = ArtifactLayout(f_raw_path, f_plan.run_id)
@@ -2456,7 +2644,9 @@ def _forExistingRun(
     except FileNotFoundError:
         raise ArtifactError(f"Existing run directory does not exist: '{f_run_root}'")
     except OSError as f_err:
-        raise ArtifactError(f"Failed to stat existing run directory '{f_run_root}': {f_err}")
+        raise ArtifactError(
+            f"Failed to stat existing run directory '{f_run_root}': {f_err}"
+        )
 
     if stat.S_ISLNK(f_stat.st_mode) or os.path.islink(f_run_root):
         raise ArtifactError(f"Existing run root '{f_run_root}' must not be a symlink")
@@ -2468,9 +2658,13 @@ def _forExistingRun(
     try:
         f_m_stat = os.lstat(f_manifest_path)
     except FileNotFoundError:
-        raise ArtifactError(f"Manifest not found in existing run directory: '{f_manifest_path}'")
+        raise ArtifactError(
+            f"Manifest not found in existing run directory: '{f_manifest_path}'"
+        )
     except OSError as f_err:
-        raise ArtifactError(f"Failed to stat manifest file '{f_manifest_path}': {f_err}")
+        raise ArtifactError(
+            f"Failed to stat manifest file '{f_manifest_path}': {f_err}"
+        )
 
     if stat.S_ISLNK(f_m_stat.st_mode) or os.path.islink(f_manifest_path):
         raise ArtifactError(f"Manifest file '{f_manifest_path}' must not be a symlink")
@@ -2481,7 +2675,9 @@ def _forExistingRun(
         with open(f_manifest_path, "rb") as f_f:
             f_manifest_bytes = f_f.read()
     except OSError as f_err:
-        raise ArtifactError(f"Failed to read manifest file '{f_manifest_path}': {f_err}")
+        raise ArtifactError(
+            f"Failed to read manifest file '{f_manifest_path}': {f_err}"
+        )
 
     if not f_manifest_bytes:
         raise ArtifactError(f"Manifest file '{f_manifest_path}' is empty")
@@ -2489,7 +2685,9 @@ def _forExistingRun(
     try:
         f_doc = ManifestSerializer.deserialize(f_manifest_bytes)
     except Exception as f_err:
-        raise ArtifactError(f"Corrupt manifest file at '{f_manifest_path}': {f_err}") from f_err
+        raise ArtifactError(
+            f"Corrupt manifest file at '{f_manifest_path}': {f_err}"
+        ) from f_err
 
     if f_doc.run_id != f_plan.run_id:
         raise ArtifactError(
@@ -2583,7 +2781,9 @@ class RunOrchestrator:
         f_reporter: Optional[Union[RunReporter, Callable[..., Any]]] = None,
         **f_kwargs: Any,
     ) -> None:
-        f_eff_profile_resolver = f_profile_resolver if f_profile_resolver is not None else f_profile_store
+        f_eff_profile_resolver = (
+            f_profile_resolver if f_profile_resolver is not None else f_profile_store
+        )
         f_eff_artifact_store_factory = f_artifact_store_factory
         if f_eff_artifact_store_factory is None and f_artifact_store is not None:
             if callable(f_artifact_store):
@@ -2596,7 +2796,9 @@ class RunOrchestrator:
             if callable(f_scheduler_adapter):
                 f_eff_scheduler_adapter_factory = f_scheduler_adapter
             else:
-                f_eff_scheduler_adapter_factory = lambda f_prof, f_ev, f_val, f_cmd: f_scheduler_adapter
+                f_eff_scheduler_adapter_factory = lambda f_prof, f_ev, f_val, f_cmd: (
+                    f_scheduler_adapter
+                )
 
         f_eff_clock = f_clock if f_clock is not None else f_time_source
         f_eff_environ = (
@@ -2641,8 +2843,12 @@ class RunOrchestrator:
 
         object.__setattr__(self, "m_profile_resolver", f_eff_profile_resolver)
         object.__setattr__(self, "m_planner", f_planner or RunPlanner)
-        object.__setattr__(self, "m_artifact_store_factory", f_eff_artifact_store_factory)
-        object.__setattr__(self, "m_scheduler_adapter_factory", f_eff_scheduler_adapter_factory)
+        object.__setattr__(
+            self, "m_artifact_store_factory", f_eff_artifact_store_factory
+        )
+        object.__setattr__(
+            self, "m_scheduler_adapter_factory", f_eff_scheduler_adapter_factory
+        )
         object.__setattr__(self, "m_reconciler", f_reconciler)
         object.__setattr__(self, "m_worker_validator", f_worker_validator)
         object.__setattr__(self, "m_command_runner", f_command_runner)
@@ -2802,14 +3008,21 @@ class RunOrchestrator:
 
     @property
     def exitCode(self) -> int:
-        if self.m_signal_coordinator is not None and self.m_signal_coordinator.is_interrupted:
+        if (
+            self.m_signal_coordinator is not None
+            and self.m_signal_coordinator.is_interrupted
+        ):
             return self.m_signal_coordinator.exit_code or 130
         if self.m_last_view is not None:
             from lsmiotool.lib.state import OverallRunState
+
             if self.m_last_view.state == OverallRunState.SUCCEEDED:
                 return 0
             if self.m_last_view.state == OverallRunState.INTERRUPTED:
-                if self.m_signal_coordinator is not None and self.m_signal_coordinator.exit_code is not None:
+                if (
+                    self.m_signal_coordinator is not None
+                    and self.m_signal_coordinator.exit_code is not None
+                ):
                     return self.m_signal_coordinator.exit_code
                 return 130
             return 1
@@ -2890,6 +3103,7 @@ class RunOrchestrator:
         if f_evidence_store is None:
             return False
         from lsmiotool.lib.evidence import EvidenceKind
+
         try:
             f_ctrl_events = f_evidence_store.readControlEvents("control")
             for f_ev in f_ctrl_events:
@@ -2953,6 +3167,7 @@ class RunOrchestrator:
 
         # 2. Cancel exact active JobHandle via scheduler adapter
         from lsmiotool.lib.state import SchedulerJobState
+
         f_cancel_state = SchedulerJobState.UNKNOWN
         try:
             if hasattr(f_adapter, "cancelAndConfirm"):
@@ -2983,6 +3198,7 @@ class RunOrchestrator:
         # 3. Record cancel outcome
         try:
             from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, WriterKind
+
             if f_cancel_state == SchedulerJobState.UNKNOWN:
                 f_unconf_path = os.path.join(
                     f_artifact_store.layout.pointSchedulerDir(f_scale_point, f_idx),
@@ -2993,7 +3209,9 @@ class RunOrchestrator:
                     f_writer_id="control",
                     f_sequence_number=2,
                     f_evidence_kind=EvidenceKind.CANCEL_UNCONFIRMED,
-                    f_point_id=f_artifact_store.layout.pointDirName(f_scale_point, f_idx),
+                    f_point_id=f_artifact_store.layout.pointDirName(
+                        f_scale_point, f_idx
+                    ),
                     f_payload={
                         "outcome": "unconfirmed",
                         "handle": f_handle.toDict(),
@@ -3002,7 +3220,11 @@ class RunOrchestrator:
                 )
                 f_evidence_store.recordRecord(f_unconf_path, f_unconf_rec)
             else:
-                f_outcome = "confirmed" if f_cancel_state == SchedulerJobState.CANCELLED else "already_terminal"
+                f_outcome = (
+                    "confirmed"
+                    if f_cancel_state == SchedulerJobState.CANCELLED
+                    else "already_terminal"
+                )
                 f_evidence_store.recordCancelRecorded(
                     f_point=f_scale_point,
                     f_writer_id="control",
@@ -3044,7 +3266,11 @@ class RunOrchestrator:
 
         f_timeout = (
             float(f_profile.cancellation.grace_seconds)
-            if (f_profile and f_profile.cancellation and f_profile.cancellation.grace_seconds is not None)
+            if (
+                f_profile
+                and f_profile.cancellation
+                and f_profile.cancellation.grace_seconds is not None
+            )
             else 120.0
         )
 
@@ -3073,9 +3299,13 @@ class RunOrchestrator:
             try:
                 if hasattr(f_adapter, "_runCommand"):
                     f_act_res = f_adapter._runCommand(f_act_argv, f_timeout=f_timeout)
-                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                elif hasattr(f_adapter, "command_runner") and hasattr(
+                    f_adapter.command_runner, "run"
+                ):
                     try:
-                        f_act_res = f_adapter.command_runner.run(f_act_argv, f_timeout=f_timeout)
+                        f_act_res = f_adapter.command_runner.run(
+                            f_act_argv, f_timeout=f_timeout
+                        )
                     except TypeError:
                         f_act_res = f_adapter.command_runner.run(f_act_argv)
                 else:
@@ -3099,9 +3329,13 @@ class RunOrchestrator:
             try:
                 if hasattr(f_adapter, "_runCommand"):
                     f_acct_res = f_adapter._runCommand(f_acct_argv, f_timeout=f_timeout)
-                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                elif hasattr(f_adapter, "command_runner") and hasattr(
+                    f_adapter.command_runner, "run"
+                ):
                     try:
-                        f_acct_res = f_adapter.command_runner.run(f_acct_argv, f_timeout=f_timeout)
+                        f_acct_res = f_adapter.command_runner.run(
+                            f_acct_argv, f_timeout=f_timeout
+                        )
                     except TypeError:
                         f_acct_res = f_adapter.command_runner.run(f_acct_argv)
                 else:
@@ -3127,9 +3361,13 @@ class RunOrchestrator:
             try:
                 if hasattr(f_adapter, "_runCommand"):
                     f_act_res = f_adapter._runCommand(f_act_argv, f_timeout=f_timeout)
-                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                elif hasattr(f_adapter, "command_runner") and hasattr(
+                    f_adapter.command_runner, "run"
+                ):
                     try:
-                        f_act_res = f_adapter.command_runner.run(f_act_argv, f_timeout=f_timeout)
+                        f_act_res = f_adapter.command_runner.run(
+                            f_act_argv, f_timeout=f_timeout
+                        )
                     except TypeError:
                         f_act_res = f_adapter.command_runner.run(f_act_argv)
                 else:
@@ -3153,9 +3391,13 @@ class RunOrchestrator:
             try:
                 if hasattr(f_adapter, "_runCommand"):
                     f_acct_res = f_adapter._runCommand(f_acct_argv, f_timeout=f_timeout)
-                elif hasattr(f_adapter, "command_runner") and hasattr(f_adapter.command_runner, "run"):
+                elif hasattr(f_adapter, "command_runner") and hasattr(
+                    f_adapter.command_runner, "run"
+                ):
                     try:
-                        f_acct_res = f_adapter.command_runner.run(f_acct_argv, f_timeout=f_timeout)
+                        f_acct_res = f_adapter.command_runner.run(
+                            f_acct_argv, f_timeout=f_timeout
+                        )
                     except TypeError:
                         f_acct_res = f_adapter.command_runner.run(f_acct_argv)
                 else:
@@ -3193,7 +3435,10 @@ class RunOrchestrator:
         f_eff_reporter = (
             f_reporter
             if f_reporter is not None
-            else f_kwargs.get("f_reporter", f_kwargs.get("reporter", getattr(self, "m_reporter", None)))
+            else f_kwargs.get(
+                "f_reporter",
+                f_kwargs.get("reporter", getattr(self, "m_reporter", None)),
+            )
         )
         if (
             f_eff_reporter is not None
@@ -3202,7 +3447,9 @@ class RunOrchestrator:
         ):
             f_eff_reporter = RunReporter(f_callback=f_eff_reporter)
 
-        f_sig_coord = f_signal_coordinator or self.m_signal_coordinator or SignalCoordinator()
+        f_sig_coord = (
+            f_signal_coordinator or self.m_signal_coordinator or SignalCoordinator()
+        )
         object.__setattr__(self, "m_signal_coordinator", f_sig_coord)
 
         with f_sig_coord:
@@ -3210,7 +3457,9 @@ class RunOrchestrator:
             # 1. Preflight Validation
             # -----------------------------------------------------------------
             if not isinstance(f_request, RunRequest):
-                raise PreflightError(f"f_request must be RunRequest, got: {type(f_request).__name__}")
+                raise PreflightError(
+                    f"f_request must be RunRequest, got: {type(f_request).__name__}"
+                )
 
             # Strict LMP large check before anything else
             if f_request.target.lower() == "lmp" and f_request.scale.lower() == "large":
@@ -3220,10 +3469,16 @@ class RunOrchestrator:
 
             # Profile file authority from runtime layout if provided
             f_profile_file: Optional[str] = None
-            if f_runtime_layout is not None and hasattr(f_runtime_layout, "profile_file") and f_runtime_layout.profile_file:
+            if (
+                f_runtime_layout is not None
+                and hasattr(f_runtime_layout, "profile_file")
+                and f_runtime_layout.profile_file
+            ):
                 f_profile_file = str(f_runtime_layout.profile_file)
 
-            f_eff_test_mode: bool = bool(f_test_mode or getattr(self, "m_test_mode", False))
+            f_eff_test_mode: bool = bool(
+                f_test_mode or getattr(self, "m_test_mode", False)
+            )
 
             # Resolve SiteProfile
             f_profile: Optional[SiteProfile] = None
@@ -3237,7 +3492,10 @@ class RunOrchestrator:
                         if hasattr(self.m_profile_resolver, "resolveProfile"):
                             try:
                                 f_profile = self.m_profile_resolver.resolveProfile(
-                                    f_site, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                    f_site,
+                                    f_user=f_user,
+                                    f_home=f_home,
+                                    f_env_file=f_profile_file,
                                 )
                             except TypeError:
                                 f_profile = self.m_profile_resolver.resolveProfile(
@@ -3248,17 +3506,27 @@ class RunOrchestrator:
                         elif callable(self.m_profile_resolver):
                             f_profile = self.m_profile_resolver(f_site)
                         else:
-                            raise PreflightError(f"Unsupported profile resolver: {self.m_profile_resolver!r}")
+                            raise PreflightError(
+                                f"Unsupported profile resolver: {self.m_profile_resolver!r}"
+                            )
                     except Exception as f_err:
-                        raise PreflightError(f"Failed to resolve site profile '{f_site}': {f_err}") from f_err
+                        raise PreflightError(
+                            f"Failed to resolve site profile '{f_site}': {f_err}"
+                        ) from f_err
                 else:
                     try:
                         from lsmiotool.lib.site import EnvironmentResolver
+
                         f_profile = EnvironmentResolver.resolveProfile(
-                            f_site, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                            f_site,
+                            f_user=f_user,
+                            f_home=f_home,
+                            f_env_file=f_profile_file,
                         )
                     except Exception as f_err:
-                        raise PreflightError(f"Failed to resolve site profile '{f_site}': {f_err}") from f_err
+                        raise PreflightError(
+                            f"Failed to resolve site profile '{f_site}': {f_err}"
+                        ) from f_err
             elif f_site is None:
                 # 3. No site provided: detect site name, then resolve through profile file authority
                 f_detected_name: Optional[str] = None
@@ -3266,7 +3534,9 @@ class RunOrchestrator:
                     try:
                         if hasattr(self.m_profile_resolver, "detect"):
                             # detect() accepts only supported detection arguments, never f_user/f_home
-                            f_res = self.m_profile_resolver.detect(f_test_mode=f_eff_test_mode)
+                            f_res = self.m_profile_resolver.detect(
+                                f_test_mode=f_eff_test_mode
+                            )
                             if isinstance(f_res, SiteProfile):
                                 f_profile = f_res
                             elif isinstance(f_res, str):
@@ -3277,7 +3547,10 @@ class RunOrchestrator:
                                 )
                         elif hasattr(self.m_profile_resolver, "resolveProfile"):
                             from lsmiotool.lib.site import EnvironmentResolver
-                            f_detected_name = EnvironmentResolver.detect(f_test_mode=f_eff_test_mode)
+
+                            f_detected_name = EnvironmentResolver.detect(
+                                f_test_mode=f_eff_test_mode
+                            )
                         elif callable(self.m_profile_resolver):
                             f_res = self.m_profile_resolver(None)
                             if isinstance(f_res, SiteProfile):
@@ -3289,15 +3562,24 @@ class RunOrchestrator:
                                     f"Resolver callable returned unexpected type: {type(f_res).__name__}"
                                 )
                         else:
-                            raise PreflightError(f"Unsupported profile resolver: {self.m_profile_resolver!r}")
+                            raise PreflightError(
+                                f"Unsupported profile resolver: {self.m_profile_resolver!r}"
+                            )
                     except Exception as f_err:
-                        raise PreflightError(f"Failed to detect site profile: {f_err}") from f_err
+                        raise PreflightError(
+                            f"Failed to detect site profile: {f_err}"
+                        ) from f_err
                 else:
                     try:
                         from lsmiotool.lib.site import EnvironmentResolver
-                        f_detected_name = EnvironmentResolver.detect(f_test_mode=f_eff_test_mode)
+
+                        f_detected_name = EnvironmentResolver.detect(
+                            f_test_mode=f_eff_test_mode
+                        )
                     except Exception as f_err:
-                        raise PreflightError(f"Failed to detect site profile: {f_err}") from f_err
+                        raise PreflightError(
+                            f"Failed to detect site profile: {f_err}"
+                        ) from f_err
 
                 if f_profile is None and f_detected_name is not None:
                     if self.m_profile_resolver is not None:
@@ -3305,20 +3587,29 @@ class RunOrchestrator:
                             if hasattr(self.m_profile_resolver, "resolveProfile"):
                                 try:
                                     f_profile = self.m_profile_resolver.resolveProfile(
-                                        f_detected_name, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                        f_detected_name,
+                                        f_user=f_user,
+                                        f_home=f_home,
+                                        f_env_file=f_profile_file,
                                     )
                                 except TypeError:
                                     f_profile = self.m_profile_resolver.resolveProfile(
                                         f_detected_name, f_user=f_user, f_home=f_home
                                     )
                             elif hasattr(self.m_profile_resolver, "getProfile"):
-                                f_profile = self.m_profile_resolver.getProfile(f_detected_name)
+                                f_profile = self.m_profile_resolver.getProfile(
+                                    f_detected_name
+                                )
                             elif callable(self.m_profile_resolver):
                                 f_profile = self.m_profile_resolver(f_detected_name)
                             else:
                                 from lsmiotool.lib.site import EnvironmentResolver
+
                                 f_profile = EnvironmentResolver.resolveProfile(
-                                    f_detected_name, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                    f_detected_name,
+                                    f_user=f_user,
+                                    f_home=f_home,
+                                    f_env_file=f_profile_file,
                                 )
                         except Exception as f_err:
                             raise PreflightError(
@@ -3327,8 +3618,12 @@ class RunOrchestrator:
                     else:
                         try:
                             from lsmiotool.lib.site import EnvironmentResolver
+
                             f_profile = EnvironmentResolver.resolveProfile(
-                                f_detected_name, f_user=f_user, f_home=f_home, f_env_file=f_profile_file
+                                f_detected_name,
+                                f_user=f_user,
+                                f_home=f_home,
+                                f_env_file=f_profile_file,
                             )
                         except Exception as f_err:
                             raise PreflightError(
@@ -3338,7 +3633,9 @@ class RunOrchestrator:
                 raise PreflightError(f"Invalid f_site argument: {f_site!r}")
 
             if not isinstance(f_profile, SiteProfile):
-                raise PreflightError(f"Resolved profile is not a SiteProfile, got: {type(f_profile).__name__ if f_profile is not None else 'None'}")
+                raise PreflightError(
+                    f"Resolved profile is not a SiteProfile, got: {type(f_profile).__name__ if f_profile is not None else 'None'}"
+                )
 
             # -----------------------------------------------------------------
             # 1.5. Credential Resolution & Validation (Slurm vs PBS/DEV)
@@ -3366,7 +3663,10 @@ class RunOrchestrator:
             f_validated_account: Optional[str] = None
             f_validated_email: Optional[str] = None
 
-            if f_profile.requires_credentials or f_profile.scheduler == SchedulerKind.SLURM:
+            if (
+                f_profile.requires_credentials
+                or f_profile.scheduler == SchedulerKind.SLURM
+            ):
                 f_raw_account = f_eff_environ.get("SB_ACCOUNT")
                 f_raw_email = f_eff_environ.get("SB_EMAIL")
 
@@ -3378,14 +3678,22 @@ class RunOrchestrator:
 
                 # 2. Validate token/email syntax via renderer authority (control chars, injection, regex)
                 try:
-                    f_validated_account = SchedulerScriptRenderer.validateAccount(f_raw_account)
+                    f_validated_account = SchedulerScriptRenderer.validateAccount(
+                        f_raw_account
+                    )
                 except (SchedulerScriptError, ValueError, TypeError) as f_err:
-                    raise PreflightError(f"Invalid Slurm account (SB_ACCOUNT): {f_err}") from f_err
+                    raise PreflightError(
+                        f"Invalid Slurm account (SB_ACCOUNT): {f_err}"
+                    ) from f_err
 
                 try:
-                    f_validated_email = SchedulerScriptRenderer.validateMailUser(f_raw_email)
+                    f_validated_email = SchedulerScriptRenderer.validateMailUser(
+                        f_raw_email
+                    )
                 except (SchedulerScriptError, ValueError, TypeError) as f_err:
-                    raise PreflightError(f"Invalid Slurm email (SB_EMAIL): {f_err}") from f_err
+                    raise PreflightError(
+                        f"Invalid Slurm email (SB_EMAIL): {f_err}"
+                    ) from f_err
             else:
                 # PBS, DEV, and non-Slurm sites ignore absent Slurm variables and render no Slurm account/email
                 try:
@@ -3397,7 +3705,9 @@ class RunOrchestrator:
             # 1.6. Request Vocabulary & Constraint Preflight Validation
             # -----------------------------------------------------------------
             if not isinstance(f_request, RunRequest):
-                raise PreflightError(f"f_request must be RunRequest, got: {f_request!r}")
+                raise PreflightError(
+                    f"f_request must be RunRequest, got: {f_request!r}"
+                )
 
             f_target = f_request.target.strip().lower()
             if f_target not in RunPlanner.DEFAULT_SETUPS:
@@ -3451,7 +3761,9 @@ class RunOrchestrator:
             elif f_runtime_layout is not None:
                 f_raw_worker = f_runtime_layout.worker_executable
             else:
-                f_raw_worker = os.path.join(f_profile.install_prefix, "bin", "lsmiotool-worker")
+                f_raw_worker = os.path.join(
+                    f_profile.install_prefix, "bin", "lsmiotool-worker"
+                )
 
             f_is_custom_mock_validator = (
                 self.m_worker_validator is not None
@@ -3462,19 +3774,29 @@ class RunOrchestrator:
             if self.m_worker_validator is not None:
                 try:
                     if hasattr(self.m_worker_validator, "validate"):
-                        f_validated_worker = self.m_worker_validator.validate(f_raw_worker)
+                        f_validated_worker = self.m_worker_validator.validate(
+                            f_raw_worker
+                        )
                     elif callable(self.m_worker_validator):
                         f_validated_worker = self.m_worker_validator(f_raw_worker)
                     else:
-                        raise PreflightError(f"Unsupported worker validator: {self.m_worker_validator!r}")
+                        raise PreflightError(
+                            f"Unsupported worker validator: {self.m_worker_validator!r}"
+                        )
                 except Exception as f_err:
                     raise PreflightError(
                         f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
                     ) from f_err
             else:
-                from lsmiotool.lib.cli import WorkerExecutableValidator, WorkerExecutableValidationError
+                from lsmiotool.lib.cli import (
+                    WorkerExecutableValidator,
+                    WorkerExecutableValidationError,
+                )
+
                 try:
-                    f_validated_worker = WorkerExecutableValidator.validate(f_raw_worker)
+                    f_validated_worker = WorkerExecutableValidator.validate(
+                        f_raw_worker
+                    )
                 except (WorkerExecutableValidationError, Exception) as f_err:
                     raise PreflightError(
                         f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
@@ -3488,6 +3810,7 @@ class RunOrchestrator:
                 f_raw_benchmark_exe = f_profile.executables.lmp
             elif f_target == "lsmio":
                 from lsmiotool.lib.benchmarks import LsmioAdapter
+
                 f_exe_name = LsmioAdapter.getExecutableName(f_norm_setup)
                 f_raw_benchmark_exe = f_profile.executables.getExecutable(f_exe_name)
             else:
@@ -3497,7 +3820,9 @@ class RunOrchestrator:
                 f_validated_benchmark_exe = f_raw_benchmark_exe
             else:
                 try:
-                    f_validated_benchmark_exe = validateBenchmarkExecutable(f_raw_benchmark_exe)
+                    f_validated_benchmark_exe = validateBenchmarkExecutable(
+                        f_raw_benchmark_exe
+                    )
                 except PreflightError:
                     raise
                 except Exception as f_err:
@@ -3535,7 +3860,11 @@ class RunOrchestrator:
                         f_runner=self.m_command_runner,
                         f_setup=f_norm_setup,
                     )
-                except (BenchmarkProbeError, BenchmarkConfigurationError, Exception) as f_err:
+                except (
+                    BenchmarkProbeError,
+                    BenchmarkConfigurationError,
+                    Exception,
+                ) as f_err:
                     raise PreflightError(
                         f"Capability probe failed for benchmark '{f_target}' executable '{f_validated_benchmark_exe}': {f_err}"
                     ) from f_err
@@ -3546,7 +3875,9 @@ class RunOrchestrator:
                 if f_runtime_layout is not None:
                     f_asset_root = f_runtime_layout.asset_root
                 else:
-                    f_asset_root = os.path.join(f_profile.install_prefix, "share", "lsmio", "lmp-reaxff")
+                    f_asset_root = os.path.join(
+                        f_profile.install_prefix, "share", "lsmio", "lmp-reaxff"
+                    )
                 try:
                     f_adapter.validateAssets(f_asset_root)
                 except (BenchmarkConfigurationError, Exception) as f_err:
@@ -3577,7 +3908,9 @@ class RunOrchestrator:
             f_storage = f_plan.request.storage
             f_benchmark_root = f_profile.getBenchmarkRoot(f_storage)
             if not f_benchmark_root:
-                raise PreflightError(f"Benchmark root for storage '{f_storage.value}' is not configured")
+                raise PreflightError(
+                    f"Benchmark root for storage '{f_storage.value}' is not configured"
+                )
 
             from lsmiotool.lib.artifacts import (
                 ArtifactError,
@@ -3586,7 +3919,9 @@ class RunOrchestrator:
             )
 
             if self.m_artifact_store_factory is not None:
-                f_artifact_store = self.m_artifact_store_factory(f_benchmark_root, f_plan.run_id)
+                f_artifact_store = self.m_artifact_store_factory(
+                    f_benchmark_root, f_plan.run_id
+                )
             else:
                 f_artifact_store = ArtifactStore(f_benchmark_root, f_plan.run_id)
 
@@ -3651,7 +3986,10 @@ class RunOrchestrator:
         f_eff_reporter = (
             f_reporter
             if f_reporter is not None
-            else f_kwargs.get("f_reporter", f_kwargs.get("reporter", getattr(self, "m_reporter", None)))
+            else f_kwargs.get(
+                "f_reporter",
+                f_kwargs.get("reporter", getattr(self, "m_reporter", None)),
+            )
         )
         if (
             f_eff_reporter is not None
@@ -3672,7 +4010,9 @@ class RunOrchestrator:
         try:
             f_artifact_store = ArtifactStore.forExistingRun(f_root, f_plan)
         except ArtifactError as f_err:
-            raise OrchestrationError(f"Failed to open existing run store: {f_err}") from f_err
+            raise OrchestrationError(
+                f"Failed to open existing run store: {f_err}"
+            ) from f_err
 
         object.__setattr__(self, "m_last_plan", f_plan)
         object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
@@ -3687,6 +4027,7 @@ class RunOrchestrator:
 
         try:
             from lsmiotool.lib.evidence import EvidenceStore
+
             f_temp_ev = EvidenceStore(f_artifact_store.layout, f_plan)
             for f_idx, f_sp in enumerate(f_plan.scale_points):
                 f_sub_recs = f_temp_ev.readSubmissionRecords(f_sp, f_ordinal=f_idx)
@@ -3696,7 +4037,9 @@ class RunOrchestrator:
                     if f_h_id and f_eff_reporter is not None:
                         f_pt_name = f_artifact_store.layout.pointDirName(f_sp, f_idx)
                         f_tok = f_plan.tokens[f_idx]
-                        f_eff_reporter.reportPointSubmission(f_pt_name, f_tok, str(f_h_id))
+                        f_eff_reporter.reportPointSubmission(
+                            f_pt_name, f_tok, str(f_h_id)
+                        )
         except Exception:
             pass
 
@@ -3706,7 +4049,9 @@ class RunOrchestrator:
         elif f_runtime_layout is not None:
             f_raw_worker = f_runtime_layout.worker_executable
         else:
-            f_raw_worker = os.path.join(f_profile.install_prefix, "bin", "lsmiotool-worker")
+            f_raw_worker = os.path.join(
+                f_profile.install_prefix, "bin", "lsmiotool-worker"
+            )
 
         f_is_custom_mock_validator = (
             self.m_worker_validator is not None
@@ -3721,13 +4066,19 @@ class RunOrchestrator:
                 elif callable(self.m_worker_validator):
                     f_validated_worker = self.m_worker_validator(f_raw_worker)
                 else:
-                    raise PreflightError(f"Unsupported worker validator: {self.m_worker_validator!r}")
+                    raise PreflightError(
+                        f"Unsupported worker validator: {self.m_worker_validator!r}"
+                    )
             except Exception as f_err:
                 raise PreflightError(
                     f"Worker executable validation failed for '{f_raw_worker}': {f_err}"
                 ) from f_err
         else:
-            from lsmiotool.lib.cli import WorkerExecutableValidator, WorkerExecutableValidationError
+            from lsmiotool.lib.cli import (
+                WorkerExecutableValidator,
+                WorkerExecutableValidationError,
+            )
+
             try:
                 f_validated_worker = WorkerExecutableValidator.validate(f_raw_worker)
             except (WorkerExecutableValidationError, Exception) as f_err:
@@ -3763,14 +4114,22 @@ class RunOrchestrator:
                 raise PreflightError(str(f_err)) from f_err
 
             try:
-                f_validated_account = SchedulerScriptRenderer.validateAccount(f_raw_account)
+                f_validated_account = SchedulerScriptRenderer.validateAccount(
+                    f_raw_account
+                )
             except (SchedulerScriptError, ValueError, TypeError) as f_err:
-                raise PreflightError(f"Invalid Slurm account (SB_ACCOUNT): {f_err}") from f_err
+                raise PreflightError(
+                    f"Invalid Slurm account (SB_ACCOUNT): {f_err}"
+                ) from f_err
 
             try:
-                f_validated_email = SchedulerScriptRenderer.validateMailUser(f_raw_email)
+                f_validated_email = SchedulerScriptRenderer.validateMailUser(
+                    f_raw_email
+                )
             except (SchedulerScriptError, ValueError, TypeError) as f_err:
-                raise PreflightError(f"Invalid Slurm email (SB_EMAIL): {f_err}") from f_err
+                raise PreflightError(
+                    f"Invalid Slurm email (SB_EMAIL): {f_err}"
+                ) from f_err
 
         f_sig_coord = self.m_signal_coordinator or SignalCoordinator()
 
@@ -3817,7 +4176,10 @@ class RunOrchestrator:
         f_eff_reporter = (
             f_reporter
             if f_reporter is not None
-            else f_kwargs.get("f_reporter", f_kwargs.get("reporter", getattr(self, "m_reporter", None)))
+            else f_kwargs.get(
+                "f_reporter",
+                f_kwargs.get("reporter", getattr(self, "m_reporter", None)),
+            )
         )
         if (
             f_eff_reporter is not None
@@ -3826,7 +4188,13 @@ class RunOrchestrator:
         ):
             f_eff_reporter = RunReporter(f_callback=f_eff_reporter)
         try:
-            from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, EvidenceStore, WriterKind
+            from lsmiotool.lib.evidence import (
+                EvidenceKind,
+                EvidenceRecord,
+                EvidenceStore,
+                WriterKind,
+            )
+
             f_evidence_store = EvidenceStore(f_artifact_store.layout, f_plan)
             object.__setattr__(self, "m_last_evidence_store", f_evidence_store)
 
@@ -3849,7 +4217,10 @@ class RunOrchestrator:
 
             if self.m_scheduler_adapter_factory is not None:
                 f_adapter = self.m_scheduler_adapter_factory(
-                    f_profile, f_evidence_store, self.m_worker_validator, self.m_command_runner
+                    f_profile,
+                    f_evidence_store,
+                    self.m_worker_validator,
+                    self.m_command_runner,
                 )
             else:
                 if f_profile.scheduler == SchedulerKind.SLURM:
@@ -3884,7 +4255,9 @@ class RunOrchestrator:
                 object.__setattr__(self, "m_last_view", f_current_view)
                 if f_eff_reporter is not None:
                     try:
-                        f_eff_reporter.reportCompletion(f_current_view.state, self.exitCode)
+                        f_eff_reporter.reportCompletion(
+                            f_current_view.state, self.exitCode
+                        )
                     except Exception:
                         pass
                 return f_current_view
@@ -3895,17 +4268,25 @@ class RunOrchestrator:
             for f_idx, f_scale_point in enumerate(f_plan.scale_points):
                 if f_sig_coord.is_interrupted:
                     self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_current_view = f_reconciler_obj.reconcile(
+                        f_plan, f_evidence_store
+                    )
                     f_all_points_succeeded = False
                     break
 
-                f_point_name = f_artifact_store.layout.pointDirName(f_scale_point, f_idx)
+                f_point_name = f_artifact_store.layout.pointDirName(
+                    f_scale_point, f_idx
+                )
 
                 # Prepare point directory structure
-                f_artifact_store.preparePoint(f_scale_point, f_plan.combinations, f_ordinal=f_idx)
+                f_artifact_store.preparePoint(
+                    f_scale_point, f_plan.combinations, f_ordinal=f_idx
+                )
 
                 # Render script
-                f_point_sched_dir = f_artifact_store.layout.pointSchedulerDir(f_scale_point, f_idx)
+                f_point_sched_dir = f_artifact_store.layout.pointSchedulerDir(
+                    f_scale_point, f_idx
+                )
                 f_script_path = os.path.join(f_point_sched_dir, "job.sh")
                 f_logs_dir = f_artifact_store.layout.pointLogsDir(f_scale_point, f_idx)
                 f_output_path = os.path.join(f_logs_dir, "job.out")
@@ -3916,7 +4297,9 @@ class RunOrchestrator:
                 f_mail_mode_val: Optional[Any] = None
 
                 if f_profile.scheduler == SchedulerKind.SLURM:
-                    f_mail_mode_val = SlurmMailMode.END_FAIL if f_point_res.mail_mode else None
+                    f_mail_mode_val = (
+                        SlurmMailMode.END_FAIL if f_point_res.mail_mode else None
+                    )
                     f_directives = SlurmScriptRenderer.renderDirectives(
                         f_point=f_scale_point,
                         f_profile=f_profile,
@@ -3961,11 +4344,17 @@ class RunOrchestrator:
                 f_spec = JobSpec(
                     f_point_id=f_scale_point,
                     f_script_path=f_script_path,
-                    f_working_dir=f_artifact_store.layout.pointDir(f_scale_point, f_idx),
+                    f_working_dir=f_artifact_store.layout.pointDir(
+                        f_scale_point, f_idx
+                    ),
                     f_resources=f_point_res,
-                    f_mail_user=f_validated_email if f_profile.scheduler == SchedulerKind.SLURM else None,
+                    f_mail_user=f_validated_email
+                    if f_profile.scheduler == SchedulerKind.SLURM
+                    else None,
                     f_mail_mode=f_mail_mode_val,
-                    f_account=f_validated_account if f_profile.scheduler == SchedulerKind.SLURM else None,
+                    f_account=f_validated_account
+                    if f_profile.scheduler == SchedulerKind.SLURM
+                    else None,
                     f_output_path=f_output_path,
                     f_error_path=f_error_path,
                     f_job_name=f_token,
@@ -3973,7 +4362,9 @@ class RunOrchestrator:
 
                 if f_sig_coord.is_interrupted:
                     self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_current_view = f_reconciler_obj.reconcile(
+                        f_plan, f_evidence_store
+                    )
                     f_all_points_succeeded = False
                     break
 
@@ -3990,30 +4381,55 @@ class RunOrchestrator:
                         if f_eff_reporter is not None:
                             try:
                                 f_eff_reporter.reportPointSubmission(
-                                    f_point_name, f_token, f_job_result.job_handle.job_id
+                                    f_point_name,
+                                    f_token,
+                                    f_job_result.job_handle.job_id,
                                 )
                             except Exception:
                                 pass
                 except Exception as f_err:
                     f_dispatch_error = f_err
 
-                f_poll_override = f_kwargs.get("f_poll_interval", f_kwargs.get("poll_interval", self.m_poll_interval))
+                f_poll_override = f_kwargs.get(
+                    "f_poll_interval",
+                    f_kwargs.get("poll_interval", self.m_poll_interval),
+                )
                 if f_poll_override is not None:
                     f_poll_interval = float(f_poll_override)
-                elif f_profile.cancellation and f_profile.cancellation.poll_interval_seconds is not None:
-                    f_poll_interval = float(f_profile.cancellation.poll_interval_seconds)
-                elif hasattr(f_profile, "scheduler") and hasattr(f_profile.scheduler, "poll_interval_seconds"):
+                elif (
+                    f_profile.cancellation
+                    and f_profile.cancellation.poll_interval_seconds is not None
+                ):
+                    f_poll_interval = float(
+                        f_profile.cancellation.poll_interval_seconds
+                    )
+                elif hasattr(f_profile, "scheduler") and hasattr(
+                    f_profile.scheduler, "poll_interval_seconds"
+                ):
                     f_poll_interval = float(f_profile.scheduler.poll_interval_seconds)
-                elif hasattr(f_profile, "poll_interval_seconds") and f_profile.poll_interval_seconds is not None:
+                elif (
+                    hasattr(f_profile, "poll_interval_seconds")
+                    and f_profile.poll_interval_seconds is not None
+                ):
                     f_poll_interval = float(f_profile.poll_interval_seconds)
                 else:
                     f_poll_interval = 8.0
 
-                f_sleep_fn = (
-                    f_kwargs.get("f_sleep_fn", f_kwargs.get("f_sleep", self.m_sleep if self.m_sleep is not None else time.sleep))
+                f_sleep_fn = f_kwargs.get(
+                    "f_sleep_fn",
+                    f_kwargs.get(
+                        "f_sleep",
+                        self.m_sleep if self.m_sleep is not None else time.sleep,
+                    ),
                 )
-                f_clock_float = (
-                    f_kwargs.get("f_clock_fn", f_kwargs.get("f_clock_float", self.m_clock_float if self.m_clock_float is not None else time.monotonic))
+                f_clock_float = f_kwargs.get(
+                    "f_clock_fn",
+                    f_kwargs.get(
+                        "f_clock_float",
+                        self.m_clock_float
+                        if self.m_clock_float is not None
+                        else time.monotonic,
+                    ),
                 )
 
                 if f_sig_coord.is_interrupted:
@@ -4027,28 +4443,42 @@ class RunOrchestrator:
                         f_handle = f_job_result.job_handle
                     else:
                         try:
-                            f_sub_recs = f_evidence_store.readSubmissionRecords(f_scale_point, f_ordinal=f_idx)
+                            f_sub_recs = f_evidence_store.readSubmissionRecords(
+                                f_scale_point, f_ordinal=f_idx
+                            )
                             if f_sub_recs.get("submission_recorded") is not None:
-                                f_h_dict = f_sub_recs["submission_recorded"].payload.get("handle")
+                                f_h_dict = f_sub_recs[
+                                    "submission_recorded"
+                                ].payload.get("handle")
                                 if isinstance(f_h_dict, dict):
                                     from lsmiotool.lib.evidence import JobHandle
+
                                     f_handle = JobHandle.fromDict(f_h_dict)
                             elif f_sub_recs.get("submission_dispatched") is not None:
-                                if f_spec.job_name and hasattr(f_adapter, "recoverJobHandle"):
-                                    f_rec_h = f_adapter.recoverJobHandle(f_spec.job_name)
+                                if f_spec.job_name and hasattr(
+                                    f_adapter, "recoverJobHandle"
+                                ):
+                                    f_rec_h = f_adapter.recoverJobHandle(
+                                        f_spec.job_name
+                                    )
                                     if f_rec_h is not None:
                                         f_evidence_store.recordSubmissionRecorded(
                                             f_point=f_scale_point,
                                             f_writer_id="control",
                                             f_handle=f_rec_h,
-                                            f_payload={"recovered": True, "job_name": f_spec.job_name},
+                                            f_payload={
+                                                "recovered": True,
+                                                "job_name": f_spec.job_name,
+                                            },
                                             f_ordinal=f_idx,
                                         )
                                         f_handle = f_rec_h
                                         if f_eff_reporter is not None:
                                             try:
                                                 f_eff_reporter.reportPointSubmission(
-                                                    f_point_name, f_token, f_handle.job_id
+                                                    f_point_name,
+                                                    f_token,
+                                                    f_handle.job_id,
                                                 )
                                             except Exception:
                                                 pass
@@ -4071,11 +4501,15 @@ class RunOrchestrator:
                             f_sleep_fn=f_sleep_fn,
                         )
 
-                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_current_view = f_reconciler_obj.reconcile(
+                        f_plan, f_evidence_store
+                    )
                     break
 
                 if f_dispatch_error is not None:
-                    f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                    f_current_view = f_reconciler_obj.reconcile(
+                        f_plan, f_evidence_store
+                    )
                     f_all_points_succeeded = False
                     break
 
@@ -4095,7 +4529,9 @@ class RunOrchestrator:
                 while not f_point_terminal:
                     if f_sig_coord.is_interrupted:
                         # 1. Record INTERRUPTED control event FIRST
-                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                        self._recordInterruptionControlEvent(
+                            f_evidence_store, f_sig_coord
+                        )
                         f_all_points_succeeded = False
 
                         # 2. Cancel exact active job and record outcome
@@ -4115,7 +4551,9 @@ class RunOrchestrator:
                         )
 
                         # 3. Reconcile and exit loop
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        f_current_view = f_reconciler_obj.reconcile(
+                            f_plan, f_evidence_store
+                        )
                         f_point_terminal = True
                         break
 
@@ -4139,11 +4577,16 @@ class RunOrchestrator:
                     )
                     f_obs_seq += 1
 
-                    if f_job_state.is_terminal or f_job_state == SchedulerJobState.UNKNOWN:
+                    if (
+                        f_job_state.is_terminal
+                        or f_job_state == SchedulerJobState.UNKNOWN
+                    ):
                         f_point_terminal = True
                     elif f_sig_coord.is_interrupted:
                         # Interrupted while job was active (non-terminal)
-                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                        self._recordInterruptionControlEvent(
+                            f_evidence_store, f_sig_coord
+                        )
                         f_all_points_succeeded = False
 
                         self._cancelActiveJob(
@@ -4161,7 +4604,9 @@ class RunOrchestrator:
                             f_obs_seq=f_obs_seq,
                         )
 
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        f_current_view = f_reconciler_obj.reconcile(
+                            f_plan, f_evidence_store
+                        )
                         f_point_terminal = True
                         break
                     else:
@@ -4170,10 +4615,17 @@ class RunOrchestrator:
                 f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
                 f_pt_view = f_current_view.point_states[f_idx]
 
-                if f_sig_coord.is_interrupted or f_pt_view.state != PointRunState.SUCCEEDED:
+                if (
+                    f_sig_coord.is_interrupted
+                    or f_pt_view.state != PointRunState.SUCCEEDED
+                ):
                     if f_sig_coord.is_interrupted:
-                        self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        self._recordInterruptionControlEvent(
+                            f_evidence_store, f_sig_coord
+                        )
+                        f_current_view = f_reconciler_obj.reconcile(
+                            f_plan, f_evidence_store
+                        )
                     f_all_points_succeeded = False
                     break
 
@@ -4188,7 +4640,11 @@ class RunOrchestrator:
                     f_pv.state == PointRunState.SUCCEEDED
                     for f_pv in f_current_view.point_states
                 )
-                if f_all_pts_ok and not f_current_view.has_interruption and not f_sig_coord.is_interrupted:
+                if (
+                    f_all_pts_ok
+                    and not f_current_view.has_interruption
+                    and not f_sig_coord.is_interrupted
+                ):
                     f_ctrl_seq = len(f_evidence_store.readControlEvents("control")) + 1
                     try:
                         f_evidence_store.recordWholeRunSucceeded(
@@ -4196,9 +4652,13 @@ class RunOrchestrator:
                             f_sequence=f_ctrl_seq,
                             f_payload={"run_id": f_plan.run_id},
                         )
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        f_current_view = f_reconciler_obj.reconcile(
+                            f_plan, f_evidence_store
+                        )
                     except Exception:
-                        f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
+                        f_current_view = f_reconciler_obj.reconcile(
+                            f_plan, f_evidence_store
+                        )
 
             object.__setattr__(self, "m_last_view", f_current_view)
             if f_current_view is not None and f_eff_reporter is not None:

@@ -121,7 +121,9 @@ def validatePathContainment(f_path: str, f_base: str) -> str:
     if os.path.exists(f_abs_path) or os.path.islink(f_abs_path):
         f_real_path = os.path.realpath(f_abs_path)
         f_real_base = os.path.realpath(f_abs_base)
-        if f_real_path != f_real_base and not f_real_path.startswith(f_real_base + os.sep):
+        if f_real_path != f_real_base and not f_real_path.startswith(
+            f_real_base + os.sep
+        ):
             raise ContainmentError(
                 f"Symlink target '{f_real_path}' escapes base directory '{f_real_base}'"
             )
@@ -132,7 +134,9 @@ def validatePathContainment(f_path: str, f_base: str) -> str:
         if os.path.islink(f_curr):
             f_target = os.path.realpath(f_curr)
             f_real_base = os.path.realpath(f_abs_base)
-            if f_target != f_real_base and not f_target.startswith(f_real_base + os.sep):
+            if f_target != f_real_base and not f_target.startswith(
+                f_real_base + os.sep
+            ):
                 raise ContainmentError(
                     f"Symlink component '{f_curr}' pointing to '{f_target}' escapes base '{f_real_base}'"
                 )
@@ -154,11 +158,15 @@ class ArtifactLayout:
         if not isinstance(f_run_id, str) or not f_run_id.strip():
             raise ArtifactError(f"run_id must be a non-empty string, got: {f_run_id!r}")
         if "/" in f_run_id or "\\" in f_run_id or ".." in f_run_id or "\0" in f_run_id:
-            raise ContainmentError(f"Invalid run_id containing path separators or traversal: {f_run_id!r}")
+            raise ContainmentError(
+                f"Invalid run_id containing path separators or traversal: {f_run_id!r}"
+            )
 
         f_norm_root = os.path.abspath(f_benchmark_root)
         if "\0" in f_norm_root:
-            raise ContainmentError(f"benchmark_root contains NUL byte: {f_benchmark_root!r}")
+            raise ContainmentError(
+                f"benchmark_root contains NUL byte: {f_benchmark_root!r}"
+            )
 
         super().__setattr__("m_benchmark_root", f_norm_root)
         super().__setattr__("m_run_id", f_run_id.strip())
@@ -171,7 +179,9 @@ class ArtifactLayout:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -243,7 +253,9 @@ class ArtifactLayout:
             raise ArtifactError(f"writer must be a non-empty string, got: {f_writer!r}")
         if "/" in f_writer or "\\" in f_writer or ".." in f_writer or "\0" in f_writer:
             raise ContainmentError(f"Invalid writer name: {f_writer!r}")
-        return os.path.join(self.controlEventsDir, f_writer.strip(), f"{f_sequence}.json")
+        return os.path.join(
+            self.controlEventsDir, f_writer.strip(), f"{f_sequence}.json"
+        )
 
     @property
     def pointsDir(self) -> str:
@@ -265,7 +277,9 @@ class ArtifactLayout:
             return f_name
         if isinstance(f_point, int):
             if f_point < 0:
-                raise ArtifactError(f"ordinal/point integer must be non-negative, got: {f_point}")
+                raise ArtifactError(
+                    f"ordinal/point integer must be non-negative, got: {f_point}"
+                )
             return f"{f_point:02d}-tasks-1"
         if isinstance(f_point, ScalePoint):
             if f_ordinal is not None:
@@ -300,8 +314,15 @@ class ArtifactLayout:
         f_obs = os.path.join(self.pointSchedulerDir(f_point, f_ordinal), "observations")
         if f_writer is not None:
             if not isinstance(f_writer, str) or not f_writer.strip():
-                raise ArtifactError(f"writer must be a non-empty string, got: {f_writer!r}")
-            if "/" in f_writer or "\\" in f_writer or ".." in f_writer or "\0" in f_writer:
+                raise ArtifactError(
+                    f"writer must be a non-empty string, got: {f_writer!r}"
+                )
+            if (
+                "/" in f_writer
+                or "\\" in f_writer
+                or ".." in f_writer
+                or "\0" in f_writer
+            ):
                 raise ContainmentError(f"Invalid writer name: {f_writer!r}")
             return os.path.join(f_obs, f_writer.strip())
         return f_obs
@@ -351,7 +372,9 @@ class ArtifactLayout:
             return f_name
         if isinstance(f_combination, Combination):
             return f_combination.name
-        raise ArtifactError(f"Unsupported combination type: {type(f_combination).__name__}")
+        raise ArtifactError(
+            f"Unsupported combination type: {type(f_combination).__name__}"
+        )
 
     def pointCombinationDir(
         self,
@@ -410,7 +433,9 @@ class ArtifactLayout:
         f_ordinal: Optional[int] = None,
     ) -> str:
         return os.path.join(
-            self.pointRankCombinationDir(f_point, f_global_rank, f_combination, f_ordinal),
+            self.pointRankCombinationDir(
+                f_point, f_global_rank, f_combination, f_ordinal
+            ),
             "claim.lock",
         )
 
@@ -422,7 +447,9 @@ class ArtifactLayout:
         f_ordinal: Optional[int] = None,
     ) -> str:
         return os.path.join(
-            self.pointRankCombinationDir(f_point, f_global_rank, f_combination, f_ordinal),
+            self.pointRankCombinationDir(
+                f_point, f_global_rank, f_combination, f_ordinal
+            ),
             "result.json",
         )
 
@@ -523,7 +550,9 @@ class ControlLock:
 
     def __init__(self, f_lock_path: str) -> None:
         if not isinstance(f_lock_path, str) or not f_lock_path.strip():
-            raise ArtifactError(f"lock_path must be a non-empty string, got: {f_lock_path!r}")
+            raise ArtifactError(
+                f"lock_path must be a non-empty string, got: {f_lock_path!r}"
+            )
         super().__setattr__("m_lock_path", os.path.abspath(f_lock_path))
         super().__setattr__("m_fd", None)
         super().__setattr__("m_is_locked", False)
@@ -539,7 +568,9 @@ class ControlLock:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -572,7 +603,9 @@ class ControlLock:
         try:
             f_fd = os.open(self.m_lock_path, os.O_RDWR | os.O_CREAT, 0o644)
         except OSError as f_err:
-            raise ArtifactError(f"Failed to open lock file '{self.m_lock_path}': {f_err}")
+            raise ArtifactError(
+                f"Failed to open lock file '{self.m_lock_path}': {f_err}"
+            )
 
         f_flags = fcntl.LOCK_EX
         if not f_blocking:
@@ -647,7 +680,9 @@ class ArtifactStore:
             f_layout = f_benchmark_root_or_layout
         elif isinstance(f_benchmark_root_or_layout, str):
             if f_run_id is None:
-                raise ArtifactError("run_id must be provided when passing benchmark_root string")
+                raise ArtifactError(
+                    "run_id must be provided when passing benchmark_root string"
+                )
             f_layout = ArtifactLayout(f_benchmark_root_or_layout, f_run_id)
         else:
             raise ArtifactError(
@@ -664,7 +699,9 @@ class ArtifactStore:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -696,7 +733,9 @@ class ArtifactStore:
                 f"Run directory already exists at '{f_run_root}': collision rejected"
             )
         except OSError as f_err:
-            raise ArtifactError(f"Failed to create run directory '{f_run_root}': {f_err}")
+            raise ArtifactError(
+                f"Failed to create run directory '{f_run_root}': {f_err}"
+            )
 
         try:
             os.makedirs(self.m_layout.controlDir, exist_ok=True)
@@ -740,7 +779,9 @@ class ArtifactStore:
             while f_written < len(f_serialized_bytes):
                 f_n = os.write(f_fd, f_serialized_bytes[f_written:])
                 if f_n == 0:
-                    raise ManifestWriteError(f"Zero bytes written to manifest at '{f_manifest_path}'")
+                    raise ManifestWriteError(
+                        f"Zero bytes written to manifest at '{f_manifest_path}'"
+                    )
                 f_written += f_n
 
             os.fsync(f_fd)
@@ -789,8 +830,12 @@ class ArtifactStore:
             self.m_layout.pointSchedulerObservationsDir(f_point, f_ordinal=f_ordinal),
             exist_ok=True,
         )
-        os.makedirs(self.m_layout.pointWorkerEventsDir(f_point, f_ordinal), exist_ok=True)
-        os.makedirs(self.m_layout.pointCombinationsDir(f_point, f_ordinal), exist_ok=True)
+        os.makedirs(
+            self.m_layout.pointWorkerEventsDir(f_point, f_ordinal), exist_ok=True
+        )
+        os.makedirs(
+            self.m_layout.pointCombinationsDir(f_point, f_ordinal), exist_ok=True
+        )
         os.makedirs(self.m_layout.pointRanksDir(f_point, f_ordinal), exist_ok=True)
         os.makedirs(self.m_layout.pointLogsDir(f_point, f_ordinal), exist_ok=True)
         os.makedirs(self.m_layout.pointWorkDir(f_point, f_ordinal), exist_ok=True)
@@ -836,7 +881,9 @@ class ArtifactStore:
         f_meta = {
             "run_id": self.m_layout.runId,
             "point_id": f_point_id,
-            "prepared_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "prepared_at_utc": datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
             "status": "prepared",
         }
         with open(f_meta_path, "w", encoding="utf-8") as f_f:
@@ -851,7 +898,9 @@ class ArtifactStore:
         f_ordinal: Optional[int] = None,
     ) -> None:
         """Safely clean up incomplete point preparation without touching run root, logs, or results."""
-        if isinstance(f_point, str) and (f_point.startswith("/") or "/" in f_point or "\\" in f_point):
+        if isinstance(f_point, str) and (
+            f_point.startswith("/") or "/" in f_point or "\\" in f_point
+        ):
             f_point_dir = os.path.abspath(f_point)
         else:
             f_point_dir = self.m_layout.pointDir(f_point, f_ordinal)

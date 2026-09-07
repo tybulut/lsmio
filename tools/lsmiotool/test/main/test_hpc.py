@@ -77,7 +77,7 @@ class TestHpcModules(unittest.TestCase):
             "OpenMPI/4.1.5-GCC-12.3.0",
             "zlib/1.2.13-GCCcore-12.3.0",
             "lz4/1.9.4-GCCcore-12.3.0",
-            "libunwind/1.6.2-GCCcore-11.3.0", # wait, let's make sure exact Viking2 modules match
+            "libunwind/1.6.2-GCCcore-11.3.0",  # wait, let's make sure exact Viking2 modules match
             "OpenJPEG/2.5.0-GCCcore-12.3.0",
             "FFTW/3.3.10-GCC-12.3.0",
             "gflags/2.2.2-GCCcore-12.3.0",

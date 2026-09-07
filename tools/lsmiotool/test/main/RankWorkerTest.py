@@ -38,9 +38,18 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 import unittest
 from unittest.mock import MagicMock, patch
 
-from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore, STANDARD_COMBINATION_TUPLES
+from lsmiotool.lib.artifacts import (
+    ArtifactLayout,
+    ArtifactStore,
+    STANDARD_COMBINATION_TUPLES,
+)
 from lsmiotool.lib.benchmarks import LsmioAdapter
-from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, EvidenceStore, WriterKind
+from lsmiotool.lib.evidence import (
+    EvidenceKind,
+    EvidenceRecord,
+    EvidenceStore,
+    WriterKind,
+)
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import (
     Combination,
@@ -73,7 +82,9 @@ class MockProcessRunner:
         f_default_returncode: int = 0,
         f_stdout: str = "",
         f_stderr: str = "",
-        f_side_effect: Optional[Callable[[Sequence[str], Dict[str, Any]], ProcessResult]] = None,
+        f_side_effect: Optional[
+            Callable[[Sequence[str], Dict[str, Any]], ProcessResult]
+        ] = None,
     ) -> None:
         self.m_default_returncode = f_default_returncode
         self.m_stdout = f_stdout
@@ -93,7 +104,11 @@ class MockProcessRunner:
             return self.m_side_effect(f_argv_list, f_kwargs)
 
         # Mirror output to log file if requested
-        f_log_path = f_kwargs.get("f_log_path") or f_kwargs.get("log_path") or f_kwargs.get("log")
+        f_log_path = (
+            f_kwargs.get("f_log_path")
+            or f_kwargs.get("log_path")
+            or f_kwargs.get("log")
+        )
         if f_log_path:
             os.makedirs(os.path.dirname(f_log_path), exist_ok=True)
             with open(f_log_path, "a", encoding="utf-8") as f_f:
@@ -114,7 +129,9 @@ class RankWorkerTest(unittest.TestCase):
         self.m_temp_dir = tempfile.TemporaryDirectory()
         self.m_real_temp = os.path.realpath(self.m_temp_dir.name)
         self.m_etc_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_etc_path)
         self.m_dev_profile = EnvironmentResolver.resolveProfile(
@@ -144,7 +161,11 @@ class RankWorkerTest(unittest.TestCase):
     ) -> Tuple[ManifestDocument, str, ArtifactLayout]:
         """Helper to create a valid RunPlan, write manifest.json to disk, and return layout."""
         self.m_run_counter += 1
-        f_eff_run_id = f_run_id if f_run_id is not None else f"test-run-rank-{self.m_run_counter:04d}"
+        f_eff_run_id = (
+            f_run_id
+            if f_run_id is not None
+            else f"test-run-rank-{self.m_run_counter:04d}"
+        )
         f_prof = f_profile or self.m_dev_profile
         f_req = RunRequest(
             f_target=f_target,
@@ -153,7 +174,9 @@ class RankWorkerTest(unittest.TestCase):
             f_setup=f_setup,
         )
 
-        f_tokens = [f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))]
+        f_tokens = [
+            f"lm-{f_i:024x}" for f_i in range(len(RunPlanner.SCALE_MATRICES[f_scale]))
+        ]
         f_tok_idx = 0
 
         def token_gen() -> str:
@@ -170,7 +193,9 @@ class RankWorkerTest(unittest.TestCase):
             f_token_source=token_gen,
         )
 
-        f_layout = ArtifactLayout(f_prof.getBenchmarkRoot("ssd" if f_ssd else "hdd"), f_eff_run_id)
+        f_layout = ArtifactLayout(
+            f_prof.getBenchmarkRoot("ssd" if f_ssd else "hdd"), f_eff_run_id
+        )
         f_store = ArtifactStore(f_layout)
         f_store.allocateRun(f_plan)
 
@@ -365,7 +390,9 @@ class RankWorkerTest(unittest.TestCase):
 
         # 3. Same rank in DIFFERENT combination succeeds!
         f_diff_combo_dir = os.path.join(self.m_real_temp, "ranks", "0", "c16_b1M")
-        f_diff_lock_path = RankClaimStore.claim(f_diff_combo_dir, 0, f_combination="c16_b1M")
+        f_diff_lock_path = RankClaimStore.claim(
+            f_diff_combo_dir, 0, f_combination="c16_b1M"
+        )
         self.assertTrue(os.path.exists(f_diff_lock_path))
         self.assertTrue(RankClaimStore.isClaimed(f_diff_combo_dir))
 
@@ -423,7 +450,9 @@ class RankWorkerTest(unittest.TestCase):
                 f_layout=f_layout,
             )
             self.assertEqual(
-                f_exit, 0, f"RankWorker failed on combination '{f_combo_name}' with exit {f_exit}"
+                f_exit,
+                0,
+                f"RankWorker failed on combination '{f_combo_name}' with exit {f_exit}",
             )
 
             # Record paths for validation
@@ -472,7 +501,9 @@ class RankWorkerTest(unittest.TestCase):
 
         # Assert all 6 claims persist permanently
         for f_cp in f_claim_paths:
-            self.assertTrue(os.path.exists(f_cp), f"Claim lock {f_cp} was unexpectedly removed")
+            self.assertTrue(
+                os.path.exists(f_cp), f"Claim lock {f_cp} was unexpectedly removed"
+            )
 
     def testDuplicateSameRankCombinationRaceOneWinner(self) -> None:
         """F-04a: Prove duplicate rank worker for identical rank and combination has exactly one winner."""
@@ -527,7 +558,9 @@ class RankWorkerTest(unittest.TestCase):
                 f_layout=f_layout,
             )
         # Verify no claim lock was created for c99_b99M
-        f_bad_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c99_b99M")
+        f_bad_dir = os.path.join(
+            f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c99_b99M"
+        )
         self.assertFalse(os.path.exists(f_bad_dir))
 
         # 2. Unplanned foreign combination
@@ -540,7 +573,9 @@ class RankWorkerTest(unittest.TestCase):
                 f_runner=f_mock_runner,
                 f_layout=f_layout,
             )
-        f_foreign_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c32_b16M")
+        f_foreign_dir = os.path.join(
+            f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c32_b16M"
+        )
         self.assertFalse(os.path.exists(f_foreign_dir))
 
         # 3. Malformed descriptor
@@ -590,10 +625,22 @@ class RankWorkerTest(unittest.TestCase):
                 f_all_outputs.add(f_bound.output_path)
 
                 # Validate exact path format and containment
-                self.assertTrue(f_claim.endswith(f"ranks/{f_rank}/{f_c.name}/claim.lock"))
-                self.assertTrue(f_bound.result_path.endswith(f"ranks/{f_rank}/{f_c.name}/result.json"))
-                self.assertTrue(f_bound.stdout_path.endswith(f"logs/{f_c.name}/rank_{f_rank}.log"))
-                self.assertTrue(f_bound.output_path.endswith(f"data/c{f_c.stripe_count}/b{f_c.block_size}/lsmio-rank-{f_rank}-native-m.db"))
+                self.assertTrue(
+                    f_claim.endswith(f"ranks/{f_rank}/{f_c.name}/claim.lock")
+                )
+                self.assertTrue(
+                    f_bound.result_path.endswith(
+                        f"ranks/{f_rank}/{f_c.name}/result.json"
+                    )
+                )
+                self.assertTrue(
+                    f_bound.stdout_path.endswith(f"logs/{f_c.name}/rank_{f_rank}.log")
+                )
+                self.assertTrue(
+                    f_bound.output_path.endswith(
+                        f"data/c{f_c.stripe_count}/b{f_c.block_size}/lsmio-rank-{f_rank}-native-m.db"
+                    )
+                )
 
         # 4 ranks x 2 combinations = 8 distinct paths each
         self.assertEqual(len(f_all_claims), 8)
@@ -776,14 +823,14 @@ class RankWorkerTest(unittest.TestCase):
         self.assertEqual(f_exit, 0)
 
         # 2. Check claim lock exists
-        f_rank_combo_dir = os.path.join(f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c16_b8M")
+        f_rank_combo_dir = os.path.join(
+            f_layout.runRoot, "points", "00-tasks-1", "ranks", "0", "c16_b8M"
+        )
         self.assertTrue(RankClaimStore.isClaimed(f_rank_combo_dir))
         self.assertTrue(os.path.exists(os.path.join(f_rank_combo_dir, "claim.lock")))
 
         # 3. Check rank result was recorded
-        f_result_path = os.path.join(
-            f_rank_combo_dir, "result.json"
-        )
+        f_result_path = os.path.join(f_rank_combo_dir, "result.json")
         self.assertTrue(os.path.exists(f_result_path))
 
         with open(f_result_path, "r", encoding="utf-8") as f_f:
@@ -861,7 +908,10 @@ class RankWorkerTest(unittest.TestCase):
         """Test non-zero returncode and signal propagation from child process to rank result."""
         # 1. Child process exits with returncode 42
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="ROCKSDB", f_run_id="test-run-fail-42"
+            f_target="lsmio",
+            f_scale="local",
+            f_setup="ROCKSDB",
+            f_run_id="test-run-fail-42",
         )
         f_mock_runner = MockProcessRunner(
             f_default_returncode=42,
@@ -888,7 +938,10 @@ class RankWorkerTest(unittest.TestCase):
 
         # 2. Child process killed by signal (e.g. SIGKILL -9)
         _, f_sig_manifest, f_sig_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="ADIOS", f_run_id="test-run-sig-9"
+            f_target="lsmio",
+            f_scale="local",
+            f_setup="ADIOS",
+            f_run_id="test-run-sig-9",
         )
         f_sig_runner = MockProcessRunner(
             f_default_returncode=-9,
@@ -906,7 +959,9 @@ class RankWorkerTest(unittest.TestCase):
         self.assertEqual(f_sig_exit, -9)
 
         f_sig_store = EvidenceStore(f_sig_layout)
-        f_sig_rec = f_sig_store.readRankResult(ScalePoint(1, 1, 1), 0, "c4_b64K", f_ordinal=0)
+        f_sig_rec = f_sig_store.readRankResult(
+            ScalePoint(1, 1, 1), 0, "c4_b64K", f_ordinal=0
+        )
         self.assertIsNotNone(f_sig_rec)
         self.assertEqual(f_sig_rec.payload["status"], "failed")
         self.assertEqual(f_sig_rec.payload["exit_code"], -9)
@@ -915,7 +970,10 @@ class RankWorkerTest(unittest.TestCase):
     def testRankWorkerInstanceExecution(self) -> None:
         """Test instantiation and execute() method of RankWorker."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="PLUGIN-M", f_run_id="test-run-inst"
+            f_target="lsmio",
+            f_scale="local",
+            f_setup="PLUGIN-M",
+            f_run_id="test-run-inst",
         )
         f_mock_runner = MockProcessRunner(f_default_returncode=0)
 

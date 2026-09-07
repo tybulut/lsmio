@@ -100,10 +100,15 @@ class ProcessRunnerTest(unittest.TestCase):
             self.assertIn(f"STDERR_MSG_{f_code}", f_content)
 
             # Test with mirroring enabled
-            f_mirror_log_path = os.path.join(self.m_temp_dir.name, f"test_mirror_status_{f_code}.log")
+            f_mirror_log_path = os.path.join(
+                self.m_temp_dir.name, f"test_mirror_status_{f_code}.log"
+            )
             f_stdout_capture = io.StringIO()
             f_stderr_capture = io.StringIO()
-            with patch("sys.stdout", f_stdout_capture), patch("sys.stderr", f_stderr_capture):
+            with (
+                patch("sys.stdout", f_stdout_capture),
+                patch("sys.stderr", f_stderr_capture),
+            ):
                 f_res_mirror = self.m_runner.run(
                     f_argv,
                     f_log_path=f_mirror_log_path,
@@ -134,7 +139,9 @@ class ProcessRunnerTest(unittest.TestCase):
             self.assertFalse(f_result.is_success)
 
         # Test spawn failure with non-existent executable
-        f_non_existent = os.path.join(self.m_temp_dir.name, "non_existent_binary_xyz_123")
+        f_non_existent = os.path.join(
+            self.m_temp_dir.name, "non_existent_binary_xyz_123"
+        )
         with self.assertRaises(ProcessSpawnError) as f_ctx:
             self.m_runner.run([f_non_existent, "arg1"])
         self.assertIn(f_non_existent, str(f_ctx.exception))
@@ -143,7 +150,9 @@ class ProcessRunnerTest(unittest.TestCase):
         f_unexecutable = os.path.join(self.m_temp_dir.name, "unexecutable_file.bin")
         with open(f_unexecutable, "w") as f_f:
             f_f.write("#!/bin/sh\necho test\n")
-        os.chmod(f_unexecutable, stat.S_IRUSR | stat.S_IWUSR)  # 0o600 no execute permission
+        os.chmod(
+            f_unexecutable, stat.S_IRUSR | stat.S_IWUSR
+        )  # 0o600 no execute permission
 
         with self.assertRaises(ProcessSpawnError) as f_ctx2:
             self.m_runner.run([f_unexecutable])
@@ -194,10 +203,7 @@ class ProcessRunnerTest(unittest.TestCase):
             "--flag=value with spaces",
         ]
 
-        f_script = (
-            "import sys, json; "
-            "sys.stdout.write(json.dumps(sys.argv[1:]))"
-        )
+        f_script = "import sys, json; sys.stdout.write(json.dumps(sys.argv[1:]))"
         f_argv = [sys.executable, "-c", f_script] + f_adversarial_args
 
         f_result = self.m_runner.run(f_argv)
@@ -291,7 +297,9 @@ class ProcessRunnerTest(unittest.TestCase):
 
         self.assertEqual(f_result.returncode, 0)
         f_data = json.loads(f_result.stdout)
-        self.assertEqual(os.path.realpath(f_data["cwd"]), os.path.realpath(f_custom_cwd))
+        self.assertEqual(
+            os.path.realpath(f_data["cwd"]), os.path.realpath(f_custom_cwd)
+        )
         self.assertEqual(f_data["env_val"], "test_custom_value_42")
 
     def testArgvValidation(self) -> None:

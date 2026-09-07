@@ -49,7 +49,6 @@ from lsmiotool.lib.cli import (
 from lsmiotool.lib.run import Combination
 
 
-
 class WorkerError(Exception):
     """Base exception for all worker and process operations."""
 
@@ -96,7 +95,6 @@ class RankIdentityError(RankWorkerError):
     """Raised when rank identity resolution fails, environment variables are missing/malformed/out-of-range."""
 
     pass
-
 
 
 class ProcessExecutionError(WorkerError):
@@ -156,8 +154,12 @@ class ProcessResult:
         f_spawn_error: Optional[str] = None,
     ) -> None:
         object.__setattr__(self, "m_returncode", int(f_returncode))
-        object.__setattr__(self, "m_stdout", str(f_stdout) if f_stdout is not None else "")
-        object.__setattr__(self, "m_stderr", str(f_stderr) if f_stderr is not None else "")
+        object.__setattr__(
+            self, "m_stdout", str(f_stdout) if f_stdout is not None else ""
+        )
+        object.__setattr__(
+            self, "m_stderr", str(f_stderr) if f_stderr is not None else ""
+        )
         object.__setattr__(self, "m_elapsed_seconds", float(f_elapsed_seconds))
         object.__setattr__(self, "m_timed_out", bool(f_timed_out))
         object.__setattr__(
@@ -169,12 +171,16 @@ class ProcessResult:
 
     def __setattr__(self, f_name: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"ProcessResult is immutable; cannot set attribute '{f_name}'")
+            raise AttributeError(
+                f"ProcessResult is immutable; cannot set attribute '{f_name}'"
+            )
         super().__setattr__(f_name, f_value)
 
     def __delattr__(self, f_name: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"ProcessResult is immutable; cannot delete attribute '{f_name}'")
+            raise AttributeError(
+                f"ProcessResult is immutable; cannot delete attribute '{f_name}'"
+            )
         super().__delattr__(f_name)
 
     @property
@@ -219,7 +225,11 @@ class ProcessResult:
 
     @property
     def is_success(self) -> bool:
-        return self.m_returncode == 0 and not self.m_timed_out and self.m_spawn_error is None
+        return (
+            self.m_returncode == 0
+            and not self.m_timed_out
+            and self.m_spawn_error is None
+        )
 
     @property
     def isSuccess(self) -> bool:
@@ -317,11 +327,21 @@ class ProcessRunner:
         """
         # Resolve any kwargs aliases
         if f_cwd is None:
-            f_cwd = f_kwargs.get("f_working_dir") or f_kwargs.get("cwd") or f_kwargs.get("working_dir")
+            f_cwd = (
+                f_kwargs.get("f_working_dir")
+                or f_kwargs.get("cwd")
+                or f_kwargs.get("working_dir")
+            )
         if f_env is None:
-            f_env = f_kwargs.get("f_environment") or f_kwargs.get("env") or f_kwargs.get("environment")
+            f_env = (
+                f_kwargs.get("f_environment")
+                or f_kwargs.get("env")
+                or f_kwargs.get("environment")
+            )
         if f_log_path is None:
-            f_log_path = f_kwargs.get("f_log") or f_kwargs.get("log_path") or f_kwargs.get("log")
+            f_log_path = (
+                f_kwargs.get("f_log") or f_kwargs.get("log_path") or f_kwargs.get("log")
+            )
         if not f_mirror_stdout:
             f_mirror_stdout = bool(f_kwargs.get("mirror_stdout", False))
         if f_timeout is None:
@@ -340,7 +360,9 @@ class ProcessRunner:
         f_argv_list: List[str] = []
         for f_index, f_arg in enumerate(f_argv):
             if f_arg is None:
-                raise ProcessSpawnError(f"Process argv contains None at index {f_index}")
+                raise ProcessSpawnError(
+                    f"Process argv contains None at index {f_index}"
+                )
             f_str_arg = str(f_arg)
             if "\0" in f_str_arg:
                 raise ProcessSpawnError(
@@ -349,12 +371,16 @@ class ProcessRunner:
             f_argv_list.append(f_str_arg)
 
         if not f_argv_list:
-            raise ProcessSpawnError("Process argv must be a non-empty sequence of strings")
+            raise ProcessSpawnError(
+                "Process argv must be a non-empty sequence of strings"
+            )
 
         # Validate log path if specified
         if f_log_path is not None:
             if not isinstance(f_log_path, str) or not f_log_path.strip():
-                raise ProcessLoggingError("Log path must be a non-empty string when specified")
+                raise ProcessLoggingError(
+                    "Log path must be a non-empty string when specified"
+                )
             if "\0" in f_log_path:
                 raise ProcessLoggingError("Log path contains NUL byte")
 
@@ -381,7 +407,12 @@ class ProcessRunner:
                 stderr=subprocess.PIPE,
                 shell=False,
             )
-        except (FileNotFoundError, PermissionError, NotADirectoryError, OSError) as f_spawn_err:
+        except (
+            FileNotFoundError,
+            PermissionError,
+            NotADirectoryError,
+            OSError,
+        ) as f_spawn_err:
             raise ProcessSpawnError(
                 f"Failed to spawn process '{f_argv_list[0]}': {f_spawn_err}"
             ) from f_spawn_err
@@ -431,7 +462,9 @@ class ProcessRunner:
         # Write output to log file if requested
         if f_log_path is not None:
             try:
-                with open(f_log_path, "a", encoding="utf-8", errors="replace") as f_log_file:
+                with open(
+                    f_log_path, "a", encoding="utf-8", errors="replace"
+                ) as f_log_file:
                     if f_stdout_str:
                         f_log_file.write(f_stdout_str)
                     if f_stderr_str:
@@ -565,6 +598,7 @@ class ModuleSetup:
         if hasattr(f_profile, "name") and isinstance(f_profile.name, str):
             try:
                 from lsmiotool.lib.site import EnvironmentResolver
+
                 f_user = os.environ.get("USER") or "user"
                 f_home = os.environ.get("HOME") or "/tmp"
                 f_resolved = EnvironmentResolver.resolveProfile(
@@ -580,6 +614,7 @@ class ModuleSetup:
         if isinstance(f_profile, str):
             try:
                 from lsmiotool.lib.site import EnvironmentResolver
+
                 f_user = os.environ.get("USER") or "user"
                 f_home = os.environ.get("HOME") or "/tmp"
                 f_resolved = EnvironmentResolver.resolveProfile(
@@ -714,7 +749,9 @@ class LustreConfigurator:
         f_stripe: Any = None
         f_block: Any = None
 
-        if hasattr(f_combination, "stripe_count") and hasattr(f_combination, "block_size"):
+        if hasattr(f_combination, "stripe_count") and hasattr(
+            f_combination, "block_size"
+        ):
             f_stripe = f_combination.stripe_count
             f_block = f_combination.block_size
         elif hasattr(f_combination, "stripe") and hasattr(f_combination, "block"):
@@ -727,7 +764,9 @@ class LustreConfigurator:
             f_stripe = f_combination.get("stripe_count") or f_combination.get("stripe")
             f_block = f_combination.get("block_size") or f_combination.get("block")
         elif isinstance(f_combination, str):
-            f_match = re.match(r"^c?(\d+)[_/b-]b?([0-9]+[KMGkmg]?)$", f_combination.strip())
+            f_match = re.match(
+                r"^c?(\d+)[_/b-]b?([0-9]+[KMGkmg]?)$", f_combination.strip()
+            )
             if f_match:
                 f_stripe = int(f_match.group(1))
                 f_block = f_match.group(2)
@@ -810,7 +849,10 @@ class LustreConfigurator:
         if hasattr(f_profile, "getLustrePool") and callable(f_profile.getLustrePool):
             try:
                 from lsmiotool.lib.site import StorageClass
-                f_sc_enum = StorageClass.SSD if f_storage_key == "ssd" else StorageClass.HDD
+
+                f_sc_enum = (
+                    StorageClass.SSD if f_storage_key == "ssd" else StorageClass.HDD
+                )
                 f_pool_val = f_profile.getLustrePool(f_sc_enum)
             except Exception:
                 f_pool_val = f_profile.getLustrePool(f_storage_key)
@@ -819,14 +861,18 @@ class LustreConfigurator:
         elif hasattr(f_profile, "lustre_pools"):
             f_pools = f_profile.lustre_pools
             if isinstance(f_pools, dict):
-                f_pool_val = (
-                    f_pools.get(f_storage_key)
-                    or f_pools.get(f_storage_key.upper())
+                f_pool_val = f_pools.get(f_storage_key) or f_pools.get(
+                    f_storage_key.upper()
                 )
                 if f_pool_val is None:
                     try:
                         from lsmiotool.lib.site import StorageClass
-                        f_sc_enum = StorageClass.SSD if f_storage_key == "ssd" else StorageClass.HDD
+
+                        f_sc_enum = (
+                            StorageClass.SSD
+                            if f_storage_key == "ssd"
+                            else StorageClass.HDD
+                        )
                         f_pool_val = f_pools.get(f_sc_enum)
                     except Exception:
                         pass
@@ -835,21 +881,23 @@ class LustreConfigurator:
         elif hasattr(f_profile, "pools"):
             f_pools = f_profile.pools
             if isinstance(f_pools, dict):
-                f_pool_val = (
-                    f_pools.get(f_storage_key)
-                    or f_pools.get(f_storage_key.upper())
+                f_pool_val = f_pools.get(f_storage_key) or f_pools.get(
+                    f_storage_key.upper()
                 )
 
         # 4. String site name or pool name
         elif isinstance(f_profile, str):
             try:
                 from lsmiotool.lib.site import EnvironmentResolver, StorageClass
+
                 f_user = os.environ.get("USER") or "user"
                 f_home = os.environ.get("HOME") or "/tmp"
                 f_resolved = EnvironmentResolver.resolveProfile(
                     f_profile, f_user=f_user, f_home=f_home
                 )
-                f_sc_enum = StorageClass.SSD if f_storage_key == "ssd" else StorageClass.HDD
+                f_sc_enum = (
+                    StorageClass.SSD if f_storage_key == "ssd" else StorageClass.HDD
+                )
                 f_pool_val = f_resolved.getLustrePool(f_sc_enum)
             except Exception:
                 # If string is not a recognized site name, check if it's a direct pool name
@@ -864,9 +912,8 @@ class LustreConfigurator:
         elif isinstance(f_profile, dict):
             f_pools = f_profile.get("lustre_pools") or f_profile.get("pools")
             if isinstance(f_pools, dict):
-                f_pool_val = (
-                    f_pools.get(f_storage_key)
-                    or f_pools.get(f_storage_key.upper())
+                f_pool_val = f_pools.get(f_storage_key) or f_pools.get(
+                    f_storage_key.upper()
                 )
 
         else:
@@ -916,7 +963,9 @@ class LustreConfigurator:
             LustreConfigurationError: If any validation rule is violated.
         """
         if not isinstance(f_target_dir, str) or not f_target_dir.strip():
-            raise LustreConfigurationError("Target directory must be a non-empty string")
+            raise LustreConfigurationError(
+                "Target directory must be a non-empty string"
+            )
         if "\0" in f_target_dir:
             raise LustreConfigurationError("Target directory path contains NUL byte")
 
@@ -997,10 +1046,10 @@ class LustreConfigurator:
             LustreConfigurationError: If any argument validation fails.
         """
         f_stripe, f_block = cls._extractCombination(f_combination)
-        f_valid_target = cls.validateTargetDir(f_target_dir, f_combination=f_combination)
-        f_pool = cls.resolvePool(
-            f_profile, f_storage_class=f_storage_class, **f_kwargs
+        f_valid_target = cls.validateTargetDir(
+            f_target_dir, f_combination=f_combination
         )
+        f_pool = cls.resolvePool(f_profile, f_storage_class=f_storage_class, **f_kwargs)
 
         f_argv: List[str] = [
             "lfs",
@@ -1129,7 +1178,11 @@ class Launcher:
         f_ppn: Any = None
         f_nodes: Any = None
 
-        if hasattr(f_point, "tasks") and hasattr(f_point, "ppn") and hasattr(f_point, "nodes"):
+        if (
+            hasattr(f_point, "tasks")
+            and hasattr(f_point, "ppn")
+            and hasattr(f_point, "nodes")
+        ):
             f_tasks = f_point.tasks
             f_ppn = f_point.ppn
             f_nodes = f_point.nodes
@@ -1162,15 +1215,21 @@ class Launcher:
             )
 
         if isinstance(f_tasks, bool) or not isinstance(f_tasks, int) or f_tasks <= 0:
-            raise LauncherError(f"Scale point tasks must be a positive integer, got: {f_tasks!r}")
+            raise LauncherError(
+                f"Scale point tasks must be a positive integer, got: {f_tasks!r}"
+            )
         if isinstance(f_ppn, bool) or not isinstance(f_ppn, int) or f_ppn <= 0:
-            raise LauncherError(f"Scale point ppn must be a positive integer, got: {f_ppn!r}")
+            raise LauncherError(
+                f"Scale point ppn must be a positive integer, got: {f_ppn!r}"
+            )
 
         if f_nodes is None:
             f_nodes = max(1, f_tasks // f_ppn)
 
         if isinstance(f_nodes, bool) or not isinstance(f_nodes, int) or f_nodes <= 0:
-            raise LauncherError(f"Scale point nodes must be a positive integer, got: {f_nodes!r}")
+            raise LauncherError(
+                f"Scale point nodes must be a positive integer, got: {f_nodes!r}"
+            )
 
         return f_tasks, f_ppn, f_nodes
 
@@ -1192,7 +1251,12 @@ class Launcher:
         Raises:
             LauncherError: If profile or scheduler cannot be resolved.
         """
-        from lsmiotool.lib.site import SchedulerKind, LauncherPolicy, SiteProfile, EnvironmentResolver
+        from lsmiotool.lib.site import (
+            SchedulerKind,
+            LauncherPolicy,
+            SiteProfile,
+            EnvironmentResolver,
+        )
 
         if f_profile is None:
             return SchedulerKind.FAKE, None
@@ -1259,7 +1323,9 @@ class Launcher:
                 elif f_raw_sched_lower in ("fake", "direct"):
                     f_scheduler = SchedulerKind.FAKE
         elif isinstance(f_resolved_profile, dict):
-            f_raw_sched = f_resolved_profile.get("scheduler") or f_resolved_profile.get("launcher")
+            f_raw_sched = f_resolved_profile.get("scheduler") or f_resolved_profile.get(
+                "launcher"
+            )
             if isinstance(f_raw_sched, str):
                 f_raw_sched_lower = f_raw_sched.lower().strip()
                 if f_raw_sched_lower in ("slurm", "srun"):
@@ -1289,8 +1355,12 @@ class Launcher:
                 except Exception:
                     pass
 
-            if hasattr(f_resolved_profile, "resources") and isinstance(f_resolved_profile.resources, dict):
-                f_res_obj = f_resolved_profile.resources.get(f_shape) or f_resolved_profile.resources.get("small")
+            if hasattr(f_resolved_profile, "resources") and isinstance(
+                f_resolved_profile.resources, dict
+            ):
+                f_res_obj = f_resolved_profile.resources.get(
+                    f_shape
+                ) or f_resolved_profile.resources.get("small")
                 if f_res_obj is not None:
                     if hasattr(f_res_obj, "partition") and f_res_obj.partition:
                         f_partition = str(f_res_obj.partition).strip()
@@ -1299,13 +1369,23 @@ class Launcher:
             elif isinstance(f_resolved_profile, dict):
                 f_res_dict = f_resolved_profile.get("resources", {})
                 if isinstance(f_res_dict, dict):
-                    f_shp_dict = f_res_dict.get(f_shape) or f_res_dict.get("small") or {}
+                    f_shp_dict = (
+                        f_res_dict.get(f_shape) or f_res_dict.get("small") or {}
+                    )
                     if isinstance(f_shp_dict, dict) and f_shp_dict.get("partition"):
                         f_partition = str(f_shp_dict["partition"]).strip()
 
-            if not f_partition and hasattr(f_resolved_profile, "partition") and f_resolved_profile.partition:
+            if (
+                not f_partition
+                and hasattr(f_resolved_profile, "partition")
+                and f_resolved_profile.partition
+            ):
                 f_partition = str(f_resolved_profile.partition).strip()
-            if not f_partition and isinstance(f_resolved_profile, dict) and f_resolved_profile.get("partition"):
+            if (
+                not f_partition
+                and isinstance(f_resolved_profile, dict)
+                and f_resolved_profile.get("partition")
+            ):
                 f_partition = str(f_resolved_profile["partition"]).strip()
 
             # Profile name check fallback
@@ -1410,11 +1490,18 @@ class Launcher:
 
         if hasattr(f_combination_desc, "name"):
             f_comb_str = str(f_combination_desc.name).strip()
-        elif isinstance(f_combination_desc, (tuple, list)) and len(f_combination_desc) == 2:
+        elif (
+            isinstance(f_combination_desc, (tuple, list))
+            and len(f_combination_desc) == 2
+        ):
             f_comb_str = f"c{f_combination_desc[0]}_b{f_combination_desc[1]}"
         elif isinstance(f_combination_desc, dict):
-            f_stripe = f_combination_desc.get("stripe") or f_combination_desc.get("stripe_count")
-            f_block = f_combination_desc.get("block") or f_combination_desc.get("block_size")
+            f_stripe = f_combination_desc.get("stripe") or f_combination_desc.get(
+                "stripe_count"
+            )
+            f_block = f_combination_desc.get("block") or f_combination_desc.get(
+                "block_size"
+            )
             f_comb_str = f"c{f_stripe}_b{f_block}"
         elif isinstance(f_combination_desc, str):
             f_comb_str = f_combination_desc.strip()
@@ -1606,15 +1693,25 @@ class Launcher:
         f_argv = cls.buildSharedArgv(f_profile, f_point, f_command)
 
         if f_cwd is None:
-            f_cwd = f_kwargs.get("cwd") or f_kwargs.get("working_dir") or f_kwargs.get("f_working_dir")
+            f_cwd = (
+                f_kwargs.get("cwd")
+                or f_kwargs.get("working_dir")
+                or f_kwargs.get("f_working_dir")
+            )
         if f_cwd is None and hasattr(f_command, "working_dir"):
             f_cwd = getattr(f_command, "working_dir")
 
         if f_env is None:
-            f_env = f_kwargs.get("env") or f_kwargs.get("environment") or f_kwargs.get("f_environment")
+            f_env = (
+                f_kwargs.get("env")
+                or f_kwargs.get("environment")
+                or f_kwargs.get("f_environment")
+            )
 
         if f_log_path is None:
-            f_log_path = f_kwargs.get("log_path") or f_kwargs.get("log") or f_kwargs.get("f_log")
+            f_log_path = (
+                f_kwargs.get("log_path") or f_kwargs.get("log") or f_kwargs.get("f_log")
+            )
         if f_log_path is None and hasattr(f_command, "stdout_path"):
             f_log_path = getattr(f_command, "stdout_path")
 
@@ -1631,7 +1728,9 @@ class Launcher:
         except (ProcessSpawnError, ProcessLoggingError, ProcessExecutionError):
             raise
         except Exception as f_err:
-            raise LauncherError(f"Unexpected error executing shared launch: {f_err}") from f_err
+            raise LauncherError(
+                f"Unexpected error executing shared launch: {f_err}"
+            ) from f_err
 
     launch_shared = launchShared
 
@@ -1690,11 +1789,21 @@ class Launcher:
         )
 
         if f_cwd is None:
-            f_cwd = f_kwargs.get("cwd") or f_kwargs.get("working_dir") or f_kwargs.get("f_working_dir")
+            f_cwd = (
+                f_kwargs.get("cwd")
+                or f_kwargs.get("working_dir")
+                or f_kwargs.get("f_working_dir")
+            )
         if f_env is None:
-            f_env = f_kwargs.get("env") or f_kwargs.get("environment") or f_kwargs.get("f_environment")
+            f_env = (
+                f_kwargs.get("env")
+                or f_kwargs.get("environment")
+                or f_kwargs.get("f_environment")
+            )
         if f_log_path is None:
-            f_log_path = f_kwargs.get("log_path") or f_kwargs.get("log") or f_kwargs.get("f_log")
+            f_log_path = (
+                f_kwargs.get("log_path") or f_kwargs.get("log") or f_kwargs.get("f_log")
+            )
 
         try:
             return f_runner.run(
@@ -1709,7 +1818,9 @@ class Launcher:
         except (ProcessSpawnError, ProcessLoggingError, ProcessExecutionError):
             raise
         except Exception as f_err:
-            raise LauncherError(f"Unexpected error executing rank worker launch: {f_err}") from f_err
+            raise LauncherError(
+                f"Unexpected error executing rank worker launch: {f_err}"
+            ) from f_err
 
     launch_rank_workers = launchRankWorkers
 
@@ -1766,7 +1877,9 @@ class AllocationController:
         object.__setattr__(
             self,
             "m_worker_executable",
-            str(f_worker_executable).strip() if f_worker_executable is not None else None,
+            str(f_worker_executable).strip()
+            if f_worker_executable is not None
+            else None,
         )
         object.__setattr__(self, "m_asset_source", f_asset_source)
         object.__setattr__(self, "m_layout", f_layout)
@@ -1775,12 +1888,16 @@ class AllocationController:
 
     def __setattr__(self, f_name: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"AllocationController is immutable; cannot set attribute '{f_name}'")
+            raise AttributeError(
+                f"AllocationController is immutable; cannot set attribute '{f_name}'"
+            )
         super().__setattr__(f_name, f_value)
 
     def __delattr__(self, f_name: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"AllocationController is immutable; cannot delete attribute '{f_name}'")
+            raise AttributeError(
+                f"AllocationController is immutable; cannot delete attribute '{f_name}'"
+            )
         super().__delattr__(f_name)
 
     @classmethod
@@ -1893,7 +2010,11 @@ class AllocationController:
                     f_matched_sp = f_sp
                     f_matched_ord = f_idx
                     break
-            elif hasattr(f_point_id, "tasks") and hasattr(f_point_id, "ppn") and hasattr(f_point_id, "nodes"):
+            elif (
+                hasattr(f_point_id, "tasks")
+                and hasattr(f_point_id, "ppn")
+                and hasattr(f_point_id, "nodes")
+            ):
                 if (
                     f_sp.tasks == f_point_id.tasks
                     and f_sp.ppn == f_point_id.ppn
@@ -1981,7 +2102,9 @@ class AllocationController:
         f_storage_str = "hdd"
         if hasattr(f_manifest, "plan") and isinstance(f_manifest.plan, dict):
             f_storage_str = f_manifest.plan.get("storage", "hdd")
-        elif hasattr(f_manifest, "request") and getattr(f_manifest.request, "ssd", False):
+        elif hasattr(f_manifest, "request") and getattr(
+            f_manifest.request, "ssd", False
+        ):
             f_storage_str = "ssd"
 
         try:
@@ -2018,7 +2141,10 @@ class AllocationController:
             f_store = f_evidence_store
         else:
             from lsmiotool.lib.evidence import EvidenceStore
-            f_plan = f_manifest.toRunPlan() if hasattr(f_manifest, "toRunPlan") else None
+
+            f_plan = (
+                f_manifest.toRunPlan() if hasattr(f_manifest, "toRunPlan") else None
+            )
             f_store = EvidenceStore(f_layout_obj, f_plan=f_plan)
 
         # 5. Process Runner
@@ -2028,7 +2154,9 @@ class AllocationController:
         # 6. Record Controller Started Event
         from lsmiotool.lib.evidence import EvidenceCollisionError, EvidenceKind
 
-        f_worker_events_dir = f_layout_obj.pointWorkerEventsDir(f_matched_sp, f_matched_ord)
+        f_worker_events_dir = f_layout_obj.pointWorkerEventsDir(
+            f_matched_sp, f_matched_ord
+        )
         os.makedirs(f_worker_events_dir, exist_ok=True)
 
         try:
@@ -2124,7 +2252,9 @@ class AllocationController:
                     try:
                         from lsmiotool.lib.resources import ResourceLocator
 
-                        f_resolved_assets = ResourceLocator.forSource(sys.argv[0]).asset_root
+                        f_resolved_assets = ResourceLocator.forSource(
+                            sys.argv[0]
+                        ).asset_root
                     except Exception:
                         f_resolved_assets = os.path.join(
                             f_manifest.site.install_prefix, "share", "lmp-reaxff"
@@ -2243,10 +2373,13 @@ class AllocationController:
                 f_out_err = None
                 try:
                     from lsmiotool.lib.artifacts import validatePathContainment
+
                     validatePathContainment(f_out_path, f_layout_obj.runRoot)
                     f_st = os.lstat(f_out_path)
                     if stat.S_ISLNK(f_st.st_mode):
-                        f_out_err = f"Expected IOR output artifact '{f_out_path}' is a symlink"
+                        f_out_err = (
+                            f"Expected IOR output artifact '{f_out_path}' is a symlink"
+                        )
                     elif not stat.S_ISREG(f_st.st_mode):
                         f_out_err = f"Expected IOR output artifact '{f_out_path}' is not a regular file"
                     else:
@@ -2298,13 +2431,21 @@ class AllocationController:
                 # Read tuning exclusively from manifest plan for the exact task count
                 f_tasks_str = str(f_matched_sp.tasks)
                 f_tuning_map = None
-                if isinstance(f_manifest.plan, dict) and "lmp_task_tuning" in f_manifest.plan:
+                if (
+                    isinstance(f_manifest.plan, dict)
+                    and "lmp_task_tuning" in f_manifest.plan
+                ):
                     f_tuning_map = f_manifest.plan["lmp_task_tuning"]
                 elif hasattr(f_manifest.plan, "lmp_task_tuning"):
                     f_tuning_map = f_manifest.plan.lmp_task_tuning
 
-                if not isinstance(f_tuning_map, (dict, Mapping)) or f_tasks_str not in f_tuning_map:
-                    f_err_msg = f"Missing LMP tuning in manifest for task count {f_tasks_str}"
+                if (
+                    not isinstance(f_tuning_map, (dict, Mapping))
+                    or f_tasks_str not in f_tuning_map
+                ):
+                    f_err_msg = (
+                        f"Missing LMP tuning in manifest for task count {f_tasks_str}"
+                    )
                     try:
                         f_store.recordControllerResult(
                             f_point=f_matched_sp,
@@ -2418,10 +2559,13 @@ class AllocationController:
                 f_out_err = None
                 try:
                     from lsmiotool.lib.artifacts import validatePathContainment
+
                     validatePathContainment(f_out_path, f_layout_obj.runRoot)
                     f_st = os.lstat(f_out_path)
                     if stat.S_ISLNK(f_st.st_mode):
-                        f_out_err = f"Expected LMP output artifact '{f_out_path}' is a symlink"
+                        f_out_err = (
+                            f"Expected LMP output artifact '{f_out_path}' is a symlink"
+                        )
                     elif not stat.S_ISREG(f_st.st_mode):
                         f_out_err = f"Expected LMP output artifact '{f_out_path}' is not a regular file"
                     else:
@@ -2464,7 +2608,9 @@ class AllocationController:
                     try:
                         from lsmiotool.lib.resources import ResourceLocator
 
-                        f_worker_exe = ResourceLocator.forSource(sys.argv[0]).worker_executable
+                        f_worker_exe = ResourceLocator.forSource(
+                            sys.argv[0]
+                        ).worker_executable
                     except Exception:
                         f_worker_exe = sys.argv[0]
 
@@ -2525,15 +2671,14 @@ class AllocationController:
                 f_ranks_failed = False
                 f_failure_reason = None
                 from lsmiotool.lib.evidence import ResultPayloadValidator
+
                 for f_rank_idx in range(f_matched_sp.tasks):
                     f_rank_result_path = f_layout_obj.pointRankResultPath(
                         f_matched_sp, f_rank_idx, f_combo_name, f_matched_ord
                     )
                     if not os.path.exists(f_rank_result_path):
                         f_ranks_failed = True
-                        f_failure_reason = (
-                            f"Missing rank result for rank {f_rank_idx} in combination {f_combo_name}"
-                        )
+                        f_failure_reason = f"Missing rank result for rank {f_rank_idx} in combination {f_combo_name}"
                         break
 
                     try:
@@ -2553,20 +2698,19 @@ class AllocationController:
 
                     try:
                         f_rank_rec = f_store.readRankResult(
-                            f_matched_sp, f_rank_idx, f_combo_name, f_ordinal=f_matched_ord
+                            f_matched_sp,
+                            f_rank_idx,
+                            f_combo_name,
+                            f_ordinal=f_matched_ord,
                         )
                     except Exception as f_read_err:
                         f_ranks_failed = True
-                        f_failure_reason = (
-                            f"Corrupt rank result for rank {f_rank_idx} in combination {f_combo_name}: {f_read_err}"
-                        )
+                        f_failure_reason = f"Corrupt rank result for rank {f_rank_idx} in combination {f_combo_name}: {f_read_err}"
                         break
 
                     if f_rank_rec is None:
                         f_ranks_failed = True
-                        f_failure_reason = (
-                            f"Missing rank result for rank {f_rank_idx} in combination {f_combo_name}"
-                        )
+                        f_failure_reason = f"Missing rank result for rank {f_rank_idx} in combination {f_combo_name}"
                         break
 
                     try:
@@ -2579,13 +2723,20 @@ class AllocationController:
                         )
                     except Exception as f_val_err:
                         f_ranks_failed = True
-                        f_failure_reason = f"Rank {f_rank_idx} failed payload validation: {f_val_err}"
+                        f_failure_reason = (
+                            f"Rank {f_rank_idx} failed payload validation: {f_val_err}"
+                        )
                         break
 
                     f_payload = f_rank_rec.payload or {}
-                    if f_payload.get("status") != "success" or int(f_payload.get("exit_code", -1)) != 0:
+                    if (
+                        f_payload.get("status") != "success"
+                        or int(f_payload.get("exit_code", -1)) != 0
+                    ):
                         f_ranks_failed = True
-                        f_failure_reason = f"Rank {f_rank_idx} reported non-success: {f_payload}"
+                        f_failure_reason = (
+                            f"Rank {f_rank_idx} reported non-success: {f_payload}"
+                        )
                         break
 
                 if f_ranks_failed:
@@ -2682,9 +2833,7 @@ class RankIdentityResolver:
             )
 
         if isinstance(f_ppn, bool) or not isinstance(f_ppn, int) or f_ppn <= 0:
-            raise RankIdentityError(
-                f"PPN must be a positive integer, got: {f_ppn!r}"
-            )
+            raise RankIdentityError(f"PPN must be a positive integer, got: {f_ppn!r}")
 
         f_effective_env: Mapping[str, str] = f_env if f_env is not None else os.environ
 
@@ -2701,7 +2850,9 @@ class RankIdentityResolver:
             elif f_kind_str in ("fake", "direct"):
                 f_kind = SchedulerKind.FAKE
             else:
-                raise RankIdentityError(f"Unknown scheduler kind string: {f_scheduler_kind!r}")
+                raise RankIdentityError(
+                    f"Unknown scheduler kind string: {f_scheduler_kind!r}"
+                )
         elif hasattr(f_scheduler_kind, "scheduler"):
             f_raw = getattr(f_scheduler_kind, "scheduler")
             if isinstance(f_raw, SchedulerKind):
@@ -2737,7 +2888,9 @@ class RankIdentityResolver:
         if f_kind == SchedulerKind.SLURM:
             # 1. Global rank from SLURM_PROCID
             if "SLURM_PROCID" not in f_effective_env:
-                raise RankIdentityError("SLURM environment missing required SLURM_PROCID variable")
+                raise RankIdentityError(
+                    "SLURM environment missing required SLURM_PROCID variable"
+                )
             f_procid_raw = f_effective_env["SLURM_PROCID"]
             if f_procid_raw is None or not str(f_procid_raw).strip():
                 raise RankIdentityError("SLURM_PROCID variable is empty")
@@ -2749,17 +2902,29 @@ class RankIdentityResolver:
                 ) from f_err
 
             # 2. Node rank from SLURM_NODEID or SLURMD_NODENAME
-            if "SLURM_NODEID" in f_effective_env and str(f_effective_env["SLURM_NODEID"]).strip():
+            if (
+                "SLURM_NODEID" in f_effective_env
+                and str(f_effective_env["SLURM_NODEID"]).strip()
+            ):
                 f_node_rank = str(f_effective_env["SLURM_NODEID"]).strip()
-            elif "SLURMD_NODENAME" in f_effective_env and str(f_effective_env["SLURMD_NODENAME"]).strip():
+            elif (
+                "SLURMD_NODENAME" in f_effective_env
+                and str(f_effective_env["SLURMD_NODENAME"]).strip()
+            ):
                 f_node_rank = str(f_effective_env["SLURMD_NODENAME"]).strip()
-            elif "HOSTNAME" in f_effective_env and str(f_effective_env["HOSTNAME"]).strip():
+            elif (
+                "HOSTNAME" in f_effective_env
+                and str(f_effective_env["HOSTNAME"]).strip()
+            ):
                 f_node_rank = str(f_effective_env["HOSTNAME"]).strip()
             else:
                 f_node_rank = socket.gethostname()
 
             # 3. Local rank from SLURM_LOCALID (optional)
-            if "SLURM_LOCALID" in f_effective_env and str(f_effective_env["SLURM_LOCALID"]).strip():
+            if (
+                "SLURM_LOCALID" in f_effective_env
+                and str(f_effective_env["SLURM_LOCALID"]).strip()
+            ):
                 f_localid_raw = f_effective_env["SLURM_LOCALID"]
                 try:
                     f_local_rank = int(str(f_localid_raw).strip())
@@ -2780,7 +2945,9 @@ class RankIdentityResolver:
                 or f_effective_env.get("PBS_NODENUM")
             )
             if f_pe_raw is None or not str(f_pe_raw).strip():
-                raise RankIdentityError("PBS environment missing required ALPS_APP_PE variable")
+                raise RankIdentityError(
+                    "PBS environment missing required ALPS_APP_PE variable"
+                )
             try:
                 f_global_rank = int(str(f_pe_raw).strip())
             except ValueError as f_err:
@@ -2789,7 +2956,10 @@ class RankIdentityResolver:
                 ) from f_err
 
             # 2. Node rank from HOSTNAME or socket.gethostname()
-            if "HOSTNAME" in f_effective_env and str(f_effective_env["HOSTNAME"]).strip():
+            if (
+                "HOSTNAME" in f_effective_env
+                and str(f_effective_env["HOSTNAME"]).strip()
+            ):
                 f_node_rank = str(f_effective_env["HOSTNAME"]).strip()
             else:
                 f_node_rank = socket.gethostname()
@@ -2801,7 +2971,9 @@ class RankIdentityResolver:
                 if hasattr(f_ri, "local_rank") and f_ri.local_rank:
                     f_certified_local_var = f_ri.local_rank
             if f_certified_local_var is None:
-                f_certified_local_var = f_kwargs.get("f_certified_local_var") or f_kwargs.get("certified_local_var")
+                f_certified_local_var = f_kwargs.get(
+                    "f_certified_local_var"
+                ) or f_kwargs.get("certified_local_var")
 
             if f_certified_local_var and f_certified_local_var in f_effective_env:
                 f_loc_raw = f_effective_env[f_certified_local_var]
@@ -2942,7 +3114,9 @@ class RankClaimStore:
             RankClaimError: If rank is already claimed (file exists) or claim creation fails.
         """
         if not isinstance(f_rank_dir, str) or not f_rank_dir.strip():
-            raise RankClaimError(f"Rank directory must be a non-empty string, got: {f_rank_dir!r}")
+            raise RankClaimError(
+                f"Rank directory must be a non-empty string, got: {f_rank_dir!r}"
+            )
         if "\0" in f_rank_dir:
             raise RankClaimError("Rank directory path contains NUL byte")
 
@@ -2964,7 +3138,9 @@ class RankClaimStore:
 
         # Check for symbolic links in the claim directory path or parent directory
         if os.path.islink(f_abs_dir) or os.path.islink(os.path.dirname(f_abs_dir)):
-            raise RankClaimError(f"Rank claim directory cannot be a symlink: {f_abs_dir}")
+            raise RankClaimError(
+                f"Rank claim directory cannot be a symlink: {f_abs_dir}"
+            )
 
         os.makedirs(f_abs_dir, exist_ok=True)
 
@@ -2987,7 +3163,9 @@ class RankClaimStore:
             "pid": f_pid,
             "claimed_at_utc": f_now_utc,
         }
-        f_content = (json.dumps(f_payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        f_content = (json.dumps(f_payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
 
         try:
             f_fd = os.open(
@@ -2996,7 +3174,9 @@ class RankClaimStore:
                 0o600,
             )
         except (FileExistsError, OSError) as f_err:
-            if getattr(f_err, "errno", None) == errno.EEXIST or isinstance(f_err, FileExistsError):
+            if getattr(f_err, "errno", None) == errno.EEXIST or isinstance(
+                f_err, FileExistsError
+            ):
                 raise RankClaimError(
                     f"Rank {f_global_rank} for combination '{f_combo_str}' has already been claimed: '{f_lock_path}'"
                 ) from f_err
@@ -3030,7 +3210,11 @@ class RankClaimStore:
             return False
         f_dir = os.path.abspath(os.path.normpath(f_rank_dir.strip()))
         if f_combination is not None:
-            f_cname = f_combination.name if hasattr(f_combination, "name") else str(f_combination).strip()
+            f_cname = (
+                f_combination.name
+                if hasattr(f_combination, "name")
+                else str(f_combination).strip()
+            )
             if os.path.basename(f_dir) != f_cname:
                 f_dir = os.path.join(f_dir, f_cname)
         f_lock_path = os.path.join(f_dir, "claim.lock")
@@ -3049,7 +3233,11 @@ class RankClaimStore:
             return None
         f_dir = os.path.abspath(os.path.normpath(f_rank_dir.strip()))
         if f_combination is not None:
-            f_cname = f_combination.name if hasattr(f_combination, "name") else str(f_combination).strip()
+            f_cname = (
+                f_combination.name
+                if hasattr(f_combination, "name")
+                else str(f_combination).strip()
+            )
             if os.path.basename(f_dir) != f_cname:
                 f_dir = os.path.join(f_dir, f_cname)
         f_lock_path = os.path.join(f_dir, "claim.lock")
@@ -3073,6 +3261,7 @@ class _RankWorkerDispatcher:
     def __get__(self, f_instance: Any, f_owner: Any) -> Any:
         f_raw_func = getattr(self.m_func, "__func__", self.m_func)
         if f_instance is None:
+
             def _class_call(
                 f_manifest_path: Union[str, Any],
                 f_point_id: Union[str, int, Any],
@@ -3100,6 +3289,7 @@ class _RankWorkerDispatcher:
 
             return _class_call
         else:
+
             def _instance_call(
                 f_manifest_path: Union[str, Any],
                 f_point_id: Union[str, int, Any],
@@ -3119,9 +3309,15 @@ class _RankWorkerDispatcher:
                     f_env=f_env,
                     f_runner=f_runner if f_runner is not None else f_instance.m_runner,
                     f_layout=f_layout if f_layout is not None else f_instance.m_layout,
-                    f_evidence_store=f_evidence_store if f_evidence_store is not None else f_instance.m_evidence_store,
-                    f_identity_resolver=f_identity_resolver if f_identity_resolver is not None else f_instance.m_identity_resolver,
-                    f_claim_store=f_claim_store if f_claim_store is not None else f_instance.m_claim_store,
+                    f_evidence_store=f_evidence_store
+                    if f_evidence_store is not None
+                    else f_instance.m_evidence_store,
+                    f_identity_resolver=f_identity_resolver
+                    if f_identity_resolver is not None
+                    else f_instance.m_identity_resolver,
+                    f_claim_store=f_claim_store
+                    if f_claim_store is not None
+                    else f_instance.m_claim_store,
                     **f_kwargs,
                 )
 
@@ -3172,12 +3368,16 @@ class RankWorker:
 
     def __setattr__(self, f_name: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"RankWorker is immutable; cannot set attribute '{f_name}'")
+            raise AttributeError(
+                f"RankWorker is immutable; cannot set attribute '{f_name}'"
+            )
         super().__setattr__(f_name, f_value)
 
     def __delattr__(self, f_name: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"RankWorker is immutable; cannot delete attribute '{f_name}'")
+            raise AttributeError(
+                f"RankWorker is immutable; cannot delete attribute '{f_name}'"
+            )
         super().__delattr__(f_name)
 
     @staticmethod
@@ -3196,9 +3396,13 @@ class RankWorker:
         """Execute rank-bound benchmark for the resolved task identity."""
         # 1. Preflight Manifest Validation
         try:
-            f_manifest, f_manifest_file_path = AllocationController._extractManifest(f_manifest_path)
+            f_manifest, f_manifest_file_path = AllocationController._extractManifest(
+                f_manifest_path
+            )
         except Exception as f_err:
-            raise RankWorkerError(f"Failed to load or validate manifest: {f_err}") from f_err
+            raise RankWorkerError(
+                f"Failed to load or validate manifest: {f_err}"
+            ) from f_err
 
         # 2. Validate Benchmark Target is LSMIO
         f_target = f_manifest.request.target.lower().strip()
@@ -3209,29 +3413,39 @@ class RankWorker:
 
         # 3. Match Scale Point
         try:
-            f_matched_sp, f_matched_ord, f_point_dir_name = AllocationController._matchScalePoint(
-                f_manifest, f_point_id
+            f_matched_sp, f_matched_ord, f_point_dir_name = (
+                AllocationController._matchScalePoint(f_manifest, f_point_id)
             )
         except Exception as f_err:
             raise RankWorkerError(f"Failed to match scale point: {f_err}") from f_err
 
         # 4. Validate Combination Descriptor & Planned Matrix BEFORE Claiming (F-04)
         try:
-            f_stripe, f_block = LustreConfigurator._extractCombination(f_combination_desc)
+            f_stripe, f_block = LustreConfigurator._extractCombination(
+                f_combination_desc
+            )
         except Exception as f_err:
-            raise RankWorkerError(f"Invalid combination descriptor {f_combination_desc!r}: {f_err}") from f_err
+            raise RankWorkerError(
+                f"Invalid combination descriptor {f_combination_desc!r}: {f_err}"
+            ) from f_err
 
         f_combo_name = f"c{f_stripe}_b{f_block}"
 
         f_planned_combos: List[str] = []
         if hasattr(f_manifest, "combinations") and f_manifest.combinations:
             for f_c in f_manifest.combinations:
-                f_c_name = f_c.name if hasattr(f_c, "name") else (
-                    f"c{getattr(f_c, 'stripe_count', f_stripe)}_b{getattr(f_c, 'block_size', f_block)}"
+                f_c_name = (
+                    f_c.name
+                    if hasattr(f_c, "name")
+                    else (
+                        f"c{getattr(f_c, 'stripe_count', f_stripe)}_b{getattr(f_c, 'block_size', f_block)}"
+                    )
                 )
                 f_planned_combos.append(f_c_name)
         else:
-            f_planned_combos = [f"c{f_s}_b{f_b}" for f_s, f_b in STANDARD_COMBINATION_TUPLES]
+            f_planned_combos = [
+                f"c{f_s}_b{f_b}" for f_s, f_b in STANDARD_COMBINATION_TUPLES
+            ]
 
         if f_combo_name not in f_planned_combos:
             raise RankWorkerError(
@@ -3242,7 +3456,9 @@ class RankWorker:
         f_storage_str = "hdd"
         if hasattr(f_manifest, "plan") and isinstance(f_manifest.plan, dict):
             f_storage_str = f_manifest.plan.get("storage", "hdd")
-        elif hasattr(f_manifest, "request") and getattr(f_manifest.request, "ssd", False):
+        elif hasattr(f_manifest, "request") and getattr(
+            f_manifest.request, "ssd", False
+        ):
             f_storage_str = "ssd"
 
         try:
@@ -3266,7 +3482,9 @@ class RankWorker:
             if f_manifest_file_path is not None:
                 validatePathContainment(f_manifest_file_path, f_layout_obj.runRoot)
         except Exception as f_err:
-            raise RankWorkerError(f"Path containment validation failed: {f_err}") from f_err
+            raise RankWorkerError(
+                f"Path containment validation failed: {f_err}"
+            ) from f_err
 
         # 6. Resolve Rank Identity BEFORE Claiming
         f_resolver = f_identity_resolver or RankIdentityResolver
@@ -3282,7 +3500,9 @@ class RankWorker:
                 **f_kwargs,
             )
         except Exception as f_err:
-            raise RankWorkerError(f"Rank identity resolution failed: {f_err}") from f_err
+            raise RankWorkerError(
+                f"Rank identity resolution failed: {f_err}"
+            ) from f_err
 
         f_global_rank = f_rank_identity.global_rank
 
@@ -3290,8 +3510,12 @@ class RankWorker:
         f_rank_combo_dir = f_layout_obj.pointRankCombinationDir(
             f_matched_sp, f_global_rank, f_combo_name, f_matched_ord
         )
-        if os.path.islink(f_rank_combo_dir) or os.path.islink(os.path.dirname(f_rank_combo_dir)):
-            raise RankClaimError(f"Rank claim directory cannot be a symlink: {f_rank_combo_dir}")
+        if os.path.islink(f_rank_combo_dir) or os.path.islink(
+            os.path.dirname(f_rank_combo_dir)
+        ):
+            raise RankClaimError(
+                f"Rank claim directory cannot be a symlink: {f_rank_combo_dir}"
+            )
 
         f_claimer = f_claim_store or RankClaimStore
         f_claimer.claim(
@@ -3398,7 +3622,11 @@ class RankWorker:
                 f_log_path=f_log_path,
                 f_mirror_stdout=False,
             )
-        except (ProcessSpawnError, ProcessLoggingError, ProcessExecutionError) as f_exec_err:
+        except (
+            ProcessSpawnError,
+            ProcessLoggingError,
+            ProcessExecutionError,
+        ) as f_exec_err:
             f_proc_res = getattr(
                 f_exec_err,
                 "result",
@@ -3425,7 +3653,9 @@ class RankWorker:
         if f_evidence_store is not None:
             f_store = f_evidence_store
         else:
-            f_plan = f_manifest.toRunPlan() if hasattr(f_manifest, "toRunPlan") else None
+            f_plan = (
+                f_manifest.toRunPlan() if hasattr(f_manifest, "toRunPlan") else None
+            )
             f_store = EvidenceStore(f_layout_obj, f_plan=f_plan)
 
         f_is_ok = f_proc_res.is_success

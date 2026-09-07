@@ -57,18 +57,26 @@ class InstalledSmoke(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if not cls.m_stage_dir:
-            raise ValueError("InstalledSmoke.m_stage_dir must be configured before running tests.")
+            raise ValueError(
+                "InstalledSmoke.m_stage_dir must be configured before running tests."
+            )
         if not cls.m_work_dir:
-            raise ValueError("InstalledSmoke.m_work_dir must be configured before running tests.")
+            raise ValueError(
+                "InstalledSmoke.m_work_dir must be configured before running tests."
+            )
 
         # Ensure staged python directory is inserted at the front of sys.path
-        f_staged_python = os.path.normpath(os.path.join(cls.m_stage_dir, "share", "lsmio", "python"))
+        f_staged_python = os.path.normpath(
+            os.path.join(cls.m_stage_dir, "share", "lsmio", "python")
+        )
         if f_staged_python not in sys.path:
             sys.path.insert(0, f_staged_python)
 
     def testOnlyStagedPathsLoaded(self) -> None:
         """Verify that importing lsmiotool loads exclusively from the staged installation layout."""
-        f_staged_python = os.path.normpath(os.path.join(self.m_stage_dir, "share", "lsmio", "python"))
+        f_staged_python = os.path.normpath(
+            os.path.join(self.m_stage_dir, "share", "lsmio", "python")
+        )
 
         # Test in a separate subprocess with clean environment
         f_script = (
@@ -119,10 +127,16 @@ class InstalledSmoke(unittest.TestCase):
     def testHelpVersionAndWorkerArity(self) -> None:
         """Verify execution of staged public and private binaries, help, version, and worker arity."""
         f_public_bin = os.path.join(self.m_stage_dir, "bin", "lsmiotool")
-        f_worker_bin = os.path.join(self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker")
+        f_worker_bin = os.path.join(
+            self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker"
+        )
 
-        self.assertTrue(os.path.isfile(f_public_bin), f"Public binary missing: {f_public_bin}")
-        self.assertTrue(os.path.isfile(f_worker_bin), f"Worker binary missing: {f_worker_bin}")
+        self.assertTrue(
+            os.path.isfile(f_public_bin), f"Public binary missing: {f_public_bin}"
+        )
+        self.assertTrue(
+            os.path.isfile(f_worker_bin), f"Worker binary missing: {f_worker_bin}"
+        )
 
         # Test --version and -v
         f_proc_ver = subprocess.run(
@@ -197,17 +211,24 @@ class InstalledSmoke(unittest.TestCase):
     def testProfilesAssetsHashes(self) -> None:
         """Verify profile parsing, asset validation, and asset hashing from staged layout."""
         from lsmiotool.lib.benchmarks import LmpAdapter
-        from lsmiotool.lib.cli import InstalledPackageValidator, WorkerExecutableValidator
+        from lsmiotool.lib.cli import (
+            InstalledPackageValidator,
+            WorkerExecutableValidator,
+        )
         from lsmiotool.lib.profile import ProfileLoader
         from lsmiotool.lib.version import getVersion
 
         # 1. Verify installed package validation
-        f_pkg_root = os.path.join(self.m_stage_dir, "share", "lsmio", "python", "lsmiotool")
+        f_pkg_root = os.path.join(
+            self.m_stage_dir, "share", "lsmio", "python", "lsmiotool"
+        )
         f_validated_pkg = InstalledPackageValidator.validate(f_pkg_root)
         self.assertEqual(f_validated_pkg, os.path.normpath(f_pkg_root))
 
         # 2. Verify worker executable validation
-        f_worker_bin = os.path.join(self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker")
+        f_worker_bin = os.path.join(
+            self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker"
+        )
         f_validated_worker = WorkerExecutableValidator.validate(f_worker_bin)
         self.assertEqual(f_validated_worker, os.path.normpath(f_worker_bin))
 
@@ -216,18 +237,28 @@ class InstalledSmoke(unittest.TestCase):
         self.assertEqual(getVersion(f_version_file), "0.2.0")
 
         # 4. Verify profile loading
-        f_profile_file = os.path.join(self.m_stage_dir, "share", "lsmio", "etc", "environments.json")
+        f_profile_file = os.path.join(
+            self.m_stage_dir, "share", "lsmio", "etc", "environments.json"
+        )
         f_doc = ProfileLoader.load(f_profile_file)
         self.assertEqual(f_doc.schema_version, 1)
-        self.assertTrue({"DEV", "VIKING", "VIKING2", "ARCHER2", "ISAMBARD"}.issubset(f_doc.profiles.keys()))
+        self.assertTrue(
+            {"DEV", "VIKING", "VIKING2", "ARCHER2", "ISAMBARD"}.issubset(
+                f_doc.profiles.keys()
+            )
+        )
 
         # 5. Verify LMP assets validation and hashing
         f_asset_root = os.path.join(self.m_stage_dir, "share", "lsmio", "lmp-reaxff")
         f_adapter = LmpAdapter()
         f_hashes = f_adapter.validateAssets(f_asset_root)
-        self.assertEqual(set(f_hashes.keys()), {"in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"})
+        self.assertEqual(
+            set(f_hashes.keys()), {"in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"}
+        )
         for f_name, f_hash in f_hashes.items():
-            self.assertEqual(len(f_hash), 64, f"Hash for {f_name} is not 64 hex characters: {f_hash}")
+            self.assertEqual(
+                len(f_hash), 64, f"Hash for {f_name} is not 64 hex characters: {f_hash}"
+            )
 
         # 6. Verify staging assets into a destination directory
         f_test_staging = os.path.join(self.m_work_dir, "test_lmp_staging")
@@ -235,7 +266,9 @@ class InstalledSmoke(unittest.TestCase):
         self.assertEqual(f_staged_hashes, f_hashes)
         for f_name in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
             f_dest_file = os.path.join(f_test_staging, f_name)
-            self.assertTrue(os.path.isfile(f_dest_file), f"Staged file missing: {f_dest_file}")
+            self.assertTrue(
+                os.path.isfile(f_dest_file), f"Staged file missing: {f_dest_file}"
+            )
 
     def testMissingCopiedStageResourceCannotFallback(self) -> None:
         """Verify that a damaged copied stage fails strictly without falling back to source, cwd, or home."""
@@ -266,9 +299,19 @@ class InstalledSmoke(unittest.TestCase):
                 f_f.write("0.2.0\n")
 
             # Case A1: Missing required module (worker.py) -> InstalledPackageValidator raises and wrapper prints error
-            f_target_worker = os.path.join(f_copy_stage, "share", "lsmio", "python", "lsmiotool", "lib", "worker.py")
+            f_target_worker = os.path.join(
+                f_copy_stage,
+                "share",
+                "lsmio",
+                "python",
+                "lsmiotool",
+                "lib",
+                "worker.py",
+            )
             os.remove(f_target_worker)
-            f_pkg_a = os.path.join(f_copy_stage, "share", "lsmio", "python", "lsmiotool")
+            f_pkg_a = os.path.join(
+                f_copy_stage, "share", "lsmio", "python", "lsmiotool"
+            )
             with self.assertRaises(PackageValidationError):
                 InstalledPackageValidator.validate(f_pkg_a)
             f_proc_a = subprocess.run(
@@ -281,7 +324,9 @@ class InstalledSmoke(unittest.TestCase):
             self.assertIn("Package validation error", f_proc_a.stderr)
 
             # Case A2: Missing top-level imported module (cli.py) -> wrapper fails without falling back to source/cwd
-            f_target_cli = os.path.join(f_copy_stage, "share", "lsmio", "python", "lsmiotool", "lib", "cli.py")
+            f_target_cli = os.path.join(
+                f_copy_stage, "share", "lsmio", "python", "lsmiotool", "lib", "cli.py"
+            )
             os.remove(f_target_cli)
             f_proc_cli = subprocess.run(
                 [os.path.join(f_copy_stage, "bin", "lsmiotool"), "--help"],
@@ -294,7 +339,9 @@ class InstalledSmoke(unittest.TestCase):
             # Case B: Missing VERSION file in copied stage -> getVersion must raise VersionError
             f_copy_b = os.path.join(f_temp_dir, "stage_b")
             shutil.copytree(self.m_stage_dir, f_copy_b, symlinks=False)
-            f_ver_b = os.path.join(f_copy_b, "share", "lsmio", "python", "lsmiotool", "VERSION")
+            f_ver_b = os.path.join(
+                f_copy_b, "share", "lsmio", "python", "lsmiotool", "VERSION"
+            )
             os.remove(f_ver_b)
             with self.assertRaises(VersionError):
                 getVersion(f_ver_b)
@@ -309,15 +356,21 @@ class InstalledSmoke(unittest.TestCase):
             # Case C: Missing asset in copied stage -> validateAssets must fail
             f_copy_c = os.path.join(f_temp_dir, "stage_c")
             shutil.copytree(self.m_stage_dir, f_copy_c, symlinks=False)
-            f_asset_c = os.path.join(f_copy_c, "share", "lsmio", "lmp-reaxff", "in.reaxc.hns")
+            f_asset_c = os.path.join(
+                f_copy_c, "share", "lsmio", "lmp-reaxff", "in.reaxc.hns"
+            )
             os.remove(f_asset_c)
             with self.assertRaises(BenchmarkConfigurationError):
-                LmpAdapter().validateAssets(os.path.join(f_copy_c, "share", "lsmio", "lmp-reaxff"))
+                LmpAdapter().validateAssets(
+                    os.path.join(f_copy_c, "share", "lsmio", "lmp-reaxff")
+                )
 
             # Case D: Missing profile in copied stage -> ProfileLoader must fail
             f_copy_d = os.path.join(f_temp_dir, "stage_d")
             shutil.copytree(self.m_stage_dir, f_copy_d, symlinks=False)
-            f_prof_d = os.path.join(f_copy_d, "share", "lsmio", "etc", "environments.json")
+            f_prof_d = os.path.join(
+                f_copy_d, "share", "lsmio", "etc", "environments.json"
+            )
             os.remove(f_prof_d)
             with self.assertRaises((ProfileSchemaError, FileNotFoundError, OSError)):
                 ProfileLoader.load(f_prof_d)
@@ -395,7 +448,9 @@ class InstalledSmoke(unittest.TestCase):
         os.chmod(f_ior_fixture, 0o755)
 
         # 2. Build DEV profile with custom benchmark root and resolved ior fixture
-        f_profile_file = os.path.join(self.m_stage_dir, "share", "lsmio", "etc", "environments.json")
+        f_profile_file = os.path.join(
+            self.m_stage_dir, "share", "lsmio", "etc", "environments.json"
+        )
         f_dev_profile = EnvironmentResolver.resolveProfile(
             "DEV",
             f_user="smoketest",
@@ -428,7 +483,9 @@ class InstalledSmoke(unittest.TestCase):
         os.makedirs(f_unrelated_cwd, exist_ok=True)
         os.makedirs(f_unrelated_home, exist_ok=True)
 
-        f_worker_bin = os.path.join(self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker")
+        f_worker_bin = os.path.join(
+            self.m_stage_dir, "libexec", "lsmio", "lsmiotool-worker"
+        )
 
         f_env = os.environ.copy()
         f_env["HOME"] = f_unrelated_home
@@ -450,10 +507,22 @@ class InstalledSmoke(unittest.TestCase):
         )
 
         # 6. Verify exact six-result artifact tree
-        f_expected_combos = ["c16_b8M", "c16_b1M", "c16_b64K", "c4_b8M", "c4_b1M", "c4_b64K"]
+        f_expected_combos = [
+            "c16_b8M",
+            "c16_b1M",
+            "c16_b64K",
+            "c4_b8M",
+            "c4_b1M",
+            "c4_b64K",
+        ]
         for f_combo in f_expected_combos:
             f_res_path = os.path.join(
-                f_run_root, "points", "00-tasks-1", "combinations", f_combo, "controller-result.json"
+                f_run_root,
+                "points",
+                "00-tasks-1",
+                "combinations",
+                f_combo,
+                "controller-result.json",
             )
             self.assertTrue(
                 os.path.isfile(f_res_path),
@@ -510,7 +579,17 @@ class InstalledSmoke(unittest.TestCase):
             ([f_worker_bin, "rank"], 2),
             ([f_worker_bin, "rank", f_manifest_path], 2),
             ([f_worker_bin, "rank", f_manifest_path, "00-tasks-1"], 2),
-            ([f_worker_bin, "rank", f_manifest_path, "00-tasks-1", "c16_b8M", "extra"], 2),
+            (
+                [
+                    f_worker_bin,
+                    "rank",
+                    f_manifest_path,
+                    "00-tasks-1",
+                    "c16_b8M",
+                    "extra",
+                ],
+                2,
+            ),
             ([f_worker_bin, "unknown_mode"], 1),
         ):
             f_proc_arity = subprocess.run(
@@ -526,7 +605,9 @@ class InstalledSmoke(unittest.TestCase):
                 f"Unexpected returncode for {f_bad_args}: got {f_proc_arity.returncode}, expected {f_expected_ret}",
             )
 
-    def testStagedPublicExecutableFromUnrelatedCwdHomeWithProductionProfile(self) -> None:
+    def testStagedPublicExecutableFromUnrelatedCwdHomeWithProductionProfile(
+        self,
+    ) -> None:
         """Chunk 020: Invokes the staged lsmiotool executable from an unrelated CWD/HOME with decoys and credentials, asserting preflight failure without F-01 errors."""
         f_public_bin = os.path.join(self.m_stage_dir, "bin", "lsmiotool")
         f_unrelated_cwd = os.path.join(self.m_work_dir, "unrelated_staged_exec_cwd")
@@ -538,9 +619,13 @@ class InstalledSmoke(unittest.TestCase):
         for f_dir in (f_unrelated_cwd, f_unrelated_home):
             with open(os.path.join(f_dir, "VERSION"), "w", encoding="utf-8") as f_f:
                 f_f.write("decoy-version\n")
-            with open(os.path.join(f_dir, "in.reaxc.hns"), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_dir, "in.reaxc.hns"), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("# decoy\n")
-            with open(os.path.join(f_dir, "lsmiotool-worker"), "w", encoding="utf-8") as f_f:
+            with open(
+                os.path.join(f_dir, "lsmiotool-worker"), "w", encoding="utf-8"
+            ) as f_f:
                 f_f.write("#!/bin/sh\nexit 99\n")
             os.chmod(os.path.join(f_dir, "lsmiotool-worker"), 0o755)
 
@@ -579,19 +664,26 @@ class InstalledSmoke(unittest.TestCase):
         self.assertNotIn("Run ID:", f_proc_lmp.stdout)
 
 
-
 def main(f_argv: Optional[Sequence[str]] = None) -> int:
     """Entry point for installed smoke test."""
-    f_parser = argparse.ArgumentParser(description="Isolated smoke test for staged lsmiotool installation")
-    f_parser.add_argument("--stage", required=True, help="Path to staged installation prefix directory")
-    f_parser.add_argument("--work", required=True, help="Path to smoke working directory")
+    f_parser = argparse.ArgumentParser(
+        description="Isolated smoke test for staged lsmiotool installation"
+    )
+    f_parser.add_argument(
+        "--stage", required=True, help="Path to staged installation prefix directory"
+    )
+    f_parser.add_argument(
+        "--work", required=True, help="Path to smoke working directory"
+    )
     f_args = f_parser.parse_args(f_argv)
 
     f_stage_abs = os.path.abspath(f_args.stage)
     f_work_abs = os.path.abspath(f_args.work)
 
     if not os.path.isdir(f_stage_abs):
-        sys.stderr.write(f"Error: Stage directory '{f_stage_abs}' does not exist or is not a directory.\n")
+        sys.stderr.write(
+            f"Error: Stage directory '{f_stage_abs}' does not exist or is not a directory.\n"
+        )
         return 1
 
     os.makedirs(f_work_abs, exist_ok=True)

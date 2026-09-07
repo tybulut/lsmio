@@ -134,7 +134,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
         for f_setup in f_setups:
             for f_combo in f_combos:
-                f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup=f_setup)
+                f_req = RunRequest(
+                    f_target="lsmio", f_scale="small", f_ssd=False, f_setup=f_setup
+                )
                 f_spec = self.m_adapter.createLaunchSpec(
                     f_request=f_req,
                     f_combination=f_combo,
@@ -169,18 +171,20 @@ class LsmioAdapterTest(unittest.TestCase):
                     f_expected_argv_list.extend(["-m", "-g"])
                 if f_setup in ("PLUGIN", "PLUGIN-M"):
                     f_expected_argv_list.append("--lsmio-plugin")
-                f_expected_argv_list.extend([
-                    "-i",
-                    "10",
-                    "-o",
-                    f_expected_out,
-                    "--lsmio-ts",
-                    f_bsb,
-                    "--lsmio-bs",
-                    f_bsb,
-                    "--key-count",
-                    f_sg,
-                ])
+                f_expected_argv_list.extend(
+                    [
+                        "-i",
+                        "10",
+                        "-o",
+                        f_expected_out,
+                        "--lsmio-ts",
+                        f_bsb,
+                        "--lsmio-bs",
+                        f_bsb,
+                        "--key-count",
+                        f_sg,
+                    ]
+                )
 
                 self.assertEqual(
                     f_bound.argv,
@@ -199,7 +203,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testTemplateUnbound(self) -> None:
         """Confirm template from createLaunchSpec is unbound and rank-local."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
@@ -220,7 +226,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testPureBindDistinctGlobals(self) -> None:
         """Confirm distinct global ranks yield distinct rank-private paths."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="ROCKSDB-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="ROCKSDB-M"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_1m,
@@ -230,7 +238,9 @@ class LsmioAdapterTest(unittest.TestCase):
         f_ranks = [0, 1, 2, 3]
         f_bound_commands = []
         for f_r in f_ranks:
-            f_id = RankIdentity(f_global_rank=f_r, f_node_rank=f"node0{f_r+1}", f_local_rank=0)
+            f_id = RankIdentity(
+                f_global_rank=f_r, f_node_rank=f"node0{f_r + 1}", f_local_rank=0
+            )
             f_cmd = self.m_adapter.bindRank(
                 f_spec=f_spec,
                 f_identity=f_id,
@@ -259,7 +269,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testPbsNoneLocalAccepted(self) -> None:
         """Confirm PBS local_rank=None binds cleanly."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="LEVELDB")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="LEVELDB"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_64k,
@@ -288,7 +300,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testRangeAndContainment(self) -> None:
         """Assert negative or out-of-range global ranks fail with BenchmarkConfigurationError."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
@@ -296,7 +310,9 @@ class LsmioAdapterTest(unittest.TestCase):
         )
 
         # 1. Out of range: global_rank == tasks (4 >= 4)
-        f_out_of_range_id = RankIdentity(f_global_rank=4, f_node_rank="node01", f_local_rank=0)
+        f_out_of_range_id = RankIdentity(
+            f_global_rank=4, f_node_rank="node01", f_local_rank=0
+        )
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.bindRank(
                 f_spec=f_spec,
@@ -305,7 +321,9 @@ class LsmioAdapterTest(unittest.TestCase):
             )
 
         # 2. Large out of range: global_rank == 100
-        f_large_id = RankIdentity(f_global_rank=100, f_node_rank="node01", f_local_rank=0)
+        f_large_id = RankIdentity(
+            f_global_rank=100, f_node_rank="node01", f_local_rank=0
+        )
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.bindRank(
                 f_spec=f_spec,
@@ -329,7 +347,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testNoClaimStoreOrFilesystemCalls(self) -> None:
         """Spy on filesystem and store to prove bindRank performs zero I/O or lock calls."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="MANAGER")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="MANAGER"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
@@ -370,7 +390,9 @@ class LsmioAdapterTest(unittest.TestCase):
         # 1. createLaunchSpec with setup ENV
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.createLaunchSpec(
-                f_request=RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="ENV"),
+                f_request=RunRequest(
+                    f_target="lsmio", f_scale="small", f_ssd=False, f_setup="ENV"
+                ),
                 f_combination=self.m_combo_8m,
                 f_point=self.m_point,
             )
@@ -378,7 +400,9 @@ class LsmioAdapterTest(unittest.TestCase):
         # 2. createLaunchSpec with lowercase setup 'env'
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.createLaunchSpec(
-                f_request=RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="env"),
+                f_request=RunRequest(
+                    f_target="lsmio", f_scale="small", f_ssd=False, f_setup="env"
+                ),
                 f_combination=self.m_combo_8m,
                 f_point=self.m_point,
             )
@@ -426,7 +450,9 @@ class LsmioAdapterTest(unittest.TestCase):
     def testUnverifiedNoVersionClaim(self) -> None:
         """Prove unprobeable LSMIO binaries remain recorded as configured/unverified (Critic P-02)."""
         # When runner is None, returns CapabilityState.CONFIGURED without claiming version
-        f_state = self.m_adapter.probeCapability(f_executable="/bin/bm_native", f_runner=None)
+        f_state = self.m_adapter.probeCapability(
+            f_executable="/bin/bm_native", f_runner=None
+        )
         self.assertEqual(f_state, CapabilityState.CONFIGURED)
         self.assertEqual(f_state, ProbeState.CONFIGURED)
         self.assertTrue(f_state.is_configured)
@@ -439,21 +465,28 @@ class LsmioAdapterTest(unittest.TestCase):
         def mockRunner(f_argv: Sequence[str]) -> MockProcessResult:
             nonlocal f_runner_called
             f_runner_called = True
-            return MockProcessResult(returncode=0, stdout="LSMIO Benchmark version 1.0", stderr="")
+            return MockProcessResult(
+                returncode=0, stdout="LSMIO Benchmark version 1.0", stderr=""
+            )
 
         f_state_with_runner = self.m_adapter.probeCapability(
             f_executable="/bin/bm_native",
             f_runner=mockRunner,
             f_setup="NATIVE-M",
         )
-        self.assertFalse(f_runner_called, "LSMIO probe should not invoke runner on probe-incapable binaries")
+        self.assertFalse(
+            f_runner_called,
+            "LSMIO probe should not invoke runner on probe-incapable binaries",
+        )
         self.assertEqual(f_state_with_runner, CapabilityState.CONFIGURED)
         self.assertTrue(f_state_with_runner.is_configured)
         self.assertFalse(f_state_with_runner.is_verified)
 
     def testCommandImmutability(self) -> None:
         """Verify that LsmioLaunchSpec and LsmioBoundCommand are immutable."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
@@ -480,7 +513,9 @@ class LsmioAdapterTest(unittest.TestCase):
     def testSpacesRemainArgv(self) -> None:
         """Verify argv tokens with spaces remain discrete arguments and are not word-split."""
         f_exe_with_spaces = "/opt/lsmio tools/bin/bm native executable"
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
@@ -504,7 +539,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testNulByteRejection(self) -> None:
         """Verify that NUL bytes in arguments or paths raise BenchmarkConfigurationError."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+        )
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.createLaunchSpec(
                 f_request=f_req,
@@ -551,7 +588,9 @@ class LsmioAdapterTest(unittest.TestCase):
 
     def testEqualityHashAndDict(self) -> None:
         """Verify equality, hashing, and dict conversion of LsmioLaunchSpec and LsmioBoundCommand."""
-        f_req = RunRequest(f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M")
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+        )
         f_spec1 = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
@@ -580,9 +619,15 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertEqual(f_dict["is_bound"], False)
 
         f_id = RankIdentity(f_global_rank=0, f_node_rank="node01", f_local_rank=0)
-        f_bound1 = self.m_adapter.bindRank(f_spec=f_spec1, f_identity=f_id, f_layout=self.m_layout)
-        f_bound2 = self.m_adapter.bindRank(f_spec=f_spec1, f_identity=f_id, f_layout=self.m_layout)
-        f_bound3 = self.m_adapter.bindRank(f_spec=f_spec3, f_identity=f_id, f_layout=self.m_layout)
+        f_bound1 = self.m_adapter.bindRank(
+            f_spec=f_spec1, f_identity=f_id, f_layout=self.m_layout
+        )
+        f_bound2 = self.m_adapter.bindRank(
+            f_spec=f_spec1, f_identity=f_id, f_layout=self.m_layout
+        )
+        f_bound3 = self.m_adapter.bindRank(
+            f_spec=f_spec3, f_identity=f_id, f_layout=self.m_layout
+        )
 
         self.assertEqual(f_bound1, f_bound2)
         self.assertEqual(hash(f_bound1), hash(f_bound2))

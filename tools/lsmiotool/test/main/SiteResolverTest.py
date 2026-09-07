@@ -56,7 +56,9 @@ class SiteResolverTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.m_default_profile_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "etc", "environments.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
         )
         self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
         self.m_test_user = "alice"
@@ -110,8 +112,12 @@ class SiteResolverTest(unittest.TestCase):
         for f_site_name, f_exp in f_expected_roots.items():
             f_prof = f_registry.getProfile(f_site_name)
             self.assertEqual(f_prof.name, f_site_name)
-            self.assertEqual(f_prof.getBenchmarkRoot(StorageClass.HDD), f_exp[StorageClass.HDD])
-            self.assertEqual(f_prof.getBenchmarkRoot(StorageClass.SSD), f_exp[StorageClass.SSD])
+            self.assertEqual(
+                f_prof.getBenchmarkRoot(StorageClass.HDD), f_exp[StorageClass.HDD]
+            )
+            self.assertEqual(
+                f_prof.getBenchmarkRoot(StorageClass.SSD), f_exp[StorageClass.SSD]
+            )
             self.assertEqual(f_prof.getBenchmarkRoot("hdd"), f_exp[StorageClass.HDD])
             self.assertEqual(f_prof.getBenchmarkRoot("ssd"), f_exp[StorageClass.SSD])
             self.assertEqual(f_prof.benchmark_roots["hdd"], f_exp[StorageClass.HDD])
@@ -121,7 +127,9 @@ class SiteResolverTest(unittest.TestCase):
             # Check executables resolved below prefix/bin
             for f_ex in f_exec_names:
                 f_exp_exec_path = f"{f_exp['prefix']}/bin/{f_ex}"
-                self.assertEqual(f_prof.executables.getExecutable(f_ex), f_exp_exec_path)
+                self.assertEqual(
+                    f_prof.executables.getExecutable(f_ex), f_exp_exec_path
+                )
                 self.assertEqual(f_prof.executables[f_ex], f_exp_exec_path)
                 self.assertEqual(getattr(f_prof.executables, f_ex), f_exp_exec_path)
 
@@ -129,13 +137,38 @@ class SiteResolverTest(unittest.TestCase):
         """Assert scheduler kind, launcher policy, certification state, and test_only label for all profiles."""
         f_expected_meta = {
             "DEV": (SchedulerKind.FAKE, "fake", CertificationState.CONFIGURED, True),
-            "VIKING": (SchedulerKind.SLURM, "srun", CertificationState.CONFIGURED, False),
-            "VIKING2": (SchedulerKind.SLURM, "srun", CertificationState.CONFIGURED, False),
-            "ARCHER2": (SchedulerKind.SLURM, "srun", CertificationState.CONFIGURED, False),
-            "ISAMBARD": (SchedulerKind.PBS, "aprun", CertificationState.CONFIGURED, False),
+            "VIKING": (
+                SchedulerKind.SLURM,
+                "srun",
+                CertificationState.CONFIGURED,
+                False,
+            ),
+            "VIKING2": (
+                SchedulerKind.SLURM,
+                "srun",
+                CertificationState.CONFIGURED,
+                False,
+            ),
+            "ARCHER2": (
+                SchedulerKind.SLURM,
+                "srun",
+                CertificationState.CONFIGURED,
+                False,
+            ),
+            "ISAMBARD": (
+                SchedulerKind.PBS,
+                "aprun",
+                CertificationState.CONFIGURED,
+                False,
+            ),
         }
 
-        for f_site_name, (f_exp_sched, f_exp_launch, f_exp_cert, f_exp_test) in f_expected_meta.items():
+        for f_site_name, (
+            f_exp_sched,
+            f_exp_launch,
+            f_exp_cert,
+            f_exp_test,
+        ) in f_expected_meta.items():
             f_prof = EnvironmentResolver.resolveProfile(
                 f_site_name,
                 f_user=self.m_test_user,
@@ -198,10 +231,14 @@ class SiteResolverTest(unittest.TestCase):
             ResourcePolicy(f_scheduler=SchedulerKind.SLURM, f_mail_mode=PbsMailMode.ABE)
 
         with self.assertRaises(SiteResolutionError):
-            ResourcePolicy(f_scheduler=SchedulerKind.PBS, f_mail_mode=SlurmMailMode.END_FAIL)
+            ResourcePolicy(
+                f_scheduler=SchedulerKind.PBS, f_mail_mode=SlurmMailMode.END_FAIL
+            )
 
         with self.assertRaises(SiteResolutionError):
-            ResourcePolicy(f_scheduler=SchedulerKind.FAKE, f_mail_mode=SlurmMailMode.END_FAIL)
+            ResourcePolicy(
+                f_scheduler=SchedulerKind.FAKE, f_mail_mode=SlurmMailMode.END_FAIL
+            )
 
         # 3. Modify ProfileRecord with invalid or cross-backend mail_mode strings
         f_orig_rec = self.m_profile_doc.getProfile("VIKING")
@@ -476,10 +513,14 @@ class SiteResolverTest(unittest.TestCase):
         """Test all hostname, group, and environment detection branches."""
         # 1. Viking2 precedence over Viking on hostname containing viking2
         self.assertEqual(
-            EnvironmentResolver.detect(f_hostname="viking2-login01", f_env={}), "VIKING2"
+            EnvironmentResolver.detect(f_hostname="viking2-login01", f_env={}),
+            "VIKING2",
         )
         self.assertEqual(
-            EnvironmentResolver.detect(f_hostname="node01.viking2.york.ac.uk", f_env={}), "VIKING2"
+            EnvironmentResolver.detect(
+                f_hostname="node01.viking2.york.ac.uk", f_env={}
+            ),
+            "VIKING2",
         )
         self.assertEqual(
             EnvironmentResolver.detect(f_hostname="viking2", f_env={}), "VIKING2"
@@ -490,7 +531,8 @@ class SiteResolverTest(unittest.TestCase):
             EnvironmentResolver.detect(f_hostname="viking-login01", f_env={}), "VIKING"
         )
         self.assertEqual(
-            EnvironmentResolver.detect(f_hostname="node01.viking.york.ac.uk", f_env={}), "VIKING"
+            EnvironmentResolver.detect(f_hostname="node01.viking.york.ac.uk", f_env={}),
+            "VIKING",
         )
         self.assertEqual(
             EnvironmentResolver.detect(f_hostname="viking", f_env={}), "VIKING"
@@ -506,7 +548,8 @@ class SiteResolverTest(unittest.TestCase):
 
         # 4. Archer2 on hostname or groups
         self.assertEqual(
-            EnvironmentResolver.detect(f_hostname="archer2-login01", f_env={}), "ARCHER2"
+            EnvironmentResolver.detect(f_hostname="archer2-login01", f_env={}),
+            "ARCHER2",
         )
         self.assertEqual(
             EnvironmentResolver.detect(
@@ -529,7 +572,8 @@ class SiteResolverTest(unittest.TestCase):
             EnvironmentResolver.detect(f_env={"LSMIO_ENV": "ARCHER2"}), "ARCHER2"
         )
         self.assertEqual(
-            EnvironmentResolver.detect(f_env={"LSMIO_ENV": "DEV"}, f_test_mode=True), "DEV"
+            EnvironmentResolver.detect(f_env={"LSMIO_ENV": "DEV"}, f_test_mode=True),
+            "DEV",
         )
 
         # 6. Unmatched hostname in test mode resolves to DEV
@@ -550,9 +594,7 @@ class SiteResolverTest(unittest.TestCase):
 
         # 2. LSMIO_ENV=DEV without test_mode must fail
         with self.assertRaises(SiteResolutionError):
-            EnvironmentResolver.detect(
-                f_env={"LSMIO_ENV": "DEV"}, f_test_mode=False
-            )
+            EnvironmentResolver.detect(f_env={"LSMIO_ENV": "DEV"}, f_test_mode=False)
 
         # 3. Invalid LSMIO_ENV name must fail
         with self.assertRaises(SiteResolutionError):
@@ -560,9 +602,7 @@ class SiteResolverTest(unittest.TestCase):
 
         # 4. Ambiguous hostname matching multiple sites must fail closed
         with self.assertRaises(SiteResolutionError):
-            EnvironmentResolver.detect(
-                f_hostname="xci-archer2-login", f_env={}
-            )
+            EnvironmentResolver.detect(f_hostname="xci-archer2-login", f_env={})
 
         with self.assertRaises(SiteResolutionError):
             EnvironmentResolver.detect(

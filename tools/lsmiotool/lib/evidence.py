@@ -133,9 +133,13 @@ class JobHandle:
                 f"JobHandle job_id must be a non-empty string, got: {f_job_id!r}"
             )
         if "\0" in f_backend or "\n" in f_backend or "\r" in f_backend:
-            raise EvidenceSchemaError(f"JobHandle backend contains invalid control characters: {f_backend!r}")
+            raise EvidenceSchemaError(
+                f"JobHandle backend contains invalid control characters: {f_backend!r}"
+            )
         if "\0" in f_job_id or "\n" in f_job_id or "\r" in f_job_id:
-            raise EvidenceSchemaError(f"JobHandle job_id contains invalid control characters: {f_job_id!r}")
+            raise EvidenceSchemaError(
+                f"JobHandle job_id contains invalid control characters: {f_job_id!r}"
+            )
 
         super().__setattr__("m_backend", f_backend.strip().lower())
         super().__setattr__("m_job_id", f_job_id.strip())
@@ -148,7 +152,9 @@ class JobHandle:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -172,7 +178,9 @@ class JobHandle:
     @classmethod
     def fromDict(cls, f_data: Dict[str, Any]) -> "JobHandle":
         if not isinstance(f_data, dict):
-            raise EvidenceSchemaError(f"Expected dict for JobHandle, got: {type(f_data).__name__}")
+            raise EvidenceSchemaError(
+                f"Expected dict for JobHandle, got: {type(f_data).__name__}"
+            )
         if "backend" not in f_data or "job_id" not in f_data:
             raise EvidenceSchemaError(
                 f"JobHandle requires 'backend' and 'job_id' keys, got: {list(f_data.keys())}"
@@ -184,7 +192,10 @@ class JobHandle:
 
     def __eq__(self, f_other: Any) -> bool:
         if isinstance(f_other, JobHandle):
-            return self.m_backend == f_other.m_backend and self.m_job_id == f_other.m_job_id
+            return (
+                self.m_backend == f_other.m_backend
+                and self.m_job_id == f_other.m_job_id
+            )
         return False
 
     def __hash__(self) -> int:
@@ -245,9 +256,18 @@ class EvidenceRecord:
             )
 
         if not isinstance(f_writer_id, str) or not f_writer_id.strip():
-            raise EvidenceSchemaError(f"writer_id must be a non-empty string, got: {f_writer_id!r}")
-        if "/" in f_writer_id or "\\" in f_writer_id or ".." in f_writer_id or "\0" in f_writer_id:
-            raise ContainmentError(f"Invalid writer_id containing traversal or separator: {f_writer_id!r}")
+            raise EvidenceSchemaError(
+                f"writer_id must be a non-empty string, got: {f_writer_id!r}"
+            )
+        if (
+            "/" in f_writer_id
+            or "\\" in f_writer_id
+            or ".." in f_writer_id
+            or "\0" in f_writer_id
+        ):
+            raise ContainmentError(
+                f"Invalid writer_id containing traversal or separator: {f_writer_id!r}"
+            )
 
         if not isinstance(f_sequence_number, int) or f_sequence_number < 1:
             raise EvidenceSequenceError(
@@ -290,10 +310,14 @@ class EvidenceRecord:
             else None
         )
         f_norm_run_id = (
-            str(f_run_id).strip() if f_run_id is not None and str(f_run_id).strip() else None
+            str(f_run_id).strip()
+            if f_run_id is not None and str(f_run_id).strip()
+            else None
         )
         f_norm_point_id = (
-            str(f_point_id).strip() if f_point_id is not None and str(f_point_id).strip() else None
+            str(f_point_id).strip()
+            if f_point_id is not None and str(f_point_id).strip()
+            else None
         )
         f_norm_combo = (
             str(f_combination).strip()
@@ -323,7 +347,9 @@ class EvidenceRecord:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -438,7 +464,9 @@ class EvidenceRecord:
     @classmethod
     def fromDict(cls, f_data: Dict[str, Any]) -> "EvidenceRecord":
         if not isinstance(f_data, dict):
-            raise EvidenceSchemaError(f"Expected dict for EvidenceRecord, got: {type(f_data).__name__}")
+            raise EvidenceSchemaError(
+                f"Expected dict for EvidenceRecord, got: {type(f_data).__name__}"
+            )
 
         f_schema = f_data.get("schema_version")
         if f_schema != cls.SCHEMA_VERSION:
@@ -456,7 +484,9 @@ class EvidenceRecord:
         ]
         for f_req in f_required:
             if f_req not in f_data:
-                raise EvidenceSchemaError(f"Missing required field in EvidenceRecord: {f_req!r}")
+                raise EvidenceSchemaError(
+                    f"Missing required field in EvidenceRecord: {f_req!r}"
+                )
 
         return cls(
             f_writer_kind=f_data["writer_kind"],
@@ -517,7 +547,9 @@ class EvidenceSerializer:
             try:
                 f_parsed = json.loads(f_data)
             except Exception as f_err:
-                raise EvidenceCorruptionError(f"Failed to parse evidence JSON: {f_err}") from f_err
+                raise EvidenceCorruptionError(
+                    f"Failed to parse evidence JSON: {f_err}"
+                ) from f_err
         elif isinstance(f_data, dict):
             f_parsed = f_data
         else:
@@ -536,7 +568,12 @@ class EvidenceSerializer:
 class ResultPayloadValidator:
     """Validator enforcing exact schema, type, identity, and artifact constraints on terminal result payloads."""
 
-    CANONICAL_SUCCESS_STATUSES: Set[str] = {"success", "succeeded", "completed", "complete"}
+    CANONICAL_SUCCESS_STATUSES: Set[str] = {
+        "success",
+        "succeeded",
+        "completed",
+        "complete",
+    }
     CANONICAL_FAILURE_STATUSES: Set[str] = {"failed", "failure"}
 
     RANK_SUCCESS_ALLOWED_KEYS: Set[str] = {
@@ -623,9 +660,14 @@ class ResultPayloadValidator:
             raise EvidenceSchemaError("Result payload missing required field 'status'")
         f_raw_status = f_clean["status"]
         if not isinstance(f_raw_status, str) or not f_raw_status.strip():
-            raise EvidenceSchemaError(f"Result payload 'status' must be a non-empty string, got: {f_raw_status!r}")
+            raise EvidenceSchemaError(
+                f"Result payload 'status' must be a non-empty string, got: {f_raw_status!r}"
+            )
         f_status = f_raw_status.strip().lower()
-        if f_status not in cls.CANONICAL_SUCCESS_STATUSES and f_status not in cls.CANONICAL_FAILURE_STATUSES:
+        if (
+            f_status not in cls.CANONICAL_SUCCESS_STATUSES
+            and f_status not in cls.CANONICAL_FAILURE_STATUSES
+        ):
             raise EvidenceSchemaError(
                 f"Invalid result payload status: {f_raw_status!r} (must be one of {sorted(cls.CANONICAL_SUCCESS_STATUSES | cls.CANONICAL_FAILURE_STATUSES)})"
             )
@@ -635,10 +677,14 @@ class ResultPayloadValidator:
             if "returncode" in f_clean:
                 f_clean["exit_code"] = f_clean["returncode"]
             else:
-                raise EvidenceSchemaError("Result payload missing required field 'exit_code'")
+                raise EvidenceSchemaError(
+                    "Result payload missing required field 'exit_code'"
+                )
         f_raw_exit = f_clean["exit_code"]
         if isinstance(f_raw_exit, bool) or not isinstance(f_raw_exit, int):
-            raise EvidenceSchemaError(f"Result payload 'exit_code' must be an integer, got: {f_raw_exit!r}")
+            raise EvidenceSchemaError(
+                f"Result payload 'exit_code' must be an integer, got: {f_raw_exit!r}"
+            )
         f_exit_code = int(f_raw_exit)
 
         # 3. Status vs exit_code consistency
@@ -654,9 +700,13 @@ class ResultPayloadValidator:
             if "timed_out" in f_clean:
                 f_to = f_clean["timed_out"]
                 if not isinstance(f_to, bool):
-                    raise EvidenceSchemaError(f"timed_out must be a boolean, got: {f_to!r}")
+                    raise EvidenceSchemaError(
+                        f"timed_out must be a boolean, got: {f_to!r}"
+                    )
                 if f_to is True:
-                    raise EvidenceSchemaError("Success payload cannot have timed_out=True")
+                    raise EvidenceSchemaError(
+                        "Success payload cannot have timed_out=True"
+                    )
         else:
             # Failure
             if f_exit_code == 0:
@@ -668,7 +718,9 @@ class ResultPayloadValidator:
         if "exit_status" in f_clean:
             f_raw_es = f_clean["exit_status"]
             if isinstance(f_raw_es, bool) or not isinstance(f_raw_es, int):
-                raise EvidenceSchemaError(f"exit_status must be an integer, got: {f_raw_es!r}")
+                raise EvidenceSchemaError(
+                    f"exit_status must be an integer, got: {f_raw_es!r}"
+                )
             if f_status in cls.CANONICAL_SUCCESS_STATUSES and f_raw_es != 0:
                 raise EvidenceSchemaError(
                     f"Success payload cannot have non-zero exit_status: {f_raw_es}"
@@ -676,7 +728,11 @@ class ResultPayloadValidator:
 
         if "elapsed_seconds" in f_clean:
             f_raw_el = f_clean["elapsed_seconds"]
-            if isinstance(f_raw_el, bool) or not isinstance(f_raw_el, (int, float)) or f_raw_el < 0.0:
+            if (
+                isinstance(f_raw_el, bool)
+                or not isinstance(f_raw_el, (int, float))
+                or f_raw_el < 0.0
+            ):
                 raise EvidenceSchemaError(
                     f"elapsed_seconds must be a non-negative float/int, got: {f_raw_el!r}"
                 )
@@ -708,14 +764,22 @@ class ResultPayloadValidator:
         f_rank_val: Optional[int] = None
         if "global_rank" in f_clean:
             f_raw_gr = f_clean["global_rank"]
-            if isinstance(f_raw_gr, bool) or not isinstance(f_raw_gr, int) or f_raw_gr < 0:
-                raise EvidenceSchemaError(f"global_rank must be a non-negative integer, got: {f_raw_gr!r}")
+            if (
+                isinstance(f_raw_gr, bool)
+                or not isinstance(f_raw_gr, int)
+                or f_raw_gr < 0
+            ):
+                raise EvidenceSchemaError(
+                    f"global_rank must be a non-negative integer, got: {f_raw_gr!r}"
+                )
             f_rank_val = f_raw_gr
 
         if "rank" in f_clean:
             f_raw_r = f_clean["rank"]
             if isinstance(f_raw_r, bool) or not isinstance(f_raw_r, int) or f_raw_r < 0:
-                raise EvidenceSchemaError(f"rank must be a non-negative integer, got: {f_raw_r!r}")
+                raise EvidenceSchemaError(
+                    f"rank must be a non-negative integer, got: {f_raw_r!r}"
+                )
             if f_rank_val is not None and f_rank_val != f_raw_r:
                 raise EvidenceSchemaError(
                     f"Contradictory rank ({f_raw_r}) and global_rank ({f_rank_val}) in rank payload"
@@ -731,7 +795,9 @@ class ResultPayloadValidator:
         if "combination" in f_clean:
             f_combo_val = f_clean["combination"]
             if not isinstance(f_combo_val, str) or not f_combo_val.strip():
-                raise EvidenceSchemaError(f"combination must be a non-empty string, got: {f_combo_val!r}")
+                raise EvidenceSchemaError(
+                    f"combination must be a non-empty string, got: {f_combo_val!r}"
+                )
             if f_expected_combination is not None:
                 f_norm_exp = f_expected_combination.strip()
                 if f_combo_val.strip() != f_norm_exp:
@@ -750,36 +816,64 @@ class ResultPayloadValidator:
             if f_strict or f_validate_files:
                 # Required rank success fields
                 if "exit_status" not in f_clean:
-                    raise EvidenceSchemaError("Rank success payload requires 'exit_status: 0'")
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires 'exit_status: 0'"
+                    )
                 if f_clean["exit_status"] != 0:
                     raise EvidenceSchemaError(
                         f"Rank success payload exit_status must be 0, got: {f_clean['exit_status']}"
                     )
 
                 if f_rank_val is None:
-                    raise EvidenceSchemaError("Rank success payload requires 'global_rank' or 'rank'")
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires 'global_rank' or 'rank'"
+                    )
                 if f_expected_rank is not None and f_rank_val != f_expected_rank:
                     raise EvidenceSchemaError(
                         f"Rank identity mismatch: expected {f_expected_rank}, got {f_rank_val}"
                     )
 
                 if "combination" not in f_clean:
-                    raise EvidenceSchemaError("Rank success payload requires 'combination'")
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires 'combination'"
+                    )
 
                 if "argv" not in f_clean:
-                    raise EvidenceSchemaError("Rank success payload requires literal 'argv'")
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires literal 'argv'"
+                    )
                 f_argv = f_clean["argv"]
-                if not isinstance(f_argv, (list, tuple)) or len(f_argv) == 0 or not all(isinstance(a, str) for a in f_argv):
-                    raise EvidenceSchemaError(f"Rank success argv must be a non-empty list of strings, got: {f_argv!r}")
+                if (
+                    not isinstance(f_argv, (list, tuple))
+                    or len(f_argv) == 0
+                    or not all(isinstance(a, str) for a in f_argv)
+                ):
+                    raise EvidenceSchemaError(
+                        f"Rank success argv must be a non-empty list of strings, got: {f_argv!r}"
+                    )
 
-                if "log_path" not in f_clean or not isinstance(f_clean["log_path"], str) or not f_clean["log_path"].strip():
-                    raise EvidenceSchemaError("Rank success payload requires non-empty 'log_path'")
+                if (
+                    "log_path" not in f_clean
+                    or not isinstance(f_clean["log_path"], str)
+                    or not f_clean["log_path"].strip()
+                ):
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires non-empty 'log_path'"
+                    )
 
-                if "result_path" not in f_clean or not isinstance(f_clean["result_path"], str) or not f_clean["result_path"].strip():
-                    raise EvidenceSchemaError("Rank success payload requires non-empty 'result_path'")
+                if (
+                    "result_path" not in f_clean
+                    or not isinstance(f_clean["result_path"], str)
+                    or not f_clean["result_path"].strip()
+                ):
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires non-empty 'result_path'"
+                    )
 
                 if "timed_out" not in f_clean:
-                    raise EvidenceSchemaError("Rank success payload requires 'timed_out: false'")
+                    raise EvidenceSchemaError(
+                        "Rank success payload requires 'timed_out: false'"
+                    )
                 if f_clean["timed_out"] is not False:
                     raise EvidenceSchemaError(
                         f"Rank success payload must have timed_out=False, got: {f_clean['timed_out']!r}"
@@ -846,14 +940,22 @@ class ResultPayloadValidator:
 
             if f_strict:
                 # stage is required for controller success
-                if "stage" not in f_clean or not isinstance(f_clean["stage"], str) or not f_clean["stage"].strip():
-                    raise EvidenceSchemaError("Controller success payload requires non-empty 'stage'")
+                if (
+                    "stage" not in f_clean
+                    or not isinstance(f_clean["stage"], str)
+                    or not f_clean["stage"].strip()
+                ):
+                    raise EvidenceSchemaError(
+                        "Controller success payload requires non-empty 'stage'"
+                    )
 
             # LSMIO specific
             f_norm_target = str(f_target).strip().lower() if f_target else None
             if f_norm_target == "lsmio" or "tasks_validated" in f_clean:
                 if f_strict and "tasks_validated" not in f_clean:
-                    raise EvidenceSchemaError("LSMIO controller success requires 'tasks_validated'")
+                    raise EvidenceSchemaError(
+                        "LSMIO controller success requires 'tasks_validated'"
+                    )
                 if "tasks_validated" in f_clean:
                     f_tv = f_clean["tasks_validated"]
                     if isinstance(f_tv, bool) or not isinstance(f_tv, int) or f_tv <= 0:
@@ -892,8 +994,14 @@ class ResultPayloadValidator:
                 raise EvidenceSchemaError(
                     f"Controller failure payload contains forbidden extra fields: {sorted(f_extra)}"
                 )
-            if f_strict and ("stage" not in f_clean or not isinstance(f_clean["stage"], str) or not f_clean["stage"].strip()):
-                raise EvidenceSchemaError("Controller failure payload requires non-empty 'stage'")
+            if f_strict and (
+                "stage" not in f_clean
+                or not isinstance(f_clean["stage"], str)
+                or not f_clean["stage"].strip()
+            ):
+                raise EvidenceSchemaError(
+                    "Controller failure payload requires non-empty 'stage'"
+                )
 
         return f_clean
 
@@ -957,7 +1065,9 @@ class EvidenceStore:
             f_layout = f_benchmark_root_or_layout
         elif isinstance(f_benchmark_root_or_layout, str):
             if f_run_id is None:
-                raise ArtifactError("run_id must be provided when passing benchmark_root string")
+                raise ArtifactError(
+                    "run_id must be provided when passing benchmark_root string"
+                )
             f_layout = ArtifactLayout(f_benchmark_root_or_layout, f_run_id)
         else:
             raise ArtifactError(
@@ -975,7 +1085,9 @@ class EvidenceStore:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -1054,10 +1166,14 @@ class EvidenceStore:
             try:
                 f_rank_int = int(f_global_rank)
             except (ValueError, TypeError):
-                raise EvidencePlanError(f"global_rank must be integer-convertible, got: {f_global_rank!r}")
+                raise EvidencePlanError(
+                    f"global_rank must be integer-convertible, got: {f_global_rank!r}"
+                )
 
             if f_rank_int < 0:
-                raise EvidencePlanError(f"global_rank cannot be negative, got: {f_rank_int}")
+                raise EvidencePlanError(
+                    f"global_rank cannot be negative, got: {f_rank_int}"
+                )
 
             if f_point_tasks is not None:
                 if f_rank_int >= f_point_tasks:
@@ -1147,14 +1263,18 @@ class EvidenceStore:
                 f"Evidence file already exists at '{f_norm_path}': replacement rejected"
             ) from f_err
         except OSError as f_err:
-            raise EvidenceError(f"Failed to open evidence file '{f_norm_path}': {f_err}") from f_err
+            raise EvidenceError(
+                f"Failed to open evidence file '{f_norm_path}': {f_err}"
+            ) from f_err
 
         try:
             f_written = 0
             while f_written < len(f_bytes):
                 f_n = os.write(f_fd, f_bytes[f_written:])
                 if f_n == 0:
-                    raise EvidenceCorruptionError(f"Zero bytes written to evidence at '{f_norm_path}'")
+                    raise EvidenceCorruptionError(
+                        f"Zero bytes written to evidence at '{f_norm_path}'"
+                    )
                 f_written += f_n
 
             os.fsync(f_fd)
@@ -1192,7 +1312,9 @@ class EvidenceStore:
         # Ownership Matrix Validation
         if f_record.writer_kind == WriterKind.CONTROL:
             # Control writer can write to control/events or scheduler directories
-            f_is_control_event = f_norm_path.startswith(f_control_events_prefix + os.sep)
+            f_is_control_event = f_norm_path.startswith(
+                f_control_events_prefix + os.sep
+            )
             f_is_scheduler = (
                 f_norm_path.startswith(f_points_prefix + os.sep)
                 and os.sep + "scheduler" + os.sep in f_norm_path
@@ -1244,7 +1366,9 @@ class EvidenceStore:
                     f"Malformed rank path structure for RANK writer: '{f_norm_path}'"
                 )
         else:
-            raise EvidenceOwnershipError(f"Unknown writer kind: {f_record.writer_kind!r}")
+            raise EvidenceOwnershipError(
+                f"Unknown writer kind: {f_record.writer_kind!r}"
+            )
 
         # Write record
         self._writeExclusiveRecord(f_norm_path, f_record)
@@ -1329,10 +1453,14 @@ class EvidenceStore:
         """Record a scheduler observation event under points/<point>/scheduler/observations/<writer>/<seq>.json."""
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
 
-        f_obs_dir = self.m_layout.pointSchedulerObservationsDir(f_point, f_writer=f_writer_id, f_ordinal=f_ordinal)
+        f_obs_dir = self.m_layout.pointSchedulerObservationsDir(
+            f_point, f_writer=f_writer_id, f_ordinal=f_ordinal
+        )
         self._enforceMonotonicSequence(f_obs_dir, f_sequence)
 
-        f_path = self.m_layout.pointSchedulerObservationPath(f_point, f_writer_id, f_sequence, f_ordinal)
+        f_path = self.m_layout.pointSchedulerObservationPath(
+            f_point, f_writer_id, f_sequence, f_ordinal
+        )
         f_point_name = self.m_layout.pointDirName(f_point, f_ordinal)
         f_rec = EvidenceRecord(
             f_writer_kind=WriterKind.CONTROL,
@@ -1418,7 +1546,9 @@ class EvidenceStore:
         """Record submission_recorded persisting the returned JobHandle."""
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
         if not isinstance(f_handle, JobHandle):
-            raise EvidenceSchemaError(f"Expected JobHandle, got: {type(f_handle).__name__}")
+            raise EvidenceSchemaError(
+                f"Expected JobHandle, got: {type(f_handle).__name__}"
+            )
 
         f_path = os.path.join(
             self.m_layout.pointSchedulerDir(f_point, f_ordinal),
@@ -1556,7 +1686,9 @@ class EvidenceStore:
             f_point=f_point, f_combination=f_combination, f_ordinal=f_ordinal
         )
 
-        f_path = self.m_layout.pointControllerResultPath(f_point, f_combination, f_ordinal)
+        f_path = self.m_layout.pointControllerResultPath(
+            f_point, f_combination, f_ordinal
+        )
         f_point_name = self.m_layout.pointDirName(f_point, f_ordinal)
         f_combo_name = self.m_layout.combinationName(f_combination)
         f_rec = EvidenceRecord(
@@ -1672,7 +1804,9 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> List[EvidenceRecord]:
         """Read all scheduler observations for a writer at a point in monotonic sequence order."""
-        f_dir = self.m_layout.pointSchedulerObservationsDir(f_point, f_writer=f_writer_id, f_ordinal=f_ordinal)
+        f_dir = self.m_layout.pointSchedulerObservationsDir(
+            f_point, f_writer=f_writer_id, f_ordinal=f_ordinal
+        )
         if not os.path.exists(f_dir):
             return []
 
@@ -1729,7 +1863,9 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> Optional[EvidenceRecord]:
         """Read controller result for a point and combination if present."""
-        f_path = self.m_layout.pointControllerResultPath(f_point, f_combination, f_ordinal)
+        f_path = self.m_layout.pointControllerResultPath(
+            f_point, f_combination, f_ordinal
+        )
         return self.readRecordIfExists(f_path)
 
     def readRankResult(
@@ -1740,7 +1876,9 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> Optional[EvidenceRecord]:
         """Read task rank result for a point, rank, and combination if present."""
-        f_path = self.m_layout.pointRankResultPath(f_point, f_global_rank, f_combination, f_ordinal)
+        f_path = self.m_layout.pointRankResultPath(
+            f_point, f_global_rank, f_combination, f_ordinal
+        )
         return self.readRecordIfExists(f_path)
 
     def readSubmissionRecords(

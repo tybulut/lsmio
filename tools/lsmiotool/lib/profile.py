@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 class ProfileSchemaError(Exception):
     """Exception raised when profile schema validation fails."""
+
     pass
 
 
@@ -81,26 +82,14 @@ class ProfileRecord:
         super().__setattr__("m_launcher", f_launcher)
         super().__setattr__("m_certification", f_certification)
         super().__setattr__("m_test_only", f_test_only)
-        super().__setattr__(
-            "m_benchmark_roots", dict(copy.deepcopy(f_benchmark_roots))
-        )
+        super().__setattr__("m_benchmark_roots", dict(copy.deepcopy(f_benchmark_roots)))
         super().__setattr__("m_install_prefix", f_install_prefix)
-        super().__setattr__(
-            "m_executables", dict(copy.deepcopy(f_executables))
-        )
+        super().__setattr__("m_executables", dict(copy.deepcopy(f_executables)))
         super().__setattr__("m_modules", tuple(f_modules))
-        super().__setattr__(
-            "m_resources", dict(copy.deepcopy(f_resources))
-        )
-        super().__setattr__(
-            "m_rank_identity", dict(copy.deepcopy(f_rank_identity))
-        )
-        super().__setattr__(
-            "m_cancellation", dict(copy.deepcopy(f_cancellation))
-        )
-        super().__setattr__(
-            "m_lustre_pools", dict(copy.deepcopy(f_lustre_pools))
-        )
+        super().__setattr__("m_resources", dict(copy.deepcopy(f_resources)))
+        super().__setattr__("m_rank_identity", dict(copy.deepcopy(f_rank_identity)))
+        super().__setattr__("m_cancellation", dict(copy.deepcopy(f_cancellation)))
+        super().__setattr__("m_lustre_pools", dict(copy.deepcopy(f_lustre_pools)))
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -110,7 +99,9 @@ class ProfileRecord:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -204,7 +195,9 @@ class ProfileDocument:
 
     def __delattr__(self, f_key: str) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot delete attribute from immutable {self.__class__.__name__}")
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
         super().__delattr__(f_key)
 
     @property
@@ -218,7 +211,9 @@ class ProfileDocument:
     def getProfile(self, f_name: str) -> ProfileRecord:
         """Get profile by site name or raise ProfileSchemaError if missing."""
         if f_name not in self.m_profiles:
-            raise ProfileSchemaError(f"Profile '{f_name}' not found in profile document")
+            raise ProfileSchemaError(
+                f"Profile '{f_name}' not found in profile document"
+            )
         return self.m_profiles[f_name]
 
     def toDict(self) -> Dict[str, Any]:
@@ -226,8 +221,7 @@ class ProfileDocument:
         return {
             "schema_version": self.m_schema_version,
             "profiles": {
-                f_name: f_rec.toDict()
-                for f_name, f_rec in self.m_profiles.items()
+                f_name: f_rec.toDict() for f_name, f_rec in self.m_profiles.items()
             },
         }
 
@@ -289,7 +283,9 @@ class ProfileLoader:
         exact keys and types, and returns an immutable ProfileDocument.
         """
         if not isinstance(f_path, str) or not f_path:
-            raise ProfileSchemaError(f"Profile path must be a non-empty string, got: {f_path!r}")
+            raise ProfileSchemaError(
+                f"Profile path must be a non-empty string, got: {f_path!r}"
+            )
 
         try:
             f_stat = os.lstat(f_path)
@@ -304,9 +300,7 @@ class ProfileLoader:
             )
 
         if not stat.S_ISREG(f_stat.st_mode):
-            raise ProfileSchemaError(
-                f"Profile path '{f_path}' is not a regular file"
-            )
+            raise ProfileSchemaError(f"Profile path '{f_path}' is not a regular file")
 
         try:
             with open(f_path, "r", encoding="utf-8") as f_file:
@@ -376,9 +370,7 @@ class ProfileLoader:
         cls, f_site_name: str, f_site_dict: Any
     ) -> ProfileRecord:
         if not isinstance(f_site_dict, dict):
-            raise ProfileSchemaError(
-                f"Profile '{f_site_name}' must be a dictionary"
-            )
+            raise ProfileSchemaError(f"Profile '{f_site_name}' must be a dictionary")
 
         f_keys = set(f_site_dict.keys())
         if f_keys != cls._REQUIRED_PROFILE_KEYS:
@@ -517,7 +509,10 @@ class ProfileLoader:
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}'.rank_identity keys mismatch: missing={sorted(f_missing)}, extra={sorted(f_extra)}"
             )
-        if not isinstance(f_rank_identity["global"], str) or not f_rank_identity["global"]:
+        if (
+            not isinstance(f_rank_identity["global"], str)
+            or not f_rank_identity["global"]
+        ):
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}'.rank_identity['global'] must be a non-empty string"
             )
@@ -525,7 +520,9 @@ class ProfileLoader:
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}'.rank_identity['node'] must be a non-empty string"
             )
-        if f_rank_identity["local"] is not None and not isinstance(f_rank_identity["local"], str):
+        if f_rank_identity["local"] is not None and not isinstance(
+            f_rank_identity["local"], str
+        ):
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}'.rank_identity['local'] must be a string or null"
             )
