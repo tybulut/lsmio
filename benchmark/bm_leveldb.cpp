@@ -57,7 +57,7 @@ class BMLeveldb : public BMBase {
         return true;
     }
 
-    virtual int writeCleanup() override {
+    virtual int writeCleanup() {
         if (_lc) {
             delete _lc;
             _lc = nullptr;
