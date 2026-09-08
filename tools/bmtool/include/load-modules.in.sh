@@ -2,6 +2,7 @@
 
 # Helper
 load_modules() {
+  OLD_IFS="$IFS"
   IFS="
 "
   for module in $1
@@ -9,6 +10,11 @@ load_modules() {
     echo "Loading module: $module"
     module load $module
   done
+  if [ -n "$OLD_IFS" ]; then
+    IFS="$OLD_IFS"
+  else
+    unset IFS
+  fi
 }
 
 #  module load data/HDF5/1.12.2-gompi-2022a

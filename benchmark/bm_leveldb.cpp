@@ -57,6 +57,14 @@ class BMLeveldb : public BMBase {
         return true;
     }
 
+    virtual int writeCleanup() override {
+        if (_lc) {
+            delete _lc;
+            _lc = nullptr;
+        }
+        return 0;
+    }
+
     virtual int readPrepare(bool opt) {
         if (_lc) {
             delete _lc;
@@ -80,6 +88,7 @@ int main(int argc, char **argv) {
     bool bloomFilters[2] = {false, true};
 
     exitCode += BMBase::beginMain(argc, argv);
+    lsmio::gConfigLSMIO.storageType = lsmio::StorageType::LevelDB;
 
     BMLeveldb bm;
 

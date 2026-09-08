@@ -9,6 +9,8 @@ generate_aggregates() {
     NODES="1 2 4 8 16 24 32 40 48"
   elif [ "$1" = "large" ]; then
     NODES="1 2 4 8 16 32 48 64"
+  elif [ "$1" = "baseline" ]; then
+    NODES="8"
   fi
 
   for n in $NODES
@@ -58,7 +60,7 @@ generate_report() {
       | sed "s|$LSM_DIR_OBASE/||" \
       | sed "s|agg-||" \
       | sed "s|-report.csv||" \
-      | perl -e 's/^(.|..)\/(\d+)-(\d+[MK])/$1  $2  $3/' -p \
+      | perl -e 's/^(\d+)\/(\d+)-(\d+[MK])/$1  $2  $3/' -p \
       | perl -e 's/ +/,/g' -p \
       >> "$REPORT_FILE"
   done
@@ -70,8 +72,11 @@ if [ "$BM_SCALE" = "small" ]; then
 elif [ "$BM_SCALE" = "large" ]; then
   generate_aggregates $BM_SCALE
   generate_report
+elif [ "$BM_SCALE" = "baseline" ]; then
+  generate_aggregates $BM_SCALE
+  generate_report
 else
-  fatal_error "Please pass either small or large for lsmio parsing."
+  fatal_error "Please pass either small, large, or baseline for lsmio parsing."
 fi
 
 
