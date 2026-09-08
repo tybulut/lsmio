@@ -50,8 +50,6 @@ int BMBase::mpiSize = 0;
 int BMBase::mpiRank = 0;
 
 BMBase::BMBase() {
-    pRandomKeyIndex = nullptr;
-
     if (gConfigBM.dirName.empty()) {
         _lsmioBMPath = gConfigBM.fileName;
     } else {
@@ -60,13 +58,6 @@ BMBase::BMBase() {
 
     LOG(WARNING) << "BMBase _lsmioBMPath: " << _lsmioBMPath
                  << " gConfigBM.valueSize: " << gConfigBM.valueSize << std::endl;
-}
-
-BMBase::~BMBase() {
-    if (pRandomKeyIndex) {
-        delete[] pRandomKeyIndex;
-        pRandomKeyIndex = nullptr;
-    }
 }
 
 std::string BMBase::genDBPath(bool opt1, bool opt2) {
@@ -119,7 +110,7 @@ int BMBase::benchWrite(long long *duration) {
     return (gConfigBM.keyCount - count);
 }
 
-int BMBase::benchRead(long long *duration, bool opt) {
+int BMBase::benchRead(long long *duration) {
     int count;
     int exitCode = 0;
     std::string valSuffix(gConfigBM.valueSize - 8, 'a');
@@ -128,7 +119,6 @@ int BMBase::benchRead(long long *duration, bool opt) {
         MPI_Barrier(MPI_COMM_WORLD);
     }
     _bm.start();
-    readPrepare(opt);
 
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
@@ -175,16 +165,14 @@ int BMBase::benchIteration(int iteration, bool opt) {
     _bm.addIteration("iwrite", duration, bytes, gConfigBM.keyCount);
     writeCleanup();
 
-    if (benchRead(&duration, opt) != 0) {
+    readPrepare(opt);
+    if (benchRead(&duration) != 0) {
         LOG(ERROR) << "ERROR: benchRead(): failed." << std::endl;
         duration = -1;
         exitCode += 1;
     }
     _bm.addIteration("iread", duration, bytes, gConfigBM.keyCount);
     readCleanup();
-
-    delete[] pRandomKeyIndex;
-    pRandomKeyIndex = nullptr;
 
     return exitCode;
 }
@@ -232,14 +220,6 @@ void BMBase::writeBenchmarkResults() {
 std::string genOptionsToString() {
     std::stringstream optStream;
 
-    std::string memtableStr = "unknown";
-    switch (lsmio::gConfigLSMIO.memtable) {
-        case lsmio::MemtableType::VectorNoSort: memtableStr = "vector-no-sort"; break;
-        case lsmio::MemtableType::VectorSort:   memtableStr = "vector-sort"; break;
-        case lsmio::MemtableType::Map:          memtableStr = "map"; break;
-        case lsmio::MemtableType::BTree:        memtableStr = "btree"; break;
-    }
-
     optStream << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
               << "\n useLSMIOPlugin: " << gConfigBM.useLSMIOPlugin
               << "\n loopAll: " << gConfigBM.loopAll << "\n verbose: " << gConfigBM.verbose
@@ -273,7 +253,7 @@ std::string genOptionsToString() {
               << "\n disableAggDirStructure: " << lsmio::gConfigLSMIO.disableAggDirStructure
               << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize
               << "\n storageType: " << lsmio::to_string(lsmio::gConfigLSMIO.storageType)
-              << "\n memtable: " << memtableStr
+              << "\n memtable: " << lsmio::to_string(lsmio::gConfigLSMIO.memtable)
               << "\n maxKeyLen: " << lsmio::gConfigLSMIO.maxKeyLen
               << "\n maxValueLen: " << lsmio::gConfigLSMIO.getMaxValueLen()
               << "\n manualOffset: " << (lsmio::gConfigLSMIO.manualOffset ? "true" : "false")

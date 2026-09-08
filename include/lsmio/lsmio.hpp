@@ -220,6 +220,13 @@ std::string to_string(const MPIAggType v);
  */
 std::string to_string(const StorageType v);
 
+/**
+ * Convert a MemtableType value to its string representation.
+ * @param v MemtableType value.
+ * @return String representation of v.
+ */
+std::string to_string(const MemtableType v);
+
 }  // namespace lsmio
 
 /// Stream overload for MPIAggType.
@@ -228,10 +235,16 @@ std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v);
 /// Stream overload for StorageType.
 std::ostream &operator<<(std::ostream &os, lsmio::StorageType v);
 
+/// Stream overload for MemtableType.
+std::ostream &operator<<(std::ostream &os, lsmio::MemtableType v);
+
 /// Stream overload for MPIAggType (const reference).
 std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType &v);
 
 /// Stream overload for StorageType (const reference).
 std::ostream &operator<<(std::ostream &os, const lsmio::StorageType &v);
+
+/// Stream overload for MemtableType (const reference).
+std::ostream &operator<<(std::ostream &os, const lsmio::MemtableType &v);
 
 #endif  // _LSMIO_LSMIO_H
