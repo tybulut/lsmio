@@ -56,7 +56,7 @@ class BMBase {
 
     std::string genDBPath(bool opt1, bool opt2);
 
-    int benchRead(long long *duration);
+    int benchRead(long long *duration, bool opt = false);
     int benchWrite(long long *duration);
     int benchIteration(int iteration, bool opt = false);
 
@@ -74,6 +74,7 @@ class BMBase {
 
   public:
     BMBase();
+    virtual ~BMBase();
 
     int benchSuite(std::string bmPrefix, bool opt = false);
     void writeBenchmarkResults();
