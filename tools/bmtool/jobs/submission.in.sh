@@ -43,7 +43,7 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi
@@ -105,12 +105,4 @@ run_large_job() {
     wait_for_completion
   done
 }
-
-run_baseline_job() {
-  concurrency=8
-  pernode=1
-  batch_run $concurrency $pernode $BM_DIRNAME/jobs/job-small
-  wait_for_completion
-}
-
 

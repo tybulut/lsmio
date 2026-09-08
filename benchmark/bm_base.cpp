@@ -50,8 +50,6 @@ int BMBase::mpiSize = 0;
 int BMBase::mpiRank = 0;
 
 BMBase::BMBase() {
-    pRandomKeyIndex = nullptr;
-
     if (gConfigBM.dirName.empty()) {
         _lsmioBMPath = gConfigBM.fileName;
     } else {
@@ -60,13 +58,6 @@ BMBase::BMBase() {
 
     LOG(WARNING) << "BMBase _lsmioBMPath: " << _lsmioBMPath
                  << " gConfigBM.valueSize: " << gConfigBM.valueSize << std::endl;
-}
-
-BMBase::~BMBase() {
-    if (pRandomKeyIndex) {
-        delete[] pRandomKeyIndex;
-        pRandomKeyIndex = nullptr;
-    }
 }
 
 std::string BMBase::genDBPath(bool opt1, bool opt2) {
@@ -119,7 +110,7 @@ int BMBase::benchWrite(long long *duration) {
     return (gConfigBM.keyCount - count);
 }
 
-int BMBase::benchRead(long long *duration, bool opt) {
+int BMBase::benchRead(long long *duration) {
     int count;
     int exitCode = 0;
     std::string valSuffix(gConfigBM.valueSize - 8, 'a');
@@ -128,7 +119,6 @@ int BMBase::benchRead(long long *duration, bool opt) {
         MPI_Barrier(MPI_COMM_WORLD);
     }
     _bm.start();
-    readPrepare(opt);
 
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
@@ -175,16 +165,14 @@ int BMBase::benchIteration(int iteration, bool opt) {
     _bm.addIteration("iwrite", duration, bytes, gConfigBM.keyCount);
     writeCleanup();
 
-    if (benchRead(&duration, opt) != 0) {
+    readPrepare(opt);
+    if (benchRead(&duration) != 0) {
         LOG(ERROR) << "ERROR: benchRead(): failed." << std::endl;
         duration = -1;
         exitCode += 1;
     }
     _bm.addIteration("iread", duration, bytes, gConfigBM.keyCount);
     readCleanup();
-
-    delete[] pRandomKeyIndex;
-    pRandomKeyIndex = nullptr;
 
     return exitCode;
 }
@@ -232,14 +220,6 @@ void BMBase::writeBenchmarkResults() {
 std::string genOptionsToString() {
     std::stringstream optStream;
 
-    std::string memtableStr = "unknown";
-    switch (lsmio::gConfigLSMIO.memtable) {
-        case lsmio::MemtableType::VectorNoSort: memtableStr = "vector-no-sort"; break;
-        case lsmio::MemtableType::VectorSort:   memtableStr = "vector-sort"; break;
-        case lsmio::MemtableType::Map:          memtableStr = "map"; break;
-        case lsmio::MemtableType::BTree:        memtableStr = "btree"; break;
-    }
-
     optStream << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
               << "\n useLSMIOPlugin: " << gConfigBM.useLSMIOPlugin
               << "\n loopAll: " << gConfigBM.loopAll << "\n verbose: " << gConfigBM.verbose
@@ -247,7 +227,6 @@ std::string genOptionsToString() {
               << "\n collective-IO: " << gConfigBM.enableCollectiveIO << "\n mpi-io-world: "
               << (lsmio::gConfigLSMIO.mpiAggType != lsmio::MPIAggType::Shared ? "world"
                                                                               : "host-group")
-              << "\n mpiAggType: " << lsmio::to_string(lsmio::gConfigLSMIO.mpiAggType)
               << "\n iterations: " << gConfigBM.iterations
               << "\n segmentCount: " << gConfigBM.segmentCount
               << "\n keyCount: " << gConfigBM.keyCount << "\n valueSize: " << gConfigBM.valueSize
@@ -256,10 +235,6 @@ std::string genOptionsToString() {
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
               << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
-              << "\n useRocksDB: "
-              << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::RocksDB ? "yes" : "no")
-              << "\n useNativeDB: "
-              << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::NativeDB ? "yes" : "no")
               << "\n compression: " << lsmio::gConfigLSMIO.compression
               << "\n blockSize: " << lsmio::gConfigLSMIO.blockSize
               << "\n transferSize: " << lsmio::gConfigLSMIO.transferSize
@@ -271,16 +246,7 @@ std::string genOptionsToString() {
               << "\n writeFileSize: " << lsmio::gConfigLSMIO.writeFileSize
               << "\n preAllocate: " << lsmio::gConfigLSMIO.preAllocate
               << "\n disableAggDirStructure: " << lsmio::gConfigLSMIO.disableAggDirStructure
-              << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize
-              << "\n storageType: " << lsmio::to_string(lsmio::gConfigLSMIO.storageType)
-              << "\n memtable: " << memtableStr
-              << "\n maxKeyLen: " << lsmio::gConfigLSMIO.maxKeyLen
-              << "\n maxValueLen: " << lsmio::gConfigLSMIO.getMaxValueLen()
-              << "\n manualOffset: " << (lsmio::gConfigLSMIO.manualOffset ? "true" : "false")
-              << "\n footerIndex: " << (lsmio::gConfigLSMIO.footerIndex ? "true" : "false")
-              << "\n writeBufferNumber: " << lsmio::gConfigLSMIO.writeBufferNumber
-              << "\n autoTuneParameters: " << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
-              << "\n";
+              << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize << "\n";
 
     return optStream.str();
 }
@@ -369,10 +335,6 @@ int BMBase::beginMain(int argc, char **argv) {
                      "bypass tellp() and manually track offsets (default: false)");
         app.add_flag("--lsmio-footer-index", lsmio::gConfigLSMIO.footerIndex,
                      "append the Dense Index Footer to the SSTable (default: false)");
-        app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
-                       "number of write buffers (default: 4)");
-        app.add_flag("--lsmio-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
-                     "enable filesystem auto-tuning (default: false)");
 
         app.parse(argc, argv);
 

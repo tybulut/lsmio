@@ -33,9 +33,8 @@ BM_USAGE="Usage:
 $0 <cmd> <cmd-arguments> [<cmd-optional-arguments>]
 
 cmds:
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd]
-  parse <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd]
-  archive <lsmio> <local|bake|small|large|baseline> [<variant>] [--dest=<path>]
+  run <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
+  parse <ior|lsmio|lmp> <local|bake|small|large> [<--ssd>]
   dirs
   load-modules
 "
@@ -54,8 +53,6 @@ if [ -z "$BM_SCRIPT" -o -z "$BM_DIRNAME" ]; then
   fatal_error "Failed to determine the script environment"
 fi
 
-. $BM_DIRNAME/jobs/lsmio-variants.in.sh
-
 # SBatch settings
 if [ -z "$SB_EMAIL" ]; then
   fatal_error "Email for SBATCH is not set using SB_EMAIL: $SB_EMAIL"
@@ -69,8 +66,6 @@ if [ "$1" = "parse" ]; then
   PASS_CMD="parse"
 elif [ "$1" = "run" ]; then
   PASS_CMD="run"
-elif [ "$1" = "archive" ]; then
-  PASS_CMD="archive"
 elif [ "$1" = "load-modules" ]; then
   PASS_CMD="load-modules"
 elif [ "$1" = "dirs" ]; then
@@ -91,99 +86,27 @@ elif [ "$PASS_CMD" != "load-modules" -a "$PASS_CMD" != "dirs" ]; then
   fatal_error "Please pass either ior, lsmio, or lmp as a first cmd argument."
 fi
 
-if [ "$PASS_CMD" = "archive" -a "$JOB_TOOL" != "lsmio" ]; then
-  fatal_error "archive command is currently only supported for lsmio."
+if [ "$PASS_CMD" = "run" ]; then
+  SSD_ARG="$4"
+elif [ "$PASS_CMD" = "parse" ]; then
+  SSD_ARG="$4"
 fi
 
-if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "archive" ]; then
-  JOB_SCALE="$3"
-
-  if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" -a "$JOB_SCALE" != "baseline" ]; then
-    fatal_error "Unknown second argument for $PASS_CMD cmd: [$JOB_SCALE]"
+if [ -n "$SSD_ARG" ]; then
+  if [ "$SSD_ARG" = "--ssd" ]; then
+    # Set before including vars.in.sh
+    LUSTRE_SSD=on
+  else
+    fatal_error "Unknown argument for $PASS_CMD cmd: [$SSD_ARG]"
   fi
 fi
 
-BM_VARIANT=""
-BM_ARCHIVE_DEST=""
 
-if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "archive" ]; then
-  shift 3
-  if [ "$JOB_SCALE" = "baseline" ]; then
-    if [ $# -gt 0 ]; then
-      case "$1" in
-        default|base)
-          BM_VARIANT=""
-          shift
-          ;;
-        --*)
-          BM_VARIANT=""
-          ;;
-        *)
-          BM_VARIANT="$1"
-          shift
-          ;;
-      esac
-    else
-      BM_VARIANT=""
-    fi
+if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
+  JOB_SCALE="$3"
 
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --ssd)
-          LUSTRE_SSD=on
-          ;;
-        --dest=*)
-          BM_ARCHIVE_DEST="${1#--dest=}"
-          ;;
-        --dest)
-          shift
-          if [ $# -eq 0 ]; then
-            fatal_error "Option --dest requires an argument"
-          fi
-          BM_ARCHIVE_DEST="$1"
-          ;;
-        *)
-          fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
-          ;;
-      esac
-      shift
-    done
-
-    resolve_variant "$BM_VARIANT" || fatal_error "Invalid variant: [$BM_VARIANT]"
-  else
-    # Legacy scales: local, bake, small, large
-    if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
-      if [ $# -gt 0 ]; then
-        if [ "$1" = "--ssd" ]; then
-          LUSTRE_SSD=on
-        else
-          fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
-        fi
-        shift
-      fi
-      if [ $# -gt 0 ]; then
-        fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
-      fi
-    elif [ "$PASS_CMD" = "archive" ]; then
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          --dest=*)
-            BM_ARCHIVE_DEST="${1#--dest=}"
-            ;;
-          --dest)
-            shift
-            if [ $# -eq 0 ]; then
-              fatal_error "Option --dest requires an argument"
-            fi
-            BM_ARCHIVE_DEST="$1"
-            ;;
-          *)
-            fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
-            ;;
-        esac
-        shift
-      done
-    fi
+  if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" ]; then
+    fatal_error "Unknown second argument for $PASS_CMD cmd: [$JOB_SCALE]"
   fi
 fi
 
@@ -192,8 +115,6 @@ echo "Entered cmd summary:
 - Cmd param-1: $JOB_TOOL
 - Cmd param-2: $JOB_SCALE
 - Cmd optional param: SSD=$LUSTRE_SSD
-- Cmd optional param: Variant=$BM_VARIANT
-- Cmd optional param: Archive Dest=$BM_ARCHIVE_DEST
 
 Environment settings:
 - Email: $SB_EMAIL
@@ -203,15 +124,11 @@ Executing...
 "
 
 # Execute
-# Export: BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_VARIANT,BM_ARCHIVE_DEST,BM_SETUP
-: "${BM_SETUP:=NATIVE-M}"
-export BM_SETUP
+# Export: BM_CMD,BM_TYPE,BM_SCALE,BM_SSD
 export BM_CMD="$PASS_CMD"
 export BM_TYPE="$JOB_TOOL"
 export BM_SCALE="$JOB_SCALE"
 export BM_SSD="$LUSTRE_SSD"
-export BM_VARIANT="$BM_VARIANT"
-export BM_ARCHIVE_DEST="$BM_ARCHIVE_DEST"
 
 . $BM_DIRNAME/include/vars.in.sh
 
@@ -239,8 +156,6 @@ if [ "$BM_CMD" = "run" ]; then
     run_small_job $BM_TYPE
   elif [ "$BM_SCALE" = "large" ]; then
     run_large_job $BM_TYPE
-  elif [ "$BM_SCALE" = "baseline" ]; then
-    run_baseline_job $BM_TYPE
   else
     fatal_error "Uknown $BM_CMD parameter: $BM_SCALE."
   fi
@@ -257,8 +172,6 @@ elif [ "$BM_CMD" = "parse" ]; then
   else
     fatal_error "Uknown $BM_CMD parameter: $BM_TYPE."
   fi
-elif [ "$BM_CMD" = "archive" ]; then
-  . $BM_DIRNAME/include/archive.in.sh
 elif [ "$BM_CMD" = "load-modules" ]; then
   . $BM_DIRNAME/include/load-modules.in.sh
   list_modules
