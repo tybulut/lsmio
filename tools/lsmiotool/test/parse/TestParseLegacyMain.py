@@ -36,12 +36,12 @@ from unittest.mock import patch, MagicMock
 from lsmiotool.lib import main, env
 
 
-class TestParseMain(TestCase):
-    """Unit tests for ParseMain command and dispatch logic."""
+class TestParseLegacyMain(TestCase):
+    """Unit tests for ParseLegacyMain command and dispatch logic."""
 
     def testInitValidArguments(self) -> None:
         """Test initialization with valid command, scale mode, and ssd option."""
-        pm = main.ParseMain("ior", "small", ssd=True)
+        pm = main.ParseLegacyMain("ior", "small", ssd=True)
         self.assertEqual(pm.m_command, "ior")
         self.assertEqual(pm.m_mode, "small")
         self.assertTrue(pm.m_is_ssd)
@@ -49,31 +49,31 @@ class TestParseMain(TestCase):
     def testInitInvalidCommand(self) -> None:
         """Test system exit on unknown benchmark command."""
         with self.assertRaises(SystemExit):
-            main.ParseMain("invalid_cmd", "small")
+            main.ParseLegacyMain("invalid_cmd", "small")
 
     def testInitInvalidMode(self) -> None:
         """Test system exit on unknown execution mode."""
         with self.assertRaises(SystemExit):
-            main.ParseMain("lsmio", "invalid_mode")
+            main.ParseLegacyMain("lsmio", "invalid_mode")
 
-    @patch.object(main.ParseMain, "parseIor")
+    @patch.object(main.ParseLegacyMain, "parseIor")
     def testDispatchIor(self, mock_parse_ior: MagicMock) -> None:
         """Test run() dispatches to parseIor."""
-        pm = main.ParseMain("ior", "small", ssd=False)
+        pm = main.ParseLegacyMain("ior", "small", ssd=False)
         pm.run()
         mock_parse_ior.assert_called_once_with("small", False)
 
-    @patch.object(main.ParseMain, "parseLsmio")
+    @patch.object(main.ParseLegacyMain, "parseLsmio")
     def testDispatchLsmio(self, mock_parse_lsmio: MagicMock) -> None:
         """Test run() dispatches to parseLsmio."""
-        pm = main.ParseMain("lsmio", "large", ssd=True)
+        pm = main.ParseLegacyMain("lsmio", "large", ssd=True)
         pm.run()
         mock_parse_lsmio.assert_called_once_with("large", True)
 
-    @patch.object(main.ParseMain, "parseLmp")
+    @patch.object(main.ParseLegacyMain, "parseLmp")
     def testDispatchLmp(self, mock_parse_lmp: MagicMock) -> None:
         """Test run() dispatches to parseLmp."""
-        pm = main.ParseMain("lmp", "bake", ssd=False)
+        pm = main.ParseLegacyMain("lmp", "bake", ssd=False)
         pm.run()
         mock_parse_lmp.assert_called_once_with("bake", False)
 
@@ -82,7 +82,7 @@ class TestParseMain(TestCase):
         """Test parseIor instantiates IorAggOutput and calls generateReports."""
         mock_agg = MagicMock()
         mock_agg_class.return_value = mock_agg
-        pm = main.ParseMain("ior", "small")
+        pm = main.ParseLegacyMain("ior", "small")
         pm.parseIor("small", False)
         mock_agg.generateReports.assert_called_once()
 
@@ -91,7 +91,7 @@ class TestParseMain(TestCase):
         """Test parseLsmio instantiates LsmioAggOutput and calls generateReports."""
         mock_agg = MagicMock()
         mock_agg_class.return_value = mock_agg
-        pm = main.ParseMain("lsmio", "small")
+        pm = main.ParseLegacyMain("lsmio", "small")
         pm.parseLsmio("small", False)
         mock_agg.generateReports.assert_called_once()
 
@@ -100,6 +100,6 @@ class TestParseMain(TestCase):
         """Test parseLmp instantiates LmpAggOutput and calls generateReports."""
         mock_agg = MagicMock()
         mock_agg_class.return_value = mock_agg
-        pm = main.ParseMain("lmp", "small")
+        pm = main.ParseLegacyMain("lmp", "small")
         pm.parseLmp("small", False)
         mock_agg.generateReports.assert_called_once()

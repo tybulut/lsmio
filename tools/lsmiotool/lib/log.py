@@ -29,6 +29,7 @@
 #
 
 import csv
+import getpass
 import logging
 import os
 import sys
@@ -39,7 +40,7 @@ from typing import Any, List, Optional, TextIO, Type, Union
 from lsmiotool.lib import PROGRAM
 
 
-LOG_FILE: str = f"/tmp/{PROGRAM}-{os.getlogin()}-{PROGRAM}.log"
+LOG_FILE: str = f"/tmp/{PROGRAM}-{getpass.getuser()}-{PROGRAM}.log"
 
 
 class LogLevel(IntEnum):

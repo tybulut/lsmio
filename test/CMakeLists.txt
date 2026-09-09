@@ -142,3 +142,113 @@ gtest_discover_tests(
     TIMEOUT 30
 )
 
+if(LSMIO_ENABLE_COVERAGE)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake"
+    "add_test(lsmiotool_python_suite \"${Python3_EXECUTABLE}\" \"${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool\" \"test\")\n"
+  )
+
+  add_test(
+    NAME lsmiotool_python_suite
+    COMMAND ${CMAKE_COMMAND}
+            -Dmode=run
+            -Dpython=${Python3_EXECUTABLE}
+            -Ddata=${CMAKE_BINARY_DIR}/.coverage.lsmiotool
+            -Djson=${CMAKE_BINARY_DIR}/lsmiotool-python-coverage.json
+            -Dmarker=${CMAKE_BINARY_DIR}/.coverage.lsmiotool.sha256
+            -Dsource=${LSMIO_SOURCE_DIR}/tools/lsmiotool
+            -Dentry=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool
+            -P ${CMAKE_SOURCE_DIR}/cmake/LsmiotoolPythonCoverage.cmake
+  )
+  set_tests_properties(lsmiotool_python_suite PROPERTIES
+    TIMEOUT 120
+    ENVIRONMENT
+      "PYTHONPATH=${LSMIO_SOURCE_DIR}/tools:$ENV{PYTHONPATH};LSMIO_ENV=DEV;MPLBACKEND=Agg;MPLCONFIGDIR=${CMAKE_BINARY_DIR}/matplotlib;LSMIO_CTEST_REGISTRATION=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake;LSMIO_CTEST_PYTHON=${Python3_EXECUTABLE};LSMIO_CTEST_ENTRY=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool;LSMIO_ENABLE_COVERAGE=ON"
+  )
+
+  add_custom_target(
+    lsmiotool_python_coverage_report
+    COMMAND ${CMAKE_COMMAND}
+            -Dmode=report
+            -Dpython=${Python3_EXECUTABLE}
+            -Ddata=${CMAKE_BINARY_DIR}/.coverage.lsmiotool
+            -Djson=${CMAKE_BINARY_DIR}/lsmiotool-python-coverage.json
+            -Dmarker=${CMAKE_BINARY_DIR}/.coverage.lsmiotool.sha256
+            -P ${CMAKE_SOURCE_DIR}/cmake/LsmiotoolPythonCoverage.cmake
+    COMMENT "Generating lsmiotool Python coverage report"
+    VERBATIM
+  )
+else()
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake"
+    "add_test(lsmiotool_python_suite \"${Python3_EXECUTABLE}\" \"${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool\" \"test\")\n"
+  )
+
+  file(GLOB_RECURSE _lsmiotool_test_files
+    CONFIGURE_DEPENDS
+    "${LSMIO_SOURCE_DIR}/tools/lsmiotool/test/*Test.py"
+    "${LSMIO_SOURCE_DIR}/tools/lsmiotool/test/test_*.py"
+    "${LSMIO_SOURCE_DIR}/tools/lsmiotool/test/Test*.py"
+  )
+
+  execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c
+      "import sys; sys.path.insert(0, '${LSMIO_SOURCE_DIR}/tools'); from lsmiotool.test import _discoverTestModuleNames; print(';'.join(_discoverTestModuleNames()))"
+    OUTPUT_VARIABLE LSMIOTOOL_TEST_MODULES
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _discovery_result
+  )
+
+  if(_discovery_result EQUAL 0 AND LSMIOTOOL_TEST_MODULES)
+    foreach(_mod ${LSMIOTOOL_TEST_MODULES})
+      string(REPLACE "lsmiotool.test." "lsmiotool." _test_name "${_mod}")
+      add_test(
+        NAME "${_test_name}"
+        COMMAND Python3::Interpreter
+                "${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+                test
+                "${_mod}"
+      )
+      set_tests_properties("${_test_name}" PROPERTIES
+        TIMEOUT 60
+        ENVIRONMENT
+          "PYTHONPATH=${LSMIO_SOURCE_DIR}/tools:$ENV{PYTHONPATH};LSMIO_ENV=DEV;MPLBACKEND=Agg;MPLCONFIGDIR=${CMAKE_BINARY_DIR}/matplotlib;LSMIO_CTEST_REGISTRATION=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake;LSMIO_CTEST_PYTHON=${Python3_EXECUTABLE};LSMIO_CTEST_ENTRY=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+      )
+    endforeach()
+  else()
+    add_test(
+      NAME lsmiotool_python_suite
+      COMMAND Python3::Interpreter
+              "${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+              test
+    )
+    set_tests_properties(lsmiotool_python_suite PROPERTIES
+      TIMEOUT 120
+      ENVIRONMENT
+        "PYTHONPATH=${LSMIO_SOURCE_DIR}/tools:$ENV{PYTHONPATH};LSMIO_ENV=DEV;MPLBACKEND=Agg;MPLCONFIGDIR=${CMAKE_BINARY_DIR}/matplotlib;LSMIO_CTEST_REGISTRATION=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake;LSMIO_CTEST_PYTHON=${Python3_EXECUTABLE};LSMIO_CTEST_ENTRY=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+      )
+  endif()
+endif()
+
+add_test(
+  NAME lsmiotool_stage_install
+  COMMAND ${CMAKE_COMMAND}
+          -Dbuild_dir=${CMAKE_BINARY_DIR}
+          -Dstage_dir=${CMAKE_BINARY_DIR}/lsmiotool-stage
+          -P ${CMAKE_SOURCE_DIR}/cmake/StageLsmiotoolTest.cmake
+)
+set_tests_properties(lsmiotool_stage_install PROPERTIES
+  FIXTURES_SETUP lsmiotool_staged_install
+)
+
+add_test(
+  NAME lsmiotool_installed_smoke
+  COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_SOURCE_DIR}/tools/lsmiotool/ctest/installed_smoke.py
+          --stage ${CMAKE_BINARY_DIR}/lsmiotool-stage
+          --work ${CMAKE_BINARY_DIR}/lsmiotool-smoke-cwd
+)
+set_tests_properties(lsmiotool_installed_smoke PROPERTIES
+  FIXTURES_REQUIRED lsmiotool_staged_install
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/lsmiotool-smoke-cwd
+  ENVIRONMENT "HOME=${CMAKE_BINARY_DIR}/lsmiotool-smoke-home"
+)
+

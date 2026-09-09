@@ -46,6 +46,7 @@ class HpcEnv(Enum):
     ISAMBARD = "ISAMBARD"
     VIKING2 = "VIKING2"
     VIKING = "VIKING"
+    ARCHER2 = "ARCHER2"
     DEV = "DEV"
 
 
@@ -101,6 +102,8 @@ if lsmio_env is not None:
         HPC_ENV: HpcEnv = HpcEnv.VIKING2
     elif lsmio_env == "VIKING":
         HPC_ENV: HpcEnv = HpcEnv.VIKING
+    elif lsmio_env == "ARCHER2":
+        HPC_ENV: HpcEnv = HpcEnv.ARCHER2
     elif lsmio_env == "DEV":
         HPC_ENV: HpcEnv = HpcEnv.DEV
     else:
@@ -116,6 +119,8 @@ else:
         HPC_ENV: HpcEnv = HpcEnv.VIKING2
     elif "viking" in HOSTNAME:
         HPC_ENV: HpcEnv = HpcEnv.VIKING
+    elif "archer2" in HOSTNAME:
+        HPC_ENV: HpcEnv = HpcEnv.ARCHER2
     else:
         HPC_ENV: HpcEnv = HpcEnv.DEV
 

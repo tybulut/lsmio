@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+#
+# Copyright 2026 Serdar Bulut
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from
+#    this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+
+"""Installed public entry point wrapper for lsmiotool."""
+
+import getopt
+import os
+import sys
+
+if next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None) == "test":
+    os.environ.setdefault("MPLBACKEND", "Agg")
+
+REL_BIN_TO_PYTHON = "@REL_BIN_TO_PYTHON@"
+REL_BIN_TO_LIBEXEC_WORKER = "@REL_BIN_TO_LIBEXEC_WORKER@"
+REL_BIN_TO_PROFILE = "@REL_BIN_TO_PROFILE@"
+REL_BIN_TO_ETC = "@REL_BIN_TO_ETC@"
+REL_BIN_TO_ASSETS = "@REL_BIN_TO_ASSETS@"
+REL_BIN_TO_VERSION = "@REL_BIN_TO_VERSION@"
+
+self_path = os.path.abspath(__file__)
+anchor_dir = os.path.dirname(self_path)
+python_root = os.path.normpath(os.path.join(anchor_dir, REL_BIN_TO_PYTHON))
+if python_root not in sys.path:
+    sys.path.insert(0, python_root)
+
+from lsmiotool.lib.cli import (
+    ArchiveCliParseError,
+    InstalledPackageValidator,
+    PackageValidationError,
+    ParseCliParseError,
+    RunCliParseError,
+    parseArchiveArguments,
+    parseParseArguments,
+    parseRunArguments,
+)
+from lsmiotool.lib.resources import InstallRelativeLayout, ResourceLocator
+from lsmiotool.lib.version import getVersion
+
+LSMIOTOOL_HELP = """How to run
+-----------------------------------------------------------------------
+./lsmiotool [options] <cmd> <cmd-arguments>
+
+common cmds:
+  archive <benchmark> <scale> [<variant>] [--dest <path>]
+  compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
+  load-modules  load needed HPC modules
+  parse <target> [--output-dir <dir>] [--format <csv|json>]
+  parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
+  run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
+
+other cmds:
+  latex <viking|viking2|isambard>
+  shell       provide interactive access to the python tool
+  test        run lsmiotool unit and functional tests
+
+options:
+  --debug     enable debug mode and run
+  --help      print this help screen
+  --ssd       use SSD storage instead
+  --version   print version and exit
+"""
+
+if __name__ == '__main__':
+    pkg_root = os.path.normpath(os.path.join(python_root, "lsmiotool"))
+    try:
+        InstalledPackageValidator.validate(pkg_root)
+    except PackageValidationError as err:
+        sys.stderr.write(f"Package validation error: {err}\n")
+        sys.exit(1)
+
+    rel_layout = InstallRelativeLayout(
+        f_package_root=REL_BIN_TO_PYTHON,
+        f_profile_file=REL_BIN_TO_PROFILE,
+        f_asset_root=REL_BIN_TO_ASSETS,
+        f_worker_executable=REL_BIN_TO_LIBEXEC_WORKER,
+        f_version_file=REL_BIN_TO_VERSION,
+    )
+    runtime_layout = ResourceLocator.forInstalled(self_path, rel_layout)
+
+    debug = False
+    is_ssd = False
+    try:
+        opts, args = getopt.getopt(
+            sys.argv[1:],
+            'dhstv',
+            ['debug', 'help', 'ssd', 'test', 'version'],
+        )
+        for opt, arg in opts:
+            if opt in ('-h', '--help'):
+                print(LSMIOTOOL_HELP.rstrip())
+                sys.exit(0)
+            elif opt in ('-v', '--version'):
+                print('version: ' + getVersion(runtime_layout.version_file))
+                sys.exit(0)
+            elif opt in ('-d', '--debug'):
+                debug = True
+            elif opt in ('-s', '--ssd'):
+                is_ssd = True
+            elif opt in ('-t', '--test'):
+                pass
+            else:
+                sys.stderr.write(f"Unknown option: {opt}\n")
+                sys.exit(1)
+    except getopt.GetoptError as err:
+        sys.stderr.write(f"{err}\n")
+        sys.exit(1)
+
+    if debug:
+        from lsmiotool.lib import log
+        log.Log.setLevel(log.LOG_LEVEL.DEBUG)
+
+    if not args:
+        sys.stderr.write("Empty command.\n")
+        sys.exit(1)
+
+    cmd = args[0]
+
+    if cmd == 'archive':
+        from lsmiotool.lib import main
+        from lsmiotool.lib.variants import UnknownVariantError
+        try:
+            archive_request = parseArchiveArguments(args)
+        except (ArchiveCliParseError, UnknownVariantError) as err:
+            sys.stderr.write(f"{err}\n")
+            sys.exit(1)
+        inst_main = main.ArchiveMain(
+            f_request=archive_request,
+            f_runtime_layout=runtime_layout,
+        )
+    elif cmd == 'compare':
+        from lsmiotool.lib import main
+        cmd_args = args[1:]
+        if len(cmd_args) < 2:
+            sys.stderr.write(
+                "Compare: Needs at least two arguments: <benchmark_folder> <read|write> [<stripes>] [<blocksize>]\n"
+            )
+            sys.exit(1)
+        inst_main = main.CompareMain(*cmd_args)
+    elif cmd == 'latex':
+        from lsmiotool.lib import main
+        cmd_args = args[1:]
+        if not cmd_args:
+            sys.stderr.write(
+                "Latex: Needs argument such as viking, viking2, ...\n"
+            )
+            sys.exit(1)
+        inst_main = main.LatexMain(*cmd_args)
+    elif cmd == 'load-modules':
+        from lsmiotool.lib import main
+        inst_main = main.HpcEnvMain()
+    elif cmd == 'parse':
+        from lsmiotool.lib import main
+        try:
+            parse_request = parseParseArguments(args)
+        except ParseCliParseError as err:
+            sys.stderr.write(f"{err}\n")
+            sys.exit(2)
+        inst_main = main.ParseMain(f_request=parse_request)
+    elif cmd == 'parseLegacy':
+        from lsmiotool.lib import main
+        cmd_args = args[1:]
+        if len(cmd_args) < 2:
+            sys.stderr.write(
+                "ParseLegacy: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>\n"
+            )
+            sys.exit(1)
+        inst_main = main.ParseLegacyMain(*cmd_args, ssd=is_ssd)
+    elif cmd == 'run':
+        from lsmiotool.lib import main
+        try:
+            run_request = parseRunArguments(args, f_global_ssd=is_ssd)
+        except RunCliParseError as err:
+            sys.stderr.write(f"{err}\n")
+            sys.exit(1)
+        inst_main = main.RunMain(
+            f_request=run_request,
+            f_runtime_layout=runtime_layout,
+        )
+    elif cmd == 'shell':
+        from lsmiotool.lib import main
+        inst_main = main.ShellMain()
+    elif cmd == 'test':
+        from lsmiotool.lib import main
+        inst_main = main.TestMain()
+    else:
+        sys.stderr.write(f"Unknown command: {args}\n")
+        sys.exit(1)
+
+    res = inst_main.run()
+    sys.exit(0 if res is None else int(res))

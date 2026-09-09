@@ -29,8 +29,10 @@
 #
 
 import os, lsmiotool
+from lsmiotool.lib.version import getVersion, VersionError
 
-VERSION = "0.2"
+__version__ = getVersion()
+VERSION = __version__
 PROGRAM = "lsmiotool"
 LSMIOTOOL_DIR = os.path.dirname(os.path.abspath(lsmiotool.__file__))
 

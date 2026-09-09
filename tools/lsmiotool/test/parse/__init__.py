@@ -28,14 +28,4 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-__all__ = [
-    "test_log",
-    "test_data",
-    "test_output",
-    "TestLmpData",
-    "TestOutputAggregation",
-    "TestParseMain",
-    "TestEndToEndParse",
-    "TestMultiBarPlot",
-    "TestCompareMain",
-]
+# Test modules are discovered recursively by ``lsmiotool.test``.
