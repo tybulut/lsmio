@@ -1,2 +1,3 @@
-- Generate Debian/amd64 package
-- Automate release process
+- New native LSM backend implementation
+- Python lsmiotool as the parser
+- Bmtool now supports baseline comparing different turning parameters
