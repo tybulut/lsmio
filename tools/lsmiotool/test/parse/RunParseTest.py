@@ -34,7 +34,7 @@ import math
 import os
 import shutil
 import tempfile
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 import unittest
 
 from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore
