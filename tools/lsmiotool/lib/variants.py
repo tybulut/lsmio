@@ -30,7 +30,8 @@
 
 """Declarative variant catalogue, engine CLI flag mappings, and token resolution for LSMIO."""
 
-from typing import Any, Dict, Optional, Sequence, Tuple
+import re
+from typing import Any, Dict, NamedTuple, Optional, Sequence, Tuple
 
 from lsmiotool.lib.cli import CliParseError
 
@@ -351,3 +352,117 @@ class VariantCatalogue:
         if rec.tokens:
             return f"{backend_token}-{rec.tokens}"
         return backend_token
+
+
+class VariantResolutionResult(NamedTuple):
+    """Encapsulates the deterministic decomposition of an archive folder name."""
+
+    raw_directory: str  # e.g. "outputs-native-pool-8-3"
+    backend: str  # e.g. "native"
+    variant: str  # e.g. "pool-8"
+    collision: Optional[str]  # e.g. "3"
+    display_label: str  # e.g. "pool-8-3"
+
+
+class VariantReverseResolver:
+    """Deterministic reverse-resolution engine mapping archive directories to clean variant labels."""
+
+    @classmethod
+    def _findBackend(cls, f_token: str) -> Tuple[str, str]:
+        """Detects backend prefix or exact backend name from token.
+
+        Returns:
+            Tuple of (backend_name, remainder_string).
+        """
+        for prefix in VariantCatalogue._TWO_SEGMENT_PREFIXES:
+            if f_token.startswith(prefix):
+                backend = prefix[:-3]
+                remainder = f_token[len(prefix) :]
+                return backend, remainder
+
+        for prefix in VariantCatalogue._ONE_SEGMENT_PREFIXES:
+            if f_token.startswith(prefix):
+                backend = prefix[:-1]
+                remainder = f_token[len(prefix) :]
+                return backend, remainder
+
+        for backend in ("native", "adios", "rocksdb", "leveldb", "plugin", "manager"):
+            if f_token == backend:
+                return backend, ""
+
+        return "native", f_token
+
+    @classmethod
+    def formatLabel(
+        cls,
+        f_backend: str,
+        f_variant: str,
+        f_collision: Optional[str] = None,
+    ) -> str:
+        """Formats canonical display label based on backend, variant, and collision suffix."""
+        if f_backend == "native":
+            if f_collision is not None:
+                return f"{f_variant}-{f_collision}"
+            return f_variant
+
+        if f_variant == "default":
+            if f_collision is not None:
+                return f"{f_backend}-{f_collision}"
+            return f_backend
+
+        if f_collision is not None:
+            return f"{f_backend}-{f_variant}-{f_collision}"
+        return f"{f_backend}-{f_variant}"
+
+    @classmethod
+    def resolve(cls, f_dir_name: str) -> Optional[VariantResolutionResult]:
+        """Resolves directory name into structured variant metadata.
+
+        Returns None if f_dir_name does not match 'outputs-*'.
+        """
+        if not f_dir_name.startswith("outputs-"):
+            return None
+
+        token = f_dir_name[len("outputs-") :].strip()
+        backend, remainder = cls._findBackend(token)
+
+        variant: str
+        collision: Optional[str]
+
+        if remainder == "":
+            variant = "default"
+            collision = None
+        elif remainder.isdigit():
+            variant = "default"
+            collision = remainder
+        elif remainder in VariantCatalogue.supportedVariants():
+            variant = remainder
+            collision = None
+        else:
+            match = re.match(r"^(.*)-(\d+)$", remainder)
+            if match:
+                cand = match.group(1)
+                suffix = match.group(2)
+                if cand in VariantCatalogue.supportedVariants() or cand in (
+                    "",
+                    "default",
+                    "native",
+                ):
+                    variant = "default" if cand in ("", "default", "native") else cand
+                    collision = suffix
+                else:
+                    variant = cand
+                    collision = suffix
+            else:
+                variant = remainder
+                collision = None
+
+        display_label = cls.formatLabel(backend, variant, collision)
+
+        return VariantResolutionResult(
+            raw_directory=f_dir_name,
+            backend=backend,
+            variant=variant,
+            collision=collision,
+            display_label=display_label,
+        )

@@ -33,7 +33,21 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    TYPE_CHECKING,
+)
+
+if TYPE_CHECKING:
+    from lsmiotool.lib.cli import CompareArchiveRequest
 
 from lsmiotool.lib import debuggable, log
 
@@ -517,6 +531,323 @@ class CompareMain(BaseMain):
         bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
         bar_plot.plot(output_filename)
         log.Console.info(f"Comparison plot saved to {output_filename}")
+
+
+class CompareArchiveMain(BaseMain):
+    """Orchestrator for the 'compare-archive' subcommand.
+
+    Scans benchmark run archives, executes fault-tolerant parse-on-demand aggregation,
+    extracts 8-node baseline metrics across variants, sorts variants alphabetically,
+    and renders publication-ready comparison bar charts.
+    """
+
+    __slots__ = (
+        "m_request",
+        "m_archive_folder",
+        "m_op",
+        "m_stripes",
+        "m_blocksize",
+        "m_all",
+        "m_output_dir",
+    )
+
+    m_request: "CompareArchiveRequest"
+    m_archive_folder: str
+    m_op: str
+    m_stripes: int
+    m_blocksize: str
+    m_all: bool
+    m_output_dir: Optional[str]
+
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[Any] = None,
+        f_archive_folder: Optional[str] = None,
+        f_op: str = "both",
+        f_stripes: int = 4,
+        f_blocksize: str = "1M",
+        f_all: bool = False,
+        f_output_dir: Optional[str] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        """Initialize CompareArchiveMain.
+
+        Command: compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+
+        Args:
+            *f_args: Variable length argument list (e.g. folder, op, stripes, bs, or CLI argv).
+            f_request: Optional pre-constructed CompareArchiveRequest.
+            f_archive_folder: Optional path to archive folder.
+            f_op: Optional operation ('read', 'write', 'both').
+            f_stripes: Optional stripe count (4, 16).
+            f_blocksize: Optional block size ('64K', '1M', '8M').
+            f_all: Optional flag to run all 6 permutations.
+            f_output_dir: Optional output directory for generated plots.
+            **f_kwargs: Arbitrary keyword arguments.
+        """
+        super().__init__()
+        from lsmiotool.lib.cli import CompareArchiveRequest, parseCompareArchiveArguments
+
+        if f_request is not None:
+            req = f_request
+        elif len(f_args) == 1 and isinstance(f_args[0], CompareArchiveRequest):
+            req = f_args[0]
+        elif f_args and any(
+            isinstance(a, str) and (a.startswith("-") or a == "compare-archive")
+            for a in f_args
+        ):
+            req = parseCompareArchiveArguments([str(a) for a in f_args])
+        else:
+            folder = f_archive_folder
+            op = f_op
+            stripes = f_stripes
+            blocksize = f_blocksize
+            all_val = f_all
+            out_dir = f_output_dir
+
+            if f_args:
+                folder = str(f_args[0])
+                if len(f_args) >= 2 and f_args[1] is not None:
+                    op = str(f_args[1])
+                if len(f_args) >= 3 and f_args[2] is not None:
+                    stripes = int(f_args[2])
+                if len(f_args) >= 4 and f_args[3] is not None:
+                    blocksize = str(f_args[3])
+                if len(f_args) >= 5 and f_args[4] is not None:
+                    all_val = bool(f_args[4])
+                if len(f_args) >= 6 and f_args[5] is not None:
+                    out_dir = str(f_args[5])
+
+            if folder is None:
+                req = parseCompareArchiveArguments([])
+            else:
+                req = CompareArchiveRequest(
+                    f_archive_folder=folder,
+                    f_op=op,
+                    f_stripes=stripes,
+                    f_blocksize=blocksize,
+                    f_all=all_val,
+                    f_output_dir=out_dir,
+                )
+
+        self.m_request = req
+        self.m_archive_folder = req.archive_folder
+        self.m_op = req.op
+        self.m_stripes = req.stripes
+        self.m_blocksize = req.blocksize
+        self.m_all = req.all
+        self.m_output_dir = req.output_dir
+
+    @property
+    def request(self) -> "CompareArchiveRequest":
+        return self.m_request
+
+    @property
+    def archive_folder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def op(self) -> str:
+        return self.m_op
+
+    @property
+    def stripes(self) -> int:
+        return self.m_stripes
+
+    @property
+    def blocksize(self) -> str:
+        return self.m_blocksize
+
+    @property
+    def all(self) -> bool:
+        return self.m_all
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    def resolveDirectory(self, f_path: str) -> str:
+        """Resolves path string expanding user home (~) and normalizing to absolute path."""
+        expanded = os.path.expanduser(f_path)
+        return os.path.abspath(expanded)
+
+    def _ensureReportExists(self, f_child_path: str) -> bool:
+        """Check if lsm-report.csv exists in child directory, triggering parse-on-demand if missing.
+
+        Args:
+            f_child_path: Path to variant directory.
+
+        Returns:
+            True if lsm-report.csv exists or was successfully generated, False otherwise.
+        """
+        report_file = os.path.join(f_child_path, "lsm-report.csv")
+        if os.path.isfile(report_file):
+            return True
+
+        try:
+            from lsmiotool.lib.output import LsmioAggOutput, MissingDataError
+
+            try:
+                agg = LsmioAggOutput(f_child_path, f_scale="baseline")
+            except TypeError:
+                agg = LsmioAggOutput(f_input=f_child_path, f_scale="baseline")
+            try:
+                agg.generateReports(f_out_dir=f_child_path)
+            except TypeError:
+                agg.generateReports(f_child_path)
+            return os.path.isfile(report_file)
+        except (MissingDataError, OSError, IOError, ValueError, KeyError) as err:
+            log.Console.warning(f"Failed to generate report for {f_child_path}: {err}")
+            return False
+
+    def _extractMetrics(
+        self, f_child_path: str, f_op: str, f_stripes: int, f_blocksize: str
+    ) -> Optional[float]:
+        """Extract 8-node baseline maxMB bandwidth metric from lsm-report.csv.
+
+        Args:
+            f_child_path: Path to variant directory or csv file.
+            f_op: Operation ('read' or 'write').
+            f_stripes: Stripe count (4 or 16).
+            f_blocksize: Block size ('64K', '1M', '8M').
+
+        Returns:
+            Bandwidth in MB/s as float, or None on error or missing metric.
+        """
+        csv_path = (
+            os.path.join(f_child_path, "lsm-report.csv")
+            if os.path.isdir(f_child_path)
+            else f_child_path
+        )
+        if not os.path.isfile(csv_path):
+            return None
+
+        try:
+            from lsmiotool.lib.data import LsmioSummaryData
+
+            summary_data = LsmioSummaryData(csv_path)
+            op_key = f_op.lower()
+            stripes_key = int(f_stripes)
+            bs_key = f_blocksize.upper()
+            bw = summary_data.m_csv_data[op_key][stripes_key][bs_key][8]["maxMB"]
+            return float(bw)
+        except (KeyError, IndexError, ValueError, TypeError):
+            return None
+
+    _extractBaselineMetric = _extractMetrics
+
+    def _generateChart(
+        self,
+        f_arg1: Any,
+        f_arg2: Any,
+        f_arg3: Any,
+        f_arg4: Any,
+        f_arg5: Optional[Any] = None,
+        f_arg6: Optional[Any] = None,
+    ) -> str:
+        """Render single-series grouped bar chart using MultiBarPlot.
+
+        Supports both:
+          _generateChart(op, stripes, blocksize, variant_data)
+          _generateChart(base_name, op, stripes, bs, variant_data, output_dir)
+
+        Returns:
+            Absolute path to generated PNG chart.
+        """
+        from lsmiotool.lib import plot
+
+        if f_arg5 is not None and f_arg6 is not None:
+            archive_basename = str(f_arg1)
+            op = str(f_arg2)
+            stripes = int(f_arg3)
+            blocksize = str(f_arg4)
+            variant_data = list(f_arg5)
+            out_dir = str(f_arg6)
+        else:
+            op = str(f_arg1)
+            stripes = int(f_arg2)
+            blocksize = str(f_arg3)
+            variant_data = list(f_arg4)
+            archive_basename = os.path.basename(
+                self.resolveDirectory(self.m_archive_folder).rstrip(os.sep)
+            )
+            out_dir = (
+                self.resolveDirectory(self.m_output_dir)
+                if self.m_output_dir
+                else os.getcwd()
+            )
+
+        sorted_data = sorted(variant_data, key=lambda x: x[0])
+        sorted_variants = [x[0] for x in sorted_data]
+        sorted_bws = [x[1] for x in sorted_data]
+
+        series = [plot.PlotData(op.capitalize(), sorted_variants, sorted_bws)]
+        filename = f"compare-archive-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, filename)
+
+        title = f"LSMIO Variant Comparison ({op.capitalize()}, Stripes={stripes}, BS={blocksize.upper()})"
+        meta_data = plot.PlotMetaData(title, "Variant", "Max Bandwidth (MB/s)")
+
+        bar_plot = plot.MultiBarPlot(meta_data, *series)
+        bar_plot.plot(out_path)
+        log.Console.info(f"Comparison plot saved to {out_path}")
+        return out_path
+
+    def run(self) -> int:
+        """Scan benchmark archive folder, extract variant metrics, and generate comparison plots.
+
+        Returns:
+            0 on success, 1 on no valid runs, 3 if archive folder does not exist.
+        """
+        target_dir = self.resolveDirectory(self.m_archive_folder)
+        if not os.path.isdir(target_dir):
+            sys.stderr.write(f"Archive folder not found: {self.m_archive_folder}\n")
+            return 3
+
+        from lsmiotool.lib.variants import VariantReverseResolver
+
+        entries = sorted(os.listdir(target_dir))
+        valid_runs: List[Tuple[Any, str]] = []
+        for entry in entries:
+            child_path = os.path.join(target_dir, entry)
+            if not os.path.isdir(child_path):
+                continue
+            res = VariantReverseResolver.resolve(entry)
+            if res is None:
+                continue
+            if self._ensureReportExists(child_path):
+                valid_runs.append((res, child_path))
+
+        if not valid_runs:
+            log.Console.warning("No valid benchmark runs found in archive folder")
+            return 1
+
+        ops = ["read", "write"] if self.m_op.lower() == "both" else [self.m_op.lower()]
+        from lsmiotool.lib.cli import CompareArchiveCliParser
+
+        perms = (
+            CompareArchiveCliParser.WORKLOAD_PERMUTATIONS
+            if self.m_all
+            else [(self.m_stripes, self.m_blocksize)]
+        )
+
+        for op in ops:
+            for stripes, bs in perms:
+                variant_data: List[Tuple[str, float]] = []
+                for res, child_path in valid_runs:
+                    bw = self._extractMetrics(child_path, op, stripes, bs)
+                    if bw is not None:
+                        variant_data.append((res.display_label, bw))
+                if variant_data:
+                    self._generateChart(op, stripes, bs, variant_data)
+                else:
+                    log.Console.warning(
+                        f"No benchmark data found in subdirectories for {op}, stripes={stripes}, bs={bs}"
+                    )
+
+        return 0
 
 
 class RunMain(BaseMain):

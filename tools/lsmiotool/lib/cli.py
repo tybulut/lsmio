@@ -46,6 +46,7 @@ LSMIOTOOL_HELP = """How to run
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>]
   compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
+  compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
@@ -110,6 +111,23 @@ Options:
                 Report format: 'csv' or 'json' (default: csv).
 """
 
+COMPARE_ARCHIVE_HELP_TEXT = """Usage:
+  lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+
+Arguments:
+  <archive_folder>
+                Path to the archive directory containing benchmark variant runs.
+  [operation]   Operation to compare: 'read', 'write', or 'both' (default: 'both').
+  [stripes]     Stripe count: 4 or 16 (default: 4).
+  [blocksize]   Block size: '64K', '1M', or '8M' (default: '1M').
+
+Options:
+  --all         Generate comparison charts across all 6 (stripes, blocksize) permutations.
+  --output-dir <dir>
+                Destination directory for generated PNG plots (default: current working directory).
+                Note: '--output-dir=value' syntax is strictly rejected; use '--output-dir <dir>'.
+"""
+
 
 class PackageValidationError(Exception):
     """Raised when package root or required module files fail validation."""
@@ -143,6 +161,12 @@ class ParseCliParseError(CliParseError):
 
 class ArchiveCliParseError(CliParseError):
     """Exception raised when CLI arguments for the 'archive' command are invalid."""
+
+    pass
+
+
+class CompareArchiveCliParseError(CliParseError):
+    """Exception raised when CLI arguments for the 'compare-archive' command are invalid."""
 
     pass
 
@@ -762,6 +786,378 @@ class ArchiveCliParser:
 def parseArchiveArguments(f_argv: Sequence[str]) -> ArchiveRequest:
     """Convenience function wrapping ArchiveCliParser.parse."""
     return ArchiveCliParser.parse(f_argv=f_argv)
+
+
+class CompareArchiveRequest:
+    """Immutable parsed and validated request value object for compare-archive."""
+
+    __slots__ = (
+        "m_archive_folder",
+        "m_op",
+        "m_stripes",
+        "m_blocksize",
+        "m_all",
+        "m_output_dir",
+        "_frozen",
+    )
+
+    def __init__(
+        self,
+        f_archive_folder: str,
+        f_op: str = "both",
+        f_stripes: int = 4,
+        f_blocksize: str = "1M",
+        f_all: bool = False,
+        f_output_dir: Optional[str] = None,
+    ) -> None:
+        if not isinstance(f_archive_folder, str) or not f_archive_folder.strip():
+            raise ValueError(
+                f"archive_folder must be a non-empty string, got: {f_archive_folder!r}"
+            )
+        if not isinstance(f_op, str) or not f_op.strip():
+            raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
+        f_norm_op = f_op.strip().lower()
+        if f_norm_op not in ("read", "write", "both"):
+            raise ValueError(
+                f"op must be one of ('read', 'write', 'both'), got: {f_op!r}"
+            )
+        if (
+            isinstance(f_stripes, bool)
+            or not isinstance(f_stripes, int)
+            or f_stripes not in (4, 16)
+        ):
+            raise ValueError(f"stripes must be 4 or 16, got: {f_stripes!r}")
+        if not isinstance(f_blocksize, str) or not f_blocksize.strip():
+            raise ValueError(
+                f"blocksize must be a non-empty string, got: {f_blocksize!r}"
+            )
+        f_norm_bs = f_blocksize.strip().upper()
+        if f_norm_bs not in ("64K", "1M", "8M"):
+            raise ValueError(
+                f"blocksize must be one of ('64K', '1M', '8M'), got: {f_blocksize!r}"
+            )
+        if not isinstance(f_all, bool):
+            raise ValueError(f"all must be a boolean, got: {f_all!r}")
+        if f_output_dir is not None and (
+            not isinstance(f_output_dir, str) or not f_output_dir.strip()
+        ):
+            raise ValueError(
+                f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
+            )
+
+        super().__setattr__("m_archive_folder", f_archive_folder.strip())
+        super().__setattr__("m_op", f_norm_op)
+        super().__setattr__("m_stripes", f_stripes)
+        super().__setattr__("m_blocksize", f_norm_bs)
+        super().__setattr__("m_all", f_all)
+        super().__setattr__(
+            "m_output_dir",
+            f_output_dir.strip() if f_output_dir is not None else None,
+        )
+        super().__setattr__("_frozen", True)
+
+    def __setattr__(self, f_key: str, f_value: Any) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Cannot modify immutable {self.__class__.__name__}"
+            )
+        super().__setattr__(f_key, f_value)
+
+    def __delattr__(self, f_key: str) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
+        super().__delattr__(f_key)
+
+    @property
+    def archive_folder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def archiveFolder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def op(self) -> str:
+        return self.m_op
+
+    @property
+    def stripes(self) -> int:
+        return self.m_stripes
+
+    @property
+    def blocksize(self) -> str:
+        return self.m_blocksize
+
+    @property
+    def all(self) -> bool:
+        return self.m_all
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def outputDir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    def toDict(self) -> Dict[str, Any]:
+        return {
+            "archive_folder": self.m_archive_folder,
+            "op": self.m_op,
+            "stripes": self.m_stripes,
+            "blocksize": self.m_blocksize,
+            "all": self.m_all,
+            "output_dir": self.m_output_dir,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"CompareArchiveRequest(archive_folder={self.m_archive_folder!r}, "
+            f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
+            f"blocksize={self.m_blocksize!r}, all={self.m_all!r}, "
+            f"output_dir={self.m_output_dir!r})"
+        )
+
+    def __eq__(self, f_other: Any) -> bool:
+        if isinstance(f_other, CompareArchiveRequest):
+            return (
+                self.m_archive_folder == f_other.m_archive_folder
+                and self.m_op == f_other.m_op
+                and self.m_stripes == f_other.m_stripes
+                and self.m_blocksize == f_other.m_blocksize
+                and self.m_all == f_other.m_all
+                and self.m_output_dir == f_other.m_output_dir
+            )
+        return False
+
+    def __hash__(self) -> int:
+        return hash((
+            self.m_archive_folder,
+            self.m_op,
+            self.m_stripes,
+            self.m_blocksize,
+            self.m_all,
+            self.m_output_dir,
+        ))
+
+
+class CompareArchiveCliParser:
+    """Pure standard-library parser for 'lsmiotool compare-archive' CLI arguments.
+
+    Usage:
+        lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+
+    Arguments:
+        <archive_folder>: Path to the archive directory containing benchmark variant runs.
+        [operation]: Operation to compare: 'read', 'write', or 'both' (default: 'both').
+        [stripes]: Stripe count: 4 or 16 (default: 4).
+        [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
+
+    Options:
+        --all: Generate comparison charts across all 6 (stripes, blocksize) permutations.
+        --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
+    """
+
+    VALID_OPERATIONS: Tuple[str, ...] = ("read", "write", "both")
+    VALID_STRIPES: Tuple[int, ...] = (4, 16)
+    VALID_BLOCKSIZES: Tuple[str, ...] = ("64K", "1M", "8M")
+    WORKLOAD_PERMUTATIONS: Tuple[Tuple[int, str], ...] = (
+        (4, "64K"),
+        (16, "64K"),
+        (4, "1M"),
+        (16, "1M"),
+        (4, "8M"),
+        (16, "8M"),
+    )
+
+    @classmethod
+    def parse(
+        cls,
+        f_argv: Sequence[str],
+    ) -> CompareArchiveRequest:
+        """Parses argument sequence into an immutable canonical CompareArchiveRequest.
+
+        Args:
+            f_argv: Sequence of argument strings (either including or excluding leading 'compare-archive').
+
+        Returns:
+            Canonical CompareArchiveRequest instance.
+
+        Raises:
+            CompareArchiveCliParseError: If syntax, arity, flags, or values are invalid.
+        """
+        if f_argv is None or isinstance(f_argv, (str, bytes)):
+            raise CompareArchiveCliParseError(
+                f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
+            )
+        try:
+            f_tokens: List[str] = list(f_argv)
+        except TypeError:
+            raise CompareArchiveCliParseError(
+                f"f_argv must be iterable, got: {type(f_argv).__name__}"
+            )
+
+        for f_idx, f_elem in enumerate(f_tokens):
+            if not isinstance(f_elem, str):
+                raise CompareArchiveCliParseError(
+                    f"All argv elements must be strings, got {type(f_elem).__name__} at index {f_idx}"
+                )
+
+        for f_tok in f_tokens:
+            if f_tok.startswith("--all="):
+                raise CompareArchiveCliParseError(
+                    f"Prohibit '--all=value' syntax ({f_tok!r}); '--all' takes no value."
+                )
+            if f_tok.startswith("--output-dir="):
+                raise CompareArchiveCliParseError(
+                    f"Prohibit '--output-dir=value' syntax ({f_tok!r}); use '--output-dir <dir>' with explicit separate argument."
+                )
+
+        f_cmd_indices: List[int] = [
+            f_idx
+            for f_idx, f_tok in enumerate(f_tokens)
+            if f_tok.lower() == "compare-archive"
+        ]
+
+        if f_cmd_indices:
+            f_cmd_idx = f_cmd_indices[0]
+            f_pre_tokens = f_tokens[:f_cmd_idx]
+            f_post_tokens = f_tokens[f_cmd_idx + 1 :]
+
+            for f_pre_tok in f_pre_tokens:
+                raise CompareArchiveCliParseError(
+                    f"Unexpected token before 'compare-archive': {f_pre_tok!r}"
+                )
+        else:
+            f_post_tokens = f_tokens[:]
+
+        if not f_post_tokens:
+            raise CompareArchiveCliParseError(
+                "Missing required positional argument: <archive_folder>"
+            )
+
+        f_archive_folder_tok = f_post_tokens[0]
+        if f_archive_folder_tok.startswith("-"):
+            raise CompareArchiveCliParseError(
+                f"Unexpected option {f_archive_folder_tok!r} placed before positional argument <archive_folder>."
+            )
+
+        f_archive_folder = f_archive_folder_tok.strip()
+        if not f_archive_folder:
+            raise CompareArchiveCliParseError(
+                "Archive folder path cannot be empty."
+            )
+
+        f_op: str = "both"
+        f_stripes: int = 4
+        f_blocksize: str = "1M"
+        f_all: bool = False
+        f_output_dir: Optional[str] = None
+
+        f_remaining_tokens = f_post_tokens[1:]
+        f_pos_idx = 0
+        f_rem_idx = 0
+
+        while f_rem_idx < len(f_remaining_tokens):
+            f_tok = f_remaining_tokens[f_rem_idx]
+            if f_tok.startswith("-"):
+                break
+
+            if f_pos_idx == 0:
+                f_op_norm = f_tok.strip().lower()
+                if f_op_norm not in cls.VALID_OPERATIONS:
+                    raise CompareArchiveCliParseError(
+                        f"Invalid operation: {f_tok!r}. Must be one of: {cls.VALID_OPERATIONS}"
+                    )
+                f_op = f_op_norm
+                f_pos_idx += 1
+                f_rem_idx += 1
+            elif f_pos_idx == 1:
+                try:
+                    f_stripes_val = int(f_tok)
+                except ValueError:
+                    raise CompareArchiveCliParseError(
+                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
+                    )
+                if f_stripes_val not in cls.VALID_STRIPES:
+                    raise CompareArchiveCliParseError(
+                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
+                    )
+                f_stripes = f_stripes_val
+                f_pos_idx += 1
+                f_rem_idx += 1
+            elif f_pos_idx == 2:
+                f_bs_norm = f_tok.strip().upper()
+                if f_bs_norm not in cls.VALID_BLOCKSIZES:
+                    raise CompareArchiveCliParseError(
+                        f"Invalid blocksize: {f_tok!r}. Must be one of: {cls.VALID_BLOCKSIZES}"
+                    )
+                f_blocksize = f_bs_norm
+                f_pos_idx += 1
+                f_rem_idx += 1
+            else:
+                raise CompareArchiveCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
+
+        f_all_seen = False
+        f_output_dir_seen = False
+
+        while f_rem_idx < len(f_remaining_tokens):
+            f_tok = f_remaining_tokens[f_rem_idx]
+            if f_tok == "--all":
+                if f_all_seen:
+                    raise CompareArchiveCliParseError(
+                        "Duplicate '--all' option specified."
+                    )
+                f_all = True
+                f_all_seen = True
+                f_rem_idx += 1
+            elif f_tok == "--output-dir":
+                if f_output_dir_seen:
+                    raise CompareArchiveCliParseError(
+                        "Duplicate '--output-dir' option specified."
+                    )
+                if f_rem_idx + 1 >= len(f_remaining_tokens):
+                    raise CompareArchiveCliParseError(
+                        "Missing value after '--output-dir' option."
+                    )
+                f_val = f_remaining_tokens[f_rem_idx + 1]
+                if f_val.startswith("-"):
+                    raise CompareArchiveCliParseError(
+                        f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
+                    )
+                if not f_val.strip():
+                    raise CompareArchiveCliParseError(
+                        "Output directory path cannot be empty."
+                    )
+                f_output_dir = f_val.strip()
+                f_output_dir_seen = True
+                f_rem_idx += 2
+            elif f_tok.startswith("-"):
+                raise CompareArchiveCliParseError(f"Unknown option: {f_tok!r}")
+            else:
+                raise CompareArchiveCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
+
+        return CompareArchiveRequest(
+            f_archive_folder=f_archive_folder,
+            f_op=f_op,
+            f_stripes=f_stripes,
+            f_blocksize=f_blocksize,
+            f_all=f_all,
+            f_output_dir=f_output_dir,
+        )
+
+
+def parseCompareArchiveArguments(
+    f_argv: Sequence[str],
+) -> CompareArchiveRequest:
+    """Convenience function wrapping CompareArchiveCliParser.parse."""
+    return CompareArchiveCliParser.parse(f_argv=f_argv)
 
 
 class SourcePackageValidator:
