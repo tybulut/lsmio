@@ -38,7 +38,8 @@ jobs:
         sudo apt-get install -y \
           openmpi-bin libopenmpi-dev libgoogle-glog-dev libgtest-dev \
           libgflags-dev libleveldb-dev librocksdb-dev \
-          libadios2-mpi-c++11-dev libcli11-dev libfmt-dev
+          libadios2-mpi-c++11-dev libcli11-dev libfmt-dev \
+          python3-dev python3-pytest python3-numpy python3-matplotlib
 
     - name: Set reusable strings
       id: strings

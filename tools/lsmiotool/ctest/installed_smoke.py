@@ -139,13 +139,19 @@ class InstalledSmoke(unittest.TestCase):
         )
 
         # Test --version and -v
+        f_version_file = os.path.join(
+            self.m_stage_dir, "share", "lsmio", "python", "lsmiotool", "VERSION"
+        )
+        with open(f_version_file, "r", encoding="utf-8") as f_f:
+            f_expected_ver = f_f.read().strip()
+
         f_proc_ver = subprocess.run(
             [f_public_bin, "--version"],
             capture_output=True,
             text=True,
         )
         self.assertEqual(f_proc_ver.returncode, 0)
-        self.assertIn("0.2.0", f_proc_ver.stdout)
+        self.assertIn(f_expected_ver, f_proc_ver.stdout)
 
         f_proc_v = subprocess.run(
             [f_public_bin, "-v"],
@@ -153,7 +159,7 @@ class InstalledSmoke(unittest.TestCase):
             text=True,
         )
         self.assertEqual(f_proc_v.returncode, 0)
-        self.assertIn("0.2.0", f_proc_v.stdout)
+        self.assertIn(f_expected_ver, f_proc_v.stdout)
 
         # Test --help and -h
         f_proc_help = subprocess.run(
@@ -234,7 +240,11 @@ class InstalledSmoke(unittest.TestCase):
 
         # 3. Verify version file reading and format
         f_version_file = os.path.join(f_pkg_root, "VERSION")
-        self.assertEqual(getVersion(f_version_file), "0.2.0")
+        with open(f_version_file, "r", encoding="utf-8") as f_f:
+            f_expected_ver = f_f.read().strip()
+        f_staged_ver = getVersion(f_version_file)
+        self.assertEqual(f_staged_ver, f_expected_ver)
+        self.assertRegex(f_staged_ver, r"^\d+\.\d+\.\d+$")
 
         # 4. Verify profile loading
         f_profile_file = os.path.join(
@@ -296,7 +306,7 @@ class InstalledSmoke(unittest.TestCase):
             os.makedirs(f_home_dir, exist_ok=True)
             f_decoy_home_file = os.path.join(f_home_dir, "VERSION")
             with open(f_decoy_home_file, "w", encoding="utf-8") as f_f:
-                f_f.write("0.2.0\n")
+                f_f.write("9.9.9\n")
 
             # Case A1: Missing required module (worker.py) -> InstalledPackageValidator raises and wrapper prints error
             f_target_worker = os.path.join(

@@ -27,7 +27,8 @@ jobs:
             glog googletest gflags \
             cli11 fmt \
             leveldb rocksdb \
-            tlx
+            tlx \
+            numpy matplotlib
 
     - name: Set reusable strings - MacOS
       id: strings

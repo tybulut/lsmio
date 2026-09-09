@@ -30,6 +30,7 @@
 
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import unittest
@@ -50,8 +51,8 @@ class VersionTest(unittest.TestCase):
         os.chdir(self.m_original_cwd)
         shutil.rmtree(self.m_temp_dir, ignore_errors=True)
 
-    def testAuthorityIs020(self) -> None:
-        """Asserts tools/lsmiotool/VERSION contains exactly '0.2.0\\n'."""
+    def testAuthoritySemVerFormat(self) -> None:
+        """Asserts tools/lsmiotool/VERSION contains a valid semver string with a trailing newline."""
         f_version_file = (
             pathlib.Path(__file__).resolve().parent.parent.parent / "VERSION"
         )
@@ -61,7 +62,16 @@ class VersionTest(unittest.TestCase):
         )
         with open(f_version_file, "r", encoding="utf-8") as f_f:
             f_content = f_f.read()
-        self.assertEqual(f_content, "0.2.0\n")
+        self.assertTrue(
+            f_content.endswith("\n"),
+            "Authority file must end with a single newline",
+        )
+        f_version = f_content.rstrip("\r\n")
+        self.assertRegex(
+            f_version,
+            r"^\d+\.\d+\.\d+$",
+            f"Authority version '{f_version}' is not a valid semantic version (MAJOR.MINOR.PATCH)",
+        )
 
     def testCmakeProjectVersionMatchesAuthority(self) -> None:
         """Asserts CMake project version matches authority file."""
@@ -80,13 +90,25 @@ class VersionTest(unittest.TestCase):
         self.assertIn("project(lsmio VERSION ${LSMIO_VERSION}", f_cmake_content)
 
         # Authority version
+        f_version_file = (
+            pathlib.Path(__file__).resolve().parent.parent.parent / "VERSION"
+        )
+        with open(f_version_file, "r", encoding="utf-8") as f_f:
+            f_expected = f_f.read().strip()
+
         f_version = getVersion()
-        self.assertEqual(f_version, "0.2.0")
+        self.assertEqual(f_version, f_expected)
 
     def testPackageValueFromFile(self) -> None:
-        """Asserts lsmiotool.lib.__version__ and VERSION match 0.2.0."""
-        self.assertEqual(lsmiotool.lib.__version__, "0.2.0")
-        self.assertEqual(lsmiotool.lib.VERSION, "0.2.0")
+        """Asserts lsmiotool.lib.__version__ and VERSION match authority file."""
+        f_version_file = (
+            pathlib.Path(__file__).resolve().parent.parent.parent / "VERSION"
+        )
+        with open(f_version_file, "r", encoding="utf-8") as f_f:
+            f_expected = f_f.read().strip()
+
+        self.assertEqual(lsmiotool.lib.__version__, f_expected)
+        self.assertEqual(lsmiotool.lib.VERSION, f_expected)
 
     def testConsumerRejectsMalformedMissingSymlinkNonRegularUnreadable(self) -> None:
         """Asserts rejection of symlinks, directories, missing files, multiline content, and malformed strings."""
@@ -176,9 +198,15 @@ class VersionTest(unittest.TestCase):
         with self.assertRaises(VersionError):
             getVersion(f_non_existent)
 
-        # Calling getVersion() with no argument must read package VERSION (0.2.0), not cwd VERSION (9.9.9)
+        # Calling getVersion() with no argument must read package VERSION, not cwd VERSION (9.9.9)
+        f_version_file = (
+            pathlib.Path(__file__).resolve().parent.parent.parent / "VERSION"
+        )
+        with open(f_version_file, "r", encoding="utf-8") as f_f:
+            f_expected = f_f.read().strip()
+
         f_default_version = getVersion()
-        self.assertEqual(f_default_version, "0.2.0")
+        self.assertEqual(f_default_version, f_expected)
 
     def testSingleAuthoredVersionLiteral(self) -> None:
         """Asserts no hardcoded version literals exist in CMakeLists.txt or lib/__init__.py."""
@@ -189,10 +217,14 @@ class VersionTest(unittest.TestCase):
         with open(f_cmake_file, "r", encoding="utf-8") as f_f:
             f_cmake_content = f_f.read()
 
-        # CMakeLists.txt should not have literal "project(lsmio VERSION 0.2"
-        self.assertNotIn("project(lsmio VERSION 0.2", f_cmake_content)
+        # CMakeLists.txt should not have literal "project(lsmio VERSION <digits>"
+        self.assertNotRegex(
+            f_cmake_content,
+            r"project\s*\(\s*lsmio\s+VERSION\s+\d+\.\d+",
+            "CMakeLists.txt must not hardcode static project VERSION literal",
+        )
 
-        # lib/__init__.py should not have literal VERSION = "0.2"
+        # lib/__init__.py should not have literal VERSION = "<digits>"
         f_init_file = (
             pathlib.Path(__file__).resolve().parent.parent.parent
             / "lib"
@@ -201,6 +233,14 @@ class VersionTest(unittest.TestCase):
         with open(f_init_file, "r", encoding="utf-8") as f_f:
             f_init_content = f_f.read()
 
-        self.assertNotIn('VERSION = "0.2"', f_init_content)
-        self.assertNotIn('__version__ = "0.2"', f_init_content)
+        self.assertNotRegex(
+            f_init_content,
+            r'VERSION\s*=\s*["\']\d+\.\d+',
+            "lib/__init__.py must not hardcode static VERSION literal",
+        )
+        self.assertNotRegex(
+            f_init_content,
+            r'__version__\s*=\s*["\']\d+\.\d+',
+            "lib/__init__.py must not hardcode static __version__ literal",
+        )
         self.assertIn("getVersion()", f_init_content)
