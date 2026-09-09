@@ -227,6 +227,7 @@ std::string genOptionsToString() {
               << "\n collective-IO: " << gConfigBM.enableCollectiveIO << "\n mpi-io-world: "
               << (lsmio::gConfigLSMIO.mpiAggType != lsmio::MPIAggType::Shared ? "world"
                                                                               : "host-group")
+              << "\n mpiAggType: " << lsmio::to_string(lsmio::gConfigLSMIO.mpiAggType)
               << "\n iterations: " << gConfigBM.iterations
               << "\n segmentCount: " << gConfigBM.segmentCount
               << "\n keyCount: " << gConfigBM.keyCount << "\n valueSize: " << gConfigBM.valueSize
@@ -235,6 +236,10 @@ std::string genOptionsToString() {
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
               << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
+              << "\n useRocksDB: "
+              << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::RocksDB ? "yes" : "no")
+              << "\n useNativeDB: "
+              << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::NativeDB ? "yes" : "no")
               << "\n compression: " << lsmio::gConfigLSMIO.compression
               << "\n blockSize: " << lsmio::gConfigLSMIO.blockSize
               << "\n transferSize: " << lsmio::gConfigLSMIO.transferSize
@@ -246,7 +251,16 @@ std::string genOptionsToString() {
               << "\n writeFileSize: " << lsmio::gConfigLSMIO.writeFileSize
               << "\n preAllocate: " << lsmio::gConfigLSMIO.preAllocate
               << "\n disableAggDirStructure: " << lsmio::gConfigLSMIO.disableAggDirStructure
-              << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize << "\n";
+              << "\n filePoolSize: " << lsmio::gConfigLSMIO.filePoolSize
+              << "\n storageType: " << lsmio::to_string(lsmio::gConfigLSMIO.storageType)
+              << "\n memtable: " << lsmio::to_string(lsmio::gConfigLSMIO.memtable)
+              << "\n maxKeyLen: " << lsmio::gConfigLSMIO.maxKeyLen
+              << "\n maxValueLen: " << lsmio::gConfigLSMIO.getMaxValueLen()
+              << "\n manualOffset: " << (lsmio::gConfigLSMIO.manualOffset ? "true" : "false")
+              << "\n footerIndex: " << (lsmio::gConfigLSMIO.footerIndex ? "true" : "false")
+              << "\n writeBufferNumber: " << lsmio::gConfigLSMIO.writeBufferNumber
+              << "\n autoTuneParameters: " << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
+              << "\n";
 
     return optStream.str();
 }
@@ -335,6 +349,10 @@ int BMBase::beginMain(int argc, char **argv) {
                      "bypass tellp() and manually track offsets (default: false)");
         app.add_flag("--lsmio-footer-index", lsmio::gConfigLSMIO.footerIndex,
                      "append the Dense Index Footer to the SSTable (default: false)");
+        app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
+                       "number of write buffers (default: 4)");
+        app.add_flag("--lsmio-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
+                     "enable filesystem auto-tuning (default: false)");
 
         app.parse(argc, argv);
 
