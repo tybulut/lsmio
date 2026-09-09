@@ -28,7 +28,7 @@ jobs:
             cli11 fmt \
             leveldb rocksdb \
             tlx \
-            numpy matplotlib
+            numpy python-matplotlib
 
     - name: Set reusable strings - MacOS
       id: strings
