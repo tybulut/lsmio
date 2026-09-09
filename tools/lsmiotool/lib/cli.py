@@ -35,6 +35,7 @@ from pathlib import Path
 import stat
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+from lsmiotool.lib.archive import ArchiveError, ArchiveRequest
 from lsmiotool.lib.run import RunRequest
 
 
@@ -43,11 +44,12 @@ LSMIOTOOL_HELP = """How to run
 ./lsmiotool [options] <cmd> <cmd-arguments>
 
 common cmds:
+  archive <benchmark> <scale> [<variant>] [--dest <path>]
   compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
+  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd] [--setup <name>]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -61,13 +63,29 @@ options:
   --version   print version and exit
 """
 
+ARCHIVE_HELP_TEXT = """Usage:
+  lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+
+Arguments:
+  <benchmark>   Supported benchmarks: lsmio
+  <scale>       Supported scales: local, bake, small, large, baseline
+  <variant>     Optional variant configuration for 'lsmio baseline'
+                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio baseline'.
+
+Options:
+  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive).
+                Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
+"""
+
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [--ssd] [--setup <name>]
+  lsmiotool run <benchmark> <scale> [<variant>] [--ssd] [--setup <name>]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
-  <scale>       Supported scales: local, bake, small, large
+  <scale>       Supported scales: local, bake, small, large, baseline
                 (Note: 'lmp large' is strictly unsupported and rejected)
+  <variant>     Optional variant configuration for 'lsmio baseline'
+                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio baseline'.
 
 Options:
   --ssd         Use SSD storage class (default: HDD).
@@ -123,22 +141,22 @@ class ParseCliParseError(CliParseError):
     pass
 
 
+class ArchiveCliParseError(CliParseError):
+    """Exception raised when CLI arguments for the 'archive' command are invalid."""
+
+    pass
+
+
 class RunCliParser:
     """Pure standard-library parser for 'lsmiotool run' CLI arguments.
 
-    Usage:
-        lsmiotool run <benchmark> <scale> [--ssd] [--setup <name>]
+    Grammar:
+        lsmiotool run <benchmark> <scale> [<variant>] [--ssd] [--setup <name>]
 
-    Supported benchmarks:
-        - ior   (default setup: BASE)
-        - lsmio (default setup: NATIVE-M)
-        - lmp   (default setup: LSMIO)
-
-    Supported scales:
-        - local (1 task, 1 task/node)
-        - bake  (1, 2, 4, 8 tasks, 1 task/node)
-        - small (1, 2, 4, 8, 16, 24, 32, 40, 48 tasks, 1 task/node)
-        - large (4, 8, 16, 32, 64, 128, 192, 256 tasks, 4 tasks/node; lmp large is unsupported)
+    Positional Arguments:
+        <benchmark>: Required. One of: ior, lsmio, lmp.
+        <scale>: Required. One of: local, bake, small, large, baseline.
+        <variant>: Optional. Supported exclusively for 'lsmio baseline'.
 
     Options:
         --ssd: Storage class SSD (default HDD)
@@ -150,7 +168,7 @@ class RunCliParser:
     """
 
     VALID_BENCHMARKS = frozenset({"ior", "lsmio", "lmp"})
-    VALID_SCALES = frozenset({"local", "bake", "small", "large"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "baseline"})
 
     @classmethod
     def parse(
@@ -280,8 +298,26 @@ class RunCliParser:
                 f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
             )
 
-        # Parse trailing options
+        # Parse trailing options and optional positional variant
+        from lsmiotool.lib.variants import VariantCatalogue
+
         f_trailing_tokens = f_post_run_tokens[2:]
+        f_variant_name: Optional[str] = None
+
+        if f_scale == "baseline":
+            if f_benchmark == "lsmio":
+                if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                    f_variant_tok = f_trailing_tokens[0]
+                    f_trailing_tokens = f_trailing_tokens[1:]
+                    f_rec = VariantCatalogue.resolve(f_variant_tok)
+                    f_variant_name = f_rec.tokens if f_rec.tokens else None
+            else:
+                if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                    raise RunCliParseError(
+                        f"Benchmark {f_benchmark!r} does not support variant configurations; "
+                        f"variants are supported exclusively for 'lsmio'."
+                    )
+
         f_is_ssd: bool = f_effective_global_ssd
         f_trailing_ssd_seen: bool = False
         f_setup_name: Optional[str] = None
@@ -321,6 +357,7 @@ class RunCliParser:
             f_scale=f_scale,
             f_ssd=f_is_ssd,
             f_setup=f_setup_name,
+            f_variant=f_variant_name,
         )
 
 
@@ -544,6 +581,187 @@ class ParseCliParser:
 def parseParseArguments(f_argv: Sequence[str]) -> ParseRequest:
     """Convenience function wrapping ParseCliParser.parse."""
     return ParseCliParser.parse(f_argv=f_argv)
+
+
+class ArchiveCliParser:
+    """Pure standard-library parser for 'lsmiotool archive' CLI arguments.
+
+    Grammar:
+        lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+
+    Positional Arguments:
+        <benchmark>: Required. Must be 'lsmio'.
+        <scale>: Required. One of: local, bake, small, large, baseline.
+        <variant>: Optional. Supported exclusively for 'lsmio baseline'.
+
+    Options:
+        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive).
+            Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
+    """
+
+    VALID_BENCHMARKS = frozenset({"lsmio"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "baseline"})
+
+    @classmethod
+    def parse(
+        cls,
+        f_argv: Sequence[str],
+    ) -> ArchiveRequest:
+        """Parses argument sequence into an immutable canonical ArchiveRequest.
+
+        Args:
+            f_argv: Sequence of argument strings (either including or excluding leading 'archive').
+
+        Returns:
+            Canonical ArchiveRequest instance.
+
+        Raises:
+            ArchiveCliParseError: If syntax, arity, flags, or values are invalid.
+            UnknownVariantError: If variant is invalid for baseline scale.
+        """
+        if f_argv is None or isinstance(f_argv, (str, bytes)):
+            raise ArchiveCliParseError(
+                f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
+            )
+        try:
+            f_tokens: List[str] = list(f_argv)
+        except TypeError:
+            raise ArchiveCliParseError(
+                f"f_argv must be iterable, got: {type(f_argv).__name__}"
+            )
+
+        for f_idx, f_elem in enumerate(f_tokens):
+            if not isinstance(f_elem, str):
+                raise ArchiveCliParseError(
+                    f"All argv elements must be strings, got {type(f_elem).__name__} at index {f_idx}"
+                )
+
+        # Strictly reject --dest=value anywhere in tokens
+        for f_tok in f_tokens:
+            if f_tok.startswith("--dest="):
+                raise ArchiveCliParseError(
+                    f"Prohibit '--dest=value' syntax ({f_tok!r}); use '--dest <path>' with explicit separate argument."
+                )
+
+        # Separate pre-'archive' and post-'archive' tokens if 'archive' is present
+        f_archive_indices: List[int] = [
+            f_idx
+            for f_idx, f_tok in enumerate(f_tokens)
+            if f_tok.lower() == "archive"
+        ]
+
+        if f_archive_indices:
+            f_archive_idx = f_archive_indices[0]
+            f_pre_archive_tokens = f_tokens[:f_archive_idx]
+            f_post_archive_tokens = f_tokens[f_archive_idx + 1 :]
+
+            for f_pre_tok in f_pre_archive_tokens:
+                raise ArchiveCliParseError(
+                    f"Unexpected token before 'archive': {f_pre_tok!r}"
+                )
+        else:
+            f_post_archive_tokens = f_tokens[:]
+
+        # Validate required positional arguments
+        if not f_post_archive_tokens:
+            raise ArchiveCliParseError(
+                "Missing required positional arguments: <benchmark> <scale>"
+            )
+
+        # Validate benchmark (positional 0)
+        f_benchmark_tok = f_post_archive_tokens[0]
+        if f_benchmark_tok.startswith("-"):
+            raise ArchiveCliParseError(
+                f"Unexpected option {f_benchmark_tok!r} placed before positional arguments."
+            )
+
+        f_benchmark = f_benchmark_tok.strip().lower()
+        if f_benchmark not in cls.VALID_BENCHMARKS:
+            raise ArchiveCliParseError(
+                f"Invalid benchmark: {f_benchmark_tok!r}. Must be one of: {sorted(cls.VALID_BENCHMARKS)}"
+            )
+
+        if len(f_post_archive_tokens) < 2:
+            raise ArchiveCliParseError(
+                "Missing required positional argument: <scale>"
+            )
+
+        # Validate scale (positional 1)
+        f_scale_tok = f_post_archive_tokens[1]
+        if f_scale_tok.startswith("-"):
+            raise ArchiveCliParseError(
+                f"Unexpected option {f_scale_tok!r} placed between positional arguments."
+            )
+
+        f_scale = f_scale_tok.strip().lower()
+        if f_scale not in cls.VALID_SCALES:
+            raise ArchiveCliParseError(
+                f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
+            )
+
+        # Parse trailing options and optional positional variant
+        from lsmiotool.lib.variants import VariantCatalogue
+
+        f_trailing_tokens = f_post_archive_tokens[2:]
+        f_variant_name: Optional[str] = None
+
+        if f_scale == "baseline":
+            if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                f_variant_tok = f_trailing_tokens[0]
+                f_trailing_tokens = f_trailing_tokens[1:]
+                f_rec = VariantCatalogue.resolve(f_variant_tok)
+                f_variant_name = f_rec.tokens if f_rec.tokens else None
+        else:
+            if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                raise ArchiveCliParseError(
+                    f"Unexpected extra positional argument: {f_trailing_tokens[0]!r}"
+                )
+
+        f_dest_path: Optional[str] = None
+        f_dest_seen: bool = False
+
+        f_idx = 0
+        while f_idx < len(f_trailing_tokens):
+            f_tok = f_trailing_tokens[f_idx]
+            if f_tok == "--dest":
+                if f_dest_seen:
+                    raise ArchiveCliParseError(
+                        "Duplicate '--dest' option specified."
+                    )
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise ArchiveCliParseError(
+                        "Missing value after '--dest' option."
+                    )
+                f_val = f_trailing_tokens[f_idx + 1]
+                if f_val.startswith("-"):
+                    raise ArchiveCliParseError(
+                        f"Missing valid value after '--dest' option, got option-like token: {f_val!r}"
+                    )
+                if not f_val.strip():
+                    raise ArchiveCliParseError(
+                        "Destination path cannot be empty."
+                    )
+                f_dest_path = f_val.strip()
+                f_dest_seen = True
+                f_idx += 2
+            elif f_tok.startswith("-"):
+                raise ArchiveCliParseError(f"Unknown option: {f_tok!r}")
+            else:
+                raise ArchiveCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
+
+        return ArchiveRequest(
+            f_target=f_benchmark,
+            f_scale=f_scale,
+            f_variant=f_variant_name,
+            f_dest=f_dest_path,
+        )
+
+
+def parseArchiveArguments(f_argv: Sequence[str]) -> ArchiveRequest:
+    """Convenience function wrapping ArchiveCliParser.parse."""
+    return ArchiveCliParser.parse(f_argv=f_argv)
 
 
 class SourcePackageValidator:

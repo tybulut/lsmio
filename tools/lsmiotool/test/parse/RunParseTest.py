@@ -105,12 +105,14 @@ class RunParseTest(unittest.TestCase):
         f_scale: str = "local",
         f_setup: str = "NATIVE-M",
         f_ssd: bool = False,
+        f_variant: Optional[str] = None,
     ) -> RunPlan:
         f_req = RunRequest(
             f_target=f_target,
             f_scale=f_scale,
             f_ssd=f_ssd,
             f_setup=f_setup,
+            f_variant=f_variant,
         )
         f_tokens = [f"lm-{f_i:024d}" for f_i in range(1, 20)]
         f_tok_idx = 0
@@ -136,9 +138,15 @@ class RunParseTest(unittest.TestCase):
         f_scale: str = "local",
         f_setup: str = "NATIVE-M",
         f_ssd: bool = False,
+        f_variant: Optional[str] = None,
     ) -> Tuple[str, RunPlan, EvidenceStore]:
         f_plan = self._createPlan(
-            f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup, f_ssd=f_ssd
+            f_run_id,
+            f_target=f_target,
+            f_scale=f_scale,
+            f_setup=f_setup,
+            f_ssd=f_ssd,
+            f_variant=f_variant,
         )
         f_art_store = ArtifactStore(self.m_temp_dir, f_run_id)
         f_art_store.allocateRun(f_plan)
@@ -635,6 +643,12 @@ class RunParseTest(unittest.TestCase):
             del f_resolved.m_manifest  # type: ignore
 
         with self.assertRaises(AttributeError):
+            f_resolved.variant = "footer"  # type: ignore
+
+        with self.assertRaises(AttributeError):
+            del f_resolved.m_variant  # type: ignore
+
+        with self.assertRaises(AttributeError):
             f_pt.m_ordinal = 99  # type: ignore
 
         with self.assertRaises(AttributeError):
@@ -642,6 +656,31 @@ class RunParseTest(unittest.TestCase):
 
         with self.assertRaises(AttributeError):
             del f_pt.m_point_id  # type: ignore
+
+    def testResolvedRunVariantAttribution(self) -> None:
+        """Asserts ResolvedRun captures variant from manifest and supports equality and serialization."""
+        # 1. Base run without variant
+        f_run_root_base, _, _ = self._setupSucceededRun(
+            "run-var-base-001", "lsmio", "local", f_variant=None
+        )
+        f_resolved_base = RunRootResolver.resolve(f_run_root_base)
+        self.assertIsNone(f_resolved_base.variant)
+        self.assertIsNone(f_resolved_base.toDict().get("variant"))
+        self.assertIn("variant=None", repr(f_resolved_base))
+
+        # 2. Baseline run with variant
+        f_run_root_var, _, _ = self._setupSucceededRun(
+            "run-var-footer-001", "lsmio", "baseline", f_variant="footer-btree"
+        )
+        f_resolved_var = RunRootResolver.resolve(f_run_root_var)
+        self.assertEqual(f_resolved_var.variant, "footer-btree")
+        self.assertEqual(f_resolved_var.toDict().get("variant"), "footer-btree")
+        self.assertIn("variant='footer-btree'", repr(f_resolved_var))
+
+        # 3. Equality with variant
+        f_resolved_var_dup = RunRootResolver.resolve(f_run_root_var)
+        self.assertEqual(f_resolved_var, f_resolved_var_dup)
+        self.assertNotEqual(f_resolved_base, f_resolved_var)
 
     def testPointIdentifierLookups(self) -> None:
         """Asserts point lookup helper methods handle various identifier representations and fail on invalid ones."""
@@ -1214,6 +1253,7 @@ class RunParseTest(unittest.TestCase):
             f_resolved_ior, f_extracted_ior
         )
         self.assertIn("Benchmark", f_tbl_ior)
+        self.assertIn("Variant", f_tbl_ior)
         self.assertIn("Point ID", f_tbl_ior)
         self.assertIn("Tasks/Cores", f_tbl_ior)
         self.assertIn("Combination", f_tbl_ior)
@@ -1224,6 +1264,26 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("IOR", f_tbl_ior)
         self.assertIn("1100.25", f_tbl_ior)
         self.assertIn("2200.50", f_tbl_ior)
+
+        # Verify 9-column headers and index 1 Variant
+        f_ior_lines = [
+            l.strip() for l in f_tbl_ior.splitlines() if l.strip().startswith("|")
+        ]
+        f_ior_header_cols = [c.strip() for c in f_ior_lines[0].split("|")[1:-1]]
+        self.assertEqual(len(f_ior_header_cols), 9)
+        self.assertEqual(f_ior_header_cols[0], "Benchmark")
+        self.assertEqual(f_ior_header_cols[1], "Variant")
+        self.assertEqual(f_ior_header_cols[2], "Point ID")
+        self.assertEqual(f_ior_header_cols[3], "Tasks/Cores")
+        self.assertEqual(f_ior_header_cols[4], "Combination")
+        self.assertEqual(f_ior_header_cols[5], "Operation")
+        self.assertEqual(f_ior_header_cols[6], "Throughput MB/s")
+        self.assertEqual(f_ior_header_cols[7], "IOPS")
+        self.assertEqual(f_ior_header_cols[8], "Duration")
+
+        # Verify default '-' variant in data row
+        f_ior_row_cols = [c.strip() for c in f_ior_lines[1].split("|")[1:-1]]
+        self.assertEqual(f_ior_row_cols[1], "-")
 
         # 2. LSMIO Table
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
@@ -1263,6 +1323,36 @@ class RunParseTest(unittest.TestCase):
         )
         self.assertIn("LMP", f_tbl_lmp)
         self.assertIn("876.54", f_tbl_lmp)
+
+        # 4. LSMIO Table with explicit Variant
+        f_run_root_var, f_plan_var, _ = self._setupSucceededRun(
+            "run-lsm-table-var-001",
+            "lsmio",
+            "baseline",
+            "NATIVE-M",
+            f_variant="footer-btree",
+        )
+        f_resolved_var = RunRootResolver.resolve(f_run_root_var)
+        f_extracted_var = {
+            f_resolved_var.points[0].pointId: {
+                f_c.name: {
+                    "write": {"mean": 1350.50, "latency": 0.72},
+                    "read": {"mean": 2550.75, "latency": 0.38},
+                }
+                for f_c in f_plan_var.combinations
+            }
+        }
+        f_tbl_var = ConsoleSummaryFormatter.formatSummaryTable(
+            f_resolved_var, f_extracted_var
+        )
+        self.assertIn("LSMIO", f_tbl_var)
+        self.assertIn("Variant", f_tbl_var)
+        self.assertIn("footer-btree", f_tbl_var)
+        f_var_lines = [
+            l.strip() for l in f_tbl_var.splitlines() if l.strip().startswith("|")
+        ]
+        f_var_row_cols = [c.strip() for c in f_var_lines[1].split("|")[1:-1]]
+        self.assertEqual(f_var_row_cols[1], "footer-btree")
 
 
 if __name__ == "__main__":

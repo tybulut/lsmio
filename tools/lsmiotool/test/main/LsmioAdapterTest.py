@@ -642,6 +642,316 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertEqual(f_bound_dict["result_path"], f_bound1.result_path)
         self.assertEqual(f_bound_dict["output_path"], f_bound1.output_path)
 
+    def testVariantLaunchSpecCreation(self) -> None:
+        """Tasks 3.2.1: Verify launch spec captures variant property, enforces immutability and validation."""
+        f_req = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="NATIVE-M",
+            f_variant="footer-btree",
+        )
+        f_spec = self.m_adapter.createLaunchSpec(
+            f_request=f_req,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        self.assertEqual(f_spec.variant, "footer-btree")
+        self.assertIn("variant='footer-btree'", repr(f_spec))
+
+        # Dict serialization with variant
+        f_dict = f_spec.toDict()
+        self.assertEqual(f_dict.get("variant"), "footer-btree")
+
+        # Immutability enforcement (INV-ARCH-6)
+        with self.assertRaises(AttributeError):
+            f_spec.variant = "wbuf-512m"
+        with self.assertRaises(AttributeError):
+            f_spec.m_variant = "wbuf-512m"
+        with self.assertRaises(AttributeError):
+            del f_spec.m_variant
+
+        # Direct construction validations
+        with self.assertRaises(BenchmarkConfigurationError):
+            LsmioLaunchSpec(
+                f_request=f_req,
+                f_combination=self.m_combo_8m,
+                f_point=self.m_point,
+                f_setup="NATIVE-M",
+                f_executable="bm_native",
+                f_variant="",  # non-empty or None
+            )
+        with self.assertRaises(BenchmarkConfigurationError):
+            LsmioLaunchSpec(
+                f_request=f_req,
+                f_combination=self.m_combo_8m,
+                f_point=self.m_point,
+                f_setup="NATIVE-M",
+                f_executable="bm_native",
+                f_variant="bad\0variant",
+            )
+        with self.assertRaises(BenchmarkConfigurationError):
+            LsmioLaunchSpec(
+                f_request=f_req,
+                f_combination=self.m_combo_8m,
+                f_point=self.m_point,
+                f_setup="NATIVE-M",
+                f_executable="bm_native",
+                f_variant=12345,  # type: ignore
+            )
+
+        # Value equality and hashing with variant
+        f_spec_same = self.m_adapter.createLaunchSpec(
+            f_request=f_req,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        f_req_diff = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="NATIVE-M",
+            f_variant="wbuf-512m",
+        )
+        f_spec_diff = self.m_adapter.createLaunchSpec(
+            f_request=f_req_diff,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        self.assertEqual(f_spec, f_spec_same)
+        self.assertEqual(hash(f_spec), hash(f_spec_same))
+        self.assertNotEqual(f_spec, f_spec_diff)
+
+    def testBindRankWithVariantFlagInjection(self) -> None:
+        """Tasks 3.2.2: Verify bindRank injects engine flags and derives deterministic infix DB name (INV-ARCH-4, INV-ARCH-8)."""
+        f_req = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="NATIVE-M",
+            f_variant="footer-btree",
+        )
+        f_spec = self.m_adapter.createLaunchSpec(
+            f_request=f_req,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        f_id = RankIdentity(f_global_rank=0, f_node_rank="node01", f_local_rank=0)
+        f_bound = self.m_adapter.bindRank(
+            f_spec=f_spec,
+            f_identity=f_id,
+            f_layout=self.m_layout,
+        )
+
+        # Infix DB naming (INV-ARCH-8)
+        self.assertTrue(
+            f_bound.output_path.endswith("lsmio-rank-0-native-m-footer-btree.db"),
+            f"Expected output_path to end with lsmio-rank-0-native-m-footer-btree.db, got: {f_bound.output_path}",
+        )
+
+        # Flag injection in argv (INV-ARCH-4)
+        f_expected_flags = ("--lsmio-footer-index", "--lsmio-memtable", "btree")
+        for f_flag in f_expected_flags:
+            self.assertIn(f_flag, f_bound.argv)
+
+        # Flag ordering: -m, -g before variant flags, before -i 10 -o ...
+        idx_m = f_bound.argv.index("-m")
+        idx_footer = f_bound.argv.index("--lsmio-footer-index")
+        idx_iter = f_bound.argv.index("-i")
+        self.assertLess(idx_m, idx_footer)
+        self.assertLess(idx_footer, idx_iter)
+
+        # Also test a complex variant with 4 flags
+        f_req_complex = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="NATIVE-M",
+            f_variant="wbuf-512m-manoff-prealloc",
+        )
+        f_spec_complex = self.m_adapter.createLaunchSpec(
+            f_request=f_req_complex,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        f_bound_complex = self.m_adapter.bindRank(
+            f_spec=f_spec_complex,
+            f_identity=f_id,
+            f_layout=self.m_layout,
+        )
+        self.assertTrue(
+            f_bound_complex.output_path.endswith(
+                "lsmio-rank-0-native-m-wbuf-512m-manoff-prealloc.db"
+            )
+        )
+        for f_flag in (
+            "--lsmio-wbuffer",
+            "536870912",
+            "--lsmio-manual-offset",
+            "--lsmio-prealloc",
+        ):
+            self.assertIn(f_flag, f_bound_complex.argv)
+
+        # Test PLUGIN-M setup ordering: --lsmio-plugin immediately followed by variant flags
+        f_req_plugin = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="PLUGIN-M",
+            f_variant="footer",
+        )
+        f_spec_plugin = self.m_adapter.createLaunchSpec(
+            f_request=f_req_plugin,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        f_bound_plugin = self.m_adapter.bindRank(
+            f_spec=f_spec_plugin,
+            f_identity=f_id,
+            f_layout=self.m_layout,
+        )
+        self.assertTrue(
+            f_bound_plugin.output_path.endswith("lsmio-rank-0-plugin-m-footer.db")
+        )
+        idx_plugin = f_bound_plugin.argv.index("--lsmio-plugin")
+        idx_footer_plugin = f_bound_plugin.argv.index("--lsmio-footer-index")
+        self.assertEqual(idx_footer_plugin, idx_plugin + 1)
+
+    def testBindRankFlushVariantExactFlag(self) -> None:
+        """Tasks 3.2.3: Verify flush variant injects exact --lsmo-always-flush flag (INV-ARCH-4)."""
+        f_req = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="NATIVE-M",
+            f_variant="flush",
+        )
+        f_spec = self.m_adapter.createLaunchSpec(
+            f_request=f_req,
+            f_combination=self.m_combo_8m,
+            f_point=self.m_point,
+        )
+        f_id = RankIdentity(f_global_rank=0, f_node_rank="node01", f_local_rank=0)
+        f_bound = self.m_adapter.bindRank(
+            f_spec=f_spec,
+            f_identity=f_id,
+            f_layout=self.m_layout,
+        )
+        # Critical assertion: --lsmo-always-flush, not --lsmio-
+        self.assertIn("--lsmo-always-flush", f_bound.argv)
+        self.assertNotIn("--lsmio-always-flush", f_bound.argv)
+        self.assertTrue(f_bound.output_path.endswith("lsmio-rank-0-native-m-flush.db"))
+
+    def testBuildCommandWithVariant(self) -> None:
+        """Tasks 3.2.4: Verify buildCommand injects variant flags and generates infix DB name."""
+        # 1. Default output path with variant
+        f_cmd = self.m_adapter.buildCommand(
+            f_executable="bm_native",
+            f_setup="NATIVE-M",
+            f_block_size="8M",
+            f_variant="footer-btree",
+        )
+        self.assertIn("--lsmio-footer-index", f_cmd.argv)
+        self.assertIn("--lsmio-memtable", f_cmd.argv)
+        self.assertIn("btree", f_cmd.argv)
+        self.assertEqual(
+            f_cmd.output_path, "/tmp/lsmio-rank-0-native-m-footer-btree.db"
+        )
+        self.assertIn("/tmp/lsmio-rank-0-native-m-footer-btree.db", f_cmd.argv)
+
+        # 2. Flush variant with exact flag
+        f_cmd_flush = self.m_adapter.buildCommand(
+            f_executable="bm_native",
+            f_setup="NATIVE-M",
+            f_block_size="8M",
+            f_variant="flush",
+        )
+        self.assertIn("--lsmo-always-flush", f_cmd_flush.argv)
+        self.assertNotIn("--lsmio-always-flush", f_cmd_flush.argv)
+        self.assertEqual(f_cmd_flush.output_path, "/tmp/lsmio-rank-0-native-m-flush.db")
+
+        # 3. Explicit output path preserves custom path while injecting variant flags
+        f_cmd_custom = self.m_adapter.buildCommand(
+            f_executable="bm_native",
+            f_setup="NATIVE-M",
+            f_block_size="8M",
+            f_output_path="/custom/dir/my-output.db",
+            f_variant="wbuf-512m",
+        )
+        self.assertIn("--lsmio-wbuffer", f_cmd_custom.argv)
+        self.assertIn("536870912", f_cmd_custom.argv)
+        self.assertEqual(f_cmd_custom.output_path, "/custom/dir/my-output.db")
+        self.assertIn("/custom/dir/my-output.db", f_cmd_custom.argv)
+
+    def testBaseVariantHasNoExtraFlags(self) -> None:
+        """Tasks 3.2.5: Verify default, base, and omitted variants produce clean command matching legacy behavior."""
+        f_id = RankIdentity(f_global_rank=0, f_node_rank="node01", f_local_rank=0)
+
+        for f_variant_input in (None, "base", "default", ""):
+            # Test via createLaunchSpec and bindRank
+            f_spec = LsmioLaunchSpec(
+                f_request=None,
+                f_combination=self.m_combo_8m,
+                f_point=self.m_point,
+                f_setup="NATIVE-M",
+                f_executable="bm_native",
+                f_variant=f_variant_input if f_variant_input else None,
+            )
+            f_bound = self.m_adapter.bindRank(
+                f_spec=f_spec,
+                f_identity=f_id,
+                f_layout=self.m_layout,
+            )
+            self.assertTrue(
+                f_bound.output_path.endswith("lsmio-rank-0-native-m.db"),
+                f"Expected clean DB path for variant={f_variant_input!r}, got: {f_bound.output_path}",
+            )
+            self.assertEqual(
+                f_bound.argv,
+                (
+                    "bm_native",
+                    "-m",
+                    "-g",
+                    "-i",
+                    "10",
+                    "-o",
+                    f_bound.output_path,
+                    "--lsmio-ts",
+                    "8388608",
+                    "--lsmio-bs",
+                    "8388608",
+                    "--key-count",
+                    "1024",
+                ),
+            )
+
+            # Test via buildCommand
+            f_cmd = self.m_adapter.buildCommand(
+                f_executable="bm_native",
+                f_setup="NATIVE-M",
+                f_block_size="8M",
+                f_variant=f_variant_input,
+            )
+            self.assertEqual(f_cmd.output_path, "/tmp/lsmio-rank-0-native-m.db")
+            self.assertEqual(
+                f_cmd.argv,
+                (
+                    "bm_native",
+                    "-m",
+                    "-g",
+                    "-i",
+                    "10",
+                    "-o",
+                    "/tmp/lsmio-rank-0-native-m.db",
+                    "--lsmio-ts",
+                    "8388608",
+                    "--lsmio-bs",
+                    "8388608",
+                    "--key-count",
+                    "1024",
+                ),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

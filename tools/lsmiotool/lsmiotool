@@ -42,10 +42,12 @@ if srv_path not in sys.path:
     sys.path.insert(0, srv_path)
 
 from lsmiotool.lib.cli import (
+    ArchiveCliParseError,
     PackageValidationError,
     ParseCliParseError,
     RunCliParseError,
     SourcePackageValidator,
+    parseArchiveArguments,
     parseParseArguments,
     parseRunArguments,
 )
@@ -57,6 +59,7 @@ LSMIOTOOL_HELP = """How to run
 ./lsmiotool [options] <cmd> <cmd-arguments>
 
 common cmds:
+  archive <benchmark> <scale> [<variant>] [--dest <path>]
   compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
@@ -121,7 +124,20 @@ if __name__ == '__main__':
 
     cmd = args[0]
 
-    if cmd == 'compare':
+    if cmd == 'archive':
+        from lsmiotool.lib import main
+        from lsmiotool.lib.variants import UnknownVariantError
+        try:
+            archive_request = parseArchiveArguments(args)
+        except (ArchiveCliParseError, UnknownVariantError) as err:
+            sys.stderr.write(f"{err}\n")
+            sys.exit(1)
+        source_layout = ResourceLocator.forSource(__file__)
+        inst_main = main.ArchiveMain(
+            f_request=archive_request,
+            f_runtime_layout=source_layout,
+        )
+    elif cmd == 'compare':
         from lsmiotool.lib import main
         cmd_args = args[1:]
         if len(cmd_args) < 2:

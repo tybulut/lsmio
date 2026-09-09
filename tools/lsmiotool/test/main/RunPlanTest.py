@@ -38,6 +38,7 @@ from lsmiotool.lib.run import (
     Combination,
     LaunchMode,
     LaunchSpec,
+    ManifestSerializer,
     PlanValidationError,
     RankIdentity,
     RunPlan,
@@ -226,6 +227,15 @@ class RunPlanTest(unittest.TestCase):
         f_req = RunRequest(f_target="ior", f_scale="local", f_ssd=True, f_setup="BASE")
         with self.assertRaises(AttributeError):
             f_req.target = "lsmio"  # type: ignore
+        with self.assertRaises(AttributeError):
+            f_req.variant = "footer"  # type: ignore
+
+        with self.assertRaises(PlanValidationError):
+            RunRequest("lsmio", "baseline", f_variant="")
+        with self.assertRaises(PlanValidationError):
+            RunRequest("lsmio", "baseline", f_variant="   ")
+        with self.assertRaises(PlanValidationError):
+            RunRequest("lsmio", "baseline", f_variant=123)  # type: ignore
 
         f_sp = ScalePoint(f_tasks=4, f_ppn=4, f_nodes=1)
         with self.assertRaises(AttributeError):
@@ -559,3 +569,68 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(f_rank_no_local.global_rank, 5)
         self.assertEqual(f_rank_no_local.node_rank, "node-2")
         self.assertIsNone(f_rank_no_local.local_rank)
+
+    def testBaselineScalePointTopology(self) -> None:
+        """Tasks 2.4.1 (INV-ARCH-1): Asserts baseline scale matrix has single point ScalePoint(8, 1, 8)."""
+        self.assertIn("baseline", RunPlanner.SCALE_MATRICES)
+        f_baseline_points = RunPlanner.SCALE_MATRICES["baseline"]
+        self.assertEqual(len(f_baseline_points), 1)
+        self.assertEqual(f_baseline_points, (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),))
+        self.assertEqual(f_baseline_points[0].tasks, 8)
+        self.assertEqual(f_baseline_points[0].ppn, 1)
+        self.assertEqual(f_baseline_points[0].nodes, 8)
+
+    def testBaselinePlanShapeIsSmall(self) -> None:
+        """Tasks 2.4.1 (INV-ARCH-1): Asserts baseline scale resolves to resource shape 'small'."""
+        f_req = RunRequest("lsmio", "baseline", False, "NATIVE-M")
+        f_plan = RunPlanner.createPlan(f_req, self.m_viking_profile)
+        self.assertEqual(len(f_plan.scale_points), 1)
+        self.assertEqual(f_plan.scale_points[0], ScalePoint(8, 1, 8))
+        self.assertEqual(len(f_plan.scheduled_points), 1)
+        # Viking slurm_nodes walltime policy for 8 nodes: 2 + (8 // 3) = 4 hours -> '04:00:00'
+        self.assertEqual(f_plan.scheduled_points[0].walltime, "04:00:00")
+        self.assertEqual(f_plan.scheduled_points[0].mem, "8gb")
+
+        # Also verify under PBS scheduler profile (Isambard small shape: fixed 06:00:00, ncpus=1, pmem=8G)
+        f_plan_isambard = RunPlanner.createPlan(f_req, self.m_isambard_profile)
+        self.assertEqual(f_plan_isambard.scheduled_points[0].walltime, "06:00:00")
+        self.assertEqual(f_plan_isambard.scheduled_points[0].select_chunks, 8)
+        self.assertEqual(f_plan_isambard.scheduled_points[0].ncpus, 1)
+        self.assertEqual(f_plan_isambard.scheduled_points[0].mpiprocs, 1)
+        self.assertEqual(f_plan_isambard.scheduled_points[0].pmem, "8G")
+
+    def testManifestRoundtripWithVariant(self) -> None:
+        """Tasks 2.4.2 (INV-ARCH-9): Asserts manifest serialization and deserialization preserves variant."""
+        f_req = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_ssd=False,
+            f_setup="NATIVE-M",
+            f_variant="footer-btree",
+        )
+        self.assertEqual(f_req.variant, "footer-btree")
+        f_plan = RunPlanner.createPlan(f_req, self.m_viking_profile)
+        f_json_str = ManifestSerializer.serialize(f_plan)
+        self.assertIn('"variant": "footer-btree"', f_json_str)
+
+        f_doc = ManifestSerializer.deserialize(f_json_str)
+        self.assertEqual(f_doc.request.variant, "footer-btree")
+        self.assertEqual(f_doc.request, f_plan.request)
+        self.assertEqual(f_doc.toRunPlan(), f_plan)
+
+    def testManifestDeserializationLegacyWithoutVariant(self) -> None:
+        """Tasks 2.4.2 (INV-ARCH-9): Asserts manifest deserialization succeeds when variant is omitted."""
+        f_plan = RunPlanner.createPlan(RunRequest("lsmio", "local"), self.m_viking_profile)
+        f_json_str = ManifestSerializer.serialize(f_plan)
+        self.assertNotIn('"variant"', f_json_str)
+
+        f_doc = ManifestSerializer.deserialize(f_json_str)
+        self.assertIsNone(f_doc.request.variant)
+
+        # Explicitly verify deserializing a dict where request has no variant key
+        f_dict = json.loads(f_json_str)
+        self.assertNotIn("variant", f_dict["request"])
+        f_doc_from_dict = ManifestSerializer.deserialize(f_dict)
+        self.assertIsNone(f_doc_from_dict.request.variant)
+        self.assertEqual(f_doc_from_dict.request, f_plan.request)
+

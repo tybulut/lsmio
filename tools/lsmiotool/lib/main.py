@@ -33,7 +33,7 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple, Union
 
 from lsmiotool.lib import debuggable, log
 
@@ -66,6 +66,10 @@ class TestMain(BaseMain):
 class ParseLegacyMain(BaseMain):
     """ParseLegacy command for processing benchmark output logs."""
 
+    VALID_MODES: FrozenSet[str] = frozenset(
+        {"local", "bake", "small", "large", "baseline"}
+    )
+
     m_command: str
     m_mode: str
     m_is_ssd: bool
@@ -73,7 +77,7 @@ class ParseLegacyMain(BaseMain):
     def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
         """Initialize ParseLegacyMain.
 
-        Command: parseLegacy <ior|lsmio|lmp> <local|bake|small|large> [--ssd]
+        Command: parseLegacy <ior|lsmio|lmp> <local|bake|small|large|baseline> [--ssd]
 
         Args:
             *f_args: Variable length argument list (command, mode)
@@ -82,7 +86,7 @@ class ParseLegacyMain(BaseMain):
         super().__init__()
         if len(f_args) < 2:
             log.Console.error(
-                "ParseLegacy: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>"
+                "ParseLegacy: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large|baseline>"
             )
             sys.exit(1)
         self.m_command = f_args[0]
@@ -95,8 +99,8 @@ class ParseLegacyMain(BaseMain):
                 "Command to execute has to be in: " + str(allowed_commands)
             )
             sys.exit(1)
-        allowed_modes = ["local", "bake", "small", "large"]
-        if self.m_mode not in allowed_modes:
+        allowed_modes = ["local", "bake", "small", "large", "baseline"]
+        if self.m_mode not in self.VALID_MODES:
             log.Console.error("Command mode has to be in: " + str(allowed_modes))
             sys.exit(1)
 
@@ -185,7 +189,7 @@ class ParseLegacyMain(BaseMain):
 
         target_dir = self._getTargetDir("lsmio", f_mode, f_is_ssd)
         log.Console.debug(f"Parsing LSMIO logs from: {target_dir}")
-        agg = output.LsmioAggOutput(target_dir)
+        agg = output.LsmioAggOutput(target_dir, f_scale=f_mode)
         agg.generateReports(target_dir)
 
     def parseLmp(self, f_mode: str, f_is_ssd: bool) -> None:
@@ -692,6 +696,180 @@ class RunMain(BaseMain):
             return 1
         except Exception as f_err:
             sys.stderr.write(f"Unexpected error: {f_err}\n")
+            return 1
+
+
+class ArchiveMain(BaseMain):
+    """Archive command dispatcher executing move-on-archive for benchmark outputs."""
+
+    m_request: Any
+    m_runtime_layout: Optional[Any]
+    m_source_dir: Optional[str]
+    m_dest_dir: Optional[str]
+
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[Any] = None,
+        f_runtime_layout: Optional[Any] = None,
+        f_source_dir: Optional[str] = None,
+        f_dest_dir: Optional[str] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        """Initialize ArchiveMain.
+
+        Command: archive <benchmark> <scale> [<variant>] [--dest <path>]
+
+        Args:
+            *f_args: Variable positional arguments (e.g. tokens, or [ArchiveRequest]).
+            f_request: Optional canonical ArchiveRequest.
+            f_runtime_layout: Optional runtime layout.
+            f_source_dir: Optional explicit source directory override.
+            f_dest_dir: Optional explicit destination directory override.
+            **f_kwargs: Additional keyword arguments (e.g. dest="...", source="...").
+        """
+        super().__init__()
+        from lsmiotool.lib.archive import ArchiveRequest
+        from lsmiotool.lib.cli import parseArchiveArguments
+
+        if f_request is not None:
+            if not isinstance(f_request, ArchiveRequest):
+                raise ValueError(
+                    f"f_request must be ArchiveRequest, got: {type(f_request).__name__}"
+                )
+            self.m_request = f_request
+        elif len(f_args) == 1 and isinstance(f_args[0], ArchiveRequest):
+            self.m_request = f_args[0]
+        elif len(f_args) == 1 and isinstance(f_args[0], (list, tuple)):
+            self.m_request = parseArchiveArguments(list(f_args[0]))
+        elif len(f_args) >= 2:
+            f_argv: List[str] = [str(a) for a in f_args]
+            if (
+                "dest" in f_kwargs
+                and f_kwargs["dest"] is not None
+                and "--dest" not in f_argv
+            ):
+                f_argv.extend(["--dest", str(f_kwargs["dest"])])
+            self.m_request = parseArchiveArguments(f_argv)
+        else:
+            raise ValueError(
+                "ArchiveMain requires either an ArchiveRequest or positional benchmark and scale arguments."
+            )
+
+        self.m_runtime_layout = f_runtime_layout
+        self.m_source_dir = (
+            f_source_dir
+            if f_source_dir is not None
+            else f_kwargs.get(
+                "f_source_dir",
+                f_kwargs.get("source_dir", f_kwargs.get("source")),
+            )
+        )
+        self.m_dest_dir = (
+            f_dest_dir
+            if f_dest_dir is not None
+            else f_kwargs.get(
+                "f_dest_dir",
+                f_kwargs.get("dest_dir", f_kwargs.get("dest")),
+            )
+        )
+
+    @property
+    def request(self) -> Any:
+        return self.m_request
+
+    @property
+    def runtimeLayout(self) -> Optional[Any]:
+        return self.m_runtime_layout
+
+    @property
+    def runtime_layout(self) -> Optional[Any]:
+        return self.m_runtime_layout
+
+    @property
+    def sourceDir(self) -> Optional[str]:
+        return self.m_source_dir
+
+    @property
+    def source_dir(self) -> Optional[str]:
+        return self.m_source_dir
+
+    @property
+    def destDir(self) -> Optional[str]:
+        return self.m_dest_dir
+
+    @property
+    def dest_dir(self) -> Optional[str]:
+        return self.m_dest_dir
+
+    def run(self) -> int:
+        """Dispatches archive operation, resolves source and destination, and logs result."""
+        from lsmiotool.lib.archive import ArchiveEngine, ArchiveError
+
+        try:
+            # 1. Derive arm_id matching bmtool archive semantics
+            f_arm_id = ArchiveEngine.resolveArmId(
+                f_setup="NATIVE-M",
+                f_variant=self.m_request.variant,
+            )
+
+            # 2. Resolve source directory
+            f_source_dir = self.m_source_dir
+            if f_source_dir is None:
+                if "LSM_DIR_OBASE" in os.environ and os.path.exists(
+                    os.environ["LSM_DIR_OBASE"]
+                ):
+                    f_source_dir = os.environ["LSM_DIR_OBASE"]
+                elif os.path.isdir(os.path.join(os.getcwd(), "outputs")):
+                    f_source_dir = os.path.join(os.getcwd(), "outputs")
+                else:
+                    f_bm_root = None
+                    if self.m_runtime_layout is not None:
+                        f_bm_root = getattr(
+                            self.m_runtime_layout, "benchmark_root", None
+                        ) or getattr(
+                            self.m_runtime_layout, "benchmarkRoot", None
+                        )
+                    if f_bm_root and os.path.isdir(
+                        os.path.join(f_bm_root, "outputs")
+                    ):
+                        f_source_dir = os.path.join(f_bm_root, "outputs")
+                    else:
+                        f_source_dir = os.path.join(os.getcwd(), "outputs")
+
+            # 3. Resolve destination root
+            f_dest_root = self.m_request.dest or self.m_dest_dir
+            if f_dest_root is None:
+                if "BM_ARCHIVE_DEST" in os.environ:
+                    f_dest_root = os.environ["BM_ARCHIVE_DEST"]
+                else:
+                    f_bm_root = None
+                    if self.m_runtime_layout is not None:
+                        f_bm_root = getattr(
+                            self.m_runtime_layout, "benchmark_root", None
+                        ) or getattr(
+                            self.m_runtime_layout, "benchmarkRoot", None
+                        )
+                    if f_bm_root:
+                        f_dest_root = os.path.join(f_bm_root, "lsmio-archive")
+                    else:
+                        f_dest_root = os.path.join(os.getcwd(), "lsmio-archive")
+
+            # 4. Perform atomic move-on-archive and clean recreation
+            f_target_dir = ArchiveEngine.executeArchive(
+                f_source_dir=f_source_dir,
+                f_dest_root=f_dest_root,
+                f_arm_id=f_arm_id,
+            )
+            log.Console.info(f"Archived {f_source_dir} -> {f_target_dir}")
+            return 0
+        except ArchiveError as f_err:
+            sys.stderr.write(f"Archive error: {f_err}\n")
+            log.Console.error(f"Archive error: {f_err}")
+            return 1
+        except Exception as f_err:
+            sys.stderr.write(f"Unexpected archive error: {f_err}\n")
+            log.Console.error(f"Unexpected archive error: {f_err}")
             return 1
 
 

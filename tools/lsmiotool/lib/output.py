@@ -488,6 +488,17 @@ class IorAggOutput(DebuggableObject):
 class LsmioAggOutput(IorAggOutput):
     """Aggregate LSMIO output data processor."""
 
+    def __init__(self, f_output_dir: str, f_scale: Optional[str] = None) -> None:
+        """Initialize LSMIO output data processor.
+
+        Args:
+            f_output_dir: Directory containing LSMIO output files
+            f_scale: Optional benchmark scale (e.g. 'baseline')
+        """
+        if f_scale is not None and str(f_scale).strip().lower() == "baseline":
+            self._node_counts = ["8"]
+        super().__init__(f_output_dir)
+
     def _processAggFiles(
         self, f_files: Dict[str, FileMetadata], f_count: str
     ) -> AccessData:

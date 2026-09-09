@@ -339,6 +339,7 @@ class ResolvedRun:
         "m_run_state",
         "m_points",
         "m_evidence_store",
+        "m_variant",
         "_frozen",
     )
 
@@ -370,12 +371,29 @@ class ResolvedRun:
                 f"evidence_store must be an EvidenceStore, got: {f_evidence_store!r}"
             )
 
+        f_variant = None
+        if hasattr(f_manifest, "toDict"):
+            f_manifest_dict = f_manifest.toDict()
+            if isinstance(f_manifest_dict, dict):
+                f_req_dict = f_manifest_dict.get("request", {})
+                if isinstance(f_req_dict, dict):
+                    f_variant = f_req_dict.get("variant")
+        if f_variant is None and hasattr(f_manifest, "request"):
+            f_variant = getattr(f_manifest.request, "variant", None)
+        if f_variant is not None:
+            if not isinstance(f_variant, str) or not f_variant.strip():
+                raise RunParseError(
+                    f"variant must be a non-empty string or None, got: {f_variant!r}"
+                )
+            f_variant = f_variant.strip().lower()
+
         super().__setattr__("m_run_root", f_run_root)
         super().__setattr__("m_manifest", f_manifest)
         super().__setattr__("m_plan", f_plan)
         super().__setattr__("m_run_state", f_run_state)
         super().__setattr__("m_points", tuple(f_points))
         super().__setattr__("m_evidence_store", f_evidence_store)
+        super().__setattr__("m_variant", f_variant)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -466,6 +484,10 @@ class ResolvedRun:
     def is_ssd(self) -> bool:
         return self.m_manifest.request.is_ssd
 
+    @property
+    def variant(self) -> Optional[str]:
+        return self.m_variant
+
     def getPoint(self, f_point_id: Union[int, str, ScalePoint]) -> ResolvedPoint:
         """Lookup a resolved point by ordinal, task count, directory name, or ScalePoint."""
         if isinstance(f_point_id, int):
@@ -505,6 +527,7 @@ class ResolvedRun:
             "target": self.target,
             "scale": self.scale,
             "setup": self.setup,
+            "variant": self.m_variant,
             "is_ssd": self.is_ssd,
             "state": self.m_run_state.state.value,
             "is_success": self.is_success,
@@ -516,6 +539,7 @@ class ResolvedRun:
             f"ResolvedRun(run_id={self.run_id!r}, "
             f"target={self.target!r}, "
             f"scale={self.scale!r}, "
+            f"variant={self.m_variant!r}, "
             f"points_count={len(self.m_points)})"
         )
 
@@ -527,6 +551,7 @@ class ResolvedRun:
                 and self.m_plan == f_other.m_plan
                 and self.m_run_state == f_other.m_run_state
                 and self.m_points == f_other.m_points
+                and self.m_variant == f_other.m_variant
             )
         return False
 
@@ -1470,6 +1495,19 @@ class LmpLogExtractor:
 class ConsoleSummaryFormatter:
     """Formats benchmark results into a clean, aligned ASCII summary table."""
 
+    HEADERS: List[str] = [
+        "Benchmark",
+        "Variant",
+        "Point ID",
+        "Tasks/Cores",
+        "Combination",
+        "Operation",
+        "Throughput MB/s",
+        "IOPS",
+        "Duration",
+    ]
+    TABLE_HEADERS: Tuple[str, ...] = tuple(HEADERS)
+
     @classmethod
     def formatSummaryTable(
         cls, f_resolved_run: ResolvedRun, f_extracted_data: Mapping[str, Any]
@@ -1477,21 +1515,13 @@ class ConsoleSummaryFormatter:
         """Format an ASCII summary table for the parsed benchmark run.
 
         Columns:
-        Benchmark | Point ID | Tasks/Cores | Combination | Operation | Throughput MB/s | IOPS | Duration
+        Benchmark | Variant | Point ID | Tasks/Cores | Combination | Operation | Throughput MB/s | IOPS | Duration
         """
-        f_headers = [
-            "Benchmark",
-            "Point ID",
-            "Tasks/Cores",
-            "Combination",
-            "Operation",
-            "Throughput MB/s",
-            "IOPS",
-            "Duration",
-        ]
+        f_headers = list(cls.HEADERS)
 
         f_rows: List[List[str]] = []
         f_bm = f_resolved_run.target.upper()
+        f_variant = f_resolved_run.variant or "-"
 
         for f_pt in f_resolved_run.points:
             f_pt_id = f_pt.pointId
@@ -1533,6 +1563,7 @@ class ConsoleSummaryFormatter:
                         f_rows.append(
                             [
                                 f_bm,
+                                f_variant,
                                 f_pt_id,
                                 f_tasks_cores,
                                 f_combo.name,
@@ -1563,6 +1594,7 @@ class ConsoleSummaryFormatter:
                         f_rows.append(
                             [
                                 f_bm,
+                                f_variant,
                                 f_pt_id,
                                 f_tasks_cores,
                                 f_combo.name,
@@ -1583,6 +1615,7 @@ class ConsoleSummaryFormatter:
                     f_rows.append(
                         [
                             f_bm,
+                            f_variant,
                             f_pt_id,
                             f_tasks_cores,
                             f_combo.name,

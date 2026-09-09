@@ -47,6 +47,8 @@ from typing import (
     Union,
 )
 
+from lsmiotool.lib.variants import VariantCatalogue
+
 
 class CapabilityState(Enum):
     """Capability verification state for a benchmark executable."""
@@ -637,6 +639,7 @@ class LsmioLaunchSpec:
         "m_point",
         "m_setup",
         "m_executable",
+        "m_variant",
         "m_is_rank_local",
         "m_is_bound",
         "_frozen",
@@ -649,6 +652,7 @@ class LsmioLaunchSpec:
         f_point: Any,
         f_setup: str,
         f_executable: str,
+        f_variant: Optional[str] = None,
         f_is_rank_local: bool = True,
         f_is_bound: bool = False,
     ) -> None:
@@ -668,6 +672,16 @@ class LsmioLaunchSpec:
             raise BenchmarkConfigurationError(
                 f"LsmioLaunchSpec executable contains NUL byte: {f_executable!r}"
             )
+        if f_variant is not None and (
+            not isinstance(f_variant, str) or not f_variant.strip()
+        ):
+            raise BenchmarkConfigurationError(
+                f"LsmioLaunchSpec variant must be a non-empty string or None, got: {f_variant!r}"
+            )
+        if f_variant is not None and "\0" in f_variant:
+            raise BenchmarkConfigurationError(
+                f"LsmioLaunchSpec variant contains NUL byte: {f_variant!r}"
+            )
         if not isinstance(f_is_rank_local, bool):
             raise BenchmarkConfigurationError(
                 f"LsmioLaunchSpec is_rank_local must be a boolean, got: {f_is_rank_local!r}"
@@ -682,6 +696,9 @@ class LsmioLaunchSpec:
         super().__setattr__("m_point", f_point)
         super().__setattr__("m_setup", f_setup.strip().upper())
         super().__setattr__("m_executable", os.path.normpath(f_executable.strip()))
+        super().__setattr__(
+            "m_variant", f_variant.strip().lower() if f_variant else None
+        )
         super().__setattr__("m_is_rank_local", f_is_rank_local)
         super().__setattr__("m_is_bound", f_is_bound)
         super().__setattr__("_frozen", True)
@@ -719,6 +736,10 @@ class LsmioLaunchSpec:
         return self.m_executable
 
     @property
+    def variant(self) -> Optional[str]:
+        return self.m_variant
+
+    @property
     def is_rank_local(self) -> bool:
         return self.m_is_rank_local
 
@@ -751,7 +772,7 @@ class LsmioLaunchSpec:
         return ()
 
     def toDict(self) -> Dict[str, Any]:
-        return {
+        f_dict: Dict[str, Any] = {
             "target": "lsmio",
             "setup": self.m_setup,
             "executable": self.m_executable,
@@ -768,6 +789,9 @@ class LsmioLaunchSpec:
             "is_rank_local": self.m_is_rank_local,
             "is_bound": self.m_is_bound,
         }
+        if self.m_variant is not None:
+            f_dict["variant"] = self.m_variant
+        return f_dict
 
     def __repr__(self) -> str:
         return (
@@ -776,6 +800,7 @@ class LsmioLaunchSpec:
             f"executable={self.m_executable!r}, "
             f"combination={self.m_combination!r}, "
             f"point={self.m_point!r}, "
+            f"variant={self.m_variant!r}, "
             f"is_rank_local={self.m_is_rank_local!r}, "
             f"is_bound={self.m_is_bound!r})"
         )
@@ -788,6 +813,7 @@ class LsmioLaunchSpec:
             and self.m_executable == f_other.m_executable
             and self.m_combination == f_other.m_combination
             and self.m_point == f_other.m_point
+            and self.m_variant == f_other.m_variant
             and self.m_is_rank_local == f_other.m_is_rank_local
             and self.m_is_bound == f_other.m_is_bound
         )
@@ -812,6 +838,7 @@ class LsmioLaunchSpec:
                 self.m_executable,
                 f_combo_key,
                 f_point_key,
+                self.m_variant,
                 self.m_is_rank_local,
                 self.m_is_bound,
             )
@@ -1097,12 +1124,14 @@ class LsmioAdapter(BenchmarkAdapter):
         else:
             f_eff_executable = self.getExecutableName(f_norm_setup)
 
+        f_variant = getattr(f_request, "variant", None)
         return LsmioLaunchSpec(
             f_request=f_request,
             f_combination=f_combination,
             f_point=f_point,
             f_setup=f_norm_setup,
             f_executable=f_eff_executable,
+            f_variant=f_variant,
             f_is_rank_local=True,
             f_is_bound=False,
         )
@@ -1228,12 +1257,17 @@ class LsmioAdapter(BenchmarkAdapter):
             else "8M"
         )
 
+        f_variant = getattr(f_spec, "variant", None)
+        f_variant_rec = VariantCatalogue.resolve(f_variant)
+
         f_data_dir = f_layout.pointDataSubdir(
             f_point_desc, f_stripe, f_bs_name, f_ordinal
         )
-        f_output_path = os.path.join(
-            f_data_dir, f"lsmio-rank-{f_global_rank}-{f_setup.lower()}.db"
-        )
+        if f_variant_rec.tokens:
+            f_db_name = f"lsmio-rank-{f_global_rank}-{f_setup.lower()}-{f_variant_rec.tokens}.db"
+        else:
+            f_db_name = f"lsmio-rank-{f_global_rank}-{f_setup.lower()}.db"
+        f_output_path = os.path.join(f_data_dir, f_db_name)
 
         # 5. Block sizing and key count
         f_block_bytes, f_key_count = self.getBlockParameters(str(f_bs_name))
@@ -1247,6 +1281,9 @@ class LsmioAdapter(BenchmarkAdapter):
 
         if f_setup in ("PLUGIN", "PLUGIN-M"):
             f_argv.append("--lsmio-plugin")
+
+        if f_variant_rec.flags:
+            f_argv.extend(f_variant_rec.flags)
 
         f_argv.extend(
             [
@@ -1287,6 +1324,7 @@ class LsmioAdapter(BenchmarkAdapter):
         f_combination: Optional[Any] = None,
         f_stripe_count: Optional[int] = None,
         f_global_rank: int = 0,
+        f_variant: Optional[str] = None,
     ) -> LsmioBoundCommand:
         """Construct a BenchmarkCommand / LsmioBoundCommand directly for an LSMIO run."""
         if not isinstance(f_executable, str) or not f_executable.strip():
@@ -1313,6 +1351,9 @@ class LsmioAdapter(BenchmarkAdapter):
             raise BenchmarkConfigurationError(
                 f"Unknown LSMIO setup: {f_setup!r}. Allowed setups: {self.ALLOWED_SETUPS}"
             )
+
+        # Resolve variant
+        f_variant_rec = VariantCatalogue.resolve(f_variant)
 
         # Resolve block size
         f_resolved_block_size: Optional[str] = None
@@ -1369,9 +1410,13 @@ class LsmioAdapter(BenchmarkAdapter):
                 )
             f_outpath = os.path.normpath(f_output_path.strip())
         else:
+            if f_variant_rec.tokens:
+                f_db_name = f"lsmio-rank-{f_global_rank}-{f_norm_setup.lower()}-{f_variant_rec.tokens}.db"
+            else:
+                f_db_name = f"lsmio-rank-{f_global_rank}-{f_norm_setup.lower()}.db"
             f_outpath = os.path.join(
                 f_norm_working_dir,
-                f"lsmio-rank-{f_global_rank}-{f_norm_setup.lower()}.db",
+                f_db_name,
             )
 
         if f_stdout_path is not None:
@@ -1407,6 +1452,8 @@ class LsmioAdapter(BenchmarkAdapter):
             f_argv.extend(["-m", "-g"])
         if f_norm_setup in ("PLUGIN", "PLUGIN-M"):
             f_argv.append("--lsmio-plugin")
+        if f_variant_rec.flags:
+            f_argv.extend(f_variant_rec.flags)
         f_argv.extend(
             [
                 "-i",

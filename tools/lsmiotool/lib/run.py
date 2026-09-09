@@ -43,6 +43,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
     List,
     Mapping,
     Optional,
@@ -392,7 +393,7 @@ class RankIdentity:
 class RunRequest:
     """Immutable parsed and validated run request."""
 
-    __slots__ = ("m_target", "m_scale", "m_ssd", "m_setup", "_frozen")
+    __slots__ = ("m_target", "m_scale", "m_ssd", "m_setup", "m_variant", "_frozen")
 
     def __init__(
         self,
@@ -400,6 +401,7 @@ class RunRequest:
         f_scale: str,
         f_ssd: bool = False,
         f_setup: Optional[str] = None,
+        f_variant: Optional[str] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
             raise PlanValidationError(
@@ -417,11 +419,20 @@ class RunRequest:
             raise PlanValidationError(
                 f"setup must be a non-empty string or None, got: {f_setup!r}"
             )
+        if f_variant is not None and (
+            not isinstance(f_variant, str) or not f_variant.strip()
+        ):
+            raise PlanValidationError(
+                f"variant must be a non-empty string or None, got: {f_variant!r}"
+            )
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
         super().__setattr__("m_ssd", f_ssd)
         super().__setattr__("m_setup", f_setup.strip().upper() if f_setup else None)
+        super().__setattr__(
+            "m_variant", f_variant.strip().lower() if f_variant else None
+        )
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -457,23 +468,31 @@ class RunRequest:
         return self.m_setup
 
     @property
+    def variant(self) -> Optional[str]:
+        return self.m_variant
+
+    @property
     def storage(self) -> StorageClass:
         return StorageClass.SSD if self.m_ssd else StorageClass.HDD
 
     def toDict(self) -> Dict[str, Any]:
-        return {
+        f_dict: Dict[str, Any] = {
             "target": self.m_target,
             "scale": self.m_scale,
             "ssd": self.m_ssd,
             "setup": self.m_setup,
         }
+        if self.m_variant is not None:
+            f_dict["variant"] = self.m_variant
+        return f_dict
 
     def __repr__(self) -> str:
         return (
             f"RunRequest(target={self.m_target!r}, "
             f"scale={self.m_scale!r}, "
             f"ssd={self.m_ssd!r}, "
-            f"setup={self.m_setup!r})"
+            f"setup={self.m_setup!r}, "
+            f"variant={self.m_variant!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -483,6 +502,7 @@ class RunRequest:
                 and self.m_scale == f_other.m_scale
                 and self.m_ssd == f_other.m_ssd
                 and self.m_setup == f_other.m_setup
+                and self.m_variant == f_other.m_variant
             )
         return False
 
@@ -1183,6 +1203,7 @@ class RunPlanner:
             ScalePoint(f_tasks=192, f_ppn=4, f_nodes=48),
             ScalePoint(f_tasks=256, f_ppn=4, f_nodes=64),
         ),
+        "baseline": (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),),
     }
 
     DEFAULT_SETUPS: Dict[str, str] = {
@@ -1423,6 +1444,7 @@ class RunPlanner:
             f_scale=f_scale,
             f_ssd=f_request.ssd,
             f_setup=f_norm_setup,
+            f_variant=f_request.variant,
         )
 
         if f_target == "lmp":
@@ -1680,6 +1702,7 @@ class ManifestSerializer:
     }
 
     REQUIRED_REQUEST_KEYS: Set[str] = {"target", "scale", "ssd", "setup"}
+    OPTIONAL_REQUEST_KEYS: FrozenSet[str] = frozenset({"variant"})
     REQUIRED_PLAN_KEYS: Set[str] = {
         "target",
         "scale",
@@ -1880,7 +1903,7 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 f"Missing keys in request: {sorted(f_missing_req)}"
             )
-        f_extra_req = f_req_keys - cls.REQUIRED_REQUEST_KEYS
+        f_extra_req = f_req_keys - (cls.REQUIRED_REQUEST_KEYS | cls.OPTIONAL_REQUEST_KEYS)
         if f_extra_req:
             raise ManifestValidationError(
                 f"Unexpected extra keys in request: {sorted(f_extra_req)}"
@@ -1893,6 +1916,9 @@ class ManifestSerializer:
             raise ManifestValidationError("request.ssd must be a boolean")
         if f_req_raw["setup"] is not None and not isinstance(f_req_raw["setup"], str):
             raise ManifestValidationError("request.setup must be a string or null")
+        f_variant_raw = f_req_raw.get("variant")
+        if f_variant_raw is not None and not isinstance(f_variant_raw, str):
+            raise ManifestValidationError("request.variant must be a string or null")
 
         try:
             f_request = RunRequest(
@@ -1900,6 +1926,7 @@ class ManifestSerializer:
                 f_scale=f_req_raw["scale"],
                 f_ssd=f_req_raw["ssd"],
                 f_setup=f_req_raw["setup"],
+                f_variant=f_variant_raw,
             )
         except Exception as f_err:
             raise ManifestValidationError(f"Invalid request record: {f_err}")

@@ -38,6 +38,7 @@ from lsmiotool.lib.cli import (
 )
 from lsmiotool.lib.run import RunRequest
 from lsmiotool.lib.site import StorageClass
+from lsmiotool.lib.variants import UnknownVariantError
 
 
 class RunCliParserTest(unittest.TestCase):
@@ -312,3 +313,120 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(f_req.scale, "local")
         self.assertTrue(f_req.ssd)
         self.assertEqual(f_req.setup, "BASE")
+
+    def testBaselineScaleWithoutVariant(self) -> None:
+        """Tasks 2.3.1: Asserts baseline scale parsing without variant key."""
+        f_req = parseRunArguments(["lsmio", "baseline"])
+        self.assertEqual(f_req.target, "lsmio")
+        self.assertEqual(f_req.scale, "baseline")
+        self.assertIsNone(f_req.variant)
+        self.assertFalse(f_req.ssd)
+        self.assertIsNone(f_req.setup)
+
+        f_req_cmd = parseRunArguments(["run", "lsmio", "baseline"])
+        self.assertEqual(f_req_cmd.target, "lsmio")
+        self.assertEqual(f_req_cmd.scale, "baseline")
+        self.assertIsNone(f_req_cmd.variant)
+
+        f_req_ssd = parseRunArguments(["lsmio", "baseline", "--ssd"])
+        self.assertEqual(f_req_ssd.target, "lsmio")
+        self.assertEqual(f_req_ssd.scale, "baseline")
+        self.assertIsNone(f_req_ssd.variant)
+        self.assertTrue(f_req_ssd.ssd)
+
+        f_req_setup = parseRunArguments(["lsmio", "baseline", "--setup", "native-m"])
+        self.assertEqual(f_req_setup.target, "lsmio")
+        self.assertEqual(f_req_setup.scale, "baseline")
+        self.assertIsNone(f_req_setup.variant)
+        self.assertEqual(f_req_setup.setup, "NATIVE-M")
+
+    def testBaselineScaleWithVariant(self) -> None:
+        """Tasks 2.3.2: Asserts baseline scale parsing with positional variant key."""
+        f_req1 = parseRunArguments(["lsmio", "baseline", "footer-btree"])
+        self.assertEqual(f_req1.target, "lsmio")
+        self.assertEqual(f_req1.scale, "baseline")
+        self.assertEqual(f_req1.variant, "footer-btree")
+        self.assertFalse(f_req1.ssd)
+
+        f_req2 = parseRunArguments(["run", "lsmio", "baseline", "footer"])
+        self.assertEqual(f_req2.target, "lsmio")
+        self.assertEqual(f_req2.scale, "baseline")
+        self.assertEqual(f_req2.variant, "footer")
+
+        f_req3 = parseRunArguments(["lsmio", "baseline", "wbuf-512m"])
+        self.assertEqual(f_req3.target, "lsmio")
+        self.assertEqual(f_req3.scale, "baseline")
+        self.assertEqual(f_req3.variant, "wbuf-512m")
+
+    def testBaselineScaleWithVariantAndOptions(self) -> None:
+        """Tasks 2.3.2: Asserts baseline scale with variant followed by options."""
+        f_req = parseRunArguments(
+            ["lsmio", "baseline", "wbuf-512m", "--ssd", "--setup", "NATIVE-M"]
+        )
+        self.assertEqual(f_req.target, "lsmio")
+        self.assertEqual(f_req.scale, "baseline")
+        self.assertEqual(f_req.variant, "wbuf-512m")
+        self.assertTrue(f_req.ssd)
+        self.assertEqual(f_req.setup, "NATIVE-M")
+
+        f_req2 = parseRunArguments(
+            ["--ssd", "run", "lsmio", "baseline", "footer-prealloc", "--setup", "ROCKSDB-M"]
+        )
+        self.assertEqual(f_req2.target, "lsmio")
+        self.assertEqual(f_req2.scale, "baseline")
+        self.assertEqual(f_req2.variant, "footer-prealloc")
+        self.assertTrue(f_req2.ssd)
+        self.assertEqual(f_req2.setup, "ROCKSDB-M")
+
+    def testBaselineDefaultAndBaseVariantsCanonicalized(self) -> None:
+        """Tasks 2.3.2: Asserts default and base variant tokens canonicalize to None."""
+        f_req_default = parseRunArguments(["lsmio", "baseline", "default"])
+        self.assertIsNone(f_req_default.variant)
+
+        f_req_base = parseRunArguments(["lsmio", "baseline", "base"])
+        self.assertIsNone(f_req_base.variant)
+
+        f_req_native_base = parseRunArguments(["lsmio", "baseline", "native-m-base"])
+        self.assertIsNone(f_req_native_base.variant)
+
+    def testBaselineUnknownVariantFailFast(self) -> None:
+        """Tasks 2.3.3: Asserts unrecognized variant keys fail fast raising UnknownVariantError."""
+        with self.assertRaises(UnknownVariantError) as f_ctx:
+            parseRunArguments(["lsmio", "baseline", "invalid_variant"])
+        self.assertIsInstance(f_ctx.exception, CliParseError)
+        self.assertEqual(f_ctx.exception.variant, "invalid_variant")
+
+        with self.assertRaises(UnknownVariantError):
+            parseRunArguments(["lsmio", "baseline", "footer-unknown"])
+
+    def testNonBaselinePositionalVariantRejected(self) -> None:
+        """Tasks 2.3.4 (INV-ARCH-2): Asserts positional variants for legacy scales are strictly rejected."""
+        for f_scale in ("local", "bake", "small", "large"):
+            with self.assertRaises(RunCliParseError) as f_ctx:
+                parseRunArguments(["lsmio", f_scale, "footer"])
+            self.assertIn("Unexpected extra positional argument", str(f_ctx.exception))
+
+    def testNonLsmioBenchmarkVariantRejected(self) -> None:
+        """Tasks 2.3.5 (INV-ARCH-3): Asserts positional variants on non-lsmio benchmarks are strictly rejected."""
+        with self.assertRaises(RunCliParseError) as f_ctx_ior:
+            parseRunArguments(["ior", "baseline", "footer"])
+        self.assertIn("variants are supported exclusively for 'lsmio'", str(f_ctx_ior.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_lmp:
+            parseRunArguments(["lmp", "baseline", "footer"])
+        self.assertIn("variants are supported exclusively for 'lsmio'", str(f_ctx_lmp.exception))
+
+    def testBaselineIorAndLmpAllowedWithoutVariant(self) -> None:
+        """Tasks 2.3.5: Asserts baseline scale is accepted for IOR and LMP when variant is omitted."""
+        f_req_ior = parseRunArguments(["ior", "baseline", "--ssd"])
+        self.assertEqual(f_req_ior.target, "ior")
+        self.assertEqual(f_req_ior.scale, "baseline")
+        self.assertIsNone(f_req_ior.variant)
+        self.assertTrue(f_req_ior.ssd)
+
+        f_req_lmp = parseRunArguments(["lmp", "baseline", "--setup", "LSMIO"])
+        self.assertEqual(f_req_lmp.target, "lmp")
+        self.assertEqual(f_req_lmp.scale, "baseline")
+        self.assertIsNone(f_req_lmp.variant)
+        self.assertEqual(f_req_lmp.setup, "LSMIO")
+
