@@ -159,6 +159,27 @@ std::string to_string(const StorageType v) {
     return sVal;
 }
 
+std::string to_string(const MemtableType v) {
+    std::string sVal;
+
+    switch (v) {
+        case MemtableType::VectorNoSort:
+            sVal = "vector-no-sort";
+            break;
+        case MemtableType::VectorSort:
+            sVal = "vector-sort";
+            break;
+        case MemtableType::Map:
+            sVal = "map";
+            break;
+        case MemtableType::BTree:
+            sVal = "btree";
+            break;
+    }
+
+    return sVal;
+}
+
 }  // namespace lsmio
 
 std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v) {
@@ -171,12 +192,22 @@ std::ostream &operator<<(std::ostream &os, lsmio::StorageType v) {
     return os;
 }
 
+std::ostream &operator<<(std::ostream &os, lsmio::MemtableType v) {
+    os << lsmio::to_string(v);
+    return os;
+}
+
 std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType &v) {
     os << lsmio::to_string(v);
     return os;
 }
 
 std::ostream &operator<<(std::ostream &os, const lsmio::StorageType &v) {
+    os << lsmio::to_string(v);
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const lsmio::MemtableType &v) {
     os << lsmio::to_string(v);
     return os;
 }
