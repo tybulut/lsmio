@@ -52,11 +52,15 @@ class BaseMain(debuggable.DebuggableObject):
 class TestMain(BaseMain):
     """Test execution mode for running unit tests."""
 
+    def __init__(self, *f_args: str) -> None:
+        super().__init__()
+        self.m_test_args = f_args
+
     def run(self) -> int:
         """Execute test suite and report results."""
         from lsmiotool import test
 
-        return test.run_and_report()
+        return test.run_and_report(*self.m_test_args)
 
 
 class ParseLegacyMain(BaseMain):

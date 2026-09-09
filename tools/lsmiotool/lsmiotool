@@ -176,7 +176,7 @@ if __name__ == '__main__':
         inst_main = main.ShellMain()
     elif cmd == 'test':
         from lsmiotool.lib import main
-        inst_main = main.TestMain()
+        inst_main = main.TestMain(*args[1:])
     else:
         sys.stderr.write(f"Unknown command: {args}\n")
         sys.exit(1)

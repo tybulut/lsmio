@@ -98,7 +98,15 @@ def suite():
     return _buildTestSuite(lsmiotool_tests)
 
 
-def run_and_report() -> int:
+def run_and_report(*f_module_names: str) -> int:
+    loader = unittest.TestLoader()
+    if f_module_names:
+        test_suite = unittest.TestSuite()
+        for name in f_module_names:
+            test_suite.addTests(loader.loadTestsFromName(name))
+    else:
+        test_suite = suite()
+
     tr = unittest.TextTestRunner(verbosity=2)
-    result = tr.run(suite())
+    result = tr.run(test_suite)
     return 0 if result.wasSuccessful() else 1

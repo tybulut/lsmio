@@ -178,17 +178,54 @@ if(LSMIO_ENABLE_COVERAGE)
     VERBATIM
   )
 else()
-  add_test(
-    NAME lsmiotool_python_suite
-    COMMAND Python3::Interpreter
-            "${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
-            test
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake"
+    "add_test(lsmiotool_python_suite \"${Python3_EXECUTABLE}\" \"${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool\" \"test\")\n"
   )
-  set_tests_properties(lsmiotool_python_suite PROPERTIES
-    TIMEOUT 120
-    ENVIRONMENT
-      "PYTHONPATH=${LSMIO_SOURCE_DIR}/tools:$ENV{PYTHONPATH};LSMIO_ENV=DEV;MPLBACKEND=Agg;MPLCONFIGDIR=${CMAKE_BINARY_DIR}/matplotlib;LSMIO_CTEST_REGISTRATION=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake;LSMIO_CTEST_PYTHON=${Python3_EXECUTABLE};LSMIO_CTEST_ENTRY=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+
+  file(GLOB_RECURSE _lsmiotool_test_files
+    CONFIGURE_DEPENDS
+    "${LSMIO_SOURCE_DIR}/tools/lsmiotool/test/*Test.py"
+    "${LSMIO_SOURCE_DIR}/tools/lsmiotool/test/test_*.py"
+    "${LSMIO_SOURCE_DIR}/tools/lsmiotool/test/Test*.py"
   )
+
+  execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c
+      "import sys; sys.path.insert(0, '${LSMIO_SOURCE_DIR}/tools'); from lsmiotool.test import _discoverTestModuleNames; print(';'.join(_discoverTestModuleNames()))"
+    OUTPUT_VARIABLE LSMIOTOOL_TEST_MODULES
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _discovery_result
+  )
+
+  if(_discovery_result EQUAL 0 AND LSMIOTOOL_TEST_MODULES)
+    foreach(_mod ${LSMIOTOOL_TEST_MODULES})
+      string(REPLACE "lsmiotool.test." "lsmiotool." _test_name "${_mod}")
+      add_test(
+        NAME "${_test_name}"
+        COMMAND Python3::Interpreter
+                "${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+                test
+                "${_mod}"
+      )
+      set_tests_properties("${_test_name}" PROPERTIES
+        TIMEOUT 60
+        ENVIRONMENT
+          "PYTHONPATH=${LSMIO_SOURCE_DIR}/tools:$ENV{PYTHONPATH};LSMIO_ENV=DEV;MPLBACKEND=Agg;MPLCONFIGDIR=${CMAKE_BINARY_DIR}/matplotlib;LSMIO_CTEST_REGISTRATION=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake;LSMIO_CTEST_PYTHON=${Python3_EXECUTABLE};LSMIO_CTEST_ENTRY=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+      )
+    endforeach()
+  else()
+    add_test(
+      NAME lsmiotool_python_suite
+      COMMAND Python3::Interpreter
+              "${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+              test
+    )
+    set_tests_properties(lsmiotool_python_suite PROPERTIES
+      TIMEOUT 120
+      ENVIRONMENT
+        "PYTHONPATH=${LSMIO_SOURCE_DIR}/tools:$ENV{PYTHONPATH};LSMIO_ENV=DEV;MPLBACKEND=Agg;MPLCONFIGDIR=${CMAKE_BINARY_DIR}/matplotlib;LSMIO_CTEST_REGISTRATION=${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.baseline.cmake;LSMIO_CTEST_PYTHON=${Python3_EXECUTABLE};LSMIO_CTEST_ENTRY=${LSMIO_SOURCE_DIR}/tools/lsmiotool/lsmiotool"
+      )
+  endif()
 endif()
 
 add_test(
