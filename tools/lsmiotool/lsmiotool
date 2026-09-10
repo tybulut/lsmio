@@ -43,13 +43,13 @@ if srv_path not in sys.path:
 
 from lsmiotool.lib.cli import (
     ArchiveCliParseError,
-    CompareArchiveCliParseError,
+    CompareCliParseError,
     PackageValidationError,
     ParseCliParseError,
     RunCliParseError,
     SourcePackageValidator,
     parseArchiveArguments,
-    parseCompareArchiveArguments,
+    parseCompareArguments,
     parseParseArguments,
     parseRunArguments,
 )
@@ -62,8 +62,7 @@ LSMIOTOOL_HELP = """How to run
 
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>]
-  compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
-  compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+  compare <nodes|variants> <folder> ...
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
@@ -142,25 +141,16 @@ if __name__ == '__main__':
         )
     elif cmd == 'compare':
         from lsmiotool.lib import main
-        cmd_args = args[1:]
-        if len(cmd_args) < 2:
-            sys.stderr.write(
-                "Compare: Needs at least two arguments: <benchmark_folder> <read|write> [<stripes>] [<blocksize>]\n"
-            )
-            sys.exit(1)
-        inst_main = main.CompareMain(*cmd_args)
-    elif cmd == 'compare-archive':
-        from lsmiotool.lib import main
-        from lsmiotool.lib.cli import COMPARE_ARCHIVE_HELP_TEXT
+        from lsmiotool.lib.cli import COMPARE_HELP_TEXT
         if any(h in args[1:] for h in ('-h', '--help')):
-            print(COMPARE_ARCHIVE_HELP_TEXT.rstrip())
+            print(COMPARE_HELP_TEXT.rstrip())
             sys.exit(0)
         try:
-            compare_archive_request = parseCompareArchiveArguments(args)
-        except CompareArchiveCliParseError as err:
+            compare_request = parseCompareArguments(args)
+        except CompareCliParseError as err:
             sys.stderr.write(f"{err}\n")
             sys.exit(2)
-        inst_main = main.CompareArchiveMain(f_request=compare_archive_request)
+        inst_main = main.CompareMain(f_request=compare_request)
     elif cmd == 'latex':
         from lsmiotool.lib import main
         cmd_args = args[1:]

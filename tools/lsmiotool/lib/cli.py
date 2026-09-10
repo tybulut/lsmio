@@ -33,7 +33,7 @@
 import os
 from pathlib import Path
 import stat
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from lsmiotool.lib.archive import ArchiveError, ArchiveRequest
 from lsmiotool.lib.run import RunRequest
@@ -45,8 +45,7 @@ LSMIOTOOL_HELP = """How to run
 
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>]
-  compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
-  compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+  compare <nodes|variants> <folder> ...
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
@@ -111,22 +110,34 @@ Options:
                 Report format: 'csv' or 'json' (default: csv).
 """
 
-COMPARE_ARCHIVE_HELP_TEXT = """Usage:
-  lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+COMPARE_HELP_TEXT = """Usage:
+  lsmiotool compare <nodes|variants> <folder> ...
 
-Arguments:
-  <archive_folder>
-                Path to the archive directory containing benchmark variant runs.
-  [operation]   Operation to compare: 'read', 'write', or 'both' (default: 'both').
-  [stripes]     Stripe count: 4 or 16 (default: 4).
-  [blocksize]   Block size: '64K', '1M', or '8M' (default: '1M').
+Submodes:
+  nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+      Compares performance across node counts for a benchmark folder.
+      Arguments:
+          <folder>: Benchmark folder containing node subdirectories (e.g. 01, 02, 04, ...).
+          <read|write>: Required operation to compare ('read' or 'write').
+          [stripes]: Stripe count: 4 or 16 (default: 4).
+          [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
+      Options:
+          --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 
-Options:
-  --all         Generate comparison charts across all 6 (stripes, blocksize) permutations.
-  --output-dir <dir>
-                Destination directory for generated PNG plots (default: current working directory).
-                Note: '--output-dir=value' syntax is strictly rejected; use '--output-dir <dir>'.
+  variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+      Compares performance across benchmark/storage variants on fixed 8-node baseline runs.
+      Arguments:
+          <archive_folder>: Archive folder containing outputs-* run subdirectories.
+          [operation]: Operation to compare: 'read', 'write', or 'both' (default: 'both').
+          [stripes]: Stripe count: 4 or 16 (default: 4).
+          [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
+      Options:
+          --all: Generate comparison charts across all 6 (stripes, blocksize) permutations.
+          --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 """
+
+# Backward compatibility alias
+COMPARE_ARCHIVE_HELP_TEXT = COMPARE_HELP_TEXT
 
 
 class PackageValidationError(Exception):
@@ -165,10 +176,14 @@ class ArchiveCliParseError(CliParseError):
     pass
 
 
-class CompareArchiveCliParseError(CliParseError):
-    """Exception raised when CLI arguments for the 'compare-archive' command are invalid."""
+class CompareCliParseError(CliParseError):
+    """Exception raised when CLI arguments for the 'compare' command are invalid."""
 
     pass
+
+
+# Backward compatibility alias for existing test imports and external callers
+CompareArchiveCliParseError = CompareCliParseError
 
 
 class RunCliParser:
@@ -788,8 +803,152 @@ def parseArchiveArguments(f_argv: Sequence[str]) -> ArchiveRequest:
     return ArchiveCliParser.parse(f_argv=f_argv)
 
 
-class CompareArchiveRequest:
-    """Immutable parsed and validated request value object for compare-archive."""
+class CompareNodesRequest:
+    """Immutable parsed and validated request value object for 'compare nodes'."""
+
+    __slots__ = (
+        "m_folder",
+        "m_op",
+        "m_stripes",
+        "m_blocksize",
+        "m_output_dir",
+        "_frozen",
+    )
+
+    def __init__(
+        self,
+        f_folder: str,
+        f_op: str,
+        f_stripes: int = 4,
+        f_blocksize: str = "1M",
+        f_output_dir: Optional[str] = None,
+    ) -> None:
+        if not isinstance(f_folder, str) or not f_folder.strip():
+            raise ValueError(
+                f"folder must be a non-empty string, got: {f_folder!r}"
+            )
+        if not isinstance(f_op, str) or not f_op.strip():
+            raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
+        f_norm_op = f_op.strip().lower()
+        if f_norm_op not in ("read", "write"):
+            raise ValueError(
+                f"op must be one of ('read', 'write'), got: {f_op!r}"
+            )
+        if (
+            isinstance(f_stripes, bool)
+            or not isinstance(f_stripes, int)
+            or f_stripes <= 0
+        ):
+            raise ValueError(f"stripes must be a positive integer, got: {f_stripes!r}")
+        if not isinstance(f_blocksize, str) or not f_blocksize.strip():
+            raise ValueError(
+                f"blocksize must be a non-empty string, got: {f_blocksize!r}"
+            )
+        f_norm_bs = f_blocksize.strip().upper()
+        if f_norm_bs not in ("64K", "1M", "8M"):
+            raise ValueError(
+                f"blocksize must be one of ('64K', '1M', '8M'), got: {f_blocksize!r}"
+            )
+        if f_output_dir is not None and (
+            not isinstance(f_output_dir, str) or not f_output_dir.strip()
+        ):
+            raise ValueError(
+                f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
+            )
+
+        super().__setattr__("m_folder", f_folder.strip())
+        super().__setattr__("m_op", f_norm_op)
+        super().__setattr__("m_stripes", f_stripes)
+        super().__setattr__("m_blocksize", f_norm_bs)
+        super().__setattr__(
+            "m_output_dir",
+            f_output_dir.strip() if f_output_dir is not None else None,
+        )
+        super().__setattr__("_frozen", True)
+
+    def __setattr__(self, f_key: str, f_value: Any) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Cannot modify immutable {self.__class__.__name__}"
+            )
+        super().__setattr__(f_key, f_value)
+
+    def __delattr__(self, f_key: str) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                f"Cannot delete attribute from immutable {self.__class__.__name__}"
+            )
+        super().__delattr__(f_key)
+
+    @property
+    def submode(self) -> str:
+        return "nodes"
+
+    @property
+    def folder(self) -> str:
+        return self.m_folder
+
+    @property
+    def op(self) -> str:
+        return self.m_op
+
+    @property
+    def stripes(self) -> int:
+        return self.m_stripes
+
+    @property
+    def blocksize(self) -> str:
+        return self.m_blocksize
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def outputDir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    def toDict(self) -> Dict[str, Any]:
+        return {
+            "submode": "nodes",
+            "folder": self.m_folder,
+            "op": self.m_op,
+            "stripes": self.m_stripes,
+            "blocksize": self.m_blocksize,
+            "output_dir": self.m_output_dir,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"CompareNodesRequest(folder={self.m_folder!r}, "
+            f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
+            f"blocksize={self.m_blocksize!r}, "
+            f"output_dir={self.m_output_dir!r})"
+        )
+
+    def __eq__(self, f_other: Any) -> bool:
+        if isinstance(f_other, CompareNodesRequest):
+            return (
+                self.m_folder == f_other.m_folder
+                and self.m_op == f_other.m_op
+                and self.m_stripes == f_other.m_stripes
+                and self.m_blocksize == f_other.m_blocksize
+                and self.m_output_dir == f_other.m_output_dir
+            )
+        return False
+
+    def __hash__(self) -> int:
+        return hash((
+            self.m_folder,
+            self.m_op,
+            self.m_stripes,
+            self.m_blocksize,
+            self.m_output_dir,
+        ))
+
+
+class CompareVariantsRequest:
+    """Immutable parsed and validated request value object for 'compare variants'."""
 
     __slots__ = (
         "m_archive_folder",
@@ -871,11 +1030,19 @@ class CompareArchiveRequest:
         super().__delattr__(f_key)
 
     @property
+    def submode(self) -> str:
+        return "variants"
+
+    @property
     def archive_folder(self) -> str:
         return self.m_archive_folder
 
     @property
     def archiveFolder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def folder(self) -> str:
         return self.m_archive_folder
 
     @property
@@ -904,7 +1071,9 @@ class CompareArchiveRequest:
 
     def toDict(self) -> Dict[str, Any]:
         return {
+            "submode": "variants",
             "archive_folder": self.m_archive_folder,
+            "folder": self.m_archive_folder,
             "op": self.m_op,
             "stripes": self.m_stripes,
             "blocksize": self.m_blocksize,
@@ -914,14 +1083,14 @@ class CompareArchiveRequest:
 
     def __repr__(self) -> str:
         return (
-            f"CompareArchiveRequest(archive_folder={self.m_archive_folder!r}, "
+            f"CompareVariantsRequest(archive_folder={self.m_archive_folder!r}, "
             f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
             f"blocksize={self.m_blocksize!r}, all={self.m_all!r}, "
             f"output_dir={self.m_output_dir!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
-        if isinstance(f_other, CompareArchiveRequest):
+        if isinstance(f_other, CompareVariantsRequest):
             return (
                 self.m_archive_folder == f_other.m_archive_folder
                 and self.m_op == f_other.m_op
@@ -943,23 +1112,21 @@ class CompareArchiveRequest:
         ))
 
 
-class CompareArchiveCliParser:
-    """Pure standard-library parser for 'lsmiotool compare-archive' CLI arguments.
+# Backward compatibility alias for existing test imports and internal callers
+CompareArchiveRequest = CompareVariantsRequest
 
-    Usage:
-        lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
 
-    Arguments:
-        <archive_folder>: Path to the archive directory containing benchmark variant runs.
-        [operation]: Operation to compare: 'read', 'write', or 'both' (default: 'both').
-        [stripes]: Stripe count: 4 or 16 (default: 4).
-        [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
+class CompareCliParser:
+    """Pure standard-library two-tier parser for 'lsmiotool compare' CLI arguments.
 
-    Options:
-        --all: Generate comparison charts across all 6 (stripes, blocksize) permutations.
-        --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
+    Grammar:
+        lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+        lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
     """
 
+    VALID_SUBMODES: Tuple[str, ...] = ("nodes", "variants")
+    VALID_OPERATIONS_NODES: Tuple[str, ...] = ("read", "write")
+    VALID_OPERATIONS_VARIANTS: Tuple[str, ...] = ("read", "write", "both")
     VALID_OPERATIONS: Tuple[str, ...] = ("read", "write", "both")
     VALID_STRIPES: Tuple[int, ...] = (4, 16)
     VALID_BLOCKSIZES: Tuple[str, ...] = ("64K", "1M", "8M")
@@ -976,49 +1143,49 @@ class CompareArchiveCliParser:
     def parse(
         cls,
         f_argv: Sequence[str],
-    ) -> CompareArchiveRequest:
-        """Parses argument sequence into an immutable canonical CompareArchiveRequest.
+    ) -> Union[CompareNodesRequest, CompareVariantsRequest]:
+        """Parses argument sequence into an immutable canonical CompareNodesRequest or CompareVariantsRequest.
 
         Args:
-            f_argv: Sequence of argument strings (either including or excluding leading 'compare-archive').
+            f_argv: Sequence of argument strings (either including or excluding leading 'compare').
 
         Returns:
-            Canonical CompareArchiveRequest instance.
+            Canonical CompareNodesRequest or CompareVariantsRequest instance.
 
         Raises:
-            CompareArchiveCliParseError: If syntax, arity, flags, or values are invalid.
+            CompareCliParseError: If syntax, arity, flags, or values are invalid.
         """
         if f_argv is None or isinstance(f_argv, (str, bytes)):
-            raise CompareArchiveCliParseError(
+            raise CompareCliParseError(
                 f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
             )
         try:
             f_tokens: List[str] = list(f_argv)
         except TypeError:
-            raise CompareArchiveCliParseError(
+            raise CompareCliParseError(
                 f"f_argv must be iterable, got: {type(f_argv).__name__}"
             )
 
         for f_idx, f_elem in enumerate(f_tokens):
             if not isinstance(f_elem, str):
-                raise CompareArchiveCliParseError(
+                raise CompareCliParseError(
                     f"All argv elements must be strings, got {type(f_elem).__name__} at index {f_idx}"
                 )
 
         for f_tok in f_tokens:
             if f_tok.startswith("--all="):
-                raise CompareArchiveCliParseError(
+                raise CompareCliParseError(
                     f"Prohibit '--all=value' syntax ({f_tok!r}); '--all' takes no value."
                 )
             if f_tok.startswith("--output-dir="):
-                raise CompareArchiveCliParseError(
+                raise CompareCliParseError(
                     f"Prohibit '--output-dir=value' syntax ({f_tok!r}); use '--output-dir <dir>' with explicit separate argument."
                 )
 
         f_cmd_indices: List[int] = [
             f_idx
             for f_idx, f_tok in enumerate(f_tokens)
-            if f_tok.lower() == "compare-archive"
+            if f_tok.lower() in ("compare", "compare-archive")
         ]
 
         if f_cmd_indices:
@@ -1027,36 +1194,61 @@ class CompareArchiveCliParser:
             f_post_tokens = f_tokens[f_cmd_idx + 1 :]
 
             for f_pre_tok in f_pre_tokens:
-                raise CompareArchiveCliParseError(
-                    f"Unexpected token before 'compare-archive': {f_pre_tok!r}"
+                raise CompareCliParseError(
+                    f"Unexpected token before {f_tokens[f_cmd_idx]!r}: {f_pre_tok!r}"
                 )
         else:
             f_post_tokens = f_tokens[:]
 
         if not f_post_tokens:
-            raise CompareArchiveCliParseError(
-                "Missing required positional argument: <archive_folder>"
+            raise CompareCliParseError(
+                "Missing required submode: 'nodes' or 'variants'"
             )
 
-        f_archive_folder_tok = f_post_tokens[0]
-        if f_archive_folder_tok.startswith("-"):
-            raise CompareArchiveCliParseError(
-                f"Unexpected option {f_archive_folder_tok!r} placed before positional argument <archive_folder>."
+        f_submode_tok = f_post_tokens[0]
+        f_submode_norm = f_submode_tok.strip().lower()
+
+        if f_submode_norm == "nodes":
+            return cls._parseNodes(f_post_tokens[1:])
+        elif f_submode_norm == "variants":
+            return cls._parseVariants(f_post_tokens[1:])
+        else:
+            raise CompareCliParseError(
+                f"Invalid submode {f_submode_tok!r}. Must be 'nodes' or 'variants'"
             )
 
-        f_archive_folder = f_archive_folder_tok.strip()
-        if not f_archive_folder:
-            raise CompareArchiveCliParseError(
-                "Archive folder path cannot be empty."
+    @classmethod
+    def _parseNodes(
+        cls,
+        f_tokens: Sequence[str],
+    ) -> CompareNodesRequest:
+        for f_tok in f_tokens:
+            if f_tok == "--all" or f_tok.startswith("--all="):
+                raise CompareCliParseError(
+                    "Option '--all' is only valid for 'variants' submode"
+                )
+
+        if not f_tokens:
+            raise CompareCliParseError(
+                "Missing required positional argument: <folder>"
             )
 
-        f_op: str = "both"
+        f_folder_tok = f_tokens[0]
+        if f_folder_tok.startswith("-"):
+            raise CompareCliParseError(
+                f"Unexpected option {f_folder_tok!r} placed before positional argument <folder>."
+            )
+
+        f_folder = f_folder_tok.strip()
+        if not f_folder:
+            raise CompareCliParseError("Folder path cannot be empty.")
+
+        f_op: Optional[str] = None
         f_stripes: int = 4
         f_blocksize: str = "1M"
-        f_all: bool = False
         f_output_dir: Optional[str] = None
 
-        f_remaining_tokens = f_post_tokens[1:]
+        f_remaining_tokens = f_tokens[1:]
         f_pos_idx = 0
         f_rem_idx = 0
 
@@ -1067,9 +1259,9 @@ class CompareArchiveCliParser:
 
             if f_pos_idx == 0:
                 f_op_norm = f_tok.strip().lower()
-                if f_op_norm not in cls.VALID_OPERATIONS:
-                    raise CompareArchiveCliParseError(
-                        f"Invalid operation: {f_tok!r}. Must be one of: {cls.VALID_OPERATIONS}"
+                if f_op_norm not in cls.VALID_OPERATIONS_NODES:
+                    raise CompareCliParseError(
+                        f"Invalid operation: {f_tok!r}. Must be 'read' or 'write'"
                     )
                 f_op = f_op_norm
                 f_pos_idx += 1
@@ -1078,11 +1270,11 @@ class CompareArchiveCliParser:
                 try:
                     f_stripes_val = int(f_tok)
                 except ValueError:
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
                     )
                 if f_stripes_val not in cls.VALID_STRIPES:
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
                     )
                 f_stripes = f_stripes_val
@@ -1091,14 +1283,133 @@ class CompareArchiveCliParser:
             elif f_pos_idx == 2:
                 f_bs_norm = f_tok.strip().upper()
                 if f_bs_norm not in cls.VALID_BLOCKSIZES:
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         f"Invalid blocksize: {f_tok!r}. Must be one of: {cls.VALID_BLOCKSIZES}"
                     )
                 f_blocksize = f_bs_norm
                 f_pos_idx += 1
                 f_rem_idx += 1
             else:
-                raise CompareArchiveCliParseError(
+                raise CompareCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
+
+        if f_op is None:
+            raise CompareCliParseError(
+                "Missing required positional argument: <read|write>"
+            )
+
+        f_output_dir_seen = False
+
+        while f_rem_idx < len(f_remaining_tokens):
+            f_tok = f_remaining_tokens[f_rem_idx]
+            if f_tok == "--output-dir":
+                if f_output_dir_seen:
+                    raise CompareCliParseError(
+                        "Duplicate '--output-dir' option specified."
+                    )
+                if f_rem_idx + 1 >= len(f_remaining_tokens):
+                    raise CompareCliParseError(
+                        "Missing value after '--output-dir' option."
+                    )
+                f_val = f_remaining_tokens[f_rem_idx + 1]
+                if f_val.startswith("-"):
+                    raise CompareCliParseError(
+                        f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
+                    )
+                if not f_val.strip():
+                    raise CompareCliParseError(
+                        "Output directory path cannot be empty."
+                    )
+                f_output_dir = f_val.strip()
+                f_output_dir_seen = True
+                f_rem_idx += 2
+            elif f_tok.startswith("-"):
+                raise CompareCliParseError(f"Unknown option: {f_tok!r}")
+            else:
+                raise CompareCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
+
+        return CompareNodesRequest(
+            f_folder=f_folder,
+            f_op=f_op,
+            f_stripes=f_stripes,
+            f_blocksize=f_blocksize,
+            f_output_dir=f_output_dir,
+        )
+
+    @classmethod
+    def _parseVariants(
+        cls,
+        f_tokens: Sequence[str],
+    ) -> CompareVariantsRequest:
+        if not f_tokens:
+            raise CompareCliParseError(
+                "Missing required positional argument: <archive_folder>"
+            )
+
+        f_archive_folder_tok = f_tokens[0]
+        if f_archive_folder_tok.startswith("-"):
+            raise CompareCliParseError(
+                f"Unexpected option {f_archive_folder_tok!r} placed before positional argument <archive_folder>."
+            )
+
+        f_archive_folder = f_archive_folder_tok.strip()
+        if not f_archive_folder:
+            raise CompareCliParseError(
+                "Archive folder path cannot be empty."
+            )
+
+        f_op: str = "both"
+        f_stripes: int = 4
+        f_blocksize: str = "1M"
+        f_all: bool = False
+        f_output_dir: Optional[str] = None
+
+        f_remaining_tokens = f_tokens[1:]
+        f_pos_idx = 0
+        f_rem_idx = 0
+
+        while f_rem_idx < len(f_remaining_tokens):
+            f_tok = f_remaining_tokens[f_rem_idx]
+            if f_tok.startswith("-"):
+                break
+
+            if f_pos_idx == 0:
+                f_op_norm = f_tok.strip().lower()
+                if f_op_norm not in cls.VALID_OPERATIONS_VARIANTS:
+                    raise CompareCliParseError(
+                        f"Invalid operation: {f_tok!r}. Must be one of: {cls.VALID_OPERATIONS_VARIANTS}"
+                    )
+                f_op = f_op_norm
+                f_pos_idx += 1
+                f_rem_idx += 1
+            elif f_pos_idx == 1:
+                try:
+                    f_stripes_val = int(f_tok)
+                except ValueError:
+                    raise CompareCliParseError(
+                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
+                    )
+                if f_stripes_val not in cls.VALID_STRIPES:
+                    raise CompareCliParseError(
+                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
+                    )
+                f_stripes = f_stripes_val
+                f_pos_idx += 1
+                f_rem_idx += 1
+            elif f_pos_idx == 2:
+                f_bs_norm = f_tok.strip().upper()
+                if f_bs_norm not in cls.VALID_BLOCKSIZES:
+                    raise CompareCliParseError(
+                        f"Invalid blocksize: {f_tok!r}. Must be one of: {cls.VALID_BLOCKSIZES}"
+                    )
+                f_blocksize = f_bs_norm
+                f_pos_idx += 1
+                f_rem_idx += 1
+            else:
+                raise CompareCliParseError(
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
 
@@ -1109,7 +1420,7 @@ class CompareArchiveCliParser:
             f_tok = f_remaining_tokens[f_rem_idx]
             if f_tok == "--all":
                 if f_all_seen:
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         "Duplicate '--all' option specified."
                     )
                 f_all = True
@@ -1117,33 +1428,33 @@ class CompareArchiveCliParser:
                 f_rem_idx += 1
             elif f_tok == "--output-dir":
                 if f_output_dir_seen:
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         "Duplicate '--output-dir' option specified."
                     )
                 if f_rem_idx + 1 >= len(f_remaining_tokens):
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         "Missing value after '--output-dir' option."
                     )
                 f_val = f_remaining_tokens[f_rem_idx + 1]
                 if f_val.startswith("-"):
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise CompareArchiveCliParseError(
+                    raise CompareCliParseError(
                         "Output directory path cannot be empty."
                     )
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2
             elif f_tok.startswith("-"):
-                raise CompareArchiveCliParseError(f"Unknown option: {f_tok!r}")
+                raise CompareCliParseError(f"Unknown option: {f_tok!r}")
             else:
-                raise CompareArchiveCliParseError(
+                raise CompareCliParseError(
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
 
-        return CompareArchiveRequest(
+        return CompareVariantsRequest(
             f_archive_folder=f_archive_folder,
             f_op=f_op,
             f_stripes=f_stripes,
@@ -1153,11 +1464,44 @@ class CompareArchiveCliParser:
         )
 
 
+def parseCompareArguments(
+    f_argv: Sequence[str],
+) -> Union[CompareNodesRequest, CompareVariantsRequest]:
+    """Convenience function wrapping CompareCliParser.parse."""
+    return CompareCliParser.parse(f_argv=f_argv)
+
+
 def parseCompareArchiveArguments(
     f_argv: Sequence[str],
-) -> CompareArchiveRequest:
-    """Convenience function wrapping CompareArchiveCliParser.parse."""
-    return CompareArchiveCliParser.parse(f_argv=f_argv)
+) -> CompareVariantsRequest:
+    """Compatibility wrapper delegating to CompareCliParser.parse in variants mode."""
+    if f_argv is None or isinstance(f_argv, (str, bytes)):
+        raise CompareCliParseError(
+            f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
+        )
+    try:
+        tokens = list(f_argv)
+    except TypeError:
+        raise CompareCliParseError(
+            f"f_argv must be iterable, got: {type(f_argv).__name__}"
+        )
+    for f_idx, f_elem in enumerate(tokens):
+        if not isinstance(f_elem, str):
+            raise CompareCliParseError(
+                f"All argv elements must be strings, got {type(f_elem).__name__} at index {f_idx}"
+            )
+    if not tokens or (tokens[0] != "variants" and tokens[0] != "compare-archive"):
+        tokens.insert(0, "variants")
+    elif tokens and tokens[0] == "compare-archive":
+        tokens[0] = "variants"
+    req = CompareCliParser.parse(tokens)
+    if isinstance(req, CompareVariantsRequest):
+        return req
+    raise CompareCliParseError("Expected variants request")
+
+
+# Backward compatibility alias
+CompareArchiveCliParser = CompareCliParser
 
 
 class SourcePackageValidator:

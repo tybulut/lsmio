@@ -37,7 +37,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from lsmiotool.lib import main, plot
-from lsmiotool.lib.cli import CompareArchiveRequest
+from lsmiotool.lib.cli import CompareArchiveRequest, CompareVariantsRequest
 from lsmiotool.lib.output import MissingDataError
 
 
@@ -359,6 +359,40 @@ class CompareArchiveMainTest(TestCase):
         self.assertTrue(os.path.exists(write_png), f"{write_png} must exist")
         self.assertGreater(os.path.getsize(read_png), 0)
         self.assertGreater(os.path.getsize(write_png), 0)
+
+    def testCompareMainPolymorphicDelegationToVariants(self) -> None:
+        """Test CompareMain instantiated with CompareVariantsRequest delegates to CompareVariantsMain and executes run()."""
+        archive_dir = os.path.join(self.m_temp_dir.name, "archive_poly")
+        v_native = os.path.join(archive_dir, "outputs-native")
+        os.makedirs(v_native, exist_ok=True)
+        _writeSyntheticCsv(os.path.join(v_native, "lsm-report.csv"))
+
+        out_dir = os.path.join(self.m_temp_dir.name, "plots_poly")
+
+        req = CompareVariantsRequest(
+            f_archive_folder=archive_dir,
+            f_op="read",
+            f_stripes=4,
+            f_blocksize="1M",
+            f_output_dir=out_dir,
+        )
+        cm = main.CompareMain(f_request=req)
+        self.assertEqual(cm.submode, "variants")
+        self.assertIsInstance(cm.m_delegate, main.CompareVariantsMain)
+        ret = cm.run()
+        self.assertEqual(ret, 0)
+
+        expected_chart = os.path.join(
+            out_dir, "compare-archive-archive_poly-read-4-1M.png"
+        )
+        self.assertTrue(os.path.exists(expected_chart))
+        self.assertGreater(os.path.getsize(expected_chart), 0)
+
+    def testCompareVariantsMainAlias(self) -> None:
+        """Test CompareVariantsMain is identical to CompareArchiveMain alias."""
+        self.assertIs(main.CompareArchiveMain, main.CompareVariantsMain)
+        cm = main.CompareVariantsMain(f_archive_folder="/path/to/archive")
+        self.assertIsInstance(cm, main.CompareArchiveMain)
 
 
 if __name__ == "__main__":
