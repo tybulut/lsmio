@@ -43,7 +43,7 @@ from lsmiotool.lib.variants import (
 class VariantCatalogueTest(unittest.TestCase):
     """Unit test suite verifying declarative variant catalog, mappings, and immutability."""
 
-    EXPECTED_30_VARIANTS = {
+    EXPECTED_35_VARIANTS = {
         "footer": ("footer", ("--lsmio-footer-index",)),
         "btree": ("btree", ("--lsmio-memtable", "btree")),
         "footer-btree": (
@@ -135,6 +135,54 @@ class VariantCatalogueTest(unittest.TestCase):
                 "--lsmio-prealloc",
             ),
         ),
+        "footer-vsort-manoff-mmap": (
+            "footer-vsort-manoff-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-vsort-manoff": (
+            "footer-vsort-manoff",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pool-8-mmap": (
+            "footer-pool-8-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-manoff-pool-8-mmap": (
+            "footer-manoff-pool-8-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-btree-manoff-mmap": (
+            "footer-btree-manoff-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
     }
 
     def testDefaultAndBaseKeysReturnEmpty(self) -> None:
@@ -157,15 +205,16 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertEqual(rec.flagsString, "")
             self.assertTrue(VariantCatalogue.isValid(key))
 
-    def testAll30NonEmptyVariants(self) -> None:
-        """Assert all 30 non-empty keys match tokens and engine CLI flags."""
+    def testAll35NonEmptyVariants(self) -> None:
+        """Assert all 35 non-empty keys match tokens and engine CLI flags."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
-        self.assertEqual(len(supported), 30)
+        self.assertEqual(len(supported), 35)
+        self.assertEqual(len(self.EXPECTED_35_VARIANTS), 35)
         self.assertEqual(supported, all_keys)
-        self.assertEqual(set(supported), set(self.EXPECTED_30_VARIANTS.keys()))
+        self.assertEqual(set(supported), set(self.EXPECTED_35_VARIANTS.keys()))
 
-        for key, (expected_tokens, expected_flags) in self.EXPECTED_30_VARIANTS.items():
+        for key, (expected_tokens, expected_flags) in self.EXPECTED_35_VARIANTS.items():
             rec = VariantCatalogue.resolve(key)
             self.assertEqual(rec.key, key)
             self.assertEqual(rec.tokens, expected_tokens)

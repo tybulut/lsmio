@@ -45,7 +45,7 @@ LSMIOTOOL_HELP = """How to run
 
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>]
-  compare <nodes|variants> <folder> ...
+  compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
@@ -111,7 +111,7 @@ Options:
 """
 
 COMPARE_HELP_TEXT = """Usage:
-  lsmiotool compare <nodes|variants> <folder> ...
+  lsmiotool compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
 
 Submodes:
   nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]

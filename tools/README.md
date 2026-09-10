@@ -477,9 +477,9 @@ lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
 
 ---
 
-## 6. Canonical 30-Variant Catalogue
+## 6. Canonical 35-Variant Catalogue
 
-The LSMIO toolchain maintains an authoritative catalog of 30 non-empty variants, synchronized across `lsmiotool` (`VariantCatalogue._VARIANT_SPECS` in Python) and legacy `bmtool` (`resolve_variant()` in POSIX shell).
+The LSMIO toolchain maintains an authoritative catalog of 35 non-empty variants, synchronized across `lsmiotool` (`VariantCatalogue._VARIANT_SPECS` in Python) and legacy `bmtool` (`resolve_variant()` in POSIX shell).
 
 | # | Variant Identifier | Correlation Tokens | CLI Engine Flags | Key Feature / Architecture Evaluated |
 |:---|:---|:---|:---|:---|
@@ -513,8 +513,13 @@ The LSMIO toolchain maintains an authoritative catalog of 30 non-empty variants,
 | 28 | `footer-pool-8` | `footer-pool-8` | `--lsmio-footer-index --lsmio-pool 8` | Dense Index Footer with 8-file pre-allocation pool. |
 | 29 | `footer-wbuf-512m-manoff-prealloc` | `footer-wbuf-512m-manoff-prealloc` | `--lsmio-footer-index --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc` | Footer, 512 MiB buffer, manual offsets, and pre-allocation. |
 | 30 | `footer-vsort-manoff-prealloc` | `footer-vsort-manoff-prealloc` | `--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-prealloc` | Footer, sorted vector memtable, manual offsets, pre-allocation. |
+| 31 | `footer-vsort-manoff-mmap` | `footer-vsort-manoff-mmap` | `--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, sorted vector memtable, manual offsets, memory-mapped reads. |
+| 32 | `footer-vsort-manoff` | `footer-vsort-manoff` | `--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset` | Dense Index Footer, sorted vector memtable, manual offsets. |
+| 33 | `footer-pool-8-mmap` | `footer-pool-8-mmap` | `--lsmio-footer-index --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, 8-file pre-allocation pool, memory-mapped reads. |
+| 34 | `footer-manoff-pool-8-mmap` | `footer-manoff-pool-8-mmap` | `--lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, manual offsets, 8-file pre-allocation pool, memory-mapped reads. |
+| 35 | `footer-btree-manoff-mmap` | `footer-btree-manoff-mmap` | `--lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, B-tree memtable, manual offsets, memory-mapped reads. |
 
 > [!NOTE]
-> In addition to the 30 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, and no extra flags).
+> In addition to the 35 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, and no extra flags).
 >
 > **Buffer Sizing Standard**: In accordance with experimental rigor, read-path optimization variants (`pread`, `mmap`, `footer-pread`, `footer-mmap`) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.

@@ -106,7 +106,7 @@ ctest -R "test_mpi_" -V
 # Run all lsmiotool Python tests
 ctest -R "lsmiotool\." -V
 
-# Run the 30-variant catalogue validation test
+# Run the 35-variant catalogue validation test
 ctest -R "lsmiotool\.main\.VariantCatalogueTest" -V
 
 # Run staging and installed smoke tests

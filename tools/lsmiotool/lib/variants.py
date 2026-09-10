@@ -155,7 +155,7 @@ class VariantCatalogue:
         "manager-",
     )
 
-    # Exhaustive mapping of all 30 non-empty variant keys to (tokens, engine_flags)
+    # Exhaustive mapping of all 35 non-empty variant keys to (tokens, engine_flags)
     _VARIANT_SPECS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
         "footer": ("footer", ("--lsmio-footer-index",)),
         "btree": ("btree", ("--lsmio-memtable", "btree")),
@@ -249,6 +249,49 @@ class VariantCatalogue:
                 "--lsmio-prealloc",
             ),
         ),
+        "footer-vsort-manoff-mmap": (
+            "footer-vsort-manoff-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-vsort-manoff": (
+            "footer-vsort-manoff",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pool-8-mmap": (
+            "footer-pool-8-mmap",
+            ("--lsmio-footer-index", "--lsmio-pool", "8", "--lsmio-mmap"),
+        ),
+        "footer-manoff-pool-8-mmap": (
+            "footer-manoff-pool-8-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-btree-manoff-mmap": (
+            "footer-btree-manoff-mmap",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
     }
 
     @classmethod
@@ -272,7 +315,7 @@ class VariantCatalogue:
 
     @classmethod
     def supportedVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 30 supported non-empty variant keys in canonical order."""
+        """Returns tuple of all 35 supported non-empty variant keys in canonical order."""
         return tuple(cls._VARIANT_SPECS.keys())
 
     @classmethod
@@ -287,7 +330,7 @@ class VariantCatalogue:
         Handles:
         - None, "", "base", "default" -> empty variant (base run).
         - Strips backend prefix.
-        - Canonical lookup against 30 discrete non-empty keys.
+        - Canonical lookup against 35 discrete non-empty keys.
         - Raises UnknownVariantError on unrecognized keys.
         """
         if f_key is None:
