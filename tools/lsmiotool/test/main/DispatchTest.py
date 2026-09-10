@@ -904,7 +904,11 @@ print("LAZY_IMPORT_OK")
         self.assertNotIn("f_home", det_kw)
 
     def _readReadmeContent(self) -> str:
-        """Helper to read README.md content from repository root."""
+        """Helper to read documentation content from tools subsystem or repository root."""
+        f_tools_readme = Path(__file__).resolve().parents[3] / "README.md"
+        if f_tools_readme.is_file():
+            with open(f_tools_readme, "r", encoding="utf-8") as f_f:
+                return f_f.read()
         f_readme_path = Path(__file__).resolve().parents[4] / "README.md"
         self.assertTrue(
             f_readme_path.is_file(), f"README.md not found at {f_readme_path}"

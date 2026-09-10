@@ -114,6 +114,8 @@ class LSMIOConfig {
     bool useSync = false;
     /// @brief Flag to enable memory-mapped files.
     bool enableMMAP = false;
+    /// @brief Flag to enable persistent read file descriptors and atomic pread().
+    bool enablePread = false;
     /// @brief Flag to enable data compression.
     bool compression = false;
 

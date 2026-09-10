@@ -81,13 +81,34 @@ class SSTableManager {
 
     struct IndexNode {
         L0Index index;
-        IndexNode* next;
-        IndexNode(L0Index&& idx) : index(std::move(idx)), next(nullptr) {}
+        IndexNode* next{nullptr};
+
+        // Persistent Reader Resources
+        int m_read_fd{-1};
+        char* m_mmap_ptr{nullptr};
+        size_t m_mmap_len{0};
+
+        explicit IndexNode(L0Index&& idx);
+        ~IndexNode();
+
+        // Non-copyable, non-movable to guarantee resource ownership
+        IndexNode(const IndexNode&) = delete;
+        IndexNode& operator=(const IndexNode&) = delete;
+        IndexNode(IndexNode&&) = delete;
+        IndexNode& operator=(IndexNode&&) = delete;
+
+        // Lifecycle Management
+        void initReader(bool f_enable_mmap, bool f_enable_pread);
+        void closeReader() noexcept;
     };
 
     std::atomic<IndexNode*> m_head{nullptr};
 
-    // Helper to read from specific file/offset
+    // Helper to read from specific node/offset
+    bool readValueAt(const IndexNode& f_node, uint64_t f_offset, const std::string& f_key,
+                     std::string& f_out_value);
+
+    // Backward-compatible stream fallback overload
     bool readValueAt(const std::string& f_path, uint64_t f_offset, const std::string& f_key,
                      std::string& f_out_value);
 

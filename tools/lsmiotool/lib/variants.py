@@ -155,7 +155,7 @@ class VariantCatalogue:
         "manager-",
     )
 
-    # Exhaustive mapping of all 27 non-empty variant keys to (tokens, engine_flags)
+    # Exhaustive mapping of all 30 non-empty variant keys to (tokens, engine_flags)
     _VARIANT_SPECS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
         "footer": ("footer", ("--lsmio-footer-index",)),
         "btree": ("btree", ("--lsmio-memtable", "btree")),
@@ -193,6 +193,15 @@ class VariantCatalogue:
         "bfilter": ("bfilter", ("--lsmio-bfilter",)),
         "wal": ("wal", ("--lsmio-wal",)),
         "mmap": ("mmap", ("--lsmio-mmap",)),
+        "pread": ("pread", ("--lsmio-pread",)),
+        "footer-mmap": (
+            "footer-mmap",
+            ("--lsmio-footer-index", "--lsmio-mmap"),
+        ),
+        "footer-pread": (
+            "footer-pread",
+            ("--lsmio-footer-index", "--lsmio-pread"),
+        ),
         "compress": ("compress", ("--lsmio-compress",)),
         "sync": ("sync", ("--sync",)),
         "pool-8": ("pool-8", ("--lsmio-pool", "8")),
@@ -263,7 +272,7 @@ class VariantCatalogue:
 
     @classmethod
     def supportedVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 27 supported non-empty variant keys in canonical order."""
+        """Returns tuple of all 30 supported non-empty variant keys in canonical order."""
         return tuple(cls._VARIANT_SPECS.keys())
 
     @classmethod
@@ -278,7 +287,7 @@ class VariantCatalogue:
         Handles:
         - None, "", "base", "default" -> empty variant (base run).
         - Strips backend prefix.
-        - Canonical lookup against 27 discrete non-empty keys.
+        - Canonical lookup against 30 discrete non-empty keys.
         - Raises UnknownVariantError on unrecognized keys.
         """
         if f_key is None:

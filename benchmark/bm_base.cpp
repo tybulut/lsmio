@@ -234,7 +234,8 @@ std::string genOptionsToString() {
               << "\n\n useBloomFilter: " << lsmio::gConfigLSMIO.useBloomFilter
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
-              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
+              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP
+              << "\n enablePread: " << lsmio::gConfigLSMIO.enablePread << "\n useLevelDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
               << "\n useRocksDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::RocksDB ? "yes" : "no")
@@ -298,6 +299,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                      "use MMAP read/write (default: no MMAP)");
+        app.add_flag("--lsmio-pread", lsmio::gConfigLSMIO.enablePread,
+                     "use persistent descriptor pread() read (default: no pread)");
 
         bool flag_use_leveldb = false;
         bool flag_use_rocksdb = false;

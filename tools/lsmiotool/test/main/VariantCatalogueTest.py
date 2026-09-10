@@ -43,7 +43,7 @@ from lsmiotool.lib.variants import (
 class VariantCatalogueTest(unittest.TestCase):
     """Unit test suite verifying declarative variant catalog, mappings, and immutability."""
 
-    EXPECTED_27_VARIANTS = {
+    EXPECTED_30_VARIANTS = {
         "footer": ("footer", ("--lsmio-footer-index",)),
         "btree": ("btree", ("--lsmio-memtable", "btree")),
         "footer-btree": (
@@ -80,6 +80,15 @@ class VariantCatalogueTest(unittest.TestCase):
         "bfilter": ("bfilter", ("--lsmio-bfilter",)),
         "wal": ("wal", ("--lsmio-wal",)),
         "mmap": ("mmap", ("--lsmio-mmap",)),
+        "pread": ("pread", ("--lsmio-pread",)),
+        "footer-mmap": (
+            "footer-mmap",
+            ("--lsmio-footer-index", "--lsmio-mmap"),
+        ),
+        "footer-pread": (
+            "footer-pread",
+            ("--lsmio-footer-index", "--lsmio-pread"),
+        ),
         "compress": ("compress", ("--lsmio-compress",)),
         "sync": ("sync", ("--sync",)),
         "pool-8": ("pool-8", ("--lsmio-pool", "8")),
@@ -148,15 +157,15 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertEqual(rec.flagsString, "")
             self.assertTrue(VariantCatalogue.isValid(key))
 
-    def testAll27NonEmptyVariants(self) -> None:
-        """Assert all 27 non-empty keys match tokens and engine CLI flags."""
+    def testAll30NonEmptyVariants(self) -> None:
+        """Assert all 30 non-empty keys match tokens and engine CLI flags."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
-        self.assertEqual(len(supported), 27)
+        self.assertEqual(len(supported), 30)
         self.assertEqual(supported, all_keys)
-        self.assertEqual(set(supported), set(self.EXPECTED_27_VARIANTS.keys()))
+        self.assertEqual(set(supported), set(self.EXPECTED_30_VARIANTS.keys()))
 
-        for key, (expected_tokens, expected_flags) in self.EXPECTED_27_VARIANTS.items():
+        for key, (expected_tokens, expected_flags) in self.EXPECTED_30_VARIANTS.items():
             rec = VariantCatalogue.resolve(key)
             self.assertEqual(rec.key, key)
             self.assertEqual(rec.tokens, expected_tokens)

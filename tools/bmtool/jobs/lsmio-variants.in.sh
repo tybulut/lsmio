@@ -85,6 +85,18 @@ resolve_variant() {
       BM_VARIANT_TOKENS="mmap"
       BM_VARIANT_FLAGS="--lsmio-mmap"
       ;;
+    pread)
+      BM_VARIANT_TOKENS="pread"
+      BM_VARIANT_FLAGS="--lsmio-pread"
+      ;;
+    footer-mmap)
+      BM_VARIANT_TOKENS="footer-mmap"
+      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-mmap"
+      ;;
+    footer-pread)
+      BM_VARIANT_TOKENS="footer-pread"
+      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-pread"
+      ;;
     compress)
       BM_VARIANT_TOKENS="compress"
       BM_VARIANT_FLAGS="--lsmio-compress"
@@ -136,8 +148,9 @@ resolve_variant() {
       echo "  footer, btree, footer-btree, map, vsort" >&2
       echo "  prealloc, footer-prealloc, manoff, footer-manoff" >&2
       echo "  wbuf-512m, wbuf-32m, footer-wbuf-512m, footer-btree-prealloc" >&2
-      echo "  bfilter, wal, mmap, compress, sync" >&2
+      echo "  bfilter, wal, mmap, pread, compress, sync" >&2
       echo "  pool-8, flush, batch-2048, manoff-prealloc" >&2
+      echo "  footer-mmap, footer-pread" >&2
       echo "  wbuf-512m-manoff-prealloc, footer-wbuf-32m, footer-pool-8" >&2
       echo "  footer-wbuf-512m-manoff-prealloc, footer-vsort-manoff-prealloc" >&2
       return 1
