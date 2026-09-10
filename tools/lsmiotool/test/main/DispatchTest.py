@@ -1132,7 +1132,7 @@ print("LAZY_IMPORT_OK")
         self.assertIn("SB_EMAIL", f_readme)
 
         # 5. PBS handle contract and exact commands
-        self.assertIn("^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_readme)
+        self.assertIn(r"^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_readme)
         self.assertIn("123456.isambard-pbs", f_readme)
         self.assertIn("qstat -F json <id>", f_readme)
         self.assertIn("qstat -F json -x <id>", f_readme)

@@ -168,14 +168,8 @@ class MultiBarPlot:
         Args:
             f_file_name: Path to save the plot image
         """
-        plt.figure()
-        # Metadata
-        plt.title(self.m_meta_data.title)
-        plt.xlabel(self.m_meta_data.x_label)
-        plt.ylabel(self.m_meta_data.y_label)
-
+        x_categories: List[Any] = []
         if self.m_plot_data_list:
-            x_categories: List[Any] = []
             for plot_data in self.m_plot_data_list:
                 for x in plot_data.x_series:
                     if x not in x_categories:
@@ -185,38 +179,61 @@ class MultiBarPlot:
             except TypeError:
                 pass
 
-            if x_categories:
-                n_series = len(self.m_plot_data_list)
-                total_group_width = 0.8
-                bar_width = total_group_width / n_series
-                indices = np.arange(len(x_categories))
+        if len(x_categories) > 6:
+            fig_width = max(8.0, len(x_categories) * 0.45)
+            plt.figure(figsize=(fig_width, 6.0))
+        else:
+            plt.figure()
 
-                for i, plot_data in enumerate(self.m_plot_data_list):
-                    series_map = dict(zip(plot_data.x_series, plot_data.y_series))
-                    y_values: List[float] = []
-                    for cat in x_categories:
-                        val = float(series_map.get(cat, 0.0))
-                        if val < 0.0:
-                            Console.warning(
-                                f"Negative value {val} clamped to 0.0 for {plot_data.legend}"
-                            )
-                            val = 0.0
-                        y_values.append(val)
+        # Metadata
+        plt.title(self.m_meta_data.title)
+        plt.xlabel(self.m_meta_data.x_label)
+        plt.ylabel(self.m_meta_data.y_label)
 
-                    offset = (i - (n_series - 1) / 2.0) * bar_width
-                    plt.bar(
-                        indices + offset,
-                        y_values,
-                        width=bar_width,
-                        label=plot_data.legend,
-                    )
+        if self.m_plot_data_list and x_categories:
+            n_series = len(self.m_plot_data_list)
+            total_group_width = 0.8
+            bar_width = total_group_width / n_series
+            indices = np.arange(len(x_categories))
 
+            for i, plot_data in enumerate(self.m_plot_data_list):
+                series_map = dict(zip(plot_data.x_series, plot_data.y_series))
+                y_values: List[float] = []
+                for cat in x_categories:
+                    val = float(series_map.get(cat, 0.0))
+                    if val < 0.0:
+                        Console.warning(
+                            f"Negative value {val} clamped to 0.0 for {plot_data.legend}"
+                        )
+                        val = 0.0
+                    y_values.append(val)
+
+                offset = (i - (n_series - 1) / 2.0) * bar_width
+                plt.bar(
+                    indices + offset,
+                    y_values,
+                    width=bar_width,
+                    label=plot_data.legend,
+                )
+
+            if len(x_categories) > 6:
+                rotation = 60 if len(x_categories) > 15 else 45
+                plt.xticks(
+                    indices,
+                    [str(cat) for cat in x_categories],
+                    rotation=rotation,
+                    ha="right",
+                    rotation_mode="anchor",
+                )
+            else:
                 plt.xticks(indices, [str(cat) for cat in x_categories])
-                handles, labels = plt.gca().get_legend_handles_labels()
-                if handles:
-                    plt.legend()
+
+            handles, labels = plt.gca().get_legend_handles_labels()
+            if handles:
+                plt.legend()
 
         # Configure and save image
-        plt.grid(True)
-        plt.savefig(f_file_name)
+        plt.grid(True, axis="y", linestyle="--", alpha=0.6)
+        plt.tight_layout()
+        plt.savefig(f_file_name, bbox_inches="tight")
         plt.close()

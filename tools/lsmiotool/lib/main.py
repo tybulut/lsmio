@@ -915,7 +915,7 @@ class CompareVariantsMain(BaseMain):
         sorted_bws = [x[1] for x in sorted_data]
 
         series = [plot.PlotData(op.capitalize(), sorted_variants, sorted_bws)]
-        filename = f"compare-archive-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
+        filename = f"compare-variants-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, filename)
 
