@@ -198,7 +198,21 @@ class DispatchTest(unittest.TestCase):
         f_exec_str = str(self.m_executable)
 
         # 1. compare command
-        with patch.object(sys, "argv", [f_exec_str, "compare", "bench_folder", "read"]):
+        with patch.object(
+            sys, "argv", [f_exec_str, "compare", "nodes", "bench_folder", "read"]
+        ):
+            with patch.object(CompareMain, "run", return_value=0) as mock_run:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                mock_run.assert_called_once()
+
+        # compare variants command
+        with patch.object(
+            sys,
+            "argv",
+            [f_exec_str, "compare", "variants", "archive_folder", "both"],
+        ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
@@ -209,7 +223,16 @@ class DispatchTest(unittest.TestCase):
         with patch.object(
             sys,
             "argv",
-            [f_exec_str, "--ssd", "compare", "bench_folder", "write", "8", "8M"],
+            [
+                f_exec_str,
+                "--ssd",
+                "compare",
+                "nodes",
+                "bench_folder",
+                "write",
+                "16",
+                "8M",
+            ],
         ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
@@ -219,7 +242,7 @@ class DispatchTest(unittest.TestCase):
 
         # compare command with global -s
         with patch.object(
-            sys, "argv", [f_exec_str, "-s", "compare", "bench_folder", "read"]
+            sys, "argv", [f_exec_str, "-s", "compare", "nodes", "bench_folder", "read"]
         ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
@@ -284,11 +307,63 @@ class DispatchTest(unittest.TestCase):
                 mock_run.assert_called_once()
 
         # 6. Arity and error checks
-        # compare with insufficient arguments
+        # compare with missing submode
+        with patch.object(sys, "argv", [f_exec_str, "compare"]):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("Missing required submode", mock_stderr.getvalue())
+
+        # compare with bare folder fallback prohibited
         with patch.object(sys, "argv", [f_exec_str, "compare", "bench_folder"]):
-            with self.assertRaises(SystemExit) as ctx:
-                runpy.run_path(f_exec_str, run_name="__main__")
-            self.assertEqual(ctx.exception.code, 1)
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("Invalid submode", mock_stderr.getvalue())
+
+        # compare with prohibited scaling alias
+        with patch.object(
+            sys, "argv", [f_exec_str, "compare", "scaling", "bench_folder", "read"]
+        ):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("Invalid submode", mock_stderr.getvalue())
+
+        # compare nodes with missing operation
+        with patch.object(
+            sys, "argv", [f_exec_str, "compare", "nodes", "bench_folder"]
+        ):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn(
+                    "Missing required positional argument: <read|write>",
+                    mock_stderr.getvalue(),
+                )
+
+        # compare-archive is excised and falls through to unknown command (exit code 1)
+        with patch.object(
+            sys, "argv", [f_exec_str, "compare-archive", "archive_folder"]
+        ):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Unknown command:", mock_stderr.getvalue())
+
+        # compare with --help exits with code 0
+        with patch.object(sys, "argv", [f_exec_str, "compare", "--help"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertIn("Usage:", mock_stdout.getvalue())
+                self.assertIn("compare <nodes|variants>", mock_stdout.getvalue())
 
         # latex with no arguments
         with patch.object(sys, "argv", [f_exec_str, "latex"]):

@@ -33,7 +33,25 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    TYPE_CHECKING,
+)
+
+if TYPE_CHECKING:
+    from lsmiotool.lib.cli import (
+        CompareArchiveRequest,
+        CompareNodesRequest,
+        CompareVariantsRequest,
+    )
 
 from lsmiotool.lib import debuggable, log
 
@@ -418,64 +436,151 @@ class ParseMain(BaseMain):
             return 1
 
 
-class CompareMain(BaseMain):
-    """Compare command for generating comparison bar charts across benchmark directories."""
+class CompareNodesMain(BaseMain):
+    """Submode orchestrator for 'compare nodes' (multi-node scaling curve comparison)."""
 
+    m_request: "CompareNodesRequest"
     m_folder: str
     m_op: str
     m_stripes: int
     m_bs: str
+    m_output_dir: Optional[str]
 
-    def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
-        """Initialize CompareMain.
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[Any] = None,
+        f_folder: Optional[str] = None,
+        f_op: Optional[str] = None,
+        f_stripes: int = 4,
+        f_blocksize: str = "1M",
+        f_output_dir: Optional[str] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        """Initialize CompareNodesMain.
 
-        Command: compare <benchmark_folder> <read|write> [<stripes>] [<blocksize>]
+        Command: compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
 
         Args:
-            *f_args: Variable length argument list (folder, op, [stripes], [blocksize])
-            **f_kwargs: Arbitrary keyword arguments
+            *f_args: Variable length argument list (folder, op, [stripes], [blocksize], [output_dir]).
+            f_request: Optional pre-constructed CompareNodesRequest.
+            f_folder: Optional target benchmark folder.
+            f_op: Optional operation ('read' or 'write').
+            f_stripes: Optional stripe count (default: 4).
+            f_blocksize: Optional block size ('64K', '1M', '8M', default: '1M').
+            f_output_dir: Optional output directory for generated plots.
+            **f_kwargs: Arbitrary keyword arguments.
         """
         super().__init__()
-        if len(f_args) < 2:
-            log.Console.error(
-                "Compare: Needs at least two arguments: <benchmark_folder> <read|write> [<stripes>] [<blocksize>]"
+        from lsmiotool.lib.cli import CompareNodesRequest
+
+        if f_request is not None:
+            req = f_request
+        elif len(f_args) == 1 and isinstance(f_args[0], CompareNodesRequest):
+            req = f_args[0]
+        else:
+            folder = f_folder
+            op = f_op
+            stripes = f_stripes
+            bs = f_blocksize
+            out_dir = (
+                f_output_dir
+                or f_kwargs.get("f_output_dir")
+                or f_kwargs.get("output_dir")
             )
-            sys.exit(1)
 
-        self.m_folder = str(f_args[0])
-        op = str(f_args[1]).lower()
-        if op not in ["read", "write"]:
-            log.Console.error("Operation has to be 'read' or 'write'")
-            sys.exit(1)
-        self.m_op = op
+            if f_args:
+                if len(f_args) < 2:
+                    log.Console.error(
+                        "Compare nodes: Needs at least two arguments: <folder> <read|write> [<stripes>] [<blocksize>]"
+                    )
+                    sys.exit(1)
+                folder = str(f_args[0])
+                op = str(f_args[1])
+                if (
+                    len(f_args) >= 3
+                    and f_args[2] is not None
+                    and str(f_args[2]).strip() != ""
+                ):
+                    try:
+                        stripes = int(f_args[2])
+                    except ValueError:
+                        log.Console.error(f"Invalid stripes value: {f_args[2]}")
+                        sys.exit(1)
+                if (
+                    len(f_args) >= 4
+                    and f_args[3] is not None
+                    and str(f_args[3]).strip() != ""
+                ):
+                    bs = str(f_args[3])
+                if (
+                    len(f_args) >= 5
+                    and f_args[4] is not None
+                    and str(f_args[4]).strip() != ""
+                ):
+                    out_dir = str(f_args[4])
 
-        if len(f_args) >= 3 and f_args[2] is not None and str(f_args[2]).strip() != "":
-            try:
-                self.m_stripes = int(f_args[2])
-            except ValueError:
-                log.Console.error(f"Invalid stripes value: {f_args[2]}")
+            if folder is None or op is None:
+                log.Console.error("Compare nodes: Missing required folder or operation.")
                 sys.exit(1)
-        else:
-            self.m_stripes = 4
 
-        if len(f_args) >= 4 and f_args[3] is not None and str(f_args[3]).strip() != "":
-            self.m_bs = str(f_args[3]).upper()
-        else:
-            self.m_bs = "1M"
+            try:
+                req = CompareNodesRequest(
+                    f_folder=folder,
+                    f_op=op,
+                    f_stripes=stripes,
+                    f_blocksize=bs,
+                    f_output_dir=out_dir,
+                )
+            except ValueError as err:
+                log.Console.error(f"Compare nodes validation error: {err}")
+                sys.exit(1)
+
+        self.m_request = req
+        self.m_folder = req.folder
+        self.m_op = req.op
+        self.m_stripes = req.stripes
+        self.m_bs = req.blocksize
+        self.m_output_dir = req.output_dir
+
+    @property
+    def request(self) -> "CompareNodesRequest":
+        return self.m_request
+
+    @property
+    def folder(self) -> str:
+        return self.m_folder
+
+    @property
+    def op(self) -> str:
+        return self.m_op
+
+    @property
+    def stripes(self) -> int:
+        return self.m_stripes
+
+    @property
+    def blocksize(self) -> str:
+        return self.m_bs
+
+    @property
+    def bs(self) -> str:
+        return self.m_bs
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def outputDir(self) -> Optional[str]:
+        return self.m_output_dir
 
     def resolveDirectory(self, f_path: str) -> str:
-        """Resolve path handling user home (~), relative, and absolute paths.
-
-        Args:
-            f_path: Path string to resolve.
-
-        Returns:
-            Resolved absolute path.
-        """
+        """Resolve path handling user home (~), relative, and absolute paths."""
         expanded = os.path.expanduser(f_path)
         return os.path.abspath(expanded)
 
-    def run(self) -> None:
+    def run(self) -> int:
         """Scan benchmark subdirectories, extract data series, and generate comparison plot."""
         from lsmiotool.lib import data, plot
 
@@ -504,19 +609,549 @@ class CompareMain(BaseMain):
             log.Console.warning(
                 f"No benchmark data found in subdirectories of {target_dir} for {self.m_op}, stripes={self.m_stripes}, bs={self.m_bs}"
             )
-            return
+            return 0
 
         base_name = os.path.basename(target_dir.rstrip(os.sep))
         title = f"Comparison: {base_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
         meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
 
+        # Output directory resolution (INV-ARCH-9: fixes legacy hardcoded os.getcwd())
+        out_dir = (
+            self.resolveDirectory(self.m_output_dir)
+            if self.m_output_dir
+            else os.getcwd()
+        )
+        os.makedirs(out_dir, exist_ok=True)
         output_filename = os.path.join(
-            os.getcwd(),
+            out_dir,
             f"compare-{base_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
         )
         bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
         bar_plot.plot(output_filename)
         log.Console.info(f"Comparison plot saved to {output_filename}")
+        return 0
+
+
+class CompareVariantsMain(BaseMain):
+    """Submode orchestrator for 'compare variants' (8-node baseline variant comparison).
+
+    Scans benchmark run archives, executes fault-tolerant parse-on-demand aggregation,
+    extracts 8-node baseline metrics across variants, sorts variants alphabetically,
+    and renders publication-ready comparison bar charts.
+    """
+
+    __slots__ = (
+        "m_request",
+        "m_archive_folder",
+        "m_op",
+        "m_stripes",
+        "m_blocksize",
+        "m_all",
+        "m_output_dir",
+    )
+
+    m_request: "CompareVariantsRequest"
+    m_archive_folder: str
+    m_op: str
+    m_stripes: int
+    m_blocksize: str
+    m_all: bool
+    m_output_dir: Optional[str]
+
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[Any] = None,
+        f_archive_folder: Optional[str] = None,
+        f_op: str = "both",
+        f_stripes: int = 4,
+        f_blocksize: str = "1M",
+        f_all: bool = False,
+        f_output_dir: Optional[str] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        """Initialize CompareVariantsMain.
+
+        Command: compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+
+        Args:
+            *f_args: Variable length argument list (e.g. folder, op, stripes, bs, or CLI argv).
+            f_request: Optional pre-constructed CompareVariantsRequest.
+            f_archive_folder: Optional path to archive folder.
+            f_op: Optional operation ('read', 'write', 'both').
+            f_stripes: Optional stripe count (4, 16).
+            f_blocksize: Optional block size ('64K', '1M', '8M').
+            f_all: Optional flag to run all 6 permutations.
+            f_output_dir: Optional output directory for generated plots.
+            **f_kwargs: Arbitrary keyword arguments.
+        """
+        super().__init__()
+        from lsmiotool.lib.cli import (
+            CompareVariantsRequest,
+            parseCompareArchiveArguments,
+            parseCompareArguments,
+        )
+
+        if f_request is not None:
+            req = f_request
+        elif len(f_args) == 1 and isinstance(f_args[0], CompareVariantsRequest):
+            req = f_args[0]
+        elif f_args and any(
+            isinstance(a, str)
+            and (a.startswith("-") or a in ("compare-archive", "compare", "variants"))
+            for a in f_args
+        ):
+            tokens = [str(a) for a in f_args]
+            if tokens and tokens[0] == "variants":
+                req = parseCompareArguments(tokens)
+            else:
+                req = parseCompareArchiveArguments(tokens)
+        else:
+            folder = f_archive_folder
+            op = f_op
+            stripes = f_stripes
+            blocksize = f_blocksize
+            all_val = f_all
+            out_dir = (
+                f_output_dir
+                or f_kwargs.get("f_output_dir")
+                or f_kwargs.get("output_dir")
+            )
+
+            if f_args:
+                folder = str(f_args[0])
+                if len(f_args) >= 2 and f_args[1] is not None:
+                    op = str(f_args[1])
+                if len(f_args) >= 3 and f_args[2] is not None:
+                    stripes = int(f_args[2])
+                if len(f_args) >= 4 and f_args[3] is not None:
+                    blocksize = str(f_args[3])
+                if len(f_args) >= 5 and f_args[4] is not None:
+                    all_val = bool(f_args[4])
+                if len(f_args) >= 6 and f_args[5] is not None:
+                    out_dir = str(f_args[5])
+
+            if folder is None:
+                req = parseCompareArchiveArguments([])
+            else:
+                req = CompareVariantsRequest(
+                    f_archive_folder=folder,
+                    f_op=op,
+                    f_stripes=stripes,
+                    f_blocksize=blocksize,
+                    f_all=all_val,
+                    f_output_dir=out_dir,
+                )
+
+        self.m_request = req
+        self.m_archive_folder = req.archive_folder
+        self.m_op = req.op
+        self.m_stripes = req.stripes
+        self.m_blocksize = req.blocksize
+        self.m_all = req.all
+        self.m_output_dir = req.output_dir
+
+    @property
+    def request(self) -> "CompareVariantsRequest":
+        return self.m_request
+
+    @property
+    def archive_folder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def folder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def m_folder(self) -> str:
+        return self.m_archive_folder
+
+    @property
+    def op(self) -> str:
+        return self.m_op
+
+    @property
+    def stripes(self) -> int:
+        return self.m_stripes
+
+    @property
+    def blocksize(self) -> str:
+        return self.m_blocksize
+
+    @property
+    def bs(self) -> str:
+        return self.m_blocksize
+
+    @property
+    def m_bs(self) -> str:
+        return self.m_blocksize
+
+    @property
+    def all(self) -> bool:
+        return self.m_all
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def outputDir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    def resolveDirectory(self, f_path: str) -> str:
+        """Resolves path string expanding user home (~) and normalizing to absolute path."""
+        expanded = os.path.expanduser(f_path)
+        return os.path.abspath(expanded)
+
+    def _ensureReportExists(self, f_child_path: str) -> bool:
+        """Check if lsm-report.csv exists in child directory, triggering parse-on-demand if missing.
+
+        Args:
+            f_child_path: Path to variant directory.
+
+        Returns:
+            True if lsm-report.csv exists or was successfully generated, False otherwise.
+        """
+        report_file = os.path.join(f_child_path, "lsm-report.csv")
+        if os.path.isfile(report_file):
+            return True
+
+        try:
+            from lsmiotool.lib.output import LsmioAggOutput, MissingDataError
+
+            try:
+                agg = LsmioAggOutput(f_child_path, f_scale="baseline")
+            except TypeError:
+                agg = LsmioAggOutput(f_input=f_child_path, f_scale="baseline")
+            try:
+                agg.generateReports(f_out_dir=f_child_path)
+            except TypeError:
+                agg.generateReports(f_child_path)
+            return os.path.isfile(report_file)
+        except (MissingDataError, OSError, IOError, ValueError, KeyError) as err:
+            log.Console.warning(f"Failed to generate report for {f_child_path}: {err}")
+            return False
+
+    def _extractMetrics(
+        self, f_child_path: str, f_op: str, f_stripes: int, f_blocksize: str
+    ) -> Optional[float]:
+        """Extract 8-node baseline maxMB bandwidth metric from lsm-report.csv.
+
+        Args:
+            f_child_path: Path to variant directory or csv file.
+            f_op: Operation ('read' or 'write').
+            f_stripes: Stripe count (4 or 16).
+            f_blocksize: Block size ('64K', '1M', '8M').
+
+        Returns:
+            Bandwidth in MB/s as float, or None on error or missing metric.
+        """
+        csv_path = (
+            os.path.join(f_child_path, "lsm-report.csv")
+            if os.path.isdir(f_child_path)
+            else f_child_path
+        )
+        if not os.path.isfile(csv_path):
+            return None
+
+        try:
+            from lsmiotool.lib.data import LsmioSummaryData
+
+            summary_data = LsmioSummaryData(csv_path)
+            op_key = f_op.lower()
+            stripes_key = int(f_stripes)
+            bs_key = f_blocksize.upper()
+            bw = summary_data.m_csv_data[op_key][stripes_key][bs_key][8]["maxMB"]
+            return float(bw)
+        except (KeyError, IndexError, ValueError, TypeError):
+            return None
+
+    _extractBaselineMetric = _extractMetrics
+
+    def _generateChart(
+        self,
+        f_arg1: Any,
+        f_arg2: Any,
+        f_arg3: Any,
+        f_arg4: Any,
+        f_arg5: Optional[Any] = None,
+        f_arg6: Optional[Any] = None,
+    ) -> str:
+        """Render single-series grouped bar chart using MultiBarPlot.
+
+        Supports both:
+          _generateChart(op, stripes, blocksize, variant_data)
+          _generateChart(base_name, op, stripes, bs, variant_data, output_dir)
+
+        Returns:
+            Absolute path to generated PNG chart.
+        """
+        from lsmiotool.lib import plot
+
+        if f_arg5 is not None and f_arg6 is not None:
+            archive_basename = str(f_arg1)
+            op = str(f_arg2)
+            stripes = int(f_arg3)
+            blocksize = str(f_arg4)
+            variant_data = list(f_arg5)
+            out_dir = str(f_arg6)
+        else:
+            op = str(f_arg1)
+            stripes = int(f_arg2)
+            blocksize = str(f_arg3)
+            variant_data = list(f_arg4)
+            archive_basename = os.path.basename(
+                self.resolveDirectory(self.m_archive_folder).rstrip(os.sep)
+            )
+            out_dir = (
+                self.resolveDirectory(self.m_output_dir)
+                if self.m_output_dir
+                else os.getcwd()
+            )
+
+        sorted_data = sorted(variant_data, key=lambda x: x[0])
+        sorted_variants = [x[0] for x in sorted_data]
+        sorted_bws = [x[1] for x in sorted_data]
+
+        series = [plot.PlotData(op.capitalize(), sorted_variants, sorted_bws)]
+        filename = f"compare-archive-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, filename)
+
+        title = f"LSMIO Variant Comparison ({op.capitalize()}, Stripes={stripes}, BS={blocksize.upper()})"
+        meta_data = plot.PlotMetaData(title, "Variant", "Max Bandwidth (MB/s)")
+
+        bar_plot = plot.MultiBarPlot(meta_data, *series)
+        bar_plot.plot(out_path)
+        log.Console.info(f"Comparison plot saved to {out_path}")
+        return out_path
+
+    def run(self) -> int:
+        """Scan benchmark archive folder, extract variant metrics, and generate comparison plots.
+
+        Returns:
+            0 on success, 1 on no valid runs, 3 if archive folder does not exist.
+        """
+        target_dir = self.resolveDirectory(self.m_archive_folder)
+        if not os.path.isdir(target_dir):
+            sys.stderr.write(f"Archive folder not found: {self.m_archive_folder}\n")
+            return 3
+
+        from lsmiotool.lib.variants import VariantReverseResolver
+
+        entries = sorted(os.listdir(target_dir))
+        valid_runs: List[Tuple[Any, str]] = []
+        for entry in entries:
+            child_path = os.path.join(target_dir, entry)
+            if not os.path.isdir(child_path):
+                continue
+            res = VariantReverseResolver.resolve(entry)
+            if res is None:
+                continue
+            if self._ensureReportExists(child_path):
+                valid_runs.append((res, child_path))
+
+        if not valid_runs:
+            log.Console.warning("No valid benchmark runs found in archive folder")
+            return 1
+
+        ops = ["read", "write"] if self.m_op.lower() == "both" else [self.m_op.lower()]
+        from lsmiotool.lib.cli import CompareCliParser
+
+        perms = (
+            CompareCliParser.WORKLOAD_PERMUTATIONS
+            if self.m_all
+            else [(self.m_stripes, self.m_blocksize)]
+        )
+
+        for op in ops:
+            for stripes, bs in perms:
+                variant_data: List[Tuple[str, float]] = []
+                for res, child_path in valid_runs:
+                    bw = self._extractMetrics(child_path, op, stripes, bs)
+                    if bw is not None:
+                        variant_data.append((res.display_label, bw))
+                if variant_data:
+                    self._generateChart(op, stripes, bs, variant_data)
+                else:
+                    log.Console.warning(
+                        f"No benchmark data found in subdirectories for {op}, stripes={stripes}, bs={bs}"
+                    )
+
+        return 0
+
+
+# Backward compatibility alias for existing test imports and external callers
+CompareArchiveMain = CompareVariantsMain
+
+
+class CompareMain(BaseMain):
+    """Unified entry point and polymorphic dispatcher for 'compare' subcommand.
+
+    Supports initialization via:
+    1. Typed request object: CompareNodesRequest or CompareVariantsRequest
+    2. CLI token sequences starting with 'nodes' or 'variants'
+    3. Positional Python arguments (folder, op, stripes, bs) for test backward compatibility
+       (safeguarding ProfileSchemaTest.py:606 and TestCompareMain.py)
+    """
+
+    m_request: Optional[Union["CompareNodesRequest", "CompareVariantsRequest"]]
+    m_submode: str
+    m_delegate: Union[CompareNodesMain, CompareVariantsMain]
+
+    def __init__(
+        self,
+        *f_args: Any,
+        f_request: Optional[
+            Union["CompareNodesRequest", "CompareVariantsRequest"]
+        ] = None,
+        **f_kwargs: Any,
+    ) -> None:
+        super().__init__()
+        from lsmiotool.lib.cli import (
+            CompareNodesRequest,
+            CompareVariantsRequest,
+            parseCompareArguments,
+        )
+
+        if f_request is not None:
+            req = f_request
+            if getattr(req, "submode", "") == "variants" or isinstance(
+                req, CompareVariantsRequest
+            ):
+                self.m_submode = "variants"
+                self.m_delegate = CompareVariantsMain(f_request=req)
+            else:
+                self.m_submode = "nodes"
+                self.m_delegate = CompareNodesMain(f_request=req)
+            self.m_request = req
+        elif len(f_args) == 1 and isinstance(
+            f_args[0], (CompareNodesRequest, CompareVariantsRequest)
+        ):
+            req = f_args[0]
+            if getattr(req, "submode", "") == "variants" or isinstance(
+                req, CompareVariantsRequest
+            ):
+                self.m_submode = "variants"
+                self.m_delegate = CompareVariantsMain(f_request=req)
+            else:
+                self.m_submode = "nodes"
+                self.m_delegate = CompareNodesMain(f_request=req)
+            self.m_request = req
+        elif (
+            len(f_args) == 1
+            and isinstance(f_args[0], (list, tuple))
+            and f_args[0]
+            and str(f_args[0][0]).lower() in ("nodes", "variants", "compare")
+        ):
+            req = parseCompareArguments(f_args[0])
+            if getattr(req, "submode", "") == "variants" or isinstance(
+                req, CompareVariantsRequest
+            ):
+                self.m_submode = "variants"
+                self.m_delegate = CompareVariantsMain(f_request=req)
+            else:
+                self.m_submode = "nodes"
+                self.m_delegate = CompareNodesMain(f_request=req)
+            self.m_request = req
+        elif f_args and str(f_args[0]).lower() in ("nodes", "variants", "compare"):
+            tokens = [str(a) for a in f_args]
+            req = parseCompareArguments(tokens)
+            if getattr(req, "submode", "") == "variants" or isinstance(
+                req, CompareVariantsRequest
+            ):
+                self.m_submode = "variants"
+                self.m_delegate = CompareVariantsMain(f_request=req)
+            else:
+                self.m_submode = "nodes"
+                self.m_delegate = CompareNodesMain(f_request=req)
+            self.m_request = req
+        else:
+            # Legacy Python caller fallback (ProfileSchemaTest.py:606, TestCompareMain.py)
+            self.m_submode = "nodes"
+            self.m_delegate = CompareNodesMain(*f_args, **f_kwargs)
+            self.m_request = getattr(self.m_delegate, "m_request", None)
+
+    @property
+    def request(
+        self,
+    ) -> Optional[Union["CompareNodesRequest", "CompareVariantsRequest"]]:
+        return self.m_request
+
+    @property
+    def submode(self) -> str:
+        return self.m_submode
+
+    @property
+    def delegate(self) -> Union[CompareNodesMain, CompareVariantsMain]:
+        return self.m_delegate
+
+    @property
+    def m_folder(self) -> str:
+        return getattr(
+            self.m_delegate,
+            "m_folder",
+            getattr(self.m_delegate, "m_archive_folder", ""),
+        )
+
+    @property
+    def folder(self) -> str:
+        return self.m_folder
+
+    @property
+    def archive_folder(self) -> str:
+        return getattr(self.m_delegate, "m_archive_folder", "")
+
+    @property
+    def m_op(self) -> str:
+        return self.m_delegate.m_op
+
+    @property
+    def op(self) -> str:
+        return self.m_delegate.m_op
+
+    @property
+    def m_stripes(self) -> int:
+        return self.m_delegate.m_stripes
+
+    @property
+    def stripes(self) -> int:
+        return self.m_delegate.m_stripes
+
+    @property
+    def m_bs(self) -> str:
+        return getattr(
+            self.m_delegate,
+            "m_bs",
+            getattr(self.m_delegate, "m_blocksize", "1M"),
+        )
+
+    @property
+    def blocksize(self) -> str:
+        return self.m_bs
+
+    @property
+    def all(self) -> bool:
+        return getattr(self.m_delegate, "m_all", False)
+
+    @property
+    def m_output_dir(self) -> Optional[str]:
+        return self.m_delegate.m_output_dir
+
+    @property
+    def output_dir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    @property
+    def outputDir(self) -> Optional[str]:
+        return self.m_output_dir
+
+    def resolveDirectory(self, f_path: str) -> str:
+        return self.m_delegate.resolveDirectory(f_path)
+
+    def run(self) -> int:
+        return self.m_delegate.run()
 
 
 class RunMain(BaseMain):
