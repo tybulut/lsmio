@@ -49,7 +49,7 @@ common cmds:
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd] [--setup <name>]
+  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -78,20 +78,29 @@ Options:
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variant>] [--ssd] [--setup <name>]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
   <scale>       Supported scales: local, bake, small, large, baseline
                 (Note: 'lmp large' is strictly unsupported and rejected)
-  <variant>     Optional variant configuration for 'lsmio baseline'
-                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio baseline'.
+  <variants>    Optional single variant, comma-separated list of variants
+                (e.g. footer,manoff,autotune), or 'all' for all 38 matrix variants.
+                Only supported for 'lsmio baseline'.
 
 Options:
   --ssd         Use SSD storage class (default: HDD).
   --setup <name>
                 Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE-M, ROCKSDB-M, LSMIO).
                 Note: '--setup=value' syntax is strictly rejected; use '--setup <name>'.
+  --archive     Force automatic post-run archiving after each variant run.
+                (Default: enabled when multiple variants or 'all' specified; disabled for single variant)
+  --no-archive  Disable automatic post-run archiving after variant execution.
+  --resume      Skip variant execution if target archive directory (outputs-<arm_id>) already exists.
+  --out-dir <path>
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive).
+                Aliases: --output-dir <path>, --dest <path>.
+                Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
@@ -341,6 +350,7 @@ class RunCliParser:
         from lsmiotool.lib.variants import VariantCatalogue
 
         f_trailing_tokens = f_post_run_tokens[2:]
+        f_variants: Tuple[Optional[str], ...] = (None,)
         f_variant_name: Optional[str] = None
 
         if f_scale == "baseline":
@@ -348,8 +358,23 @@ class RunCliParser:
                 if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                     f_variant_tok = f_trailing_tokens[0]
                     f_trailing_tokens = f_trailing_tokens[1:]
-                    f_rec = VariantCatalogue.resolve(f_variant_tok)
-                    f_variant_name = f_rec.tokens if f_rec.tokens else None
+                    raw_tokens = [t.strip() for t in f_variant_tok.split(",") if t.strip()]
+                    if not raw_tokens:
+                        raise RunCliParseError("Variant specification cannot be empty.")
+
+                    expanded_tokens: List[str] = []
+                    for t in raw_tokens:
+                        if t.lower() == "all":
+                            expanded_tokens.extend(VariantCatalogue.canonicalVariants())
+                        else:
+                            expanded_tokens.append(t)
+
+                    resolved_variants: List[Optional[str]] = []
+                    for t in expanded_tokens:
+                        f_rec = VariantCatalogue.resolve(t)
+                        resolved_variants.append(f_rec.tokens if f_rec.tokens else None)
+                    f_variants = tuple(resolved_variants)
+                    f_variant_name = f_variants[0] if f_variants else None
             else:
                 if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                     raise RunCliParseError(
@@ -360,6 +385,9 @@ class RunCliParser:
         f_is_ssd: bool = f_effective_global_ssd
         f_trailing_ssd_seen: bool = False
         f_setup_name: Optional[str] = None
+        f_archive: Optional[bool] = None
+        f_resume: bool = False
+        f_out_dir: Optional[str] = None
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -384,6 +412,54 @@ class RunCliParser:
                     raise RunCliParseError("Setup name cannot be empty.")
                 f_setup_name = f_val.strip().upper()
                 f_idx += 2
+            elif f_tok == "--archive":
+                if f_archive is False:
+                    raise RunCliParseError("Cannot specify both '--archive' and '--no-archive'.")
+                if f_archive is True:
+                    raise RunCliParseError("Duplicate '--archive' option specified.")
+                f_archive = True
+                f_idx += 1
+            elif f_tok == "--no-archive":
+                if f_archive is True:
+                    raise RunCliParseError("Cannot specify both '--archive' and '--no-archive'.")
+                if f_archive is False:
+                    raise RunCliParseError("Duplicate '--no-archive' option specified.")
+                f_archive = False
+                f_idx += 1
+            elif f_tok == "--resume":
+                if f_resume:
+                    raise RunCliParseError("Duplicate '--resume' option specified.")
+                f_resume = True
+                f_idx += 1
+            elif f_tok in ("--out-dir", "--output-dir", "--dest"):
+                if f_out_dir is not None:
+                    raise RunCliParseError(f"Duplicate destination option specified: {f_tok!r}.")
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise RunCliParseError(f"Missing value after {f_tok!r} option.")
+                f_val = f_trailing_tokens[f_idx + 1]
+                if f_val.startswith("-"):
+                    raise RunCliParseError(
+                        f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
+                    )
+                if not f_val.strip():
+                    raise RunCliParseError(f"Destination path after {f_tok!r} cannot be empty.")
+                f_out_dir = str(Path(f_val.strip()).resolve())
+                f_idx += 2
+            elif any(
+                f_tok.startswith(p)
+                for p in (
+                    "--out-dir=",
+                    "--output-dir=",
+                    "--dest=",
+                    "--archive=",
+                    "--no-archive=",
+                    "--resume=",
+                )
+            ):
+                flag_name = f_tok.split("=")[0]
+                raise RunCliParseError(
+                    f"Option syntax {f_tok!r} is not supported; use '{flag_name} <value>' with separated arguments."
+                )
             elif f_tok.startswith("-"):
                 raise RunCliParseError(f"Unknown option: {f_tok!r}")
             else:
@@ -397,6 +473,10 @@ class RunCliParser:
             f_ssd=f_is_ssd,
             f_setup=f_setup_name,
             f_variant=f_variant_name,
+            f_variants=f_variants,
+            f_archive=f_archive,
+            f_resume=f_resume,
+            f_out_dir=f_out_dir,
         )
 
 

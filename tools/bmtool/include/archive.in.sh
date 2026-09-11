@@ -22,30 +22,7 @@ fi
 
 # Task 4.2.4: Mechanical Arm Identifier Derivation
 : "${BM_SETUP:=NATIVE-M}"
-
-case "$BM_SETUP" in
-  *-M)
-    BASE_BACKEND="${BM_SETUP%-M}"
-    BACKEND_TOKEN=$(echo "$BASE_BACKEND" | tr '[:upper:]' '[:lower:]')
-    ;;
-  MANAGER)
-    BASE_BACKEND="MANAGER"
-    BACKEND_TOKEN="manager"
-    ;;
-  *)
-    BASE_BACKEND="$BM_SETUP"
-    BACKEND_TOKEN="$(echo "$BASE_BACKEND" | tr '[:upper:]' '[:lower:]')-nompi"
-    ;;
-esac
-
-resolve_variant "$BM_VARIANT" || fatal_error "Invalid variant: [$BM_VARIANT]"
-
-if [ -n "$BM_VARIANT_TOKENS" ]; then
-  ARM_ID="${BACKEND_TOKEN}-${BM_VARIANT_TOKENS}"
-else
-  ARM_ID="${BACKEND_TOKEN}"
-fi
-
+ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$BM_VARIANT")" || fatal_error "Invalid variant: [$BM_VARIANT]"
 ARCHIVE_TARGET="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}"
 
 # Task 4.2.5: Target collision guard with auto-increment suffix (INV-5)

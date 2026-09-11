@@ -190,3 +190,94 @@ resolve_variant() {
   export BM_VARIANT_TOKENS BM_VARIANT_FLAGS
   return 0
 }
+
+# Canonical sequence of all 38 matrix variants (base run + 37 non-empty keys)
+LSMIO_ALL_VARIANTS="default,footer,btree,footer-btree,map,vsort,prealloc,footer-prealloc,manoff,footer-manoff,wbuf-512m,wbuf-32m,footer-wbuf-512m,footer-btree-prealloc,bfilter,wal,mmap,pread,footer-mmap,footer-pread,compress,sync,pool-8,flush,batch-2048,manoff-prealloc,wbuf-512m-manoff-prealloc,footer-wbuf-32m,footer-pool-8,footer-wbuf-512m-manoff-prealloc,footer-vsort-manoff-prealloc,footer-vsort-manoff-mmap,footer-vsort-manoff,footer-pool-8-mmap,footer-manoff-pool-8-mmap,footer-btree-manoff-mmap,footer-manoff-pool-8,autotune"
+export LSMIO_ALL_VARIANTS
+
+# Expands and validates a raw variant argument into a canonical comma-separated list.
+# Handles: omitted/empty, 'default', 'base', single variant, comma list, or 'all'.
+# Returns 0 on success (printing comma-separated tokens), 1 on validation error.
+bm_expand_variants() {
+  _raw="$1"
+  if [ -z "$_raw" ] || [ "$_raw" = "default" ] || [ "$_raw" = "base" ]; then
+    echo "default"
+    return 0
+  fi
+  if [ "$_raw" = "all" ]; then
+    echo "$LSMIO_ALL_VARIANTS"
+    return 0
+  fi
+
+  _out=""
+  _rem="$_raw"
+  while [ -n "$_rem" ]; do
+    case "$_rem" in
+      *,*)
+        _item="${_rem%%,*}"
+        _rem="${_rem#*,}"
+        ;;
+      *)
+        _item="$_rem"
+        _rem=""
+        ;;
+    esac
+
+    # Normalize token
+    case "$_item" in
+      ""|default|base)
+        _norm="default"
+        ;;
+      *)
+        if ! resolve_variant "$_item" >/dev/null 2>&1; then
+          echo "Error: Unknown variant '$_item' in variant list." >&2
+          return 1
+        fi
+        _norm="$_item"
+        ;;
+    esac
+
+    if [ -z "$_out" ]; then
+      _out="$_norm"
+    else
+      _out="${_out},${_norm}"
+    fi
+  done
+
+  [ -n "$_out" ] || _out="default"
+  echo "$_out"
+  return 0
+}
+
+# Derives mechanical arm identifier matching lsmiotool and archive.in.sh
+bm_resolve_arm_id() {
+  if [ $# -ge 2 ]; then
+    _setup="${1:-NATIVE-M}"
+    _var="$2"
+  else
+    _setup="${BM_SETUP:-NATIVE-M}"
+    _var="$1"
+  fi
+
+  case "$_setup" in
+    *-M)
+      _base="${_setup%-M}"
+      _backend=$(echo "$_base" | tr '[:upper:]' '[:lower:]')
+      ;;
+    MANAGER)
+      _backend="manager"
+      ;;
+    *)
+      _backend="$(echo "$_setup" | tr '[:upper:]' '[:lower:]')-nompi"
+      ;;
+  esac
+
+  resolve_variant "$_var" >/dev/null 2>&1 || return 1
+
+  if [ -n "$BM_VARIANT_TOKENS" ]; then
+    echo "${_backend}-${BM_VARIANT_TOKENS}"
+  else
+    echo "${_backend}"
+  fi
+  return 0
+}

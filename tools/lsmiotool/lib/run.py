@@ -33,6 +33,7 @@ from enum import Enum
 import copy
 import json
 import os
+from pathlib import Path
 import re
 import secrets
 import signal
@@ -139,6 +140,12 @@ class RunReporter:
             self.emit(f"Run Root: {f_abs_root}")
 
     report_run_identity = reportRunIdentity
+
+    def reportProgress(self, f_line: str) -> None:
+        """Emit a progress or informational message."""
+        self.emit(f_line)
+
+    report_progress = reportProgress
 
     def reportPointSubmission(
         self, f_point_id: str, f_token: str, f_job_id: str
@@ -393,7 +400,17 @@ class RankIdentity:
 class RunRequest:
     """Immutable parsed and validated run request."""
 
-    __slots__ = ("m_target", "m_scale", "m_ssd", "m_setup", "m_variant", "_frozen")
+    __slots__ = (
+        "m_target",
+        "m_scale",
+        "m_ssd",
+        "m_setup",
+        "m_variants",
+        "m_archive",
+        "m_resume",
+        "m_out_dir",
+        "_frozen",
+    )
 
     def __init__(
         self,
@@ -402,6 +419,10 @@ class RunRequest:
         f_ssd: bool = False,
         f_setup: Optional[str] = None,
         f_variant: Optional[str] = None,
+        f_variants: Optional[Sequence[Optional[str]]] = None,
+        f_archive: Optional[bool] = None,
+        f_resume: bool = False,
+        f_out_dir: Optional[Union[str, Path]] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
             raise PlanValidationError(
@@ -419,20 +440,51 @@ class RunRequest:
             raise PlanValidationError(
                 f"setup must be a non-empty string or None, got: {f_setup!r}"
             )
-        if f_variant is not None and (
-            not isinstance(f_variant, str) or not f_variant.strip()
-        ):
-            raise PlanValidationError(
-                f"variant must be a non-empty string or None, got: {f_variant!r}"
+        if f_variants is not None:
+            if not isinstance(f_variants, (list, tuple)):
+                raise PlanValidationError(
+                    "variants must be a sequence of variant strings or None"
+                )
+            m_variants = tuple(
+                v.strip().lower()
+                if (v is not None and isinstance(v, str) and v.strip())
+                else None
+                for v in f_variants
             )
+            if not m_variants:
+                m_variants = (None,)
+        elif f_variant is not None:
+            if not isinstance(f_variant, str) or not f_variant.strip():
+                raise PlanValidationError(
+                    f"variant must be a non-empty string or None, got: {f_variant!r}"
+                )
+            m_variants = (f_variant.strip().lower(),)
+        else:
+            m_variants = (None,)
+
+        if f_archive is not None and not isinstance(f_archive, bool):
+            raise PlanValidationError(
+                f"archive must be a boolean or None, got: {f_archive!r}"
+            )
+        if not isinstance(f_resume, bool):
+            raise PlanValidationError(f"resume must be a boolean, got: {f_resume!r}")
+        if f_out_dir is not None:
+            if not isinstance(f_out_dir, (str, Path)) or not str(f_out_dir).strip():
+                raise PlanValidationError(
+                    f"out_dir must be a non-empty string or Path, got: {f_out_dir!r}"
+                )
+            f_clean_out_dir = str(f_out_dir).strip()
+        else:
+            f_clean_out_dir = None
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
         super().__setattr__("m_ssd", f_ssd)
         super().__setattr__("m_setup", f_setup.strip().upper() if f_setup else None)
-        super().__setattr__(
-            "m_variant", f_variant.strip().lower() if f_variant else None
-        )
+        super().__setattr__("m_variants", m_variants)
+        super().__setattr__("m_archive", f_archive)
+        super().__setattr__("m_resume", f_resume)
+        super().__setattr__("m_out_dir", f_clean_out_dir)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -469,7 +521,32 @@ class RunRequest:
 
     @property
     def variant(self) -> Optional[str]:
-        return self.m_variant
+        """Backward-compatible primary variant accessor (returns first variant or None)."""
+        return self.m_variants[0] if self.m_variants else None
+
+    @property
+    def variants(self) -> Tuple[Optional[str], ...]:
+        """Tuple of all variants requested for execution."""
+        return self.m_variants
+
+    @property
+    def archive(self) -> Optional[bool]:
+        return self.m_archive
+
+    @property
+    def effective_archive(self) -> bool:
+        """Computed archive action: explicit archive override if set, else True if >1 variants."""
+        if self.m_archive is not None:
+            return self.m_archive
+        return len(self.m_variants) > 1
+
+    @property
+    def resume(self) -> bool:
+        return self.m_resume
+
+    @property
+    def out_dir(self) -> Optional[str]:
+        return self.m_out_dir
 
     @property
     def storage(self) -> StorageClass:
@@ -482,8 +559,16 @@ class RunRequest:
             "ssd": self.m_ssd,
             "setup": self.m_setup,
         }
-        if self.m_variant is not None:
-            f_dict["variant"] = self.m_variant
+        if self.variant is not None:
+            f_dict["variant"] = self.variant
+        if self.m_variants and (len(self.m_variants) > 1 or self.m_variants != (self.variant,)):
+            f_dict["variants"] = list(self.m_variants)
+        if self.m_archive is not None:
+            f_dict["archive"] = self.m_archive
+        if self.m_resume:
+            f_dict["resume"] = self.m_resume
+        if self.m_out_dir is not None:
+            f_dict["out_dir"] = self.m_out_dir
         return f_dict
 
     def __repr__(self) -> str:
@@ -492,7 +577,11 @@ class RunRequest:
             f"scale={self.m_scale!r}, "
             f"ssd={self.m_ssd!r}, "
             f"setup={self.m_setup!r}, "
-            f"variant={self.m_variant!r})"
+            f"variant={self.variant!r}, "
+            f"variants={self.m_variants!r}, "
+            f"archive={self.m_archive!r}, "
+            f"resume={self.m_resume!r}, "
+            f"out_dir={self.m_out_dir!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -502,7 +591,10 @@ class RunRequest:
                 and self.m_scale == f_other.m_scale
                 and self.m_ssd == f_other.m_ssd
                 and self.m_setup == f_other.m_setup
-                and self.m_variant == f_other.m_variant
+                and self.m_variants == f_other.m_variants
+                and self.m_archive == f_other.m_archive
+                and self.m_resume == f_other.m_resume
+                and self.m_out_dir == f_other.m_out_dir
             )
         return False
 
@@ -1445,6 +1537,10 @@ class RunPlanner:
             f_ssd=f_request.ssd,
             f_setup=f_norm_setup,
             f_variant=f_request.variant,
+            f_variants=f_request.variants,
+            f_archive=f_request.archive,
+            f_resume=f_request.resume,
+            f_out_dir=f_request.out_dir,
         )
 
         if f_target == "lmp":
@@ -1702,7 +1798,9 @@ class ManifestSerializer:
     }
 
     REQUIRED_REQUEST_KEYS: Set[str] = {"target", "scale", "ssd", "setup"}
-    OPTIONAL_REQUEST_KEYS: FrozenSet[str] = frozenset({"variant"})
+    OPTIONAL_REQUEST_KEYS: FrozenSet[str] = frozenset(
+        {"variant", "variants", "archive", "resume", "out_dir"}
+    )
     REQUIRED_PLAN_KEYS: Set[str] = {
         "target",
         "scale",
@@ -1919,6 +2017,10 @@ class ManifestSerializer:
         f_variant_raw = f_req_raw.get("variant")
         if f_variant_raw is not None and not isinstance(f_variant_raw, str):
             raise ManifestValidationError("request.variant must be a string or null")
+        f_variants_raw = f_req_raw.get("variants")
+        f_archive_raw = f_req_raw.get("archive")
+        f_resume_raw = f_req_raw.get("resume", False)
+        f_out_dir_raw = f_req_raw.get("out_dir")
 
         try:
             f_request = RunRequest(
@@ -1927,6 +2029,10 @@ class ManifestSerializer:
                 f_ssd=f_req_raw["ssd"],
                 f_setup=f_req_raw["setup"],
                 f_variant=f_variant_raw,
+                f_variants=f_variants_raw,
+                f_archive=f_archive_raw,
+                f_resume=f_resume_raw,
+                f_out_dir=f_out_dir_raw,
             )
         except Exception as f_err:
             raise ManifestValidationError(f"Invalid request record: {f_err}")
@@ -2777,6 +2883,7 @@ class RunOrchestrator:
         "m_last_capability_state",
         "m_last_interruption_error",
         "m_reporter",
+        "m_views",
         "_frozen",
     )
 
@@ -2895,7 +3002,12 @@ class RunOrchestrator:
         object.__setattr__(self, "m_last_view", None)
         object.__setattr__(self, "m_last_capability_state", None)
         object.__setattr__(self, "m_last_interruption_error", None)
+        object.__setattr__(self, "m_views", ())
         object.__setattr__(self, "_frozen", False)
+
+    @property
+    def views(self) -> Tuple[Any, ...]:
+        return getattr(self, "m_views", ())
 
     @property
     def reporter(self) -> Optional[Any]:
@@ -3913,85 +4025,184 @@ class RunOrchestrator:
                     ) from f_err
 
             # -----------------------------------------------------------------
-            # 1.9. Create RunPlan (Only after all preflights succeed!)
+            # 2. Multi-Variant Execution Loop & Archiving
             # -----------------------------------------------------------------
-            f_planner_obj = self.m_planner or RunPlanner
-            try:
-                f_plan = f_planner_obj.createPlan(
-                    f_request=f_request,
-                    f_profile=f_profile,
-                    f_run_id_source=self.m_run_id_source,
-                    f_clock=self.m_clock,
-                    f_token_source=self.m_token_source,
-                )
-            except PlanValidationError as f_err:
-                raise PreflightError(str(f_err)) from f_err
-            except Exception as f_err:
-                raise PreflightError(f"Plan creation failed: {f_err}") from f_err
-
-            # -----------------------------------------------------------------
-            # 2. Lock & Allocate
-            # -----------------------------------------------------------------
-            f_storage = f_plan.request.storage
-            f_benchmark_root = f_profile.getBenchmarkRoot(f_storage)
-            if not f_benchmark_root:
-                raise PreflightError(
-                    f"Benchmark root for storage '{f_storage.value}' is not configured"
-                )
-
+            from lsmiotool.lib.archive import ArchiveEngine
+            from lsmiotool.lib.state import OverallRunState, RunStateView
             from lsmiotool.lib.artifacts import (
                 ArtifactError,
                 ArtifactStore,
                 LockContentionError,
             )
 
-            if self.m_artifact_store_factory is not None:
-                f_artifact_store = self.m_artifact_store_factory(
-                    f_benchmark_root, f_plan.run_id
+            f_storage = f_request.storage
+            f_benchmark_root = f_profile.getBenchmarkRoot(f_storage)
+            if not f_benchmark_root:
+                raise PreflightError(
+                    f"Benchmark root for storage '{f_storage.value}' is not configured"
                 )
-            else:
-                f_artifact_store = ArtifactStore(f_benchmark_root, f_plan.run_id)
 
-            object.__setattr__(self, "m_last_plan", f_plan)
-            object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
-
-            try:
-                f_artifact_store.allocateRun(f_plan)
-            except ArtifactError as f_err:
-                raise OrchestrationError(f"Failed to allocate run: {f_err}") from f_err
-
-            if f_eff_reporter is not None:
-                try:
-                    f_eff_reporter.reportRunIdentity(
-                        f_plan.run_id, f_artifact_store.layout.runRoot
-                    )
-                except Exception:
-                    pass
-
-            f_control_lock = f_artifact_store.getControlLock()
-            try:
-                f_control_lock.acquire(f_blocking=False)
-            except LockContentionError as f_err:
-                raise OrchestrationError(
-                    f"Control lock contention on run '{f_plan.run_id}': {f_err}"
-                ) from f_err
-            except ArtifactError as f_err:
-                raise OrchestrationError(
-                    f"Failed to acquire control lock on run '{f_plan.run_id}': {f_err}"
-                ) from f_err
-
-            return self._executeLoop(
-                f_plan=f_plan,
-                f_profile=f_profile,
-                f_artifact_store=f_artifact_store,
-                f_control_lock=f_control_lock,
-                f_validated_worker=f_validated_worker,
-                f_validated_account=f_validated_account,
-                f_validated_email=f_validated_email,
-                f_sig_coord=f_sig_coord,
-                f_reporter=f_eff_reporter,
-                **f_kwargs,
+            f_eff_environ = (
+                f_environ
+                if f_environ is not None
+                else (f_environment if f_environment is not None else self.m_environ)
             )
+            f_dest_root = (
+                f_request.out_dir
+                or (f_eff_environ and f_eff_environ.get("BM_ARCHIVE_DEST"))
+                or os.environ.get("BM_ARCHIVE_DEST")
+                or os.path.join(f_benchmark_root, "lsmio-archive")
+            )
+
+            f_planner_obj = self.m_planner or RunPlanner
+            f_executed_views: List[RunStateView] = []
+            f_all_skipped: bool = True
+            object.__setattr__(self, "m_views", ())
+
+            for f_cur_variant in f_request.variants:
+                f_clean_setup = f_request.setup or "NATIVE-M"
+                f_arm_id = ArchiveEngine.resolveArmId(f_clean_setup, f_cur_variant)
+                f_target_dir = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}")
+
+                # Resumption check (INV-MULTI-3)
+                if f_request.resume and os.path.isdir(f_target_dir):
+                    f_var_label = f_cur_variant if f_cur_variant is not None else "default"
+                    f_msg = f"[RESUME] Skipping variant {f_var_label!r}"
+                    if f_eff_reporter is not None:
+                        try:
+                            if hasattr(f_eff_reporter, "reportProgress"):
+                                f_eff_reporter.reportProgress(f_msg)
+                            elif hasattr(f_eff_reporter, "emit"):
+                                f_eff_reporter.emit(f_msg)
+                            elif callable(f_eff_reporter):
+                                f_eff_reporter(f_msg)
+                        except Exception:
+                            pass
+                    else:
+                        sys.stdout.write(f"{f_msg}\n")
+                    continue
+
+                f_all_skipped = False
+
+                # Sub-request creation for single variant execution
+                f_sub_request = RunRequest(
+                    f_target=f_request.target,
+                    f_scale=f_request.scale,
+                    f_ssd=f_request.ssd,
+                    f_setup=f_request.setup,
+                    f_variant=f_cur_variant,
+                )
+
+                try:
+                    f_plan = f_planner_obj.createPlan(
+                        f_request=f_sub_request,
+                        f_profile=f_profile,
+                        f_run_id_source=self.m_run_id_source,
+                        f_clock=self.m_clock,
+                        f_token_source=self.m_token_source,
+                    )
+                except PlanValidationError as f_err:
+                    raise PreflightError(str(f_err)) from f_err
+                except Exception as f_err:
+                    raise PreflightError(f"Plan creation failed: {f_err}") from f_err
+
+                if self.m_artifact_store_factory is not None:
+                    f_artifact_store = self.m_artifact_store_factory(
+                        f_benchmark_root, f_plan.run_id
+                    )
+                else:
+                    f_artifact_store = ArtifactStore(f_benchmark_root, f_plan.run_id)
+
+                object.__setattr__(self, "m_last_plan", f_plan)
+                object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
+
+                try:
+                    f_artifact_store.allocateRun(f_plan)
+                except ArtifactError as f_err:
+                    raise OrchestrationError(f"Failed to allocate run: {f_err}") from f_err
+
+                if f_eff_reporter is not None:
+                    try:
+                        f_eff_reporter.reportRunIdentity(
+                            f_plan.run_id, f_artifact_store.layout.runRoot
+                        )
+                    except Exception:
+                        pass
+
+                f_control_lock = f_artifact_store.getControlLock()
+                try:
+                    f_control_lock.acquire(f_blocking=False)
+                except LockContentionError as f_err:
+                    raise OrchestrationError(
+                        f"Control lock contention on run '{f_plan.run_id}': {f_err}"
+                    ) from f_err
+                except ArtifactError as f_err:
+                    raise OrchestrationError(
+                        f"Failed to acquire control lock on run '{f_plan.run_id}': {f_err}"
+                    ) from f_err
+
+                f_view = self._executeLoop(
+                    f_plan=f_plan,
+                    f_profile=f_profile,
+                    f_artifact_store=f_artifact_store,
+                    f_control_lock=f_control_lock,
+                    f_validated_worker=f_validated_worker,
+                    f_validated_account=f_validated_account,
+                    f_validated_email=f_validated_email,
+                    f_sig_coord=f_sig_coord,
+                    f_reporter=f_eff_reporter,
+                    **f_kwargs,
+                )
+                f_executed_views.append(f_view)
+                object.__setattr__(self, "m_last_view", f_view)
+
+                # Fail-fast check
+                if (
+                    f_view.state in (OverallRunState.FAILED, OverallRunState.CANCELLED, OverallRunState.INTERRUPTED)
+                    or self.exitCode != 0
+                ):
+                    object.__setattr__(self, "m_views", tuple(f_executed_views))
+                    return f_view
+
+                # Auto-archiving
+                if f_request.effective_archive:
+                    f_source_dir = None
+                    if "LSM_DIR_OBASE" in os.environ and os.path.isdir(os.environ["LSM_DIR_OBASE"]):
+                        f_source_dir = os.environ["LSM_DIR_OBASE"]
+                    elif (
+                        hasattr(f_artifact_store, "layout")
+                        and hasattr(f_artifact_store.layout, "runRoot")
+                        and os.path.isdir(f_artifact_store.layout.runRoot)
+                    ):
+                        f_source_dir = f_artifact_store.layout.runRoot
+                    elif hasattr(f_artifact_store, "run_root") and os.path.isdir(f_artifact_store.run_root):
+                        f_source_dir = f_artifact_store.run_root
+                    else:
+                        f_source_dir = os.path.join(f_benchmark_root, "outputs")
+
+                    ArchiveEngine.executeArchive(
+                        f_source_dir=f_source_dir,
+                        f_dest_root=f_dest_root,
+                        f_arm_id=f_arm_id,
+                    )
+
+            object.__setattr__(self, "m_views", tuple(f_executed_views))
+
+            if f_executed_views:
+                return f_executed_views[-1]
+
+            if f_all_skipped:
+                synthetic_view = RunStateView(
+                    f_run_id="resumed",
+                    f_state=OverallRunState.SUCCEEDED,
+                    f_point_states=(),
+                    f_has_success_marker=True,
+                    f_has_interruption=False,
+                )
+                object.__setattr__(self, "m_last_view", synthetic_view)
+                return synthetic_view
+
+            return self.m_last_view
 
     def recoverRun(
         self,

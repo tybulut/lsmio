@@ -10,7 +10,52 @@ For C++ and Python test verification, see the [Testing Guide](../test/README.md)
 
 ## 1. Toolchain Architecture
 
-The primary entry point is `lsmiotool` (located at `tools/lsmiotool/lsmiotool` in source or `<prefix>/bin/lsmiotool` when installed).
+The LSMIO toolchain subsystem provides two coordinated orchestration engines:
+1. **POSIX Shell Orchestration (`tools/bmtool`)**: A lightweight, zero-dependency POSIX `/bin/sh` toolchain (`tools/bmtool/bmtool`) optimized for direct execution on HPC compute nodes, batch script wrapping, and legacy environments.
+2. **Python Orchestration (`tools/lsmiotool`)**: The modern enterprise orchestration CLI (`tools/lsmiotool/lsmiotool` in source or `<prefix>/bin/lsmiotool` when installed) offering immutable execution planning, isolated private run roots, SQLite state tracking, and structured reporting.
+
+### 1.1 Shell Orchestration (`tools/bmtool`)
+
+`bmtool` is located at `tools/bmtool/bmtool` and conforms strictly to pure POSIX `/bin/sh` (`INV-MULTI-1`).
+
+#### CLI Usage Syntax:
+```bash
+bmtool <command> <benchmark> <scale> [<variants>] [options]
+```
+For benchmark execution:
+```bash
+bmtool run lsmio <scale> [<variants>] [options]
+```
+
+#### Core Commands:
+- `run`: Execute benchmark jobs across HPC compute nodes.
+- `parse`: Extract metrics and format performance summaries.
+- `archive`: Archive active outputs to timestamped / Arm-ID directory.
+- `dirs`: Setup active Lustre and scratch directory hierarchies.
+- `load-modules`: Inspect and verify required HPC cluster modules.
+
+#### Early Help Dispatch (`INV-MULTI-7`):
+- `bmtool -h`, `bmtool --help`, `bmtool help`: Early help intercept prints the formatted help manual and exits immediately with status 0, bypassing all HPC environment assertions (`$SB_EMAIL`, `$SB_ACCOUNT`), filesystem checks, or lock acquisitions.
+
+#### Multi-Variant Specification:
+When executing `bmtool run lsmio baseline [<variants>]`:
+- **Omitted** or **`default`** / **`base`**: Executes default baseline configuration (empty variant).
+- **Single variant key**: e.g., `bmtool run lsmio baseline footer`
+- **Comma-separated list**: e.g., `bmtool run lsmio baseline footer,manoff,autotune`, executed sequentially in order.
+- **Keyword `all`**: Expands to the canonical sequence of all 38 matrix variants (`default` followed by the 37 non-empty variant keys).
+
+#### Options:
+- `--ssd`: Selects SSD storage root instead of HDD.
+- `--archive`: Force automatic archiving after each variant execution.
+  - **Automatic archive default rules**: Automatically defaults to `yes` when multiple variants ($N > 1$) or `all` is specified; defaults to `no` for single-variant ($N = 1$) or default baseline runs (`INV-MULTI-2`).
+- `--no-archive`: Disables automatic archiving after variant execution (forces `no`). Specifying both `--archive` and `--no-archive` is rejected.
+- `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}`) already exists in the destination directory (`INV-MULTI-3`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
+- `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory (default: `$BM_PATH/lsmio-archive`).
+- `-h`, `--help`: Early help dispatch without credentials.
+
+### 1.2 Python Orchestration (`tools/lsmiotool`)
+
+The primary entry point for modern orchestration is `lsmiotool` (located at `tools/lsmiotool/lsmiotool` in source or `<prefix>/bin/lsmiotool` when installed).
 
 ```mermaid
 graph TD
@@ -55,16 +100,21 @@ graph TD
 ### 2.1 CLI Syntax and Usage
 
 ```bash
-lsmiotool run <benchmark> <scale> [--ssd] [--setup <name>]
+lsmiotool run <workload> <scale> [<variants>] [options]
+```
+
+Full invocation signature:
+```bash
+lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
 ```bash
-lsmiotool --ssd run <benchmark> <scale> [--setup <name>]
+lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>]
 ```
 
 #### Arguments & Options:
-- `<benchmark>`: Benchmark suite to run. Supported values:
+- `<benchmark>` / `<workload>`: Benchmark suite to run. Supported values:
   - `ior`: IOR parallel I/O benchmark (default setup: `BASE`).
   - `lsmio`: LSMIO storage engine benchmark (default setup: `NATIVE-M`).
   - `lmp`: LAMMPS ReaxFF molecular dynamics benchmark (default setup: `LSMIO`).
@@ -74,9 +124,30 @@ lsmiotool --ssd run <benchmark> <scale> [--setup <name>]
   - `small`: 1, 2, 4, 8, 16, 24, 32, 40, 48 tasks on 1 task/node.
   - `large`: 4, 8, 16, 32, 64, 128, 192, 256 tasks on 4 tasks/node.
     *(Note: `lmp large` is unsupported and is rejected atomically before any mutation.)*
+  - `baseline`: Standardized baseline scaling evaluation (supports multi-variant execution for `lsmio`).
+- `<variants>`: Optional variant specification for `lsmio baseline`. Supported formats:
+  - **Omitted** or **`default`** / **`base`**: Executes the default baseline configuration (empty variant).
+  - **Single variant key**: e.g., `footer`, `btree`, `manoff`, `autotune`.
+  - **Comma-separated list**: e.g., `footer,manoff,autotune`, executed sequentially in specified order.
+  - **Keyword `all`**: Expands to all 38 matrix variants in canonical order (`default` followed by 37 non-empty variant keys).
+  *(Note: Non-lsmio benchmarks or non-baseline scales reject variant specifications atomically before execution.)*
 - `--ssd`: Selects SSD storage class root. Default storage class is HDD.
 - `--setup <name>`: Explicitly overrides the benchmark setup profile.
   - **Syntax rule**: `--setup <name>` must be specified as two separate arguments. Syntax `--setup=value` is strictly rejected.
+- `--archive` / `--no-archive`: Automatic post-run archiving control:
+  - **Automatic archive default rules**: When multiple variants are specified ($N > 1$) or `all` is used, `--archive` defaults to `yes` to ensure each variant's outputs are safely archived before the next variant executes. When a single variant ($N = 1$) or default baseline is specified, `--archive` defaults to `no` for backward compatibility (`INV-MULTI-2`).
+  - `--archive`: Explicitly forces post-run archiving even for single-variant runs.
+  - `--no-archive`: Explicitly disables post-run archiving (forces `no`) even when multiple variants or `all` are selected.
+  - Specifying both `--archive` and `--no-archive` is rejected as an error.
+- `--resume`: Idempotent pre-run resumption (`INV-MULTI-3`):
+  - Before executing each variant, checks if the target archive directory (`outputs-${ARM_ID}`) already exists under the archive destination directory.
+  - If the directory exists, execution of that variant is skipped immediately with `[RESUME] Skipping variant '<variant>'` prior to allocating run locks or submitting scheduler jobs.
+  - When `--resume` is omitted and the target directory exists, automatic collision protection increments a numerical suffix (`-1`, `-2`, ..., `-N`) to prevent overwriting (`INV-MULTI-6`).
+- `--out-dir <dir>` / `--output-dir <dir>` (alias: `--dest <dir>`): Configurable archive destination directory:
+  - Specifies the destination root directory where variant outputs are archived (default: `<benchmark_root>/lsmio-archive` or `$BM_PATH/lsmio-archive`).
+  - **Syntax rule**: Must be specified as two separate tokens (`--out-dir <path>`); equals syntax (`--out-dir=<path>`) is strictly rejected.
+- `-h`, `--help`: Early CLI help dispatch (`INV-MULTI-7`):
+  - Intercepts help requests at CLI entry point, displaying comprehensive documentation and exiting with status 0 immediately without touching the filesystem or verifying credentials.
 
 #### Benchmark Setups:
 - **IOR setups**: `BASE` (default), `HDF5`, `HDF5-C`, `COLLECTIVE`, `FSYNC`, `REVERSE`.
@@ -321,7 +392,7 @@ The runtime paths are explicitly constructed without cross-fallback or directory
 
 | Legacy `bmtool` Behavior | Modern `lsmiotool run` Implementation |
 |:---|:---|
-| Invocation via `tools/bmtool/bmtool run` | Invocation via `lsmiotool run <benchmark> <scale>` |
+| Invocation via `tools/bmtool/bmtool run` | Invocation via `lsmiotool run <workload> <scale> [<variants>] [options]` |
 | Shared mutable paths (`$HOME/scratch/benchmark/data/*`) | Isolated private run roots (`<root>/runs/<run-id>`) |
 | Uncoordinated `dirs-cleanup.sh` wiping data | Isolated per-combination data directories (`data/c<stripe>/b<block>`) |
 | Same-day run directory collisions and overwrites | Unique immutable run IDs with collision-proof directory creation (`allocateRun`) |
@@ -523,6 +594,8 @@ The LSMIO toolchain maintains an authoritative catalog of 37 non-empty variants,
 
 > [!NOTE]
 > In addition to the 37 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, auto-tuning enabled by default, and no extra flags).
+> Together with `default`, these 37 variants form the canonical sequence of all 38 matrix variants (`VariantCatalogue.canonicalVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell), which is expanded automatically via the `all` keyword in `lsmiotool run lsmio baseline all` and `bmtool run lsmio baseline all`.
+>
 > Variants 1 through 36 explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference.
 >
 > **Buffer Sizing Standard**: In accordance with experimental rigor, read-path optimization variants (`pread`, `mmap`, `footer-pread`, `footer-mmap`) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.
