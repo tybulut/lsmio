@@ -161,6 +161,10 @@ resolve_variant() {
       BM_VARIANT_TOKENS="footer-btree-manoff-mmap"
       BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap"
       ;;
+    footer-manoff-pool-8)
+      BM_VARIANT_TOKENS="footer-manoff-pool-8"
+      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8"
+      ;;
     *)
       echo "Error: Unknown variant '$1'." >&2
       echo "Supported variants are:" >&2
@@ -174,7 +178,7 @@ resolve_variant() {
       echo "  wbuf-512m-manoff-prealloc, footer-wbuf-32m, footer-pool-8" >&2
       echo "  footer-wbuf-512m-manoff-prealloc, footer-vsort-manoff-prealloc" >&2
       echo "  footer-vsort-manoff-mmap, footer-vsort-manoff, footer-pool-8-mmap" >&2
-      echo "  footer-manoff-pool-8-mmap, footer-btree-manoff-mmap" >&2
+      echo "  footer-manoff-pool-8-mmap, footer-btree-manoff-mmap, footer-manoff-pool-8" >&2
       return 1
       ;;
   esac

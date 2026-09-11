@@ -43,7 +43,7 @@ from lsmiotool.lib.variants import (
 class VariantCatalogueTest(unittest.TestCase):
     """Unit test suite verifying declarative variant catalog, mappings, and immutability."""
 
-    EXPECTED_35_VARIANTS = {
+    EXPECTED_36_VARIANTS = {
         "footer": ("footer", ("--lsmio-footer-index",)),
         "btree": ("btree", ("--lsmio-memtable", "btree")),
         "footer-btree": (
@@ -183,6 +183,15 @@ class VariantCatalogueTest(unittest.TestCase):
                 "--lsmio-mmap",
             ),
         ),
+        "footer-manoff-pool-8": (
+            "footer-manoff-pool-8",
+            (
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
     }
 
     def testDefaultAndBaseKeysReturnEmpty(self) -> None:
@@ -205,16 +214,16 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertEqual(rec.flagsString, "")
             self.assertTrue(VariantCatalogue.isValid(key))
 
-    def testAll35NonEmptyVariants(self) -> None:
-        """Assert all 35 non-empty keys match tokens and engine CLI flags."""
+    def testAll36NonEmptyVariants(self) -> None:
+        """Assert all 36 non-empty keys match tokens and engine CLI flags."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
-        self.assertEqual(len(supported), 35)
-        self.assertEqual(len(self.EXPECTED_35_VARIANTS), 35)
+        self.assertEqual(len(supported), 36)
+        self.assertEqual(len(self.EXPECTED_36_VARIANTS), 36)
         self.assertEqual(supported, all_keys)
-        self.assertEqual(set(supported), set(self.EXPECTED_35_VARIANTS.keys()))
+        self.assertEqual(set(supported), set(self.EXPECTED_36_VARIANTS.keys()))
 
-        for key, (expected_tokens, expected_flags) in self.EXPECTED_35_VARIANTS.items():
+        for key, (expected_tokens, expected_flags) in self.EXPECTED_36_VARIANTS.items():
             rec = VariantCatalogue.resolve(key)
             self.assertEqual(rec.key, key)
             self.assertEqual(rec.tokens, expected_tokens)

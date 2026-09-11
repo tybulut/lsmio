@@ -14,7 +14,7 @@ To navigate the detailed architectural, testing, and operational guides across t
 
 - [**Benchmark Subsystem Guide**](benchmark/README.md): Comprehensive reference for synthetic benchmark targets (`bm_native`, `bm_adios`, `bm_rocksdb`, `bm_leveldb`, `bm_manager`), CLI flag catalog, high-performance read flags (`--lsmio-mmap`, `--lsmio-pread`), scaling models, and the `micro.sh` runner.
 - [**Testing & Verification Guide**](test/README.md): Exhaustive documentation covering CTest orchestration, GoogleTest suites, MPI multi-rank integration fixtures, execution protocols (`test`, `xtest`, `ptest`), and debugging workflows (`gdb`, `lldb`, AddressSanitizer).
-- [**Tools & Orchestration Guide**](tools/README.md): User and architectural manual for the `lsmiotool` framework, HPC batch scheduler orchestration (Slurm & PBS), report parsing (`lsmiotool parse`), scaling and variant comparison (`lsmiotool compare`), and the canonical 35-variant catalog.
+- [**Tools & Orchestration Guide**](tools/README.md): User and architectural manual for the `lsmiotool` framework, HPC batch scheduler orchestration (Slurm & PBS), report parsing (`lsmiotool parse`), scaling and variant comparison (`lsmiotool compare`), and the canonical 36-variant catalog.
 
 ---
 
