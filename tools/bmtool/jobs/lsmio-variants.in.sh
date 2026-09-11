@@ -19,7 +19,7 @@ resolve_variant() {
   case "$var" in
     ""|base|default)
       BM_VARIANT_TOKENS=""
-      BM_VARIANT_FLAGS=""
+      BM_VARIANT_FLAGS="--lsmio-no-autotune"
       ;;
     footer)
       BM_VARIANT_TOKENS="footer"
