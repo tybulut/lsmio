@@ -477,50 +477,52 @@ lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
 
 ---
 
-## 6. Canonical 36-Variant Catalogue
+## 6. Canonical 37-Variant Catalogue
 
-The LSMIO toolchain maintains an authoritative catalog of 36 non-empty variants, synchronized across `lsmiotool` (`VariantCatalogue._VARIANT_SPECS` in Python) and legacy `bmtool` (`resolve_variant()` in POSIX shell).
+The LSMIO toolchain maintains an authoritative catalog of 37 non-empty variants, synchronized across `lsmiotool` (`VariantCatalogue._VARIANT_SPECS` in Python) and legacy `bmtool` (`resolve_variant()` in POSIX shell).
 
 | # | Variant Identifier | Correlation Tokens | CLI Engine Flags | Key Feature / Architecture Evaluated |
 |:---|:---|:---|:---|:---|
-| 1 | `footer` | `footer` | `--lsmio-footer-index` | Appends Dense Index Footer to SSTables for fast binary search. |
-| 2 | `btree` | `btree` | `--lsmio-memtable btree` | Replaces unordered vector with cache-conscious B-tree memtable. |
-| 3 | `footer-btree` | `footer-btree` | `--lsmio-footer-index --lsmio-memtable btree` | Dense Index Footer combined with B-tree memtable. |
-| 4 | `map` | `map` | `--lsmio-memtable map` | Standard red-black tree (`std::map`) memtable. |
-| 5 | `vsort` | `vsort` | `--lsmio-memtable vector-sort` | Sorted contiguous vector memtable. |
-| 6 | `prealloc` | `prealloc` | `--lsmio-prealloc` | Pre-allocates SSTable files via `posix_fallocate()`. |
-| 7 | `footer-prealloc` | `footer-prealloc` | `--lsmio-footer-index --lsmio-prealloc` | Dense Index Footer with disk file pre-allocation. |
-| 8 | `manoff` | `manoff` | `--lsmio-manual-offset` | Manually tracks write byte offsets to eliminate `tellp()` syscalls. |
-| 9 | `footer-manoff` | `footer-manoff` | `--lsmio-footer-index --lsmio-manual-offset` | Dense Index Footer with manual byte offset tracking. |
-| 10 | `wbuf-512m` | `wbuf-512m` | `--lsmio-wbuffer 536870912` | Expands write buffer size to 512 MiB. |
-| 11 | `wbuf-32m` | `wbuf-32m` | `--lsmio-wbuffer 33554432` | Shrinks write buffer size to 32 MiB. |
-| 12 | `footer-wbuf-512m` | `footer-wbuf-512m` | `--lsmio-footer-index --lsmio-wbuffer 536870912` | Dense Index Footer with 512 MiB write buffer. |
-| 13 | `footer-btree-prealloc` | `footer-btree-prealloc` | `--lsmio-footer-index --lsmio-memtable btree --lsmio-prealloc` | Dense Index Footer, B-tree memtable, and file pre-allocation. |
-| 14 | `bfilter` | `bfilter` | `--lsmio-bfilter` | Enables Bloom filter generation for fast negative lookups. |
-| 15 | `wal` | `wal` | `--lsmio-wal` | Enables Write-Ahead Logging (WAL) for durability. |
-| 16 | `mmap` | `mmap` | `--lsmio-mmap` | Zero-copy memory-mapped read path with Lustre read-ahead. |
-| 17 | `pread` | `pread` | `--lsmio-pread` | Persistent descriptor speculative single-syscall `pread()`. |
-| 18 | `footer-mmap` | `footer-mmap` | `--lsmio-footer-index --lsmio-mmap` | Dense Index Footer combined with zero-copy `mmap`. |
-| 19 | `footer-pread` | `footer-pread` | `--lsmio-footer-index --lsmio-pread` | Dense Index Footer combined with persistent `pread()`. |
-| 20 | `compress` | `compress` | `--lsmio-compress` | Enables record compression. |
-| 21 | `sync` | `sync` | `--sync` | Enforces synchronous write-through I/O. |
-| 22 | `pool-8` | `pool-8` | `--lsmio-pool 8` | Expands pre-allocated SSTable file pool size to 8 files. |
-| 23 | `flush` | `flush` | `--lsmo-always-flush` | Immediate flush mode (disables deferred write batching). |
-| 24 | `batch-2048` | `batch-2048` | `--lsmio-batch-size 2048` | Expands deferred write batch threshold to 2048 entries. |
-| 25 | `manoff-prealloc` | `manoff-prealloc` | `--lsmio-manual-offset --lsmio-prealloc` | Manual offset tracking combined with file pre-allocation. |
-| 26 | `wbuf-512m-manoff-prealloc` | `wbuf-512m-manoff-prealloc` | `--lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc` | 512 MiB write buffer, manual offsets, and pre-allocation. |
-| 27 | `footer-wbuf-32m` | `footer-wbuf-32m` | `--lsmio-footer-index --lsmio-wbuffer 33554432` | Dense Index Footer with 32 MiB write buffer. |
-| 28 | `footer-pool-8` | `footer-pool-8` | `--lsmio-footer-index --lsmio-pool 8` | Dense Index Footer with 8-file pre-allocation pool. |
-| 29 | `footer-wbuf-512m-manoff-prealloc` | `footer-wbuf-512m-manoff-prealloc` | `--lsmio-footer-index --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc` | Footer, 512 MiB buffer, manual offsets, and pre-allocation. |
-| 30 | `footer-vsort-manoff-prealloc` | `footer-vsort-manoff-prealloc` | `--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-prealloc` | Footer, sorted vector memtable, manual offsets, pre-allocation. |
-| 31 | `footer-vsort-manoff-mmap` | `footer-vsort-manoff-mmap` | `--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, sorted vector memtable, manual offsets, memory-mapped reads. |
-| 32 | `footer-vsort-manoff` | `footer-vsort-manoff` | `--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset` | Dense Index Footer, sorted vector memtable, manual offsets. |
-| 33 | `footer-pool-8-mmap` | `footer-pool-8-mmap` | `--lsmio-footer-index --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, 8-file pre-allocation pool, memory-mapped reads. |
-| 34 | `footer-manoff-pool-8-mmap` | `footer-manoff-pool-8-mmap` | `--lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, manual offsets, 8-file pre-allocation pool, memory-mapped reads. |
-| 35 | `footer-btree-manoff-mmap` | `footer-btree-manoff-mmap` | `--lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, B-tree memtable, manual offsets, memory-mapped reads. |
-| 36 | `footer-manoff-pool-8` | `footer-manoff-pool-8` | `--lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8` | Dense Index Footer, manual offsets, 8-file pre-allocation pool. |
+| 1 | `footer` | `footer` | `--lsmio-no-autotune --lsmio-footer-index` | Appends Dense Index Footer to SSTables for fast binary search. |
+| 2 | `btree` | `btree` | `--lsmio-no-autotune --lsmio-memtable btree` | Replaces unordered vector with cache-conscious B-tree memtable. |
+| 3 | `footer-btree` | `footer-btree` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree` | Dense Index Footer combined with B-tree memtable. |
+| 4 | `map` | `map` | `--lsmio-no-autotune --lsmio-memtable map` | Standard red-black tree (`std::map`) memtable. |
+| 5 | `vsort` | `vsort` | `--lsmio-no-autotune --lsmio-memtable vector-sort` | Sorted contiguous vector memtable. |
+| 6 | `prealloc` | `prealloc` | `--lsmio-no-autotune --lsmio-prealloc` | Pre-allocates SSTable files via `posix_fallocate()`. |
+| 7 | `footer-prealloc` | `footer-prealloc` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-prealloc` | Dense Index Footer with disk file pre-allocation. |
+| 8 | `manoff` | `manoff` | `--lsmio-no-autotune --lsmio-manual-offset` | Manually tracks write byte offsets to eliminate `tellp()` syscalls. |
+| 9 | `footer-manoff` | `footer-manoff` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset` | Dense Index Footer with manual byte offset tracking. |
+| 10 | `wbuf-512m` | `wbuf-512m` | `--lsmio-no-autotune --lsmio-wbuffer 536870912` | Expands write buffer size to 512 MiB. |
+| 11 | `wbuf-32m` | `wbuf-32m` | `--lsmio-no-autotune --lsmio-wbuffer 33554432` | Shrinks write buffer size to 32 MiB. |
+| 12 | `footer-wbuf-512m` | `footer-wbuf-512m` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 536870912` | Dense Index Footer with 512 MiB write buffer. |
+| 13 | `footer-btree-prealloc` | `footer-btree-prealloc` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-prealloc` | Dense Index Footer, B-tree memtable, and file pre-allocation. |
+| 14 | `bfilter` | `bfilter` | `--lsmio-no-autotune --lsmio-bfilter` | Enables Bloom filter generation for fast negative lookups. |
+| 15 | `wal` | `wal` | `--lsmio-no-autotune --lsmio-wal` | Enables Write-Ahead Logging (WAL) for durability. |
+| 16 | `mmap` | `mmap` | `--lsmio-no-autotune --lsmio-mmap` | Zero-copy memory-mapped read path with Lustre read-ahead. |
+| 17 | `pread` | `pread` | `--lsmio-no-autotune --lsmio-pread` | Persistent descriptor speculative single-syscall `pread()`. |
+| 18 | `footer-mmap` | `footer-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-mmap` | Dense Index Footer combined with zero-copy `mmap`. |
+| 19 | `footer-pread` | `footer-pread` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-pread` | Dense Index Footer combined with persistent `pread()`. |
+| 20 | `compress` | `compress` | `--lsmio-no-autotune --lsmio-compress` | Enables record compression. |
+| 21 | `sync` | `sync` | `--lsmio-no-autotune --sync` | Enforces synchronous write-through I/O. |
+| 22 | `pool-8` | `pool-8` | `--lsmio-no-autotune --lsmio-pool 8` | Expands pre-allocated SSTable file pool size to 8 files. |
+| 23 | `flush` | `flush` | `--lsmio-no-autotune --lsmio-always-flush` | Immediate flush mode (disables deferred write batching). |
+| 24 | `batch-2048` | `batch-2048` | `--lsmio-no-autotune --lsmio-batch-size 2048` | Expands deferred write batch threshold to 2048 entries. |
+| 25 | `manoff-prealloc` | `manoff-prealloc` | `--lsmio-no-autotune --lsmio-manual-offset --lsmio-prealloc` | Manual offset tracking combined with file pre-allocation. |
+| 26 | `wbuf-512m-manoff-prealloc` | `wbuf-512m-manoff-prealloc` | `--lsmio-no-autotune --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc` | 512 MiB write buffer, manual offsets, and pre-allocation. |
+| 27 | `footer-wbuf-32m` | `footer-wbuf-32m` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 33554432` | Dense Index Footer with 32 MiB write buffer. |
+| 28 | `footer-pool-8` | `footer-pool-8` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-pool 8` | Dense Index Footer with 8-file pre-allocation pool. |
+| 29 | `footer-wbuf-512m-manoff-prealloc` | `footer-wbuf-512m-manoff-prealloc` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc` | Footer, 512 MiB buffer, manual offsets, and pre-allocation. |
+| 30 | `footer-vsort-manoff-prealloc` | `footer-vsort-manoff-prealloc` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-prealloc` | Footer, sorted vector memtable, manual offsets, pre-allocation. |
+| 31 | `footer-vsort-manoff-mmap` | `footer-vsort-manoff-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, sorted vector memtable, manual offsets, memory-mapped reads. |
+| 32 | `footer-vsort-manoff` | `footer-vsort-manoff` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset` | Dense Index Footer, sorted vector memtable, manual offsets. |
+| 33 | `footer-pool-8-mmap` | `footer-pool-8-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, 8-file pre-allocation pool, memory-mapped reads. |
+| 34 | `footer-manoff-pool-8-mmap` | `footer-manoff-pool-8-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, manual offsets, 8-file pre-allocation pool, memory-mapped reads. |
+| 35 | `footer-btree-manoff-mmap` | `footer-btree-manoff-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, B-tree memtable, manual offsets, memory-mapped reads. |
+| 36 | `footer-manoff-pool-8` | `footer-manoff-pool-8` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8` | Dense Index Footer, manual offsets, 8-file pre-allocation pool. |
+| 37 | `autotune` | `autotune` | `--lsmio-autotune` | Adaptive filesystem auto-tuning (matches `footer-manoff-pool-8` on Lustre/GPFS, `base` on local FS). |
 
 > [!NOTE]
-> In addition to the 36 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, and no extra flags).
+> In addition to the 37 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, auto-tuning enabled by default, and no extra flags).
+> Variants 1 through 36 explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference.
 >
 > **Buffer Sizing Standard**: In accordance with experimental rigor, read-path optimization variants (`pread`, `mmap`, `footer-pread`, `footer-mmap`) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.

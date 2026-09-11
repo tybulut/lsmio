@@ -50,6 +50,14 @@
 #include "MemtableVectorSort.hpp"
 #include "SSTableManager.hpp"
 
+#ifndef LUSTRE_SUPER_MAGIC
+#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
+#endif
+
+#ifndef GPFS_SUPER_MAGIC
+#define GPFS_SUPER_MAGIC 0x47504653
+#endif
+
 namespace lsmio {
 
 class LSMIOStoreNative : public LSMIOStore {

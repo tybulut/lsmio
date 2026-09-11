@@ -109,9 +109,14 @@ class BaselineGateTest(unittest.TestCase):
 
     def testGeneratedCtestRegistrationExactlyOnceAndReadOnly(self) -> None:
         source_root = Path(__file__).resolve().parents[4]
+        baseline_file = source_root / "build" / "test" / "CTestTestfile.baseline.cmake"
         registration_path = Path(
             os.environ.get("LSMIO_CTEST_REGISTRATION")
-            or source_root / "build" / "test" / "CTestTestfile.cmake"
+            or (
+                baseline_file
+                if baseline_file.is_file()
+                else source_root / "build" / "test" / "CTestTestfile.cmake"
+            )
         )
         cache_path = registration_path.parent.parent / "CMakeCache.txt"
         cache_before = cache_path.stat()

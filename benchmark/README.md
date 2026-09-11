@@ -76,7 +76,7 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `--lsmio-fsize` | `<bytes>` | `8x wbuffer` | Target SSTable file size on disk before rotating files. |
 | `--lsmio-prealloc` | None | `false` | Pre-allocates SSTable files on disk using `posix_fallocate()` to avoid fragmentation and metadata lock contention. |
 | `--lsmio-pool` | `<int>` | `4` | Number of pre-allocated file descriptors maintained in the background `FilePool`. |
-| `--lsmo-always-flush` | None | `false` | Disables write batching and flushes data immediately so records are accessible immediately. |
+| `--lsmio-always-flush` | None | `false` | Disables write batching and flushes data immediately so records are accessible immediately. |
 | `--lsmio-batch-size` | `<int>` | `512` | Batch threshold for asynchronous batched write operations. |
 | `--lsmio-batch-bytes` | `<bytes>` | `32M` (33554432) | Maximum deferred batch byte capacity. |
 | `--lsmio-cache` | `<bytes>` | `0` | Capacity of LRU block/record cache in bytes (`0` disables cache). |
@@ -85,7 +85,7 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `--lsmio-bfilter` | None | `false` | Enables Bloom filter generation to filter out SSTables that do not contain a queried key. |
 | `--lsmio-wal` | None | `false` | Enables Write-Ahead Logging (WAL) for durability against process crash. |
 | `--lsmio-compress` | None | `false` | Enables data compression for stored records. |
-| `--lsmio-autotune` | None | `false` | Enables automatic parameter tuning based on filesystem block and stripe sizes. |
+| `--lsmio-autotune` | None | `true` | Enables automatic parameter tuning based on filesystem block and stripe sizes. |
 | `--lsmio-disable-agg-dir-structure` | None | `false` | Disables per-rank aggregation directory structure, placing SSTables in a shared directory. |
 | `--lsmio-max-key` | `<bytes>` | `256K` (262144) | Maximum allowable key length in bytes. |
 

@@ -23,147 +23,151 @@ resolve_variant() {
       ;;
     footer)
       BM_VARIANT_TOKENS="footer"
-      BM_VARIANT_FLAGS="--lsmio-footer-index"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index"
       ;;
     btree)
       BM_VARIANT_TOKENS="btree"
-      BM_VARIANT_FLAGS="--lsmio-memtable btree"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-memtable btree"
       ;;
     footer-btree)
       BM_VARIANT_TOKENS="footer-btree"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable btree"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree"
       ;;
     map)
       BM_VARIANT_TOKENS="map"
-      BM_VARIANT_FLAGS="--lsmio-memtable map"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-memtable map"
       ;;
     vsort)
       BM_VARIANT_TOKENS="vsort"
-      BM_VARIANT_FLAGS="--lsmio-memtable vector-sort"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-memtable vector-sort"
       ;;
     prealloc)
       BM_VARIANT_TOKENS="prealloc"
-      BM_VARIANT_FLAGS="--lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-prealloc"
       ;;
     footer-prealloc)
       BM_VARIANT_TOKENS="footer-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-prealloc"
       ;;
     manoff)
       BM_VARIANT_TOKENS="manoff"
-      BM_VARIANT_FLAGS="--lsmio-manual-offset"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-manual-offset"
       ;;
     footer-manoff)
       BM_VARIANT_TOKENS="footer-manoff"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-manual-offset"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset"
       ;;
     wbuf-512m)
       BM_VARIANT_TOKENS="wbuf-512m"
-      BM_VARIANT_FLAGS="--lsmio-wbuffer 536870912"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wbuffer 536870912"
       ;;
     wbuf-32m)
       BM_VARIANT_TOKENS="wbuf-32m"
-      BM_VARIANT_FLAGS="--lsmio-wbuffer 33554432"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wbuffer 33554432"
       ;;
     footer-wbuf-512m)
       BM_VARIANT_TOKENS="footer-wbuf-512m"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-wbuffer 536870912"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 536870912"
       ;;
     footer-btree-prealloc)
       BM_VARIANT_TOKENS="footer-btree-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable btree --lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-prealloc"
       ;;
     bfilter)
       BM_VARIANT_TOKENS="bfilter"
-      BM_VARIANT_FLAGS="--lsmio-bfilter"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-bfilter"
       ;;
     wal)
       BM_VARIANT_TOKENS="wal"
-      BM_VARIANT_FLAGS="--lsmio-wal"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wal"
       ;;
     mmap)
       BM_VARIANT_TOKENS="mmap"
-      BM_VARIANT_FLAGS="--lsmio-mmap"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-mmap"
       ;;
     pread)
       BM_VARIANT_TOKENS="pread"
-      BM_VARIANT_FLAGS="--lsmio-pread"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-pread"
       ;;
     footer-mmap)
       BM_VARIANT_TOKENS="footer-mmap"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-mmap"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-mmap"
       ;;
     footer-pread)
       BM_VARIANT_TOKENS="footer-pread"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-pread"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pread"
       ;;
     compress)
       BM_VARIANT_TOKENS="compress"
-      BM_VARIANT_FLAGS="--lsmio-compress"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-compress"
       ;;
     sync)
       BM_VARIANT_TOKENS="sync"
-      BM_VARIANT_FLAGS="--sync"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --sync"
       ;;
     pool-8)
       BM_VARIANT_TOKENS="pool-8"
-      BM_VARIANT_FLAGS="--lsmio-pool 8"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-pool 8"
       ;;
     flush)
       BM_VARIANT_TOKENS="flush"
-      BM_VARIANT_FLAGS="--lsmo-always-flush"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-always-flush"
       ;;
     batch-2048)
       BM_VARIANT_TOKENS="batch-2048"
-      BM_VARIANT_FLAGS="--lsmio-batch-size 2048"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-batch-size 2048"
       ;;
     manoff-prealloc)
       BM_VARIANT_TOKENS="manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-manual-offset --lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-manual-offset --lsmio-prealloc"
       ;;
     wbuf-512m-manoff-prealloc)
       BM_VARIANT_TOKENS="wbuf-512m-manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc"
       ;;
     footer-wbuf-32m)
       BM_VARIANT_TOKENS="footer-wbuf-32m"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-wbuffer 33554432"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 33554432"
       ;;
     footer-pool-8)
       BM_VARIANT_TOKENS="footer-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-pool 8"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pool 8"
       ;;
     footer-wbuf-512m-manoff-prealloc)
       BM_VARIANT_TOKENS="footer-wbuf-512m-manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc"
       ;;
     footer-vsort-manoff-prealloc)
       BM_VARIANT_TOKENS="footer-vsort-manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-prealloc"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-prealloc"
       ;;
     footer-vsort-manoff-mmap)
       BM_VARIANT_TOKENS="footer-vsort-manoff-mmap"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-mmap"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-mmap"
       ;;
     footer-vsort-manoff)
       BM_VARIANT_TOKENS="footer-vsort-manoff"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset"
       ;;
     footer-pool-8-mmap)
       BM_VARIANT_TOKENS="footer-pool-8-mmap"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-pool 8 --lsmio-mmap"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pool 8 --lsmio-mmap"
       ;;
     footer-manoff-pool-8-mmap)
       BM_VARIANT_TOKENS="footer-manoff-pool-8-mmap"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap"
       ;;
     footer-btree-manoff-mmap)
       BM_VARIANT_TOKENS="footer-btree-manoff-mmap"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap"
       ;;
     footer-manoff-pool-8)
       BM_VARIANT_TOKENS="footer-manoff-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8"
+      ;;
+    autotune)
+      BM_VARIANT_TOKENS="autotune"
+      BM_VARIANT_FLAGS="--lsmio-autotune"
       ;;
     *)
       echo "Error: Unknown variant '$1'." >&2
@@ -179,6 +183,7 @@ resolve_variant() {
       echo "  footer-wbuf-512m-manoff-prealloc, footer-vsort-manoff-prealloc" >&2
       echo "  footer-vsort-manoff-mmap, footer-vsort-manoff, footer-pool-8-mmap" >&2
       echo "  footer-manoff-pool-8-mmap, footer-btree-manoff-mmap, footer-manoff-pool-8" >&2
+      echo "  autotune" >&2
       return 1
       ;;
   esac

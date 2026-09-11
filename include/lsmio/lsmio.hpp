@@ -162,7 +162,7 @@ class LSMIOConfig {
     /// @brief Number of files to keep pre-allocated in the pool.
     int filePoolSize = 4;
     /// @brief Flag to enable auto-tuning of parameters based on the filesystem.
-    bool autoTuneParameters = false;
+    bool autoTuneParameters = true;
 
     // NativeStore specific settings
     /// @brief Memtable implementation to use (vector-no-sort, vector-sort, map, btree)

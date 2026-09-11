@@ -154,3 +154,103 @@ TEST_F(NativeStoreExtendedTest, LargeWriteFlush) {
 
     CleanDir(dbPath);
 }
+
+TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
+    std::string dbPath = "test_native_autotune_lustre";
+    CleanDir(dbPath);
+
+    // Explicitly set baseline parameters before tuning
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
+
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 8);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneLustre: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
+    std::string dbPath = "test_native_autotune_gpfs";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 6;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(GPFS_SUPER_MAGIC);
+
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 12);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneGPFS: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneLocalFsNoMutation) {
+    std::string dbPath = "test_native_autotune_local";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        // 0xEF53 is EXT4_SUPER_MAGIC
+        store.autoTuneParameters(0xEF53);
+
+        EXPECT_FALSE(gConfigLSMIO.footerIndex);
+        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneLocalFsNoMutation: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
+    std::string dbPath = "test_native_autotune_disabled";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = false;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
+
+        EXPECT_FALSE(gConfigLSMIO.footerIndex);
+        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneDisabledBypass: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}

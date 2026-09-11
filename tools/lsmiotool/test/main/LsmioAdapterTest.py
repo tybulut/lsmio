@@ -814,11 +814,13 @@ class LsmioAdapterTest(unittest.TestCase):
             f_bound_plugin.output_path.endswith("lsmio-rank-0-plugin-m-footer.db")
         )
         idx_plugin = f_bound_plugin.argv.index("--lsmio-plugin")
+        idx_no_autotune = f_bound_plugin.argv.index("--lsmio-no-autotune")
         idx_footer_plugin = f_bound_plugin.argv.index("--lsmio-footer-index")
-        self.assertEqual(idx_footer_plugin, idx_plugin + 1)
+        self.assertEqual(idx_no_autotune, idx_plugin + 1)
+        self.assertEqual(idx_footer_plugin, idx_plugin + 2)
 
     def testBindRankFlushVariantExactFlag(self) -> None:
-        """Tasks 3.2.3: Verify flush variant injects exact --lsmo-always-flush flag (INV-ARCH-4)."""
+        """Tasks 3.2.3: Verify flush variant injects exact --lsmio-always-flush flag (INV-ARCH-4)."""
         f_req = RunRequest(
             f_target="lsmio",
             f_scale="baseline",
@@ -837,9 +839,9 @@ class LsmioAdapterTest(unittest.TestCase):
             f_identity=f_id,
             f_layout=self.m_layout,
         )
-        # Critical assertion: --lsmo-always-flush, not --lsmio-
-        self.assertIn("--lsmo-always-flush", f_bound.argv)
-        self.assertNotIn("--lsmio-always-flush", f_bound.argv)
+        # Critical assertion: --lsmio-always-flush, not --lsmo-
+        self.assertIn("--lsmio-always-flush", f_bound.argv)
+        self.assertNotIn("--lsmo-always-flush", f_bound.argv)
         self.assertTrue(f_bound.output_path.endswith("lsmio-rank-0-native-m-flush.db"))
 
     def testBuildCommandWithVariant(self) -> None:
@@ -866,8 +868,8 @@ class LsmioAdapterTest(unittest.TestCase):
             f_block_size="8M",
             f_variant="flush",
         )
-        self.assertIn("--lsmo-always-flush", f_cmd_flush.argv)
-        self.assertNotIn("--lsmio-always-flush", f_cmd_flush.argv)
+        self.assertIn("--lsmio-always-flush", f_cmd_flush.argv)
+        self.assertNotIn("--lsmo-always-flush", f_cmd_flush.argv)
         self.assertEqual(f_cmd_flush.output_path, "/tmp/lsmio-rank-0-native-m-flush.db")
 
         # 3. Explicit output path preserves custom path while injecting variant flags

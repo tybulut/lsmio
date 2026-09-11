@@ -314,7 +314,7 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-ts", lsmio::gConfigLSMIO.transferSize,
                        "transfer size (default: 64K)");
 
-        app.add_flag("--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
+        app.add_flag("--lsmio-always-flush,--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
                      "disable batching and makes read available immediately after "
                      "write (default: no)");
         app.add_option("--lsmio-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
@@ -354,8 +354,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "append the Dense Index Footer to the SSTable (default: false)");
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
-        app.add_flag("--lsmio-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
-                     "enable filesystem auto-tuning (default: false)");
+        app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
+                     "enable filesystem auto-tuning (default: true)");
 
         app.parse(argc, argv);
 

@@ -55,14 +55,6 @@
 #include <vector>
 #include <stdexcept>
 
-#ifndef LUSTRE_SUPER_MAGIC
-#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
-#endif
-
-#ifndef GPFS_SUPER_MAGIC
-#define GPFS_SUPER_MAGIC 0x47504653
-#endif
-
 namespace lsmio {
 
 std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
@@ -116,6 +108,10 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
 }
 
 void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
+    if (!gConfigLSMIO.autoTuneParameters) {
+        return;
+    }
+
     std::string fs_type = "Unknown/Local";
     bool is_parallel_fs = false;
 
@@ -131,12 +127,34 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
               << std::hex << f_fs_magic << std::dec << ")";
 
     if (is_parallel_fs) {
-        // TODO(tybulut): Adjust writer thread pool size
+        LOG(WARNING) << "[NATIVE] autotune-triggered: parallel filesystem detected (" << fs_type << ")";
+
+        bool prev_footerIndex = gConfigLSMIO.footerIndex;
+        bool prev_manualOffset = gConfigLSMIO.manualOffset;
+        int prev_filePoolSize = gConfigLSMIO.filePoolSize;
+
+        gConfigLSMIO.footerIndex = true;
+        gConfigLSMIO.manualOffset = true;
+        gConfigLSMIO.filePoolSize = 2 * gConfigLSMIO.writeBufferNumber;
+
+        std::cout << "[LSMIO] Autotune: " << fs_type << " detected -> "
+                  << "footerIndex=true, manualOffset=true, filePoolSize="
+                  << gConfigLSMIO.filePoolSize << std::endl;
+
+        LOG(INFO) << "[NATIVE] autotune: footerIndex changed from "
+                  << (prev_footerIndex ? "true" : "false") << " to "
+                  << (gConfigLSMIO.footerIndex ? "true" : "false");
+        LOG(INFO) << "[NATIVE] autotune: manualOffset changed from "
+                  << (prev_manualOffset ? "true" : "false") << " to "
+                  << (gConfigLSMIO.manualOffset ? "true" : "false");
+        LOG(INFO) << "[NATIVE] autotune: filePoolSize changed from "
+                  << prev_filePoolSize << " to " << gConfigLSMIO.filePoolSize;
     }
 
     LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
               << (m_memtable_max_size_bytes / 1024 / 1024)
-              << "MB, writeBufferNumber=" << m_max_immutable_memtables;
+              << "MB, writeBufferNumber=" << m_max_immutable_memtables
+              << ", filePoolSize=" << gConfigLSMIO.filePoolSize;
 }
 
 LSMIOStoreNative::~LSMIOStoreNative() {
