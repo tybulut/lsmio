@@ -172,8 +172,7 @@ TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
 
         EXPECT_TRUE(gConfigLSMIO.footerIndex);
         EXPECT_TRUE(gConfigLSMIO.manualOffset);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 8);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneLustre: " << e.what();
     }
@@ -197,8 +196,7 @@ TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
 
         EXPECT_TRUE(gConfigLSMIO.footerIndex);
         EXPECT_TRUE(gConfigLSMIO.manualOffset);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 12);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneGPFS: " << e.what();
     }

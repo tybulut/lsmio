@@ -131,15 +131,12 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
 
         bool prev_footerIndex = gConfigLSMIO.footerIndex;
         bool prev_manualOffset = gConfigLSMIO.manualOffset;
-        int prev_filePoolSize = gConfigLSMIO.filePoolSize;
 
         gConfigLSMIO.footerIndex = true;
         gConfigLSMIO.manualOffset = true;
-        gConfigLSMIO.filePoolSize = 2 * gConfigLSMIO.writeBufferNumber;
 
         std::cout << "[LSMIO] Autotune: " << fs_type << " detected -> "
-                  << "footerIndex=true, manualOffset=true, filePoolSize="
-                  << gConfigLSMIO.filePoolSize << std::endl;
+                  << "footerIndex=true, manualOffset=true" << std::endl;
 
         LOG(INFO) << "[NATIVE] autotune: footerIndex changed from "
                   << (prev_footerIndex ? "true" : "false") << " to "
@@ -147,8 +144,6 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
         LOG(INFO) << "[NATIVE] autotune: manualOffset changed from "
                   << (prev_manualOffset ? "true" : "false") << " to "
                   << (gConfigLSMIO.manualOffset ? "true" : "false");
-        LOG(INFO) << "[NATIVE] autotune: filePoolSize changed from "
-                  << prev_filePoolSize << " to " << gConfigLSMIO.filePoolSize;
     }
 
     LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
