@@ -172,7 +172,8 @@ TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
 
         EXPECT_TRUE(gConfigLSMIO.footerIndex);
         EXPECT_TRUE(gConfigLSMIO.manualOffset);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 8);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneLustre: " << e.what();
     }
@@ -196,7 +197,8 @@ TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
 
         EXPECT_TRUE(gConfigLSMIO.footerIndex);
         EXPECT_TRUE(gConfigLSMIO.manualOffset);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 12);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneGPFS: " << e.what();
     }
@@ -248,6 +250,50 @@ TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
         EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneDisabledBypass: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
+    std::string dbPath = "test_native_readonly_suppress";
+    CleanDir(dbPath);
+
+    int writer_sst_count = 0;
+    // First create a DB and write a key, then close
+    {
+        LSMIOStoreNative writer(dbPath, true, false);
+        std::string key = "key1";
+        std::string val = "val1";
+        EXPECT_TRUE(writer.put(key, val));
+        writer.close();
+
+        for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+            if (entry.path().extension() == ".sst") {
+                writer_sst_count++;
+            }
+        }
+    }
+
+    // Now open read-only
+    {
+        LSMIOStoreNative reader(dbPath, false, true);
+        std::string val;
+        EXPECT_TRUE(reader.get("key1", &val));
+        EXPECT_EQ(val, "val1");
+
+        // Verify that mutations are rejected in read-only mode
+        EXPECT_FALSE(reader.put("key2", "val2"));
+
+        // Count .sst files: reader must not have pre-allocated any new pool files
+        int reader_sst_count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+            if (entry.path().extension() == ".sst") {
+                reader_sst_count++;
+            }
+        }
+        EXPECT_EQ(reader_sst_count, writer_sst_count);
+        reader.close();
     }
 
     CleanDir(dbPath);

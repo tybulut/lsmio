@@ -519,7 +519,7 @@ The LSMIO toolchain maintains an authoritative catalog of 37 non-empty variants,
 | 34 | `footer-manoff-pool-8-mmap` | `footer-manoff-pool-8-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap` | Dense Index Footer, manual offsets, 8-file pre-allocation pool, memory-mapped reads. |
 | 35 | `footer-btree-manoff-mmap` | `footer-btree-manoff-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, B-tree memtable, manual offsets, memory-mapped reads. |
 | 36 | `footer-manoff-pool-8` | `footer-manoff-pool-8` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8` | Dense Index Footer, manual offsets, 8-file pre-allocation pool. |
-| 37 | `autotune` | `autotune` | `--lsmio-autotune` | Adaptive filesystem auto-tuning (matches `footer-manoff` on Lustre/GPFS, `base` on local FS). |
+| 37 | `autotune` | `autotune` | `--lsmio-autotune` | Adaptive filesystem auto-tuning (matches `footer-manoff-pool-8` on Lustre/GPFS, `base` on local FS). |
 
 > [!NOTE]
 > In addition to the 37 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, auto-tuning enabled by default, and no extra flags).
