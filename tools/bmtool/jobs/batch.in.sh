@@ -24,9 +24,9 @@ else
   exit
 fi
 
-for rf in 16 4
+for rf in 4 16
 do
-  for bs in 8M 1M 64K
+  for bs in 1M 64K 8M
   do
 
     if [ "$BM_TYPE" = "lmp" ]; then
