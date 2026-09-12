@@ -2788,3 +2788,145 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertIn(
             "Point 00-tasks-1 Job ID: 123456.isambard-pbs.epcc.ed.ac.uk", f_lines
         )
+
+    def testMultiVariantSequentialExecution(self) -> None:
+        """Task 2.6.1: Asserts orchestrator executes multiple variants sequentially and populates self.views."""
+        f_fake_runner = FakeSchedulerCommandRunner()
+        f_reporter = RunReporter()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_fake_runner,
+            f_poll_interval=0.01,
+            f_reporter=f_reporter,
+        )
+
+        f_submitted_variants = []
+
+        def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
+            if f_orch.last_evidence_store and f_orch.last_plan:
+                f_submitted_variants.append(f_orch.last_plan.request.variant)
+                self._mockWritePointResults(
+                    f_orch.last_evidence_store,
+                    f_orch.last_plan.scale_points[0],
+                    f_orch.last_plan,
+                    f_ordinal=0,
+                )
+
+        f_fake_runner.m_on_submit_callback = on_submit
+        f_fake_runner.m_submit_job_ids = ["9001", "9002"]
+
+        f_req = RunRequest("lsmio", "baseline", f_variants=["footer", "manoff"], f_archive=False)
+        f_view = f_orch.execute(
+            f_req,
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        self.assertEqual(f_submitted_variants, ["footer", "manoff"])
+        self.assertEqual(len(f_orch.views), 2)
+        self.assertEqual(f_orch.exitCode, 0)
+
+    def testResumptionSkipsExistingArchive(self) -> None:
+        """Task 2.6.2 (INV-MULTI-3): Asserts variant is skipped if archive directory exists under --resume."""
+        import tempfile
+        from lsmiotool.lib.archive import ArchiveEngine
+
+        with tempfile.TemporaryDirectory() as f_tmpdir:
+            f_fake_runner = FakeSchedulerCommandRunner()
+            f_reporter = RunReporter()
+            f_orch = RunOrchestrator(
+                f_profile_resolver=self.m_registry,
+                f_command_runner=f_fake_runner,
+                f_poll_interval=0.01,
+                f_reporter=f_reporter,
+            )
+
+            # Pre-create archive target for 'footer'
+            f_arm_id = ArchiveEngine.resolveArmId("NATIVE-M", "footer")
+            f_target_dir = os.path.join(f_tmpdir, f"outputs-{f_arm_id}")
+            os.makedirs(f_target_dir, exist_ok=True)
+
+            f_req = RunRequest(
+                "lsmio",
+                "baseline",
+                f_variants=["footer"],
+                f_resume=True,
+                f_out_dir=f_tmpdir,
+            )
+
+            f_view = f_orch.execute(
+                f_req,
+                f_site=self.m_viking_profile,
+                f_worker_executable=self.m_worker_path,
+            )
+
+            # 0 jobs submitted because variant was skipped via resumption
+            self.assertEqual(len(f_fake_runner.m_submit_calls), 0)
+            self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+            self.assertEqual(f_orch.exitCode, 0)
+            f_resume_logs = [l for l in f_reporter.lines if "[RESUME] Skipping variant 'footer'" in l]
+            self.assertTrue(len(f_resume_logs) > 0)
+
+    def testAutoArchiveMultiVariant(self) -> None:
+        """Task 2.6.3: Asserts ArchiveEngine.executeArchive is invoked after variant execution when auto-archive is active."""
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as f_tmpdir:
+            f_fake_runner = FakeSchedulerCommandRunner()
+            f_reporter = RunReporter()
+            f_orch = RunOrchestrator(
+                f_profile_resolver=self.m_registry,
+                f_command_runner=f_fake_runner,
+                f_poll_interval=0.01,
+                f_reporter=f_reporter,
+            )
+
+            def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
+                if f_orch.last_evidence_store and f_orch.last_plan:
+                    self._mockWritePointResults(
+                        f_orch.last_evidence_store,
+                        f_orch.last_plan.scale_points[0],
+                        f_orch.last_plan,
+                        f_ordinal=0,
+                    )
+
+            f_fake_runner.m_on_submit_callback = on_submit
+            f_fake_runner.m_submit_job_ids = ["9101"]
+
+            with patch("lsmiotool.lib.archive.ArchiveEngine.executeArchive") as f_mock_archive:
+                f_req = RunRequest("lsmio", "baseline", f_variants=["footer", "manoff"], f_out_dir=f_tmpdir)
+                f_view = f_orch.execute(
+                    f_req,
+                    f_site=self.m_viking_profile,
+                    f_worker_executable=self.m_worker_path,
+                )
+                self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+                self.assertEqual(f_mock_archive.call_count, 2)
+
+    def testFailFastOnVariantError(self) -> None:
+        """Task 2.6.4: Asserts multi-variant execution halts immediately upon first variant failure without running subsequent variants."""
+        f_fake_runner = FakeSchedulerCommandRunner()
+        f_reporter = RunReporter()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_fake_runner,
+            f_poll_interval=0.01,
+            f_reporter=f_reporter,
+        )
+
+        f_fake_runner.m_submit_error = "Slurm sbatch rejection"
+
+        f_req = RunRequest("lsmio", "baseline", f_variants=["footer", "manoff"])
+        f_view = f_orch.execute(
+            f_req,
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+
+        self.assertEqual(f_view.state, OverallRunState.FAILED)
+        self.assertEqual(len(f_fake_runner.m_submit_calls), 1)
+        self.assertEqual(len(f_orch.views), 1)
+        self.assertNotEqual(f_orch.exitCode, 0)
+

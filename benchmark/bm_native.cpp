@@ -64,7 +64,7 @@ class BMNative : public BMBase {
             _lc = nullptr;
         }
         _lc = new lsmio::LSMIOStoreNative(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false, true);
         return 0;
     }
 

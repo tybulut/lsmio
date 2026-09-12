@@ -185,7 +185,7 @@ class CompareArchiveMainTest(TestCase):
             self.assertTrue(os.path.exists(report_path))
 
             expected_chart = os.path.join(
-                out_dir, "compare-archive-archive_parse_on_demand-read-4-1M.png"
+                out_dir, "compare-variants-archive_parse_on_demand-read-4-1M.png"
             )
             self.assertTrue(os.path.exists(expected_chart))
             self.assertGreater(os.path.getsize(expected_chart), 0)
@@ -223,7 +223,7 @@ class CompareArchiveMainTest(TestCase):
                     any("Failed to generate report for" in msg and "corrupted" in msg for msg in warning_messages)
                 )
                 expected_chart = os.path.join(
-                    out_dir, "compare-archive-archive_corrupted-read-4-1M.png"
+                    out_dir, "compare-variants-archive_corrupted-read-4-1M.png"
                 )
                 self.assertTrue(os.path.exists(expected_chart))
 
@@ -290,8 +290,8 @@ class CompareArchiveMainTest(TestCase):
         ret = cm.run()
         self.assertEqual(ret, 0)
 
-        read_chart = os.path.join(out_dir, "compare-archive-archive_both-read-4-1M.png")
-        write_chart = os.path.join(out_dir, "compare-archive-archive_both-write-4-1M.png")
+        read_chart = os.path.join(out_dir, "compare-variants-archive_both-read-4-1M.png")
+        write_chart = os.path.join(out_dir, "compare-variants-archive_both-write-4-1M.png")
         self.assertTrue(os.path.exists(read_chart), "Read chart must exist")
         self.assertTrue(os.path.exists(write_chart), "Write chart must exist")
         self.assertGreater(os.path.getsize(read_chart), 0)
@@ -331,7 +331,7 @@ class CompareArchiveMainTest(TestCase):
         ]
         for op, stripes, bs in permutations:
             chart = os.path.join(
-                out_dir, f"compare-archive-archive_all-{op}-{stripes}-{bs}.png"
+                out_dir, f"compare-variants-archive_all-{op}-{stripes}-{bs}.png"
             )
             self.assertTrue(os.path.exists(chart), f"Chart {chart} must exist")
             self.assertGreater(os.path.getsize(chart), 0)
@@ -353,8 +353,8 @@ class CompareArchiveMainTest(TestCase):
         ret = cm.run()
         self.assertEqual(ret, 0)
 
-        read_png = os.path.join(out_dir, "compare-archive-lsmio-2026-08-04-read-4-1M.png")
-        write_png = os.path.join(out_dir, "compare-archive-lsmio-2026-08-04-write-4-1M.png")
+        read_png = os.path.join(out_dir, "compare-variants-lsmio-2026-08-04-read-4-1M.png")
+        write_png = os.path.join(out_dir, "compare-variants-lsmio-2026-08-04-write-4-1M.png")
         self.assertTrue(os.path.exists(read_png), f"{read_png} must exist")
         self.assertTrue(os.path.exists(write_png), f"{write_png} must exist")
         self.assertGreater(os.path.getsize(read_png), 0)
@@ -383,7 +383,7 @@ class CompareArchiveMainTest(TestCase):
         self.assertEqual(ret, 0)
 
         expected_chart = os.path.join(
-            out_dir, "compare-archive-archive_poly-read-4-1M.png"
+            out_dir, "compare-variants-archive_poly-read-4-1M.png"
         )
         self.assertTrue(os.path.exists(expected_chart))
         self.assertGreater(os.path.getsize(expected_chart), 0)

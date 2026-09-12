@@ -751,10 +751,16 @@ class CompareCliParserTest(unittest.TestCase):
 
     def testCompareHelpTextSynchronization(self) -> None:
         """Asserts that COMPARE_HELP_TEXT and LSMIOTOOL_HELP are defined and synchronized."""
-        self.assertIn("lsmiotool compare <nodes|variants> <folder> ...", COMPARE_HELP_TEXT)
+        self.assertIn(
+            "lsmiotool compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]",
+            COMPARE_HELP_TEXT,
+        )
         self.assertIn("nodes <folder> <read|write>", COMPARE_HELP_TEXT)
         self.assertIn("variants <archive_folder>", COMPARE_HELP_TEXT)
-        self.assertIn("compare <nodes|variants> <folder> ...", LSMIOTOOL_HELP)
+        self.assertIn(
+            "compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]",
+            LSMIOTOOL_HELP,
+        )
         self.assertEqual(COMPARE_ARCHIVE_HELP_TEXT, COMPARE_HELP_TEXT)
         self.assertIs(CompareArchiveCliParseError, CompareCliParseError)
 

@@ -41,6 +41,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from lsmiotool.lib.cli import (
+    COMPARE_HELP_TEXT,
     LSMIOTOOL_HELP,
     RUN_HELP_TEXT,
     PackageValidationError,
@@ -710,7 +711,7 @@ print("LAZY_IMPORT_OK")
                 f_out = mock_stdout.getvalue()
                 self.assertIn("How to run", f_out)
                 self.assertIn("common cmds:", f_out)
-                self.assertIn("run <ior|lsmio|lmp> <local|bake|small|large>", f_out)
+                self.assertIn("run <ior|lsmio|lmp> <local|bake|small|large|baseline>", f_out)
 
         # 2. -h
         with patch.object(sys, "argv", [f_exec_str, "-h"]):
@@ -719,6 +720,30 @@ print("LAZY_IMPORT_OK")
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 0)
                 self.assertIn("How to run", mock_stdout.getvalue())
+
+        # 2b. --help <cmd> dispatch
+        with patch.object(sys, "argv", [f_exec_str, "--help", "compare"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertEqual(mock_stdout.getvalue().rstrip(), COMPARE_HELP_TEXT.rstrip())
+
+        # 2c. -h <cmd> dispatch
+        with patch.object(sys, "argv", [f_exec_str, "-h", "compare"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertEqual(mock_stdout.getvalue().rstrip(), COMPARE_HELP_TEXT.rstrip())
+
+        # 2d. --help <cmd> for run, archive, parse
+        with patch.object(sys, "argv", [f_exec_str, "--help", "run"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertEqual(mock_stdout.getvalue().rstrip(), RUN_HELP_TEXT.rstrip())
 
         # 3. --version
         with patch.object(sys, "argv", [f_exec_str, "--version"]):
@@ -904,7 +929,11 @@ print("LAZY_IMPORT_OK")
         self.assertNotIn("f_home", det_kw)
 
     def _readReadmeContent(self) -> str:
-        """Helper to read README.md content from repository root."""
+        """Helper to read documentation content from tools subsystem or repository root."""
+        f_tools_readme = Path(__file__).resolve().parents[3] / "README.md"
+        if f_tools_readme.is_file():
+            with open(f_tools_readme, "r", encoding="utf-8") as f_f:
+                return f_f.read()
         f_readme_path = Path(__file__).resolve().parents[4] / "README.md"
         self.assertTrue(
             f_readme_path.is_file(), f"README.md not found at {f_readme_path}"
@@ -1132,7 +1161,7 @@ print("LAZY_IMPORT_OK")
         self.assertIn("SB_EMAIL", f_readme)
 
         # 5. PBS handle contract and exact commands
-        self.assertIn("^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_readme)
+        self.assertIn(r"^[0-9]+(?:\.[A-Za-z0-9._-]+)?$", f_readme)
         self.assertIn("123456.isambard-pbs", f_readme)
         self.assertIn("qstat -F json <id>", f_readme)
         self.assertIn("qstat -F json -x <id>", f_readme)

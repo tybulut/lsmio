@@ -155,57 +155,68 @@ class VariantCatalogue:
         "manager-",
     )
 
-    # Exhaustive mapping of all 27 non-empty variant keys to (tokens, engine_flags)
+    # Exhaustive mapping of all 37 non-empty variant keys to (tokens, engine_flags)
     _VARIANT_SPECS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
-        "footer": ("footer", ("--lsmio-footer-index",)),
-        "btree": ("btree", ("--lsmio-memtable", "btree")),
+        "footer": ("footer", ("--lsmio-no-autotune", "--lsmio-footer-index")),
+        "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
         "footer-btree": (
             "footer-btree",
-            ("--lsmio-footer-index", "--lsmio-memtable", "btree"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-memtable", "btree"),
         ),
-        "map": ("map", ("--lsmio-memtable", "map")),
-        "vsort": ("vsort", ("--lsmio-memtable", "vector-sort")),
-        "prealloc": ("prealloc", ("--lsmio-prealloc",)),
+        "map": ("map", ("--lsmio-no-autotune", "--lsmio-memtable", "map")),
+        "vsort": ("vsort", ("--lsmio-no-autotune", "--lsmio-memtable", "vector-sort")),
+        "prealloc": ("prealloc", ("--lsmio-no-autotune", "--lsmio-prealloc")),
         "footer-prealloc": (
             "footer-prealloc",
-            ("--lsmio-footer-index", "--lsmio-prealloc"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-prealloc"),
         ),
-        "manoff": ("manoff", ("--lsmio-manual-offset",)),
+        "manoff": ("manoff", ("--lsmio-no-autotune", "--lsmio-manual-offset")),
         "footer-manoff": (
             "footer-manoff",
-            ("--lsmio-footer-index", "--lsmio-manual-offset"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-manual-offset"),
         ),
-        "wbuf-512m": ("wbuf-512m", ("--lsmio-wbuffer", "536870912")),
-        "wbuf-32m": ("wbuf-32m", ("--lsmio-wbuffer", "33554432")),
+        "wbuf-512m": ("wbuf-512m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912")),
+        "wbuf-32m": ("wbuf-32m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432")),
         "footer-wbuf-512m": (
             "footer-wbuf-512m",
-            ("--lsmio-footer-index", "--lsmio-wbuffer", "536870912"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "536870912"),
         ),
         "footer-btree-prealloc": (
             "footer-btree-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-footer-index",
                 "--lsmio-memtable",
                 "btree",
                 "--lsmio-prealloc",
             ),
         ),
-        "bfilter": ("bfilter", ("--lsmio-bfilter",)),
-        "wal": ("wal", ("--lsmio-wal",)),
-        "mmap": ("mmap", ("--lsmio-mmap",)),
-        "compress": ("compress", ("--lsmio-compress",)),
-        "sync": ("sync", ("--sync",)),
-        "pool-8": ("pool-8", ("--lsmio-pool", "8")),
-        # INV-ARCH-4: exact CLI11 spelling --lsmo-always-flush
-        "flush": ("flush", ("--lsmo-always-flush",)),
-        "batch-2048": ("batch-2048", ("--lsmio-batch-size", "2048")),
+        "bfilter": ("bfilter", ("--lsmio-no-autotune", "--lsmio-bfilter")),
+        "wal": ("wal", ("--lsmio-no-autotune", "--lsmio-wal")),
+        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap")),
+        "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
+        "footer-mmap": (
+            "footer-mmap",
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap"),
+        ),
+        "footer-pread": (
+            "footer-pread",
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pread"),
+        ),
+        "compress": ("compress", ("--lsmio-no-autotune", "--lsmio-compress")),
+        "sync": ("sync", ("--lsmio-no-autotune", "--sync")),
+        "pool-8": ("pool-8", ("--lsmio-no-autotune", "--lsmio-pool", "8")),
+        # INV-ARCH-4: exact CLI11 spelling --lsmio-always-flush
+        "flush": ("flush", ("--lsmio-no-autotune", "--lsmio-always-flush")),
+        "batch-2048": ("batch-2048", ("--lsmio-no-autotune", "--lsmio-batch-size", "2048")),
         "manoff-prealloc": (
             "manoff-prealloc",
-            ("--lsmio-manual-offset", "--lsmio-prealloc"),
+            ("--lsmio-no-autotune", "--lsmio-manual-offset", "--lsmio-prealloc"),
         ),
         "wbuf-512m-manoff-prealloc": (
             "wbuf-512m-manoff-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-wbuffer",
                 "536870912",
                 "--lsmio-manual-offset",
@@ -214,15 +225,16 @@ class VariantCatalogue:
         ),
         "footer-wbuf-32m": (
             "footer-wbuf-32m",
-            ("--lsmio-footer-index", "--lsmio-wbuffer", "33554432"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "33554432"),
         ),
         "footer-pool-8": (
             "footer-pool-8",
-            ("--lsmio-footer-index", "--lsmio-pool", "8"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pool", "8"),
         ),
         "footer-wbuf-512m-manoff-prealloc": (
             "footer-wbuf-512m-manoff-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-footer-index",
                 "--lsmio-wbuffer",
                 "536870912",
@@ -233,12 +245,74 @@ class VariantCatalogue:
         "footer-vsort-manoff-prealloc": (
             "footer-vsort-manoff-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-footer-index",
                 "--lsmio-memtable",
                 "vector-sort",
                 "--lsmio-manual-offset",
                 "--lsmio-prealloc",
             ),
+        ),
+        "footer-vsort-manoff-mmap": (
+            "footer-vsort-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-vsort-manoff": (
+            "footer-vsort-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pool-8-mmap": (
+            "footer-pool-8-mmap",
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pool", "8", "--lsmio-mmap"),
+        ),
+        "footer-manoff-pool-8-mmap": (
+            "footer-manoff-pool-8-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-btree-manoff-mmap": (
+            "footer-btree-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-manoff-pool-8": (
+            "footer-manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "autotune": (
+            "autotune",
+            ("--lsmio-autotune",),
         ),
     }
 
@@ -263,7 +337,7 @@ class VariantCatalogue:
 
     @classmethod
     def supportedVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 27 supported non-empty variant keys in canonical order."""
+        """Returns tuple of all 37 supported non-empty variant keys in canonical order."""
         return tuple(cls._VARIANT_SPECS.keys())
 
     @classmethod
@@ -272,13 +346,18 @@ class VariantCatalogue:
         return cls.supportedVariants()
 
     @classmethod
+    def canonicalVariants(cls) -> Tuple[str, ...]:
+        """Returns tuple of all 38 matrix variant keys in canonical order ('default' followed by 37 variants)."""
+        return ("default",) + cls.supportedVariants()
+
+    @classmethod
     def resolve(cls, f_key: Optional[str] = None) -> VariantRecord:
         """Resolves variant key into a canonical VariantRecord.
 
         Handles:
         - None, "", "base", "default" -> empty variant (base run).
         - Strips backend prefix.
-        - Canonical lookup against 27 discrete non-empty keys.
+        - Canonical lookup against 37 discrete non-empty keys.
         - Raises UnknownVariantError on unrecognized keys.
         """
         if f_key is None:

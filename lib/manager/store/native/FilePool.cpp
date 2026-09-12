@@ -49,7 +49,9 @@ FilePool::FilePool(const std::string& f_directory, const std::string& f_prefix,
       m_pool_size(f_pool_size),
       m_next_id(f_start_id),
       m_pre_allocation_size(f_pre_allocation_size) {
-    m_worker = std::thread(&FilePool::replenish, this);
+    if (m_pool_size > 0) {
+        m_worker = std::thread(&FilePool::replenish, this);
+    }
 }
 
 FilePool::~FilePool() {
@@ -65,6 +67,16 @@ FilePool::~FilePool() {
 
 std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
     std::unique_lock<std::mutex> lock(m_mutex);
+
+    if (m_pool_size == 0) {
+        uint64_t id = m_next_id.fetch_add(1);
+        std::ostringstream oss;
+        oss << m_prefix << std::setw(6) << std::setfill('0') << id << m_suffix;
+        std::string full_path = (std::filesystem::path(m_directory) / oss.str()).string();
+        auto ofs = std::make_unique<std::ofstream>(full_path, std::ios::binary | std::ios::out);
+        return {full_path, std::move(ofs)};
+    }
+
     m_cv_wait.wait(lock, [this] { return !m_pool.empty() || m_shutdown; });
 
     if (m_shutdown && m_pool.empty()) {

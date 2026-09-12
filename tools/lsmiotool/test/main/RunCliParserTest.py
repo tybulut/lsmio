@@ -28,6 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+from pathlib import Path
 import unittest
 
 from lsmiotool.lib.cli import (
@@ -429,4 +430,80 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(f_req_lmp.scale, "baseline")
         self.assertIsNone(f_req_lmp.variant)
         self.assertEqual(f_req_lmp.setup, "LSMIO")
+
+    def testBaselineScaleWithCommaSeparatedVariants(self) -> None:
+        """Task 2.5.1: Asserts comma-separated variants are parsed into variants tuple and auto-archive is enabled."""
+        f_req = parseRunArguments(["lsmio", "baseline", "footer,manoff,autotune"])
+        self.assertEqual(f_req.variants, ("footer", "manoff", "autotune"))
+        self.assertEqual(f_req.variant, "footer")
+        self.assertIsNone(f_req.archive)
+        self.assertTrue(f_req.effective_archive)
+        self.assertFalse(f_req.resume)
+
+    def testBaselineScaleWithAllKeyword(self) -> None:
+        """Task 2.5.2: Asserts 'all' keyword expands to all 38 canonical matrix variants with auto-archive enabled."""
+        f_req = parseRunArguments(["lsmio", "baseline", "all"])
+        self.assertEqual(len(f_req.variants), 38)
+        self.assertIsNone(f_req.variants[0])  # default/base variant
+        self.assertEqual(f_req.variants[1], "footer")
+        self.assertEqual(f_req.variants[-1], "autotune")
+        self.assertIsNone(f_req.variant)
+        self.assertTrue(f_req.effective_archive)
+
+    def testArchiveOptionFlags(self) -> None:
+        """Task 2.5.3: Asserts --archive and --no-archive flags, conflict detection, and duplicate detection."""
+        f_req_arch = parseRunArguments(["lsmio", "baseline", "footer", "--archive"])
+        self.assertTrue(f_req_arch.archive)
+        self.assertTrue(f_req_arch.effective_archive)
+
+        f_req_no_arch = parseRunArguments(["lsmio", "baseline", "footer,manoff", "--no-archive"])
+        self.assertFalse(f_req_no_arch.archive)
+        self.assertFalse(f_req_no_arch.effective_archive)
+
+        with self.assertRaises(RunCliParseError) as f_ctx_conflict:
+            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--no-archive"])
+        self.assertIn("Cannot specify both '--archive' and '--no-archive'", str(f_ctx_conflict.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_dup:
+            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--archive"])
+        self.assertIn("Duplicate '--archive' option specified", str(f_ctx_dup.exception))
+
+    def testResumeOptionFlag(self) -> None:
+        """Task 2.5.4: Asserts --resume flag sets resume=True and rejects duplicates."""
+        f_req = parseRunArguments(["lsmio", "baseline", "footer", "--resume"])
+        self.assertTrue(f_req.resume)
+
+        with self.assertRaises(RunCliParseError) as f_ctx_dup:
+            parseRunArguments(["lsmio", "baseline", "footer", "--resume", "--resume"])
+        self.assertIn("Duplicate '--resume' option specified", str(f_ctx_dup.exception))
+
+    def testOutDirOptionFlags(self) -> None:
+        """Task 2.5.5: Asserts --out-dir, --output-dir, and --dest aliases populate out_dir."""
+        f_expected = str(Path("/tmp/my-lsmio-archive").resolve())
+        for f_flag in ("--out-dir", "--output-dir", "--dest"):
+            f_req = parseRunArguments(["lsmio", "baseline", "footer", f_flag, "/tmp/my-lsmio-archive"])
+            self.assertEqual(f_req.out_dir, f_expected)
+
+        with self.assertRaises(RunCliParseError) as f_ctx_missing:
+            parseRunArguments(["lsmio", "baseline", "footer", "--out-dir"])
+        self.assertIn("Missing value after '--out-dir' option", str(f_ctx_missing.exception))
+
+    def testOutDirEqualsSyntaxRejected(self) -> None:
+        """Task 2.5.6: Asserts syntax with '=' delimiter is rejected for all destination and archive flags."""
+        with self.assertRaises(RunCliParseError) as f_ctx_out:
+            parseRunArguments(["lsmio", "baseline", "footer", "--out-dir=/tmp/test"])
+        self.assertIn("is not supported", str(f_ctx_out.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_dest:
+            parseRunArguments(["lsmio", "baseline", "footer", "--dest=/tmp/test"])
+        self.assertIn("is not supported", str(f_ctx_dest.exception))
+
+    def testRunHelpDisplaysMultiVariantAndOptions(self) -> None:
+        """Task 2.5.7: Asserts --help text contains multi-variant and options documentation."""
+        from lsmiotool.lib.cli import LSMIOTOOL_HELP, RUN_HELP_TEXT
+        self.assertIn("--archive", RUN_HELP_TEXT)
+        self.assertIn("--no-archive", RUN_HELP_TEXT)
+        self.assertIn("--resume", RUN_HELP_TEXT)
+        self.assertIn("--out-dir", RUN_HELP_TEXT)
+
 

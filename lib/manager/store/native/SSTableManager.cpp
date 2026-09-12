@@ -28,7 +28,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -204,6 +210,57 @@ bool tryLoadFooterIndex(std::ifstream& f_file, uint64_t& f_file_size,
 
 namespace lsmio {
 
+SSTableManager::IndexNode::IndexNode(L0Index&& idx) : index(std::move(idx)) {}
+
+SSTableManager::IndexNode::~IndexNode() {
+    closeReader();
+}
+
+void SSTableManager::IndexNode::initReader(bool f_enable_mmap, bool f_enable_pread) {
+    if (f_enable_mmap) {
+        int fd = ::open(index.path.c_str(), O_RDONLY);
+        if (fd >= 0) {
+            struct stat st;
+            bool stat_ok = (::fstat(fd, &st) == 0);
+            if (stat_ok && st.st_size > 0) {
+                void* ptr = ::mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
+                if (ptr != MAP_FAILED) {
+                    m_mmap_ptr = static_cast<char*>(ptr);
+                    m_mmap_len = static_cast<size_t>(st.st_size);
+                    ::posix_madvise(m_mmap_ptr, m_mmap_len, POSIX_MADV_WILLNEED);
+                    if (!f_enable_pread) {
+                        ::close(fd);
+                        fd = -1;
+                    } else {
+                        m_read_fd = fd;
+                        fd = -1;
+                    }
+                }
+            }
+            if (fd >= 0) {
+                if (f_enable_pread && stat_ok && st.st_size > 0) {
+                    m_read_fd = fd;
+                } else {
+                    ::close(fd);
+                }
+            }
+        }
+    } else if (f_enable_pread) {
+        m_read_fd = ::open(index.path.c_str(), O_RDONLY);
+    }
+}
+
+void SSTableManager::IndexNode::closeReader() noexcept {
+    if (m_mmap_ptr != nullptr && m_mmap_ptr != MAP_FAILED) {
+        ::munmap(m_mmap_ptr, m_mmap_len);
+        m_mmap_ptr = nullptr;
+        m_mmap_len = 0;
+    }
+    if (m_read_fd >= 0) {
+        ::close(m_read_fd);
+        m_read_fd = -1;
+    }
+}
 
 SSTableManager::SSTableManager(const std::string& f_db_path, size_t f_file_pool_size, size_t f_pre_alloc_bytes)
     : m_db_path(f_db_path) {
@@ -323,6 +380,7 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
     dedupOffsets(new_index.offsets);
 
     IndexNode* new_node = new IndexNode(std::move(new_index));
+    new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
     IndexNode* old_head = m_head.load(std::memory_order_relaxed);
     do {
         new_node->next = old_head;
@@ -344,7 +402,7 @@ bool SSTableManager::get(const std::string& f_key, std::string& f_value) {
             std::lower_bound(offsets.begin(), offsets.end(), f_key, OffsetEntryKeyLess{});
 
         if (offset_it != offsets.end() && offset_it->first == f_key) {
-            if (readValueAt(curr->index.path, offset_it->second, f_key, f_value)) {
+            if (readValueAt(*curr, offset_it->second, f_key, f_value)) {
                 return true;
             }
         }
@@ -372,7 +430,7 @@ bool SSTableManager::scan(const std::string& f_prefix, std::map<std::string, std
             if (f_results.find(key) == f_results.end() &&
                 f_deleted_keys.find(key) == f_deleted_keys.end()) {
                 std::string val_from_disk;
-                if (readValueAt(curr->index.path, offset, key, val_from_disk)) {
+                if (readValueAt(*curr, offset, key, val_from_disk)) {
                     if (val_from_disk == MEMTABLE_TOMBSTONE) {
                         f_deleted_keys.insert(key);
                     } else {
@@ -385,6 +443,76 @@ bool SSTableManager::scan(const std::string& f_prefix, std::map<std::string, std
         curr = curr->next;
     }
     return found_any;
+}
+
+bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
+                                 const std::string& f_key, std::string& f_out_value) {
+    if (f_node.m_mmap_ptr != nullptr) {
+        if (f_offset > f_node.m_mmap_len || f_node.m_mmap_len - f_offset < 8) {
+            return false;
+        }
+
+        uint32_t key_len = unpackLe32(f_node.m_mmap_ptr + f_offset);
+        if (key_len != f_key.size() || key_len > READ_MAX_KEY_LEN ||
+            f_node.m_mmap_len - (f_offset + 8) < key_len) {
+            return false;
+        }
+
+        if (std::memcmp(f_node.m_mmap_ptr + f_offset + 4, f_key.data(), key_len) != 0) {
+            return false;
+        }
+
+        uint32_t val_len = unpackLe32(f_node.m_mmap_ptr + f_offset + 4 + key_len);
+        if (val_len > READ_MAX_VAL_LEN ||
+            f_node.m_mmap_len - (f_offset + 8 + key_len) < val_len) {
+            return false;
+        }
+
+        f_out_value.assign(f_node.m_mmap_ptr + f_offset + 8 + key_len, val_len);
+        return true;
+    } else if (f_node.m_read_fd >= 0) {
+        constexpr size_t PREAD_SPECULATIVE_BUF_SIZE = 64 * 1024;
+        char stack_buf[PREAD_SPECULATIVE_BUF_SIZE];
+        ssize_t bytes_read = ::pread(f_node.m_read_fd, stack_buf, sizeof(stack_buf), f_offset);
+        if (bytes_read < static_cast<ssize_t>(8 + f_key.size())) {
+            return false;
+        }
+
+        uint32_t key_len = unpackLe32(stack_buf);
+        if (key_len != f_key.size() || key_len > READ_MAX_KEY_LEN) {
+            return false;
+        }
+
+        if (std::memcmp(stack_buf + 4, f_key.data(), key_len) != 0) {
+            return false;
+        }
+
+        uint32_t val_len = unpackLe32(stack_buf + 4 + key_len);
+        if (val_len > READ_MAX_VAL_LEN) {
+            return false;
+        }
+
+        uint64_t total_record_len = 8ULL + key_len + val_len;
+        if (static_cast<uint64_t>(bytes_read) >= total_record_len) {
+            f_out_value.assign(stack_buf + 8 + key_len, val_len);
+            return true;
+        } else {
+            f_out_value.resize(val_len);
+            uint64_t val_in_buf = static_cast<uint64_t>(bytes_read) - (8ULL + key_len);
+            std::memcpy(f_out_value.data(), stack_buf + 8 + key_len, val_in_buf);
+            uint64_t remaining_bytes = val_len - val_in_buf;
+            uint64_t second_offset = f_offset + static_cast<uint64_t>(bytes_read);
+            ssize_t n2 = ::pread(f_node.m_read_fd, f_out_value.data() + val_in_buf,
+                                 remaining_bytes, second_offset);
+            if (n2 != static_cast<ssize_t>(remaining_bytes)) {
+                f_out_value.clear();
+                return false;
+            }
+            return true;
+        }
+    } else {
+        return readValueAt(f_node.index.path, f_offset, f_key, f_out_value);
+    }
 }
 
 bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
@@ -494,6 +622,7 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
             // Since we iterate found_files Oldest -> Newest, prepending each results in Newest at
             // head. No mutex needed during initialization single-thread context.
             IndexNode* new_node = new IndexNode(std::move(new_index));
+            new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
             IndexNode* old_head = m_head.load(std::memory_order_relaxed);
             new_node->next = old_head;
             m_head.store(new_node, std::memory_order_relaxed);

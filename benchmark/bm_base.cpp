@@ -234,7 +234,8 @@ std::string genOptionsToString() {
               << "\n\n useBloomFilter: " << lsmio::gConfigLSMIO.useBloomFilter
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
-              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
+              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP
+              << "\n enablePread: " << lsmio::gConfigLSMIO.enablePread << "\n useLevelDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
               << "\n useRocksDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::RocksDB ? "yes" : "no")
@@ -298,6 +299,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                      "use MMAP read/write (default: no MMAP)");
+        app.add_flag("--lsmio-pread", lsmio::gConfigLSMIO.enablePread,
+                     "use persistent descriptor pread() read (default: no pread)");
 
         bool flag_use_leveldb = false;
         bool flag_use_rocksdb = false;
@@ -311,7 +314,7 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-ts", lsmio::gConfigLSMIO.transferSize,
                        "transfer size (default: 64K)");
 
-        app.add_flag("--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
+        app.add_flag("--lsmio-always-flush,--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
                      "disable batching and makes read available immediately after "
                      "write (default: no)");
         app.add_option("--lsmio-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
@@ -351,8 +354,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "append the Dense Index Footer to the SSTable (default: false)");
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
-        app.add_flag("--lsmio-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
-                     "enable filesystem auto-tuning (default: false)");
+        app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
+                     "enable filesystem auto-tuning (default: true)");
 
         app.parse(argc, argv);
 

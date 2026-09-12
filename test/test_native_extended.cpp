@@ -154,3 +154,147 @@ TEST_F(NativeStoreExtendedTest, LargeWriteFlush) {
 
     CleanDir(dbPath);
 }
+
+TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
+    std::string dbPath = "test_native_autotune_lustre";
+    CleanDir(dbPath);
+
+    // Explicitly set baseline parameters before tuning
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
+
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 8);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneLustre: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
+    std::string dbPath = "test_native_autotune_gpfs";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 6;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(GPFS_SUPER_MAGIC);
+
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 12);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneGPFS: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneLocalFsNoMutation) {
+    std::string dbPath = "test_native_autotune_local";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        // 0xEF53 is EXT4_SUPER_MAGIC
+        store.autoTuneParameters(0xEF53);
+
+        EXPECT_FALSE(gConfigLSMIO.footerIndex);
+        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneLocalFsNoMutation: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
+    std::string dbPath = "test_native_autotune_disabled";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = false;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
+
+        EXPECT_FALSE(gConfigLSMIO.footerIndex);
+        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneDisabledBypass: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
+    std::string dbPath = "test_native_readonly_suppress";
+    CleanDir(dbPath);
+
+    int writer_sst_count = 0;
+    // First create a DB and write a key, then close
+    {
+        LSMIOStoreNative writer(dbPath, true, false);
+        std::string key = "key1";
+        std::string val = "val1";
+        EXPECT_TRUE(writer.put(key, val));
+        writer.close();
+
+        for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+            if (entry.path().extension() == ".sst") {
+                writer_sst_count++;
+            }
+        }
+    }
+
+    // Now open read-only
+    {
+        LSMIOStoreNative reader(dbPath, false, true);
+        std::string val;
+        EXPECT_TRUE(reader.get("key1", &val));
+        EXPECT_EQ(val, "val1");
+
+        // Verify that mutations are rejected in read-only mode
+        EXPECT_FALSE(reader.put("key2", "val2"));
+
+        // Count .sst files: reader must not have pre-allocated any new pool files
+        int reader_sst_count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+            if (entry.path().extension() == ".sst") {
+                reader_sst_count++;
+            }
+        }
+        EXPECT_EQ(reader_sst_count, writer_sst_count);
+        reader.close();
+    }
+
+    CleanDir(dbPath);
+}
