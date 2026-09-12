@@ -535,9 +535,11 @@ class RunRequest:
 
     @property
     def effective_archive(self) -> bool:
-        """Computed archive action: explicit archive override if set, else True if >1 variants."""
+        """Computed archive action: explicit archive override if set, else True if any variant is requested."""
         if self.m_archive is not None:
             return self.m_archive
+        if any(v is not None and v not in ("", "default", "base") for v in self.m_variants):
+            return True
         return len(self.m_variants) > 1
 
     @property
@@ -4063,9 +4065,10 @@ class RunOrchestrator:
                 f_clean_setup = f_request.setup or "NATIVE-M"
                 f_arm_id = ArchiveEngine.resolveArmId(f_clean_setup, f_cur_variant)
                 f_target_dir = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}")
+                f_target_dir_run = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}:run")
 
-                # Resumption check (INV-MULTI-3)
-                if f_request.resume and os.path.isdir(f_target_dir):
+                # Resumption check (INV-MULTI-3, INV-PAIR-7)
+                if f_request.resume and (os.path.isdir(f_target_dir) or os.path.isdir(f_target_dir_run)):
                     f_var_label = f_cur_variant if f_cur_variant is not None else "default"
                     f_msg = f"[RESUME] Skipping variant {f_var_label!r}"
                     if f_eff_reporter is not None:
@@ -4180,10 +4183,12 @@ class RunOrchestrator:
                     else:
                         f_source_dir = os.path.join(f_benchmark_root, "outputs")
 
+                    f_role = "run" if f_cur_variant not in ("", "default", "base") and f_cur_variant is not None else None
                     ArchiveEngine.executeArchive(
                         f_source_dir=f_source_dir,
                         f_dest_root=f_dest_root,
                         f_arm_id=f_arm_id,
+                        f_role=f_role,
                     )
 
             object.__setattr__(self, "m_views", tuple(f_executed_views))

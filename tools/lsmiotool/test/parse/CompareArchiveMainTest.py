@@ -388,6 +388,101 @@ class CompareArchiveMainTest(TestCase):
         self.assertTrue(os.path.exists(expected_chart))
         self.assertGreater(os.path.getsize(expected_chart), 0)
 
+    def testPairedArchiveDeltaComparisonGeneratesDeltaPlots(self) -> None:
+        """Test that archive folder with paired variant runs triggers delta comparison flow and generates delta charts."""
+        archive_dir = os.path.join(self.m_temp_dir.name, "archive_paired")
+        run_footer = os.path.join(archive_dir, "outputs-native-footer:run")
+        base_footer = os.path.join(archive_dir, "outputs-native-footer:base")
+        run_btree = os.path.join(archive_dir, "outputs-native-btree:run")
+        base_btree = os.path.join(archive_dir, "outputs-native-btree:base")
+
+        os.makedirs(run_footer, exist_ok=True)
+        os.makedirs(base_footer, exist_ok=True)
+        os.makedirs(run_btree, exist_ok=True)
+        os.makedirs(base_btree, exist_ok=True)
+
+        _writeSyntheticCsv(os.path.join(run_footer, "lsm-report.csv"), f_multiplier=1.2)
+        _writeSyntheticCsv(os.path.join(base_footer, "lsm-report.csv"), f_multiplier=1.0)
+        _writeSyntheticCsv(os.path.join(run_btree, "lsm-report.csv"), f_multiplier=0.85)
+        _writeSyntheticCsv(os.path.join(base_btree, "lsm-report.csv"), f_multiplier=1.0)
+
+        out_dir = os.path.join(self.m_temp_dir.name, "plots_paired")
+
+        cm = main.CompareVariantsMain(
+            f_archive_folder=archive_dir,
+            f_op="both",
+            f_stripes=4,
+            f_blocksize="1M",
+            f_output_dir=out_dir,
+        )
+        ret = cm.run()
+        self.assertEqual(ret, 0)
+
+        read_chart = os.path.join(out_dir, "compare-variants-delta-archive_paired-read-4-1M.png")
+        write_chart = os.path.join(out_dir, "compare-variants-delta-archive_paired-write-4-1M.png")
+
+        self.assertTrue(os.path.exists(read_chart), f"Delta read chart {read_chart} must exist")
+        self.assertTrue(os.path.exists(write_chart), f"Delta write chart {write_chart} must exist")
+        self.assertGreater(os.path.getsize(read_chart), 0)
+        self.assertGreater(os.path.getsize(write_chart), 0)
+
+    def testPairedArchiveDeltaComparisonAllPermutations(self) -> None:
+        """Test that f_all=True generates 12 paired delta charts across all 6 permutations."""
+        archive_dir = os.path.join(self.m_temp_dir.name, "archive_paired_all")
+        run_footer = os.path.join(archive_dir, "outputs-native-footer:run")
+        base_footer = os.path.join(archive_dir, "outputs-native-footer:base")
+
+        os.makedirs(run_footer, exist_ok=True)
+        os.makedirs(base_footer, exist_ok=True)
+
+        _writeSyntheticCsv(os.path.join(run_footer, "lsm-report.csv"), f_multiplier=1.1)
+        _writeSyntheticCsv(os.path.join(base_footer, "lsm-report.csv"), f_multiplier=1.0)
+
+        out_dir = os.path.join(self.m_temp_dir.name, "plots_paired_all")
+
+        cm = main.CompareVariantsMain(
+            f_archive_folder=archive_dir,
+            f_op="both",
+            f_all=True,
+            f_output_dir=out_dir,
+        )
+        ret = cm.run()
+        self.assertEqual(ret, 0)
+
+        permutations = [
+            ("read", 4, "64K"),
+            ("read", 16, "64K"),
+            ("read", 4, "1M"),
+            ("read", 16, "1M"),
+            ("read", 4, "8M"),
+            ("read", 16, "8M"),
+            ("write", 4, "64K"),
+            ("write", 16, "64K"),
+            ("write", 4, "1M"),
+            ("write", 16, "1M"),
+            ("write", 4, "8M"),
+            ("write", 16, "8M"),
+        ]
+        for op, stripes, bs in permutations:
+            chart = os.path.join(
+                out_dir, f"compare-variants-delta-archive_paired_all-{op}-{stripes}-{bs}.png"
+            )
+            self.assertTrue(os.path.exists(chart), f"Delta chart {chart} must exist")
+            self.assertGreater(os.path.getsize(chart), 0)
+
+    def testPairedArchiveNoMatchedPairsReturnsExitCode1(self) -> None:
+        """Test that archive folder with only orphaned :run returns exit code 1."""
+        archive_dir = os.path.join(self.m_temp_dir.name, "archive_orphans")
+        run_footer = os.path.join(archive_dir, "outputs-native-footer:run")
+        os.makedirs(run_footer, exist_ok=True)
+        _writeSyntheticCsv(os.path.join(run_footer, "lsm-report.csv"))
+
+        cm = main.CompareVariantsMain(f_archive_folder=archive_dir)
+        with patch("lsmiotool.lib.log.Console.warning") as mock_warn:
+            ret = cm.run()
+            self.assertEqual(ret, 1)
+
+
     def testCompareVariantsMainAlias(self) -> None:
         """Test CompareVariantsMain is identical to CompareArchiveMain alias."""
         self.assertIs(main.CompareArchiveMain, main.CompareVariantsMain)

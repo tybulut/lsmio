@@ -436,40 +436,23 @@ class VariantCatalogue:
 class VariantResolutionResult(NamedTuple):
     """Encapsulates the deterministic decomposition of an archive folder name."""
 
-    raw_directory: str  # e.g. "outputs-native-pool-8-3"
+    raw_directory: str  # e.g. "outputs-native-footer:run-1"
     backend: str  # e.g. "native"
-    variant: str  # e.g. "pool-8"
-    collision: Optional[str]  # e.g. "3"
-    display_label: str  # e.g. "pool-8-3"
+    variant: str  # e.g. "footer"
+    collision: Optional[str]  # e.g. "1" or None
+    display_label: str  # e.g. "footer" or "footer-1"
+    role: Optional[str] = None  # "run" | "base" | None
 
 
 class VariantReverseResolver:
     """Deterministic reverse-resolution engine mapping archive directories to clean variant labels."""
 
-    @classmethod
-    def _findBackend(cls, f_token: str) -> Tuple[str, str]:
-        """Detects backend prefix or exact backend name from token.
-
-        Returns:
-            Tuple of (backend_name, remainder_string).
-        """
-        for prefix in VariantCatalogue._TWO_SEGMENT_PREFIXES:
-            if f_token.startswith(prefix):
-                backend = prefix[:-3]
-                remainder = f_token[len(prefix) :]
-                return backend, remainder
-
-        for prefix in VariantCatalogue._ONE_SEGMENT_PREFIXES:
-            if f_token.startswith(prefix):
-                backend = prefix[:-1]
-                remainder = f_token[len(prefix) :]
-                return backend, remainder
-
-        for backend in ("native", "adios", "rocksdb", "leveldb", "plugin", "manager"):
-            if f_token == backend:
-                return backend, ""
-
-        return "native", f_token
+    PATTERN = re.compile(
+        r"^outputs-(?P<backend>[a-zA-Z0-9]+)"
+        r"(?:-(?P<variant>[a-zA-Z0-9_-]+?))?"
+        r"(?::(?P<role>run|base))?"
+        r"(?:-(?P<collision>\d+))?$"
+    )
 
     @classmethod
     def formatLabel(
@@ -495,47 +478,40 @@ class VariantReverseResolver:
 
     @classmethod
     def resolve(cls, f_dir_name: str) -> Optional[VariantResolutionResult]:
-        """Resolves directory name into structured variant metadata.
-
-        Returns None if f_dir_name does not match 'outputs-*'.
-        """
+        """Decomposes 'outputs-<backend>-<variant>[:<role>][-<collision>]' and 'outputs-<backend>[-<collision>]'."""
         if not f_dir_name.startswith("outputs-"):
             return None
 
-        token = f_dir_name[len("outputs-") :].strip()
-        backend, remainder = cls._findBackend(token)
+        match = cls.PATTERN.match(f_dir_name)
+        if not match:
+            return None
 
-        variant: str
-        collision: Optional[str]
+        backend = match.group("backend")
+        variant_raw = match.group("variant")
+        role = match.group("role")
+        collision = match.group("collision")
 
-        if remainder == "":
+        # Step 3: Normalize variant and standalone baseline collision
+        if variant_raw is None or variant_raw == "":
             variant = "default"
-            collision = None
-        elif remainder.isdigit():
+        elif variant_raw.isdigit() and role is None and collision is None:
             variant = "default"
-            collision = remainder
-        elif remainder in VariantCatalogue.supportedVariants():
-            variant = remainder
-            collision = None
+            collision = variant_raw
         else:
-            match = re.match(r"^(.*)-(\d+)$", remainder)
-            if match:
-                cand = match.group(1)
-                suffix = match.group(2)
-                if cand in VariantCatalogue.supportedVariants() or cand in (
-                    "",
-                    "default",
-                    "native",
-                ):
-                    variant = "default" if cand in ("", "default", "native") else cand
-                    collision = suffix
-                else:
-                    variant = cand
-                    collision = suffix
-            else:
-                variant = remainder
+            variant = variant_raw
+
+        # Step 4: Disambiguate hyphenated variants ending in digits (e.g. footer-pool-8)
+        if role is None and collision is not None and variant != "default":
+            combined_candidate = f"{variant}-{collision}"
+            if combined_candidate in VariantCatalogue.supportedVariants():
+                variant = combined_candidate
                 collision = None
 
+        # Step 5: Canonicalize baseline alias
+        if variant in ("", "default", "native"):
+            variant = "default"
+
+        # Step 6: Derive display label
         display_label = cls.formatLabel(backend, variant, collision)
 
         return VariantResolutionResult(
@@ -544,4 +520,5 @@ class VariantReverseResolver:
             variant=variant,
             collision=collision,
             display_label=display_label,
+            role=role,
         )

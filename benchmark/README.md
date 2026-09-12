@@ -85,7 +85,7 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `--lsmio-bfilter` | None | `false` | Enables Bloom filter generation to filter out SSTables that do not contain a queried key. |
 | `--lsmio-wal` | None | `false` | Enables Write-Ahead Logging (WAL) for durability against process crash. |
 | `--lsmio-compress` | None | `false` | Enables data compression for stored records. |
-| `--lsmio-autotune` | None | `true` | Enables automatic parameter tuning based on filesystem block and stripe sizes. |
+| `--lsmio-autotune` | None | `false` | Enables automatic parameter tuning based on filesystem block and stripe sizes. |
 | `--lsmio-disable-agg-dir-structure` | None | `false` | Disables per-rank aggregation directory structure, placing SSTables in a shared directory. |
 | `--lsmio-max-key` | `<bytes>` | `256K` (262144) | Maximum allowable key length in bytes. |
 

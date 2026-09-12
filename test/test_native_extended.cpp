@@ -255,6 +255,12 @@ TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
     CleanDir(dbPath);
 }
 
+TEST_F(NativeStoreExtendedTest, DefaultConfigAutoTuneDisabled) {
+    lsmio::LSMIOConfig config;
+    EXPECT_FALSE(config.autoTuneParameters);
+    EXPECT_FALSE(gConfigLSMIO.autoTuneParameters);
+}
+
 TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
     std::string dbPath = "test_native_readonly_suppress";
     CleanDir(dbPath);

@@ -44,12 +44,25 @@ When executing `bmtool run lsmio baseline [<variants>]`:
 - **Comma-separated list**: e.g., `bmtool run lsmio baseline footer,manoff,autotune`, executed sequentially in order.
 - **Keyword `all`**: Expands to the canonical sequence of all 38 matrix variants (`default` followed by the 37 non-empty variant keys).
 
+#### Paired Baseline & Variant Execution (`INV-PAIR-1`):
+When one or more non-empty variants are specified:
+- **Single Slurm Allocation**: `bmtool` dispatches a single Slurm/PBS job allocation to execute the entire sequence.
+- **Shared Pre-Baseline Execution**: The batch harness executes the unconfigured baseline workload first and stages its output directory.
+- **Sequential Variant Runs on Identical Physical Nodes**: Each requested variant is executed sequentially within the same allocation on the exact same compute nodes (`nid*`). This single-allocation binding eliminates node topology variance, cross-allocation hardware drift, and fluctuating Lustre contention.
+
+#### Paired Archive Schema & Collision Handling (`INV-PAIR-2`, `INV-PAIR-3`):
+- **Symmetrical Paired Archive Naming (`INV-PAIR-2`)**: Automatic archiving produces twin directories for each variant run:
+  - `outputs-native-<variant>:run`: The active variant benchmark output.
+  - `outputs-native-<variant>:base`: The paired baseline output replicated from the pre-baseline run within the same allocation.
+- **Synchronized Suffix Locking**: If archive collision occurs (e.g. `outputs-native-footer:run` exists), synchronized `-N` collision resolution assigns an identical suffix to both twins simultaneously (`outputs-native-footer:run-1` and `outputs-native-footer:base-1`), preventing suffix divergence.
+- **Standalone Baseline Isolation (`INV-PAIR-3`)**: Invocations without variants or with `default`/`base` (e.g., `bmtool run lsmio baseline`) archive strictly to unadorned `outputs-native` (or `outputs-native-N` upon collision) without role delimiters (`:run` or `:base`).
+
 #### Options:
 - `--ssd`: Selects SSD storage root instead of HDD.
 - `--archive`: Force automatic archiving after each variant execution.
   - **Automatic archive default rules**: Automatically defaults to `yes` when multiple variants ($N > 1$) or `all` is specified; defaults to `no` for single-variant ($N = 1$) or default baseline runs (`INV-MULTI-2`).
 - `--no-archive`: Disables automatic archiving after variant execution (forces `no`). Specifying both `--archive` and `--no-archive` is rejected.
-- `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}`) already exists in the destination directory (`INV-MULTI-3`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
+- `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}` or `outputs-${ARM_ID}:run`) already exists in the destination directory (`INV-MULTI-3`, `INV-PAIR-7`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
 - `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory (default: `$BM_PATH/lsmio-archive`).
 - `-h`, `--help`: Early help dispatch without credentials.
 
@@ -515,12 +528,14 @@ lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--outpu
 
 ---
 
-### 4.2 Variant Sensitivity Comparison (`lsmiotool compare variants`)
+### 4.2 Variant Sensitivity Comparison (`lsmiotool compare variants` / `lsmiotool compare-archive`)
 
 Evaluates sensitivity across storage engine parameters and tuning variants on fixed 8-node baseline runs:
 
 ```bash
 lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+# Equivalent direct archive comparison alias:
+lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
 ```
 
 #### Arguments & Options:
@@ -530,6 +545,20 @@ lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<bloc
 - `[blocksize]`: Block size: `'64K'`, `'1M'`, or `'8M'` (default: `'1M'`).
 - `--all`: Generate comparison charts across all 6 `(stripes, blocksize)` permutations.
 - `--output-dir <dir>`: Destination directory for generated PNG plots (default: current working directory).
+
+#### Paired Delta Comparison Plots (`INV-PAIR-4`):
+When `<archive_folder>` contains paired variant runs (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`), `lsmiotool compare-archive` (and `lsmiotool compare variants`) automatically activates paired delta mode:
+- **Output Filename**: Renders `compare-variants-delta-<op>-c<stripes>-b<blocksize>.png`.
+- **1 Bar Per Variant**: Each variant displays exactly 1 bar representing its relative $+/-$ percentage delta against its paired base run:
+  $$\Delta_{\%} = \frac{\text{BW}_{\text{run}} - \text{BW}_{\text{base}}}{\text{BW}_{\text{base}}} \times 100\%$$
+- **Zero Baseline Reference Line**: Draws a prominent horizontal reference line at zero (`y = 0`) via `plt.axhline(0)`.
+- **Dynamic Bidirectional Color Encoding**:
+  - **Green (`#2ca02c`)**: Positive performance improvement ($\Delta > 0$).
+  - **Red (`#d62728`)**: Performance regression ($\Delta < 0$).
+- **Negative Delta Preservation**: Negative values are preserved directly without clamping, ensuring accurate visibility into performance regressions.
+
+#### Legacy Absolute Comparison Mode:
+If `<archive_folder>` contains unpaired directories without `:run` and `:base` suffixes, the command falls back to rendering standard multi-bar absolute throughput comparison charts (`compare-variants-<op>-c<stripes>-b<blocksize>.png`).
 
 ---
 
@@ -545,6 +574,8 @@ lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
 - `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `baseline`).
 - `[variant]`: Variant identifier (mandatory for `baseline` scale; resolved against `VariantCatalogue`).
 - `--dest <path>`: Destination archive directory.
+
+Under paired execution workflows, the archiving engine automatically coordinates symmetrical twin directory generation (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`) with synchronized collision suffix locking (`INV-PAIR-2`), while standalone baseline runs maintain clean unadorned directory names (`outputs-native`, `INV-PAIR-3`).
 
 ---
 

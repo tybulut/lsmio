@@ -355,7 +355,7 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
         app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
-                     "enable filesystem auto-tuning (default: true)");
+                     "enable filesystem auto-tuning (default: false)");
 
         app.parse(argc, argv);
 

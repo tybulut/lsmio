@@ -252,10 +252,10 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
         fi
       fi
 
-      # Archiving decision matrix (INV-MULTI-2)
+      # Archiving decision matrix (INV-MULTI-2, INV-PAIR-2)
       if [ -n "$BM_ARCHIVE_OVERRIDE" ]; then
         DO_ARCHIVE="$BM_ARCHIVE_OVERRIDE"
-      elif [ "$VAR_COUNT" -gt 1 ]; then
+      elif [ -n "$BM_VARIANTS_RAW" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
         DO_ARCHIVE="yes"
       else
         DO_ARCHIVE="no"
@@ -363,44 +363,32 @@ if [ "$BM_CMD" = "run" ]; then
     if [ "$BM_TYPE" = "lsmio" ]; then
       : "${BM_ARCHIVE_DEST:=$BM_PATH/lsmio-archive}"
       export BM_ARCHIVE_DEST
+      export EXPANDED_VARIANTS
+      export BM_RESUME
+      export VAR_COUNT
 
-      _rem="$EXPANDED_VARIANTS"
-      while [ -n "$_rem" ]; do
-        case "$_rem" in
-          *,*)
-            _v="${_rem%%,*}"
-            _rem="${_rem#*,}"
-            ;;
-          *)
-            _v="$_rem"
-            _rem=""
-            ;;
-        esac
-
-        if [ "$_v" = "default" ] || [ "$_v" = "base" ]; then
-          CUR_VARIANT=""
+      if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
+        export BM_PAIRED_RUN="yes"
+        export DO_ARCHIVE="yes"
+        if [ -n "$BM_ARCHIVE_OVERRIDE" ]; then
+          export DO_ARCHIVE="$BM_ARCHIVE_OVERRIDE"
+        fi
+        echo "=== Submitting single paired baseline & variant job (Variants: ${EXPANDED_VARIANTS}) ==="
+        run_baseline_job "$BM_TYPE" || fatal_error "Paired baseline job failed during execution"
+      else
+        export BM_PAIRED_RUN="no"
+        if [ -n "$BM_ARCHIVE_OVERRIDE" ]; then
+          DO_ARCHIVE="$BM_ARCHIVE_OVERRIDE"
         else
-          CUR_VARIANT="$_v"
+          DO_ARCHIVE="no"
         fi
-
-        export BM_VARIANT="$CUR_VARIANT"
-        ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$CUR_VARIANT")" || fatal_error "Failed to derive Arm ID for variant [$_v]"
-        TARGET_ARCHIVE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}"
-
-        # Idempotent Resumption Check (INV-MULTI-3)
-        if [ "$BM_RESUME" = "yes" ] && [ -d "$TARGET_ARCHIVE" ]; then
-          echo "[RESUME] Skipping variant '${_v}'"
-          continue
-        fi
-
-        echo "=== Executing variant '${_v}' (ARM_ID: ${ARM_ID}) ==="
-        run_baseline_job "$BM_TYPE" || fatal_error "Variant '${_v}' failed during execution"
-
+        echo "=== Submitting standalone baseline job ==="
+        run_baseline_job "$BM_TYPE" || fatal_error "Baseline job failed during execution"
         if [ "$DO_ARCHIVE" = "yes" ]; then
-          echo "=== Auto-archiving variant '${_v}' ==="
+          echo "=== Auto-archiving standalone baseline ==="
           . $BM_DIRNAME/include/archive.in.sh
         fi
-      done
+      fi
     else
       run_baseline_job "$BM_TYPE"
     fi
