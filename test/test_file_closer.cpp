@@ -34,3 +34,15 @@ TEST_F(FileCloserTest, BatchClose) {
     EXPECT_TRUE(std::filesystem::exists(p1));
     EXPECT_TRUE(std::filesystem::exists(p2));
 }
+
+TEST_F(FileCloserTest, ZeroBatchSizeNoWorker) {
+    lsmio::FileCloser closer(0);
+
+    std::string p1 = test_dir + "/f1_zero.txt";
+    auto f1 = std::make_unique<std::ofstream>(p1);
+    *f1 << "test_content";
+
+    closer.scheduleClose(std::move(f1));
+
+    EXPECT_TRUE(std::filesystem::exists(p1));
+}
