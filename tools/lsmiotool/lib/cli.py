@@ -102,8 +102,8 @@ Options:
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
-                Explicit job walltime limit in hours (aliases: --walltime, --wallhour).
-                Overrides default dynamic scaling (2 + total_runs hours, granting 60 minutes per matrix run + 2 hours safety headroom to absorb regressions).
+                Explicit job walltime limit in hours (aliases: --walltime, --wallhour, clamped to [1, 48]).
+                Overrides default dynamic scaling (2 + total_runs * 2 hours, granting 120 minutes per matrix run + 2 hours safety headroom).
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
@@ -469,7 +469,7 @@ class RunCliParser:
                     f_h = int(f_val_str)
                     if f_h <= 0:
                         raise RunCliParseError(f"--time value must be greater than 0, got: {f_h}")
-                    f_wallhour = max(1, min(24, f_h))
+                    f_wallhour = max(1, min(48, f_h))
                 elif re.match(r"^\d+:\d{2}:\d{2}$", f_val_str):
                     f_walltime = f_val_str
                 else:

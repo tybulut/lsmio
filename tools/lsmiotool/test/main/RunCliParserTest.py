@@ -536,5 +536,10 @@ class RunCliParserTest(unittest.TestCase):
             parseRunArguments(["lsmio", "baseline", "footer", "--time", "0"])
         self.assertIn("must be greater than 0", str(f_ctx_zero.exception))
 
+        # Clamping to [1, 48]
+        f_req_high = parseRunArguments(["lsmio", "baseline", "footer", "--time", "60"])
+        self.assertEqual(f_req_high.wallhour, 48)
+        self.assertEqual(f_req_high.walltime, "48:00:00")
+
 
 

@@ -454,7 +454,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
         # Map block size to numeric values as in the shell script
         if bs == "64K":
             bsb = "65536"
-            sg = "65536"
+            sg = "32768"
         elif bs == "1M":
             bsb = "1048576"
             sg = "4096"

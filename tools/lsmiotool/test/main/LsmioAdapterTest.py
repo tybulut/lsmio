@@ -92,7 +92,7 @@ class LsmioAdapterTest(unittest.TestCase):
             f_block_size="64K",
             f_stripe_count=16,
             f_block_bytes=65536,
-            f_key_count=65536,
+            f_key_count=32768,
             f_segment_count=16384,
         )
 
@@ -124,7 +124,7 @@ class LsmioAdapterTest(unittest.TestCase):
             "MANAGER": "bm_manager",
         }
         f_block_params = {
-            "64K": ("65536", "65536"),
+            "64K": ("65536", "32768"),
             "1M": ("1048576", "4096"),
             "8M": ("8388608", "1024"),
         }
@@ -576,7 +576,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 "MANAGER",
             },
         )
-        self.assertEqual(LsmioAdapter.getBlockParameters("64K"), (65536, 65536))
+        self.assertEqual(LsmioAdapter.getBlockParameters("64K"), (65536, 32768))
         self.assertEqual(LsmioAdapter.getBlockParameters("1M"), (1048576, 4096))
         self.assertEqual(LsmioAdapter.getBlockParameters("8M"), (8388608, 1024))
         self.assertEqual(LsmioAdapter.getExecutableName("NATIVE-M"), "bm_native")

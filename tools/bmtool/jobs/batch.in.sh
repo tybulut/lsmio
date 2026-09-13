@@ -78,7 +78,8 @@ if [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
 
   STAGING_BASE="$BM_PATH/lsmio/outputs-baseline-staged"
   rm -rf "$STAGING_BASE"
-  cp -R "$LSM_DIR_OBASE" "$STAGING_BASE"
+  mv "$LSM_DIR_OBASE" "$STAGING_BASE"
+  mkdir -p "$LSM_DIR_OBASE"
 
   _rem="$EXPANDED_VARIANTS"
   while [ -n "$_rem" ]; do
@@ -118,7 +119,7 @@ if [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
 
     BM_ROLE="run" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
     rm -rf "$LSM_DIR_OBASE"
-    cp -R "$STAGING_BASE" "$LSM_DIR_OBASE"
+    cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
     BM_ROLE="base" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
   done
 

@@ -1276,7 +1276,7 @@ class RunPlanner:
             f_block_size="64K",
             f_stripe_count=16,
             f_block_bytes=65536,
-            f_key_count=65536,
+            f_key_count=32768,
             f_segment_count=16384,
         ),
         Combination(
@@ -1300,7 +1300,7 @@ class RunPlanner:
             f_block_size="64K",
             f_stripe_count=4,
             f_block_bytes=65536,
-            f_key_count=65536,
+            f_key_count=32768,
             f_segment_count=16384,
         ),
     )
@@ -1457,7 +1457,7 @@ class RunPlanner:
         for f_sp in f_scale_points:
             # Walltime calculation (INV-PAIR-1)
             if f_request.wallhour is not None:
-                f_wallhour = max(1, min(24, f_request.wallhour))
+                f_wallhour = max(1, min(48, f_request.wallhour))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_request.walltime is not None:
                 f_walltime = f_request.walltime
@@ -1467,10 +1467,10 @@ class RunPlanner:
                 and f_resource_policy.walltime_policy == "slurm_nodes"
                 and any(v not in (None, "", "default", "base") for v in f_request.variants)
             ):
-                # 60 min per run (maximum safety margin for regressions) + 2 hours base headroom
+                # 120 min per run (maximum safety margin for 64K workloads) + 2 hours base headroom
                 total_runs = 1 + sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
-                calculated_hours = 2 + total_runs
-                f_wallhour = max(4, min(24, calculated_hours))
+                calculated_hours = 2 + (total_runs * 2)
+                f_wallhour = max(4, min(48, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_resource_policy.walltime_policy == "slurm_nodes":
                 f_wallhour = 2 + (f_sp.nodes // 3)

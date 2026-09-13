@@ -23,8 +23,8 @@ batch_run() {
     _user_hours="${BM_WALLHOUR_OVERRIDE:-$BM_WALLHOUR}"
     if [ "$_user_hours" -lt 1 ]; then
       wallhour=1
-    elif [ "$_user_hours" -gt 24 ]; then
-      wallhour=24
+    elif [ "$_user_hours" -gt 48 ]; then
+      wallhour=48
     else
       wallhour=$_user_hours
     fi
@@ -42,12 +42,12 @@ batch_run() {
     else
       total_runs=$(( 1 + VAR_COUNT ))
     fi
-    # 60 min per run (maximum safety margin for regressions) + 2 hours base headroom
-    calculated_hours=$(( 2 + total_runs ))
+    # 120 min per run (maximum safety margin for 64K workloads) + 2 hours base headroom
+    calculated_hours=$(( 2 + total_runs * 2 ))
     if [ "$calculated_hours" -lt 4 ]; then
       wallhour=4
-    elif [ "$calculated_hours" -gt 24 ]; then
-      wallhour=24
+    elif [ "$calculated_hours" -gt 48 ]; then
+      wallhour=48
     else
       wallhour=$calculated_hours
     fi
