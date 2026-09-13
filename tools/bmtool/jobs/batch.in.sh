@@ -14,6 +14,7 @@ if [ "$BM_TYPE" = "ior" ]; then
 elif [ "$BM_TYPE" = "lsmio" ]; then
   JOB_BIN="$BM_DIRNAME/jobs/lsmio-benchmark.sh"
   . $BM_DIRNAME/jobs/lsmio-vars.in.sh
+  rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
   . $BM_DIRNAME/jobs/lsmio-setup.in.sh
   . $BM_DIRNAME/jobs/lsmio-variants.in.sh
 elif [ "$BM_TYPE" = "lmp" ]; then
@@ -68,6 +69,7 @@ if [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   BM_VARIANT=""
   export BM_VARIANT
   . $BM_DIRNAME/include/dirs-cleanup.in.sh
+  rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
   . $BM_DIRNAME/jobs/lsmio-setup.in.sh
   run_matrix_workload
 

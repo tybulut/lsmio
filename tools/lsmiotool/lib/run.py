@@ -4114,6 +4114,18 @@ class RunOrchestrator:
             f_all_skipped: bool = True
             object.__setattr__(self, "m_views", ())
 
+            # Purge legacy LSM_DIR_OBASE on job start to avoid ghost files from earlier aborted runs
+            if "LSM_DIR_OBASE" in os.environ and os.path.isdir(os.environ["LSM_DIR_OBASE"]):
+                for f_entry in os.listdir(os.environ["LSM_DIR_OBASE"]):
+                    f_entry_path = os.path.join(os.environ["LSM_DIR_OBASE"], f_entry)
+                    if os.path.isdir(f_entry_path):
+                        shutil.rmtree(f_entry_path)
+                    else:
+                        try:
+                            os.unlink(f_entry_path)
+                        except OSError:
+                            pass
+
             for f_cur_variant in f_request.variants:
                 f_clean_setup = f_request.setup or "NATIVE-M"
                 f_arm_id = ArchiveEngine.resolveArmId(f_clean_setup, f_cur_variant)
