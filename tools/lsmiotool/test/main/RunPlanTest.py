@@ -634,3 +634,31 @@ class RunPlanTest(unittest.TestCase):
         self.assertIsNone(f_doc_from_dict.request.variant)
         self.assertEqual(f_doc_from_dict.request, f_plan.request)
 
+    def testWalltimeScalingAndOverride(self) -> None:
+        """Asserts walltime scales at 60 min/run + 2h headroom, and explicit overrides are respected."""
+        # 1. Single variant: total_runs = 2 -> 2 + 2 = 4 hours (04:00:00)
+        f_req_1 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",))
+        f_plan_1 = RunPlanner.createPlan(f_req_1, self.m_viking_profile)
+        self.assertEqual(f_plan_1.scheduled_points[0].walltime, "04:00:00")
+
+        # 2. Three variants: total_runs = 4 -> 2 + 4 = 6 hours (06:00:00)
+        f_req_3 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap"))
+        f_plan_3 = RunPlanner.createPlan(f_req_3, self.m_viking_profile)
+        self.assertEqual(f_plan_3.scheduled_points[0].walltime, "06:00:00")
+
+        # 3. Five variants: total_runs = 6 -> 2 + 6 = 8 hours (08:00:00)
+        f_req_5 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap", "autotune", "manoff"))
+        f_plan_5 = RunPlanner.createPlan(f_req_5, self.m_viking_profile)
+        self.assertEqual(f_plan_5.scheduled_points[0].walltime, "08:00:00")
+
+        # 4. Explicit wallhour override
+        f_req_override = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=12)
+        f_plan_override = RunPlanner.createPlan(f_req_override, self.m_viking_profile)
+        self.assertEqual(f_plan_override.scheduled_points[0].walltime, "12:00:00")
+
+        # 5. Explicit walltime string override
+        f_req_hms = RunRequest(f_target="lsmio", f_scale="baseline", f_walltime="05:30:00")
+        f_plan_hms = RunPlanner.createPlan(f_req_hms, self.m_viking_profile)
+        self.assertEqual(f_plan_hms.scheduled_points[0].walltime, "05:30:00")
+
+

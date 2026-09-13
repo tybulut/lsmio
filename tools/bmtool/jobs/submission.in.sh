@@ -18,8 +18,17 @@ batch_run() {
   nodes=`echo "$concurrency / $pernode" | bc`
   export BM_NUM_TASKS=$concurrency
 
-  # Dynamic Walltime Scaling (INV-PAIR-1)
-  if [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
+  # Dynamic Walltime Scaling & Explicit Override (INV-PAIR-1)
+  if [ -n "$BM_WALLHOUR_OVERRIDE" ] || [ -n "$BM_WALLHOUR" ]; then
+    _user_hours="${BM_WALLHOUR_OVERRIDE:-$BM_WALLHOUR}"
+    if [ "$_user_hours" -lt 1 ]; then
+      wallhour=1
+    elif [ "$_user_hours" -gt 24 ]; then
+      wallhour=24
+    else
+      wallhour=$_user_hours
+    fi
+  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
     if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
       _cnt=0
       _r="$EXPANDED_VARIANTS"
@@ -33,7 +42,8 @@ batch_run() {
     else
       total_runs=$(( 1 + VAR_COUNT ))
     fi
-    calculated_hours=$(( 2 + (total_runs * 20 + 59) / 60 ))
+    # 60 min per run (maximum safety margin for regressions) + 2 hours base headroom
+    calculated_hours=$(( 2 + total_runs ))
     if [ "$calculated_hours" -lt 4 ]; then
       wallhour=4
     elif [ "$calculated_hours" -gt 24 ]; then
@@ -69,7 +79,7 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi

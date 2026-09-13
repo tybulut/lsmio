@@ -64,6 +64,7 @@ When one or more non-empty variants are specified:
 - `--no-archive`: Disables automatic archiving after variant execution (forces `no`). Specifying both `--archive` and `--no-archive` is rejected.
 - `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}` or `outputs-${ARM_ID}:run`) already exists in the destination directory (`INV-MULTI-3`, `INV-PAIR-7`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
 - `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory (default: `$BM_PATH/lsmio-archive`).
+- `--time <hours>` / `--walltime <hours>` / `--wallhour <hours>`: Explicit job walltime limit in hours (clamped to `[1, 24]`). Overrides the default dynamic scaling calculation (`2 + total_runs` hours, granting 60 minutes per matrix run + 2 hours safety headroom to absorb regressions).
 - `-h`, `--help`: Early help dispatch without credentials.
 
 ### 1.2 Python Orchestration (`tools/lsmiotool`)

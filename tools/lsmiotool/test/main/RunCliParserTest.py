@@ -505,5 +505,36 @@ class RunCliParserTest(unittest.TestCase):
         self.assertIn("--no-archive", RUN_HELP_TEXT)
         self.assertIn("--resume", RUN_HELP_TEXT)
         self.assertIn("--out-dir", RUN_HELP_TEXT)
+        self.assertIn("--time", RUN_HELP_TEXT)
+
+    def testTimeOptionFlags(self) -> None:
+        """Asserts --time, --walltime, and --wallhour aliases parse integer and HH:MM:SS values."""
+        for flag in ("--time", "--walltime", "--wallhour"):
+            f_req = parseRunArguments(["lsmio", "baseline", "footer", flag, "8"])
+            self.assertEqual(f_req.wallhour, 8)
+            self.assertEqual(f_req.walltime, "08:00:00")
+
+        f_req_hms = parseRunArguments(["lsmio", "baseline", "footer", "--time", "06:30:00"])
+        self.assertEqual(f_req_hms.walltime, "06:30:00")
+
+        # Duplicate detection
+        with self.assertRaises(RunCliParseError) as f_ctx_dup:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time", "4", "--wallhour", "8"])
+        self.assertIn("Duplicate walltime option specified", str(f_ctx_dup.exception))
+
+        # Equals syntax rejection
+        with self.assertRaises(RunCliParseError) as f_ctx_eq:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time=8"])
+        self.assertIn("is not supported", str(f_ctx_eq.exception))
+
+        # Invalid value rejection
+        with self.assertRaises(RunCliParseError) as f_ctx_inv:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time", "invalid"])
+        self.assertIn("Invalid --time/--wallhour value", str(f_ctx_inv.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_zero:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time", "0"])
+        self.assertIn("must be greater than 0", str(f_ctx_zero.exception))
+
 
 

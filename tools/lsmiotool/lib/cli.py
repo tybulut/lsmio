@@ -101,6 +101,9 @@ Options:
                 Explicit archive destination directory (default: <benchmark_root>/lsmio-archive).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
+  --time <hours>
+                Explicit job walltime limit in hours (aliases: --walltime, --wallhour).
+                Overrides default dynamic scaling (2 + total_runs hours, granting 60 minutes per matrix run + 2 hours safety headroom to absorb regressions).
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
@@ -388,6 +391,8 @@ class RunCliParser:
         f_archive: Optional[bool] = None
         f_resume: bool = False
         f_out_dir: Optional[str] = None
+        f_wallhour: Optional[int] = None
+        f_walltime: Optional[str] = None
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -445,6 +450,33 @@ class RunCliParser:
                     raise RunCliParseError(f"Destination path after {f_tok!r} cannot be empty.")
                 f_out_dir = str(Path(f_val.strip()).resolve())
                 f_idx += 2
+            elif f_tok in ("--time", "--walltime", "--wallhour"):
+                if f_wallhour is not None or f_walltime is not None:
+                    raise RunCliParseError(f"Duplicate walltime option specified: {f_tok!r}.")
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise RunCliParseError(f"Missing value after {f_tok!r} option.")
+                f_val = f_trailing_tokens[f_idx + 1]
+                if f_val.startswith("-"):
+                    raise RunCliParseError(
+                        f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
+                    )
+                if not f_val.strip():
+                    raise RunCliParseError(f"Walltime value after {f_tok!r} cannot be empty.")
+                f_val_str = f_val.strip()
+                import re
+
+                if re.match(r"^\d+$", f_val_str):
+                    f_h = int(f_val_str)
+                    if f_h <= 0:
+                        raise RunCliParseError(f"--time value must be greater than 0, got: {f_h}")
+                    f_wallhour = max(1, min(24, f_h))
+                elif re.match(r"^\d+:\d{2}:\d{2}$", f_val_str):
+                    f_walltime = f_val_str
+                else:
+                    raise RunCliParseError(
+                        f"Invalid --time/--wallhour value: {f_val!r} (must be positive integer hours or HH:MM:SS format)"
+                    )
+                f_idx += 2
             elif any(
                 f_tok.startswith(p)
                 for p in (
@@ -454,6 +486,9 @@ class RunCliParser:
                     "--archive=",
                     "--no-archive=",
                     "--resume=",
+                    "--time=",
+                    "--walltime=",
+                    "--wallhour=",
                 )
             ):
                 flag_name = f_tok.split("=")[0]
@@ -477,6 +512,8 @@ class RunCliParser:
             f_archive=f_archive,
             f_resume=f_resume,
             f_out_dir=f_out_dir,
+            f_wallhour=f_wallhour,
+            f_walltime=f_walltime,
         )
 
 

@@ -409,6 +409,8 @@ class RunRequest:
         "m_archive",
         "m_resume",
         "m_out_dir",
+        "m_wallhour",
+        "m_walltime",
         "_frozen",
     )
 
@@ -423,6 +425,8 @@ class RunRequest:
         f_archive: Optional[bool] = None,
         f_resume: bool = False,
         f_out_dir: Optional[Union[str, Path]] = None,
+        f_wallhour: Optional[int] = None,
+        f_walltime: Optional[str] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
             raise PlanValidationError(
@@ -477,6 +481,17 @@ class RunRequest:
         else:
             f_clean_out_dir = None
 
+        if f_wallhour is not None:
+            if not isinstance(f_wallhour, int) or f_wallhour <= 0:
+                raise PlanValidationError(
+                    f"wallhour must be a positive integer, got: {f_wallhour!r}"
+                )
+        if f_walltime is not None:
+            if not isinstance(f_walltime, str) or not f_walltime.strip():
+                raise PlanValidationError(
+                    f"walltime must be a non-empty string, got: {f_walltime!r}"
+                )
+
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
         super().__setattr__("m_ssd", f_ssd)
@@ -485,6 +500,8 @@ class RunRequest:
         super().__setattr__("m_archive", f_archive)
         super().__setattr__("m_resume", f_resume)
         super().__setattr__("m_out_dir", f_clean_out_dir)
+        super().__setattr__("m_wallhour", f_wallhour)
+        super().__setattr__("m_walltime", f_walltime.strip() if f_walltime else None)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -551,6 +568,18 @@ class RunRequest:
         return self.m_out_dir
 
     @property
+    def wallhour(self) -> Optional[int]:
+        return self.m_wallhour
+
+    @property
+    def walltime(self) -> Optional[str]:
+        if self.m_walltime is not None:
+            return self.m_walltime
+        if self.m_wallhour is not None:
+            return f"{self.m_wallhour:02d}:00:00"
+        return None
+
+    @property
     def storage(self) -> StorageClass:
         return StorageClass.SSD if self.m_ssd else StorageClass.HDD
 
@@ -571,6 +600,10 @@ class RunRequest:
             f_dict["resume"] = self.m_resume
         if self.m_out_dir is not None:
             f_dict["out_dir"] = self.m_out_dir
+        if self.m_wallhour is not None:
+            f_dict["wallhour"] = self.m_wallhour
+        if self.m_walltime is not None:
+            f_dict["walltime"] = self.m_walltime
         return f_dict
 
     def __repr__(self) -> str:
@@ -583,7 +616,9 @@ class RunRequest:
             f"variants={self.m_variants!r}, "
             f"archive={self.m_archive!r}, "
             f"resume={self.m_resume!r}, "
-            f"out_dir={self.m_out_dir!r})"
+            f"out_dir={self.m_out_dir!r}, "
+            f"wallhour={self.m_wallhour!r}, "
+            f"walltime={self.m_walltime!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -597,6 +632,8 @@ class RunRequest:
                 and self.m_archive == f_other.m_archive
                 and self.m_resume == f_other.m_resume
                 and self.m_out_dir == f_other.m_out_dir
+                and self.m_wallhour == f_other.m_wallhour
+                and self.m_walltime == f_other.m_walltime
             )
         return False
 
@@ -1418,8 +1455,24 @@ class RunPlanner:
         # 5. ScheduledPointResources calculation
         f_scheduled_points: List[ScheduledPointResources] = []
         for f_sp in f_scale_points:
-            # Walltime calculation
-            if f_resource_policy.walltime_policy == "slurm_nodes":
+            # Walltime calculation (INV-PAIR-1)
+            if f_request.wallhour is not None:
+                f_wallhour = max(1, min(24, f_request.wallhour))
+                f_walltime = f"{f_wallhour:02d}:00:00"
+            elif f_request.walltime is not None:
+                f_walltime = f_request.walltime
+            elif (
+                f_scale == "baseline"
+                and f_target == "lsmio"
+                and f_resource_policy.walltime_policy == "slurm_nodes"
+                and any(v not in (None, "", "default", "base") for v in f_request.variants)
+            ):
+                # 60 min per run (maximum safety margin for regressions) + 2 hours base headroom
+                total_runs = 1 + sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
+                calculated_hours = 2 + total_runs
+                f_wallhour = max(4, min(24, calculated_hours))
+                f_walltime = f"{f_wallhour:02d}:00:00"
+            elif f_resource_policy.walltime_policy == "slurm_nodes":
                 f_wallhour = 2 + (f_sp.nodes // 3)
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_resource_policy.walltime_policy == "fixed_06:00:00":
@@ -4094,6 +4147,8 @@ class RunOrchestrator:
                     f_ssd=f_request.ssd,
                     f_setup=f_request.setup,
                     f_variant=f_cur_variant,
+                    f_wallhour=f_request.wallhour,
+                    f_walltime=f_request.walltime,
                 )
 
                 try:
