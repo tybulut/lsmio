@@ -13,9 +13,90 @@ DO_PTEST=false
 DO_INSTALL=false
 DO_COVERAGE=false
 
+detect_num_cores() {
+  if command -v nproc >/dev/null 2>&1; then
+    nproc 2>/dev/null || echo 0
+  elif command -v sysctl >/dev/null 2>&1; then
+    sysctl -n hw.logicalcpu 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0
+  elif command -v getconf >/dev/null 2>&1; then
+    getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+
+detect_total_ram_gb() {
+  if [ -f /proc/meminfo ]; then
+    local ram_kb
+    ram_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    echo $((ram_kb / 1024 / 1024))
+  elif command -v sysctl >/dev/null 2>&1; then
+    local ram_bytes
+    ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+    echo $((ram_bytes / 1024 / 1024 / 1024))
+  else
+    echo 0
+  fi
+}
+
+detect_optimal_jobs() {
+  local num_cores
+  local total_ram_gb
+  local core_jobs
+  local ram_jobs
+  local jobs
+
+  num_cores=$(detect_num_cores)
+  total_ram_gb=$(detect_total_ram_gb)
+
+  # 1. Core budget: leave 1-2 cores for OS/IDE responsiveness
+  if [ "$num_cores" -gt 16 ]; then
+    core_jobs=$((num_cores - 2))
+  elif [ "$num_cores" -gt 4 ]; then
+    core_jobs=$((num_cores - 1))
+  elif [ "$num_cores" -gt 0 ]; then
+    core_jobs=$num_cores
+  else
+    core_jobs=4
+  fi
+
+  # 2. Memory budget: allocate ~1.4 GiB per compiler/linker job to prevent OOM
+  if [ "$total_ram_gb" -gt 0 ]; then
+    ram_jobs=$((total_ram_gb * 10 / 14))
+    [ "$ram_jobs" -lt 1 ] && ram_jobs=1
+  else
+    ram_jobs=$core_jobs
+  fi
+
+  # 3. Take minimum of core and memory budgets
+  if [ "$ram_jobs" -lt "$core_jobs" ]; then
+    jobs=$ram_jobs
+  else
+    jobs=$core_jobs
+  fi
+
+  # 4. Enforce lower bound of 1 and hard cap of 24
+  [ "$jobs" -lt 1 ] && jobs=1
+  if [ "$jobs" -gt 24 ]; then
+    jobs=24
+  fi
+
+  echo "$jobs"
+}
+
+# Automatic JOBS detection bounded by CPU cores, physical RAM, and a hard cap of 24
+JOBS=$(detect_optimal_jobs)
+
 # Parse arguments
-for arg in "$@"; do
-  case $arg in
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -j|--jobs)
+      JOBS=$2
+      shift
+      ;;
+    -j*)
+      JOBS="${1#-j}"
+      ;;
     debug)
       BUILD_TYPE="DEBUG"
       ;;
@@ -43,6 +124,7 @@ for arg in "$@"; do
       BUILD_TYPE="DEBUG"
       ;;
   esac
+  shift
 done
 
 if [ "$DO_CLEAN" = true ]; then
@@ -60,7 +142,7 @@ pushd build
 
 # make is implied if test or install are requested
 if [ "$DO_MAKE" = true ] || [ "$DO_TEST" = true ] || [ "$DO_INSTALL" = true ]; then
-  make -j8 || exit 1
+  make -j$JOBS || exit 1
 fi
 
 CTEST_FAILED=0
@@ -68,11 +150,11 @@ if [ "$DO_TEST" = true ]; then
   if [ "$DO_COVERAGE" = true ]; then
     export LLVM_PROFILE_FILE="coverage-%p.profraw"
   fi
-  ctest -j8 || CTEST_FAILED=1
+  ctest -j$JOBS || CTEST_FAILED=1
 fi
 
 if [ "$DO_XTEST" = true ]; then
-  ctest -j8 --output-on-failure -Q --timeout 120 || exit 1
+  ctest -j$JOBS --output-on-failure -Q --timeout 120 || exit 1
 fi
 
 if [ "$DO_PTEST" = true ]; then
