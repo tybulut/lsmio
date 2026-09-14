@@ -36,6 +36,17 @@
 #include <iostream>
 #include <lsmio/benchmark.hpp>
 
+namespace lsmio {
+
+enum BMExitStatus : int {
+    BM_SUCCESS     = 0,      // All phases succeeded (0x00)
+    BM_ERR_WRITE   = 1 << 0, // Write phase encountered failure (0x01)
+    BM_ERR_READ    = 1 << 1, // Read phase encountered failure (0x02)
+    BM_ERR_PREPARE = 1 << 2  // Setup/prepare phase failure (0x04)
+};
+
+}  // namespace lsmio
+
 class BMBase {
   protected:
     const std::string _keyPrefix = "benchmark:";
@@ -46,7 +57,7 @@ class BMBase {
     std::string _benchResultsWrite = "";
     std::string _benchResultsRead = "";
 
-    int *pRandomKeyIndex;
+    int *pRandomKeyIndex = nullptr;
 
     static bool useMPI;
     static int mpiWorldSize;

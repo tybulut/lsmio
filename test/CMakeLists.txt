@@ -9,6 +9,8 @@ include(PackageMPI)
 include(PackageAdios)
 include(PackageGoogleLog)
 include(PackageGoogleTest)
+include(PackageCLI11)
+include(PackageFMT)
 
 # MPI settings
 set (mpi_processes 2)
@@ -96,6 +98,19 @@ endfunction()
 
 # GTest: Benchmark
 add_lsmio_base_test(test_benchmark)
+
+# GTest: BMBase Regression Harness
+add_executable(test_bm_base test_bm_base.cpp "${CMAKE_SOURCE_DIR}/benchmark/bm_base.cpp")
+target_include_directories(test_bm_base PRIVATE ${LSMIO_INCLUDE_DIR} "${CMAKE_SOURCE_DIR}/benchmark")
+target_link_libraries(test_bm_base
+  PUBLIC GTest::GTest GTest::Main
+  PRIVATE lsmio::base fmt::fmt MPI::MPI_CXX CLI11::CLI11
+)
+gtest_add_tests(TARGET test_bm_base TEST_LIST test_bm_base_tests)
+set_tests_properties(${test_bm_base_tests} PROPERTIES
+  TIMEOUT 30
+  ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+)
 
 # GTest: Manager, LevelDB and RocksDB
 add_lsmio_store_test(test_leveldb)
