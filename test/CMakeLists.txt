@@ -45,7 +45,7 @@ function(add_lsmio_base_test x)
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main
-    PRIVATE lsmio::base
+    PRIVATE lsmio::base_static
   )
 
   gtest_add_tests(TARGET ${x} TEST_LIST tests)
@@ -62,8 +62,8 @@ function(add_lsmio_store_test x)
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main
-    PRIVATE lsmio::store
-    PRIVATE lsmio::posix
+    PRIVATE lsmio::store_static
+    PRIVATE lsmio::posix_static
   )
 
   gtest_add_tests(TARGET ${x} TEST_LIST tests)
@@ -83,8 +83,8 @@ function(add_lsmio_mpi_test x)
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
-    PRIVATE lsmio_base
-    PRIVATE lsmio::store
+    PRIVATE lsmio::base_static
+    PRIVATE lsmio::store_static
   )
 
   gtest_discover_tests(
@@ -104,7 +104,7 @@ add_executable(test_bm_base test_bm_base.cpp "${CMAKE_SOURCE_DIR}/benchmark/bm_b
 target_include_directories(test_bm_base PRIVATE ${LSMIO_INCLUDE_DIR} "${CMAKE_SOURCE_DIR}/benchmark")
 target_link_libraries(test_bm_base
   PUBLIC GTest::GTest GTest::Main
-  PRIVATE lsmio::base fmt::fmt MPI::MPI_CXX CLI11::CLI11
+  PRIVATE lsmio::base_static fmt::fmt MPI::MPI_CXX CLI11::CLI11
 )
 gtest_add_tests(TARGET test_bm_base TEST_LIST test_bm_base_tests)
 set_tests_properties(${test_bm_base_tests} PROPERTIES
@@ -133,7 +133,7 @@ add_executable(test_adios test_adios.cpp test_plugin.cpp)
 target_include_directories(test_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_adios
   PUBLIC GTest::GTest GTest::Main adios2::cxx adios2::core
-  PRIVATE lsmio_base
+  PRIVATE lsmio::base_static
 )
 gtest_discover_tests(
   test_adios
@@ -147,7 +147,7 @@ add_executable(test_mpi_adios test_mpi_adios.cpp test_mpi_utils.cpp)
 target_include_directories(test_mpi_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(test_mpi_adios
   PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
-  PRIVATE lsmio_base
+  PRIVATE lsmio::base_static
 )
 gtest_discover_tests(
   test_mpi_adios

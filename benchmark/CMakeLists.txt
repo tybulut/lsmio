@@ -25,7 +25,7 @@ add_executable(bm_leveldb ${BASE_SOURCE_FILES} bm_leveldb.cpp)
 #set_target_properties(bm_leveldb PROPERTIES LINK_FLAGS "-static")
 target_include_directories(bm_leveldb PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_leveldb
-  PRIVATE lsmio::store
+  PRIVATE lsmio::store_static
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
 )
 install(TARGETS bm_leveldb
@@ -37,7 +37,7 @@ install(TARGETS bm_leveldb
 add_executable(bm_rocksdb ${BASE_SOURCE_FILES} bm_rocksdb.cpp)
 target_include_directories(bm_rocksdb PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_rocksdb
-  PRIVATE lsmio::store
+  PRIVATE lsmio::store_static
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
 )
 install(TARGETS bm_rocksdb
@@ -49,7 +49,7 @@ install(TARGETS bm_rocksdb
 add_executable(bm_native ${BASE_SOURCE_FILES} bm_native.cpp)
 target_include_directories(bm_native PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_native
-  PRIVATE lsmio::store
+  PRIVATE lsmio::store_static
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
 )
 install(TARGETS bm_native
@@ -61,7 +61,7 @@ install(TARGETS bm_native
 add_executable(bm_manager ${BASE_SOURCE_FILES} bm_manager.cpp)
 target_include_directories(bm_manager PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_manager
-  PRIVATE lsmio::store
+  PRIVATE lsmio::store_static
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
 )
 install(TARGETS bm_manager
@@ -73,7 +73,7 @@ install(TARGETS bm_manager
 add_executable(bm_adios ${BASE_SOURCE_FILES} bm_adios.cpp)
 target_include_directories(bm_adios PRIVATE ${LSMIO_INCLUDE_DIR})
 target_link_libraries(bm_adios
-  PRIVATE lsmio_base
+  PRIVATE lsmio::base_static
   PUBLIC fmt::fmt MPI::MPI_CXX CLI11::CLI11
     adios2::cxx adios2::cxx_mpi
     glog::glog

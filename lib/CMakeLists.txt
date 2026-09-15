@@ -69,7 +69,7 @@ set(LIB_ADIOS_SOURCE_FILES ${LIB_ADIOS_HPP_FILES} ${LIB_ADIOS_CPP_FILES})
 set(LIB_POSIX_SOURCE_FILES ${LIB_POSIX_HPP_FILES} ${LIB_POSIX_CPP_FILES})
 
 macro(lsmio_add_props MY_TARGET)
-  #set_property(TARGET ${MY_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET ${MY_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
   target_include_directories(${MY_TARGET} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_compile_definitions(${MY_TARGET} PRIVATE LSMIO_VERSION="${PROJECT_VERSION}")
   if(LSMIO_ENABLE_COVERAGE)
@@ -92,6 +92,14 @@ target_link_libraries(lsmio_base
 )
 lsmio_add_props(lsmio_base)
 
+# Add library: BASE (Static)
+add_library(lsmio_base_static STATIC ${LIB_BASE_SOURCE_FILES})
+add_library(lsmio::base_static ALIAS lsmio_base_static)
+target_link_libraries(lsmio_base_static
+  PUBLIC fmt::fmt glog::glog
+)
+lsmio_add_props(lsmio_base_static)
+
 # Add library and binary: STORE
 add_library(lsmio_store ${LIB_STORE_SOURCE_FILES})
 add_library(lsmio::store ALIAS lsmio_store)
@@ -103,6 +111,18 @@ target_link_libraries(lsmio_store
     tlx
 )
 lsmio_add_props(lsmio_store)
+
+# Add library: STORE (Static)
+add_library(lsmio_store_static STATIC ${LIB_STORE_SOURCE_FILES})
+add_library(lsmio::store_static ALIAS lsmio_store_static)
+target_link_libraries(lsmio_store_static
+  PUBLIC fmt::fmt glog::glog lsmio_base_static
+    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
+    MPI::MPI_CXX Threads::Threads
+    adios2::cxx_mpi adios2::core_mpi
+    tlx
+)
+lsmio_add_props(lsmio_store_static)
 
 # Add library and binary: ADIOS
 add_library(lsmio_adios ${LIB_ADIOS_SOURCE_FILES})
@@ -126,6 +146,18 @@ target_link_libraries(lsmio_posix
     adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_posix)
+
+# Add library: POSIX (Static)
+add_library(lsmio_posix_static STATIC ${LIB_POSIX_SOURCE_FILES})
+add_library(lsmio::posix_static ALIAS lsmio_posix_static)
+target_link_libraries(lsmio_posix_static
+  PUBLIC fmt::fmt glog::glog
+    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
+    lsmio_store_static
+    MPI::MPI_CXX Threads::Threads
+    adios2::cxx_mpi adios2::core_mpi
+)
+lsmio_add_props(lsmio_posix_static)
 
 # Install: BASE
 install(TARGETS lsmio_base
