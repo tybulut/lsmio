@@ -55,6 +55,7 @@ class TestBatchJobOrchestration(unittest.TestCase):
     """Unit tests for batch_job_orchestration function."""
 
     @patch("lsmiotool.lib.jobs.setup_job_environment_and_dirs", return_value={})
+    @patch("os.makedirs")
     @patch("shutil.copytree")
     @patch("shutil.rmtree")
     @patch("os.path.isdir", return_value=True)
@@ -67,6 +68,7 @@ class TestBatchJobOrchestration(unittest.TestCase):
         mock_isdir: Mock,
         mock_rmtree: Mock,
         mock_copytree: Mock,
+        mock_makedirs: Mock,
         mock_setup: Mock,
     ) -> None:
         jobs.batch_job_orchestration("lmp", "/tmp", env.HpcManager.SLURM, "ds")
@@ -75,6 +77,9 @@ class TestBatchJobOrchestration(unittest.TestCase):
         self.assertTrue(mock_rmtree.called)
         self.assertTrue(mock_isdir.called)
         self.assertTrue(mock_sleep.called)
+
+        # Test lsmio batch orchestration
+        jobs.batch_job_orchestration("lsmio", "/tmp", env.HpcManager.SLURM, "ds")
 
     @patch("lsmiotool.lib.jobs.setup_job_environment_and_dirs", return_value={})
     @patch("subprocess.run")

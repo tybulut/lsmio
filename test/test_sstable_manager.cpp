@@ -225,3 +225,132 @@ TEST_F(SSTableManagerTest, CreateMemtableThrowsOnUnknown) {
     // LSMIOStoreNative::createMemtable (std::invalid_argument).
     EXPECT_ANY_THROW(LSMIOStoreNative(dbPath, true));
 }
+
+TEST_F(SSTableManagerTest, MmapRead) {
+    gConfigLSMIO.enableMMAP = true;
+    gConfigLSMIO.enablePread = false;
+
+    MemtableVectorNoSort m;
+    m.add("mmap_k1", "mmap_v1");
+    m.add("mmap_k2", "mmap_v2");
+    m.add("mmap_k3", "mmap_v3");
+
+    std::vector<char> buf(1024);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+
+    std::string val;
+    EXPECT_TRUE(mgr->get("mmap_k1", val));
+    EXPECT_EQ(val, "mmap_v1");
+
+    EXPECT_TRUE(mgr->get("mmap_k2", val));
+    EXPECT_EQ(val, "mmap_v2");
+
+    EXPECT_TRUE(mgr->get("mmap_k3", val));
+    EXPECT_EQ(val, "mmap_v3");
+
+    EXPECT_FALSE(mgr->get("mmap_missing", val));
+
+    // Test scan under mmap
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(mgr->scan("mmap_k", results, deleted));
+    EXPECT_EQ(results.size(), 3);
+    EXPECT_EQ(results["mmap_k1"], "mmap_v1");
+    EXPECT_EQ(results["mmap_k2"], "mmap_v2");
+    EXPECT_EQ(results["mmap_k3"], "mmap_v3");
+
+    // Test recovery under mmap
+    mgr.reset();
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    val.clear();
+    EXPECT_TRUE(new_mgr->get("mmap_k2", val));
+    EXPECT_EQ(val, "mmap_v2");
+
+    results.clear();
+    deleted.clear();
+    EXPECT_TRUE(new_mgr->scan("mmap_k", results, deleted));
+    EXPECT_EQ(results.size(), 3);
+}
+
+TEST_F(SSTableManagerTest, PreadReadSmallAndLarge) {
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = true;
+
+    MemtableVectorNoSort m;
+    m.add("small_key", "small_val");
+
+    // Large value > 64 KiB to trigger pread speculative buffer slow path (2-stage pread)
+    std::string large_val(70 * 1024, 'Z');
+    m.add("large_key", large_val);
+
+    std::vector<char> buf(128 * 1024);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+
+    std::string val;
+    // Fast path (< 64 KiB)
+    EXPECT_TRUE(mgr->get("small_key", val));
+    EXPECT_EQ(val, "small_val");
+
+    // Slow path (> 64 KiB)
+    EXPECT_TRUE(mgr->get("large_key", val));
+    EXPECT_EQ(val.size(), 70 * 1024);
+    EXPECT_EQ(val, large_val);
+
+    EXPECT_FALSE(mgr->get("non_existent", val));
+
+    // Test scan under pread
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(mgr->scan("large_", results, deleted));
+    EXPECT_EQ(results.size(), 1);
+    EXPECT_EQ(results["large_key"], large_val);
+
+    // Test recovery under pread
+    mgr.reset();
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    val.clear();
+    EXPECT_TRUE(new_mgr->get("large_key", val));
+    EXPECT_EQ(val, large_val);
+    EXPECT_TRUE(new_mgr->get("small_key", val));
+    EXPECT_EQ(val, "small_val");
+}
+
+TEST_F(SSTableManagerTest, MmapAndPreadCombined) {
+    gConfigLSMIO.enableMMAP = true;
+    gConfigLSMIO.enablePread = true;
+
+    MemtableVectorNoSort m;
+    m.add("combo_k1", "combo_v1");
+    std::string large_val(80 * 1024, 'W');
+    m.add("combo_k2", large_val);
+
+    std::vector<char> buf(128 * 1024);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+
+    std::string val;
+    EXPECT_TRUE(mgr->get("combo_k1", val));
+    EXPECT_EQ(val, "combo_v1");
+    EXPECT_TRUE(mgr->get("combo_k2", val));
+    EXPECT_EQ(val, large_val);
+
+    mgr.reset();
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 10, 0);
+    val.clear();
+    EXPECT_TRUE(new_mgr->get("combo_k2", val));
+    EXPECT_EQ(val, large_val);
+}
+
+TEST_F(SSTableManagerTest, FallbackStreamWhenBothDisabled) {
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = false;
+
+    MemtableVectorNoSort m;
+    m.add("stream_k", "stream_v");
+    std::vector<char> buf(1024);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+
+    std::string val;
+    EXPECT_TRUE(mgr->get("stream_k", val));
+    EXPECT_EQ(val, "stream_v");
+}
+

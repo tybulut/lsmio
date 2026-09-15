@@ -43,55 +43,66 @@ from lsmiotool.lib.variants import (
 class VariantCatalogueTest(unittest.TestCase):
     """Unit test suite verifying declarative variant catalog, mappings, and immutability."""
 
-    EXPECTED_27_VARIANTS = {
-        "footer": ("footer", ("--lsmio-footer-index",)),
-        "btree": ("btree", ("--lsmio-memtable", "btree")),
+    EXPECTED_37_VARIANTS = {
+        "footer": ("footer", ("--lsmio-no-autotune", "--lsmio-footer-index")),
+        "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
         "footer-btree": (
             "footer-btree",
-            ("--lsmio-footer-index", "--lsmio-memtable", "btree"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-memtable", "btree"),
         ),
-        "map": ("map", ("--lsmio-memtable", "map")),
-        "vsort": ("vsort", ("--lsmio-memtable", "vector-sort")),
-        "prealloc": ("prealloc", ("--lsmio-prealloc",)),
+        "map": ("map", ("--lsmio-no-autotune", "--lsmio-memtable", "map")),
+        "vsort": ("vsort", ("--lsmio-no-autotune", "--lsmio-memtable", "vector-sort")),
+        "prealloc": ("prealloc", ("--lsmio-no-autotune", "--lsmio-prealloc")),
         "footer-prealloc": (
             "footer-prealloc",
-            ("--lsmio-footer-index", "--lsmio-prealloc"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-prealloc"),
         ),
-        "manoff": ("manoff", ("--lsmio-manual-offset",)),
+        "manoff": ("manoff", ("--lsmio-no-autotune", "--lsmio-manual-offset")),
         "footer-manoff": (
             "footer-manoff",
-            ("--lsmio-footer-index", "--lsmio-manual-offset"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-manual-offset"),
         ),
-        "wbuf-512m": ("wbuf-512m", ("--lsmio-wbuffer", "536870912")),
-        "wbuf-32m": ("wbuf-32m", ("--lsmio-wbuffer", "33554432")),
+        "wbuf-512m": ("wbuf-512m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912")),
+        "wbuf-32m": ("wbuf-32m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432")),
         "footer-wbuf-512m": (
             "footer-wbuf-512m",
-            ("--lsmio-footer-index", "--lsmio-wbuffer", "536870912"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "536870912"),
         ),
         "footer-btree-prealloc": (
             "footer-btree-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-footer-index",
                 "--lsmio-memtable",
                 "btree",
                 "--lsmio-prealloc",
             ),
         ),
-        "bfilter": ("bfilter", ("--lsmio-bfilter",)),
-        "wal": ("wal", ("--lsmio-wal",)),
-        "mmap": ("mmap", ("--lsmio-mmap",)),
-        "compress": ("compress", ("--lsmio-compress",)),
-        "sync": ("sync", ("--sync",)),
-        "pool-8": ("pool-8", ("--lsmio-pool", "8")),
-        "flush": ("flush", ("--lsmo-always-flush",)),
-        "batch-2048": ("batch-2048", ("--lsmio-batch-size", "2048")),
+        "bfilter": ("bfilter", ("--lsmio-no-autotune", "--lsmio-bfilter")),
+        "wal": ("wal", ("--lsmio-no-autotune", "--lsmio-wal")),
+        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap")),
+        "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
+        "footer-mmap": (
+            "footer-mmap",
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap"),
+        ),
+        "footer-pread": (
+            "footer-pread",
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pread"),
+        ),
+        "compress": ("compress", ("--lsmio-no-autotune", "--lsmio-compress")),
+        "sync": ("sync", ("--lsmio-no-autotune", "--sync")),
+        "pool-8": ("pool-8", ("--lsmio-no-autotune", "--lsmio-pool", "8")),
+        "flush": ("flush", ("--lsmio-no-autotune", "--lsmio-always-flush")),
+        "batch-2048": ("batch-2048", ("--lsmio-no-autotune", "--lsmio-batch-size", "2048")),
         "manoff-prealloc": (
             "manoff-prealloc",
-            ("--lsmio-manual-offset", "--lsmio-prealloc"),
+            ("--lsmio-no-autotune", "--lsmio-manual-offset", "--lsmio-prealloc"),
         ),
         "wbuf-512m-manoff-prealloc": (
             "wbuf-512m-manoff-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-wbuffer",
                 "536870912",
                 "--lsmio-manual-offset",
@@ -100,15 +111,16 @@ class VariantCatalogueTest(unittest.TestCase):
         ),
         "footer-wbuf-32m": (
             "footer-wbuf-32m",
-            ("--lsmio-footer-index", "--lsmio-wbuffer", "33554432"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "33554432"),
         ),
         "footer-pool-8": (
             "footer-pool-8",
-            ("--lsmio-footer-index", "--lsmio-pool", "8"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pool", "8"),
         ),
         "footer-wbuf-512m-manoff-prealloc": (
             "footer-wbuf-512m-manoff-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-footer-index",
                 "--lsmio-wbuffer",
                 "536870912",
@@ -119,12 +131,80 @@ class VariantCatalogueTest(unittest.TestCase):
         "footer-vsort-manoff-prealloc": (
             "footer-vsort-manoff-prealloc",
             (
+                "--lsmio-no-autotune",
                 "--lsmio-footer-index",
                 "--lsmio-memtable",
                 "vector-sort",
                 "--lsmio-manual-offset",
                 "--lsmio-prealloc",
             ),
+        ),
+        "footer-vsort-manoff-mmap": (
+            "footer-vsort-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-vsort-manoff": (
+            "footer-vsort-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pool-8-mmap": (
+            "footer-pool-8-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-manoff-pool-8-mmap": (
+            "footer-manoff-pool-8-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-btree-manoff-mmap": (
+            "footer-btree-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-manoff-pool-8": (
+            "footer-manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "autotune": (
+            "autotune",
+            ("--lsmio-autotune",),
         ),
     }
 
@@ -148,15 +228,16 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertEqual(rec.flagsString, "")
             self.assertTrue(VariantCatalogue.isValid(key))
 
-    def testAll27NonEmptyVariants(self) -> None:
-        """Assert all 27 non-empty keys match tokens and engine CLI flags."""
+    def testAll37NonEmptyVariants(self) -> None:
+        """Assert all 37 non-empty keys match tokens and engine CLI flags."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
-        self.assertEqual(len(supported), 27)
+        self.assertEqual(len(supported), 37)
+        self.assertEqual(len(self.EXPECTED_37_VARIANTS), 37)
         self.assertEqual(supported, all_keys)
-        self.assertEqual(set(supported), set(self.EXPECTED_27_VARIANTS.keys()))
+        self.assertEqual(set(supported), set(self.EXPECTED_37_VARIANTS.keys()))
 
-        for key, (expected_tokens, expected_flags) in self.EXPECTED_27_VARIANTS.items():
+        for key, (expected_tokens, expected_flags) in self.EXPECTED_37_VARIANTS.items():
             rec = VariantCatalogue.resolve(key)
             self.assertEqual(rec.key, key)
             self.assertEqual(rec.tokens, expected_tokens)
@@ -165,17 +246,17 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertTrue(VariantCatalogue.isValid(key))
 
     def testFlushVariantExactFlag(self) -> None:
-        """Assert INV-ARCH-4: 'flush' maps strictly to '--lsmo-always-flush'."""
+        """Assert INV-ARCH-4: 'flush' maps strictly to '--lsmio-always-flush'."""
         rec = VariantCatalogue.resolve("flush")
-        self.assertEqual(rec.flags, ("--lsmo-always-flush",))
-        self.assertEqual(rec.flagsString, "--lsmo-always-flush")
-        self.assertNotIn("--lsmio-always-flush", rec.flags)
+        self.assertEqual(rec.flags, ("--lsmio-no-autotune", "--lsmio-always-flush"))
+        self.assertEqual(rec.flagsString, "--lsmio-no-autotune --lsmio-always-flush")
+        self.assertNotIn("--lsmo-always-flush", rec.flags)
 
     def testSyncVariantFlag(self) -> None:
         """Assert 'sync' maps strictly to ('--sync',)."""
         rec = VariantCatalogue.resolve("sync")
-        self.assertEqual(rec.flags, ("--sync",))
-        self.assertEqual(rec.flagsString, "--sync")
+        self.assertEqual(rec.flags, ("--lsmio-no-autotune", "--sync"))
+        self.assertEqual(rec.flagsString, "--lsmio-no-autotune --sync")
 
     def testPrefixStripping(self) -> None:
         """Assert stripBackendPrefix strips two-segment and one-segment prefixes."""

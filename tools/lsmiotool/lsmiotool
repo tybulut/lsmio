@@ -42,6 +42,10 @@ if srv_path not in sys.path:
     sys.path.insert(0, srv_path)
 
 from lsmiotool.lib.cli import (
+    ARCHIVE_HELP_TEXT,
+    COMPARE_HELP_TEXT,
+    PARSE_HELP_TEXT,
+    RUN_HELP_TEXT,
     ArchiveCliParseError,
     CompareCliParseError,
     PackageValidationError,
@@ -62,11 +66,11 @@ LSMIOTOOL_HELP = """How to run
 
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>]
-  compare <nodes|variants> <folder> ...
+  compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large> [--ssd] [--setup <name>]
+  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd] [--setup <name>]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -98,6 +102,20 @@ if __name__ == '__main__':
         )
         for opt, arg in opts:
             if opt in ('-h', '--help'):
+                if args:
+                    subcmd = args[0]
+                    if subcmd == 'archive':
+                        print(ARCHIVE_HELP_TEXT.rstrip())
+                        sys.exit(0)
+                    elif subcmd == 'compare':
+                        print(COMPARE_HELP_TEXT.rstrip())
+                        sys.exit(0)
+                    elif subcmd == 'parse':
+                        print(PARSE_HELP_TEXT.rstrip())
+                        sys.exit(0)
+                    elif subcmd == 'run':
+                        print(RUN_HELP_TEXT.rstrip())
+                        sys.exit(0)
                 print(LSMIOTOOL_HELP.rstrip())
                 sys.exit(0)
             elif opt in ('-v', '--version'):

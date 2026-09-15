@@ -34,7 +34,7 @@ bs="$2"
 if [ "$bs" = "64K" ]; then
   bsb="65536"
   #sg="4096"
-  sg="65536"
+  sg="32768"
 elif [ "$bs" = "1M" ]; then
   bsb="1048576"
   sg="4096"
@@ -78,7 +78,7 @@ case "$BASE_BACKEND" in
     BIN_NAME="bm_adios"
     ;;
   NATIVE)
-    BIN_NAME="bm_native"
+    BIN_NAME="${BM_BIN_NAME:-bm_native}"
     ;;
   ROCKSDB)
     BIN_NAME="bm_rocksdb"

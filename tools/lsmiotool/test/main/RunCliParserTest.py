@@ -28,6 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+from pathlib import Path
 import unittest
 
 from lsmiotool.lib.cli import (
@@ -430,3 +431,152 @@ class RunCliParserTest(unittest.TestCase):
         self.assertIsNone(f_req_lmp.variant)
         self.assertEqual(f_req_lmp.setup, "LSMIO")
 
+    def testBaselineScaleWithCommaSeparatedVariants(self) -> None:
+        """Task 2.5.1: Asserts comma-separated variants are parsed into variants tuple and auto-archive is enabled."""
+        f_req = parseRunArguments(["lsmio", "baseline", "footer,manoff,autotune"])
+        self.assertEqual(f_req.variants, ("footer", "manoff", "autotune"))
+        self.assertEqual(f_req.variant, "footer")
+        self.assertIsNone(f_req.archive)
+        self.assertTrue(f_req.effective_archive)
+        self.assertFalse(f_req.resume)
+
+    def testBaselineScaleWithAllKeyword(self) -> None:
+        """Task 2.5.2: Asserts 'all' keyword expands to all 38 canonical matrix variants with auto-archive enabled."""
+        f_req = parseRunArguments(["lsmio", "baseline", "all"])
+        self.assertEqual(len(f_req.variants), 38)
+        self.assertIsNone(f_req.variants[0])  # default/base variant
+        self.assertEqual(f_req.variants[1], "footer")
+        self.assertEqual(f_req.variants[-1], "autotune")
+        self.assertIsNone(f_req.variant)
+        self.assertTrue(f_req.effective_archive)
+
+    def testArchiveOptionFlags(self) -> None:
+        """Task 2.5.3: Asserts --archive and --no-archive flags, conflict detection, and duplicate detection."""
+        f_req_arch = parseRunArguments(["lsmio", "baseline", "footer", "--archive"])
+        self.assertTrue(f_req_arch.archive)
+        self.assertTrue(f_req_arch.effective_archive)
+
+        f_req_no_arch = parseRunArguments(["lsmio", "baseline", "footer,manoff", "--no-archive"])
+        self.assertFalse(f_req_no_arch.archive)
+        self.assertFalse(f_req_no_arch.effective_archive)
+
+        with self.assertRaises(RunCliParseError) as f_ctx_conflict:
+            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--no-archive"])
+        self.assertIn("Cannot specify both '--archive' and '--no-archive'", str(f_ctx_conflict.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_dup:
+            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--archive"])
+        self.assertIn("Duplicate '--archive' option specified", str(f_ctx_dup.exception))
+
+    def testResumeOptionFlag(self) -> None:
+        """Task 2.5.4: Asserts --resume flag sets resume=True and rejects duplicates."""
+        f_req = parseRunArguments(["lsmio", "baseline", "footer", "--resume"])
+        self.assertTrue(f_req.resume)
+
+        with self.assertRaises(RunCliParseError) as f_ctx_dup:
+            parseRunArguments(["lsmio", "baseline", "footer", "--resume", "--resume"])
+        self.assertIn("Duplicate '--resume' option specified", str(f_ctx_dup.exception))
+
+    def testOutDirOptionFlags(self) -> None:
+        """Task 2.5.5: Asserts --out-dir, --output-dir, and --dest aliases populate out_dir."""
+        f_expected = str(Path("/tmp/my-lsmio-archive").resolve())
+        for f_flag in ("--out-dir", "--output-dir", "--dest"):
+            f_req = parseRunArguments(["lsmio", "baseline", "footer", f_flag, "/tmp/my-lsmio-archive"])
+            self.assertEqual(f_req.out_dir, f_expected)
+
+        with self.assertRaises(RunCliParseError) as f_ctx_missing:
+            parseRunArguments(["lsmio", "baseline", "footer", "--out-dir"])
+        self.assertIn("Missing value after '--out-dir' option", str(f_ctx_missing.exception))
+
+    def testOutDirEqualsSyntaxRejected(self) -> None:
+        """Task 2.5.6: Asserts syntax with '=' delimiter is rejected for all destination and archive flags."""
+        with self.assertRaises(RunCliParseError) as f_ctx_out:
+            parseRunArguments(["lsmio", "baseline", "footer", "--out-dir=/tmp/test"])
+        self.assertIn("is not supported", str(f_ctx_out.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_dest:
+            parseRunArguments(["lsmio", "baseline", "footer", "--dest=/tmp/test"])
+        self.assertIn("is not supported", str(f_ctx_dest.exception))
+
+    def testRunHelpDisplaysMultiVariantAndOptions(self) -> None:
+        """Task 2.5.7: Asserts --help text contains multi-variant and options documentation."""
+        from lsmiotool.lib.cli import LSMIOTOOL_HELP, RUN_HELP_TEXT
+        self.assertIn("--archive", RUN_HELP_TEXT)
+        self.assertIn("--no-archive", RUN_HELP_TEXT)
+        self.assertIn("--resume", RUN_HELP_TEXT)
+        self.assertIn("--out-dir", RUN_HELP_TEXT)
+        self.assertIn("--time", RUN_HELP_TEXT)
+
+    def testTimeOptionFlags(self) -> None:
+        """Asserts --time, --walltime, and --wallhour aliases parse integer and HH:MM:SS values."""
+        for flag in ("--time", "--walltime", "--wallhour"):
+            f_req = parseRunArguments(["lsmio", "baseline", "footer", flag, "8"])
+            self.assertEqual(f_req.wallhour, 8)
+            self.assertEqual(f_req.walltime, "08:00:00")
+
+        f_req_hms = parseRunArguments(["lsmio", "baseline", "footer", "--time", "06:30:00"])
+        self.assertEqual(f_req_hms.walltime, "06:30:00")
+
+        # Duplicate detection
+        with self.assertRaises(RunCliParseError) as f_ctx_dup:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time", "4", "--wallhour", "8"])
+        self.assertIn("Duplicate walltime option specified", str(f_ctx_dup.exception))
+
+        # Equals syntax rejection
+        with self.assertRaises(RunCliParseError) as f_ctx_eq:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time=8"])
+        self.assertIn("is not supported", str(f_ctx_eq.exception))
+
+        # Invalid value rejection
+        with self.assertRaises(RunCliParseError) as f_ctx_inv:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time", "invalid"])
+        self.assertIn("Invalid --time/--wallhour value", str(f_ctx_inv.exception))
+
+        with self.assertRaises(RunCliParseError) as f_ctx_zero:
+            parseRunArguments(["lsmio", "baseline", "footer", "--time", "0"])
+        self.assertIn("must be greater than 0", str(f_ctx_zero.exception))
+
+        # Clamping to [1, 48]
+        f_req_high = parseRunArguments(["lsmio", "baseline", "footer", "--time", "60"])
+        self.assertEqual(f_req_high.wallhour, 48)
+        self.assertEqual(f_req_high.walltime, "48:00:00")
+
+    def testVersionedBaselineSuccess(self) -> None:
+        """Validates that --versioned successfully parses under baseline and sets versioned=True."""
+        req = parseRunArguments(["lsmio", "baseline", "--versioned"])
+        self.assertTrue(req.versioned)
+        self.assertTrue(req.is_versioned)
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "baseline")
+        self.assertTrue(req.archive)
+
+    def testVersionedRejectsVariantsAtomically(self) -> None:
+        """Validates that combining --versioned with any variant is rejected (INV-VER-1)."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "footer", "--versioned"])
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "all", "--versioned"])
+
+    def testVersionedRejectsNonBaselineScale(self) -> None:
+        """Validates that --versioned on non-baseline scale is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "small", "--versioned"])
+
+    def testVersionedRejectsNonLsmioTarget(self) -> None:
+        """Validates that --versioned on non-lsmio target is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["ior", "baseline", "--versioned"])
+
+    def testVersionedRejectsDuplicateFlag(self) -> None:
+        """Validates that duplicate --versioned is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "--versioned", "--versioned"])
+
+    def testVersionedRejectsNoArchive(self) -> None:
+        """Validates that --no-archive with --versioned is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "--versioned", "--no-archive"])
+
+
+if __name__ == "__main__":
+    unittest.main()

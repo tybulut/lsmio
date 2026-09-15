@@ -16,8 +16,55 @@ batch_run() {
   job_script="$3"
 
   nodes=`echo "$concurrency / $pernode" | bc`
-  wallhour=`echo "2 + ($nodes / 3)" | bc`
   export BM_NUM_TASKS=$concurrency
+
+  # Dynamic Walltime Scaling & Explicit Override (INV-PAIR-1)
+  if [ -n "$BM_WALLHOUR_OVERRIDE" ] || [ -n "$BM_WALLHOUR" ]; then
+    _user_hours="${BM_WALLHOUR_OVERRIDE:-$BM_WALLHOUR}"
+    if [ "$_user_hours" -lt 1 ]; then
+      wallhour=1
+    elif [ "$_user_hours" -gt 48 ]; then
+      wallhour=48
+    else
+      wallhour=$_user_hours
+    fi
+  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
+    total_runs=2
+    # 120 min per baseline run (maximum safety margin for 64K workloads) + 2 hours base headroom
+    calculated_hours=$(( 2 + total_runs * 2 ))
+    if [ "$calculated_hours" -lt 4 ]; then
+      wallhour=4
+    elif [ "$calculated_hours" -gt 48 ]; then
+      wallhour=48
+    else
+      wallhour=$calculated_hours
+    fi
+  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
+    if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
+      _cnt=0
+      _r="$EXPANDED_VARIANTS"
+      while [ -n "$_r" ]; do
+        case "$_r" in
+          *,*) _cnt=$(( _cnt + 1 )); _r="${_r#*,}" ;;
+          *) _cnt=$(( _cnt + 1 )); _r="" ;;
+        esac
+      done
+      total_runs=$(( 1 + _cnt ))
+    else
+      total_runs=$(( 1 + VAR_COUNT ))
+    fi
+    # 120 min per run (maximum safety margin for 64K workloads) + 2 hours base headroom
+    calculated_hours=$(( 2 + total_runs * 2 ))
+    if [ "$calculated_hours" -lt 4 ]; then
+      wallhour=4
+    elif [ "$calculated_hours" -gt 48 ]; then
+      wallhour=48
+    else
+      wallhour=$calculated_hours
+    fi
+  else
+    wallhour=`echo "2 + ($nodes / 3)" | bc`
+  fi
 
   if [ "$QSUBMIT" = "sbatch" ]; then
     # ARCHER2's standard partition allocates whole nodes and rejects --mem;
@@ -43,7 +90,7 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi

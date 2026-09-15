@@ -113,7 +113,7 @@ class DataUnitTestCase(TestCase):
     def test_lsm_run_data(self) -> None:
         data_file_list = ["example", "lsmio-single-run.txt"]
         data_file = os.path.join(MY_DIR, *data_file_list)
-        Console.debug("Reading LSMO single run file: " + data_file + ".")
+        Console.debug("Reading LSMIO single run file: " + data_file + ".")
         lsm_run = data.LsmioSingleRunData(data_file)
         run_data = lsm_run.get_map()
         # Console.debug("test_lsm_run_data: " + pprint.pformat(run_data))
