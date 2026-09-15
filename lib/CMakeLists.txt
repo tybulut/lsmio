@@ -84,45 +84,45 @@ macro(lsmio_add_props MY_TARGET)
 endmacro()
 
 
-# Add library and binary: BASE
-add_library(lsmio_base ${LIB_BASE_SOURCE_FILES})
-add_library(lsmio::base ALIAS lsmio_base)
-target_link_libraries(lsmio_base
-  PUBLIC fmt::fmt glog::glog
-)
-lsmio_add_props(lsmio_base)
+function(add_lsmio_dual_library NAME)
+  cmake_parse_arguments(ARG "" "" "SOURCES;INTERNAL_DEPS;PUBLIC_LIBS" ${ARGN})
 
-# Add library: BASE (Static)
-add_library(lsmio_base_static STATIC ${LIB_BASE_SOURCE_FILES})
-add_library(lsmio::base_static ALIAS lsmio_base_static)
-target_link_libraries(lsmio_base_static
-  PUBLIC fmt::fmt glog::glog
-)
-lsmio_add_props(lsmio_base_static)
+  # Shared library
+  add_library(lsmio_${NAME} ${ARG_SOURCES})
+  add_library(lsmio::${NAME} ALIAS lsmio_${NAME})
+  target_link_libraries(lsmio_${NAME} PUBLIC ${ARG_PUBLIC_LIBS})
+  foreach(dep ${ARG_INTERNAL_DEPS})
+    target_link_libraries(lsmio_${NAME} PUBLIC lsmio_${dep})
+  endforeach()
+  lsmio_add_props(lsmio_${NAME})
 
-# Add library and binary: STORE
-add_library(lsmio_store ${LIB_STORE_SOURCE_FILES})
-add_library(lsmio::store ALIAS lsmio_store)
-target_link_libraries(lsmio_store
-  PUBLIC fmt::fmt glog::glog lsmio_base
+  # Static library
+  add_library(lsmio_${NAME}_static STATIC ${ARG_SOURCES})
+  add_library(lsmio::${NAME}_static ALIAS lsmio_${NAME}_static)
+  target_link_libraries(lsmio_${NAME}_static PUBLIC ${ARG_PUBLIC_LIBS})
+  foreach(dep ${ARG_INTERNAL_DEPS})
+    target_link_libraries(lsmio_${NAME}_static PUBLIC lsmio_${dep}_static)
+  endforeach()
+  lsmio_add_props(lsmio_${NAME}_static)
+endfunction()
+
+
+# Add library: BASE (Shared and Static)
+add_lsmio_dual_library(base
+  SOURCES ${LIB_BASE_SOURCE_FILES}
+  PUBLIC_LIBS fmt::fmt glog::glog
+)
+
+# Add library: STORE (Shared and Static)
+add_lsmio_dual_library(store
+  SOURCES ${LIB_STORE_SOURCE_FILES}
+  INTERNAL_DEPS base
+  PUBLIC_LIBS fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx_mpi adios2::core_mpi
     tlx
 )
-lsmio_add_props(lsmio_store)
-
-# Add library: STORE (Static)
-add_library(lsmio_store_static STATIC ${LIB_STORE_SOURCE_FILES})
-add_library(lsmio::store_static ALIAS lsmio_store_static)
-target_link_libraries(lsmio_store_static
-  PUBLIC fmt::fmt glog::glog lsmio_base_static
-    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
-    MPI::MPI_CXX Threads::Threads
-    adios2::cxx_mpi adios2::core_mpi
-    tlx
-)
-lsmio_add_props(lsmio_store_static)
 
 # Add library and binary: ADIOS
 add_library(lsmio_adios ${LIB_ADIOS_SOURCE_FILES})
@@ -135,29 +135,15 @@ target_link_libraries(lsmio_adios
 )
 lsmio_add_props(lsmio_adios)
 
-# Add library and binary: POSIX
-add_library(lsmio_posix ${LIB_POSIX_SOURCE_FILES})
-add_library(lsmio::posix ALIAS lsmio_posix)
-target_link_libraries(lsmio_posix
-  PUBLIC fmt::fmt glog::glog
+# Add library: POSIX (Shared and Static)
+add_lsmio_dual_library(posix
+  SOURCES ${LIB_POSIX_SOURCE_FILES}
+  INTERNAL_DEPS store
+  PUBLIC_LIBS fmt::fmt glog::glog
     Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
-    lsmio_store
     MPI::MPI_CXX Threads::Threads
     adios2::cxx_mpi adios2::core_mpi
 )
-lsmio_add_props(lsmio_posix)
-
-# Add library: POSIX (Static)
-add_library(lsmio_posix_static STATIC ${LIB_POSIX_SOURCE_FILES})
-add_library(lsmio::posix_static ALIAS lsmio_posix_static)
-target_link_libraries(lsmio_posix_static
-  PUBLIC fmt::fmt glog::glog
-    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
-    lsmio_store_static
-    MPI::MPI_CXX Threads::Threads
-    adios2::cxx_mpi adios2::core_mpi
-)
-lsmio_add_props(lsmio_posix_static)
 
 # Install: BASE
 install(TARGETS lsmio_base
