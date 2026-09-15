@@ -47,6 +47,7 @@ const std::string BM_HEADER =
 Benchmark::Benchmark() {
     _isStarted = false;
     _iterations = {};
+    _failedIterations = {};
 }
 
 Benchmark::~Benchmark() {
@@ -101,6 +102,18 @@ int64_t Benchmark::duration() const {
 }
 
 void Benchmark::addIteration(const std::string& name, int64_t duration, double bytes, double ops) {
+    if (duration <= 0) {
+        LOG(WARNING) << "Benchmark::addIteration: Rejected non-positive duration ("
+                     << duration << " us) for metric '" << name << "'." << std::endl;
+        _failedIterations[name]++;
+        return;
+    }
+    if (bytes < 0.0 || ops < 0.0) {
+        LOG(WARNING) << "Benchmark::addIteration: Rejected negative bytes (" << bytes
+                     << ") or ops (" << ops << ") for metric '" << name << "'." << std::endl;
+        _failedIterations[name]++;
+        return;
+    }
     _iterations.insert({name, {duration, bytes, ops}});
 }
 
@@ -117,7 +130,9 @@ void Benchmark::summaryIteration(const std::string& name, double& min, double& m
         if (entry.first != name) continue;
 
         std::tie(duration, bytes, ops) = entry.second;
+        if (duration <= 0) continue;
         bw = bytes / duration / 1.024 / 1.024;
+        if (bw < 0.0) bw = 0.00;
 
         if (0 == iterations++) {
             min = max = bw;
@@ -158,7 +173,9 @@ std::string Benchmark::formatIterations(const std::string& name) {
         if (entry.first != name) continue;
 
         std::tie(duration, bytes, ops) = entry.second;
+        if (duration <= 0) continue;
         bw = bytes / duration / 1.024 / 1.024;
+        if (bw < 0.0) bw = 0.00;
 
         output += name + ":" + fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bw) + ":" +
                   fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bytes / 1024 / 1024) +
@@ -183,8 +200,8 @@ std::string Benchmark::formatSummary(const std::string& name, const std::string&
         return BM_HEADER;
     }
 
-    if (totalBytes <= 0) {
-        return name + ", FAILED\n";
+    if (totalBytes <= 0.0 || iterations == 0) {
+        return sumName + ", FAILED";
     }
 
     output = sumName + ":" + fmt::format("{:.2f}", max) + ":" + fmt::format("{:.2f}", min) + ":" +
@@ -199,6 +216,15 @@ std::string Benchmark::formatSummary(const std::string& name, const std::string&
 
 void Benchmark::clearIterations() {
     _iterations.clear();
+    _failedIterations.clear();
+}
+
+int Benchmark::failedIterations(const std::string& name) const {
+    auto it = _failedIterations.find(name);
+    if (it != _failedIterations.end()) {
+        return it->second;
+    }
+    return 0;
 }
 
 }  // namespace lsmio

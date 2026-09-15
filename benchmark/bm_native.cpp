@@ -58,13 +58,16 @@ class BMNative : public BMBase {
         return true;
     }
 
+    // writeCleanup(): Skipped as LSM stores support concurrent R/W open (unlike ADIOS2 baseline).
+
+    // close/open() is not needed for LSM store, but put in-place for safety as below is not measured in benchmarking anyway.
     virtual int readPrepare(bool opt) {
         if (_lc) {
             delete _lc;
             _lc = nullptr;
         }
         _lc = new lsmio::LSMIOStoreNative(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false, true);
         return 0;
     }
 

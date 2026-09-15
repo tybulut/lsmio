@@ -55,14 +55,6 @@
 #include <vector>
 #include <stdexcept>
 
-#ifndef LUSTRE_SUPER_MAGIC
-#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
-#endif
-
-#ifndef GPFS_SUPER_MAGIC
-#define GPFS_SUPER_MAGIC 0x47504653
-#endif
-
 namespace lsmio {
 
 std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
@@ -75,7 +67,8 @@ std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
     }
 }
 
-LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write)
+LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write,
+                                   const bool f_read_only)
     : LSMIOStore(f_db_path, f_over_write),
       m_memtable_max_size_bytes(gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
                                                                 : 32 * 1024 * 1024),
@@ -84,13 +77,16 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
       m_max_key_len(gConfigLSMIO.maxKeyLen),
       m_max_value_len(gConfigLSMIO.getMaxValueLen()),
       m_active_memtable(createMemtable()),
-      m_flush_buffer(m_memtable_max_size_bytes) {
+      m_flush_buffer(m_memtable_max_size_bytes),
+      m_read_only(f_read_only) {
     if (m_max_value_len == 0) throw std::invalid_argument("writeBufferSize is too small to accommodate maxKeyLen and overhead");
     // Ensure database directory exists
     if (f_over_write) {
         std::filesystem::remove_all(_dbPath);
     }
-    std::filesystem::create_directories(_dbPath);
+    if (!m_read_only || f_over_write) {
+        std::filesystem::create_directories(_dbPath);
+    }
 
     if (gConfigLSMIO.autoTuneParameters) {
         struct statfs fs_info;
@@ -107,15 +103,23 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
     }
 
     // Initialize SSTableManager (which handles FilePool, Recovery, etc.)
+    // For read-only open, suppress FilePool background pre-allocations by setting pool size to 0
+    size_t pool_size = m_read_only ? 0 : gConfigLSMIO.filePoolSize;
     m_sstable_manager =
-        std::make_unique<SSTableManager>(_dbPath, gConfigLSMIO.filePoolSize, pre_alloc_bytes);
+        std::make_unique<SSTableManager>(_dbPath, pool_size, pre_alloc_bytes);
 
-    // Start the background flush thread
-    m_shutting_down = false;
-    m_flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
+    // Start the background flush thread only if not read-only
+    if (!m_read_only) {
+        m_shutting_down = false;
+        m_flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
+    }
 }
 
 void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
+    if (!gConfigLSMIO.autoTuneParameters) {
+        return;
+    }
+
     std::string fs_type = "Unknown/Local";
     bool is_parallel_fs = false;
 
@@ -131,12 +135,34 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
               << std::hex << f_fs_magic << std::dec << ")";
 
     if (is_parallel_fs) {
-        // TODO(tybulut): Adjust writer thread pool size
+        LOG(WARNING) << "[NATIVE] autotune-triggered: parallel filesystem detected (" << fs_type << ")";
+
+        bool prev_footerIndex = gConfigLSMIO.footerIndex;
+        bool prev_manualOffset = gConfigLSMIO.manualOffset;
+        int prev_filePoolSize = gConfigLSMIO.filePoolSize;
+
+        gConfigLSMIO.footerIndex = true;
+        gConfigLSMIO.manualOffset = true;
+        gConfigLSMIO.filePoolSize = 2 * gConfigLSMIO.writeBufferNumber;
+
+        std::cout << "[LSMIO] Autotune: " << fs_type << " detected -> "
+                  << "footerIndex=true, manualOffset=true, filePoolSize="
+                  << gConfigLSMIO.filePoolSize << std::endl;
+
+        LOG(INFO) << "[NATIVE] autotune: footerIndex changed from "
+                  << (prev_footerIndex ? "true" : "false") << " to "
+                  << (gConfigLSMIO.footerIndex ? "true" : "false");
+        LOG(INFO) << "[NATIVE] autotune: manualOffset changed from "
+                  << (prev_manualOffset ? "true" : "false") << " to "
+                  << (gConfigLSMIO.manualOffset ? "true" : "false");
+        LOG(INFO) << "[NATIVE] autotune: filePoolSize changed from "
+                  << prev_filePoolSize << " to " << gConfigLSMIO.filePoolSize;
     }
 
     LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
               << (m_memtable_max_size_bytes / 1024 / 1024)
-              << "MB, writeBufferNumber=" << m_max_immutable_memtables;
+              << "MB, writeBufferNumber=" << m_max_immutable_memtables
+              << ", filePoolSize=" << gConfigLSMIO.filePoolSize;
 }
 
 LSMIOStoreNative::~LSMIOStoreNative() {
@@ -237,6 +263,7 @@ bool LSMIOStoreNative::stopBatch() {
 
 bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string f_key,
                                       const std::string f_value, bool f_flush) {
+    if (m_read_only) return false;
     if (m_bg_error.load(std::memory_order_relaxed)) return false;
     std::string actual_value = f_value;
     if (f_m_type == MutationType::Del) {

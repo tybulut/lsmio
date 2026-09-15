@@ -34,7 +34,9 @@
 namespace lsmio {
 
 FileCloser::FileCloser(size_t f_batch_size) : m_batch_size(f_batch_size) {
-    m_worker = std::thread(&FileCloser::workerLoop, this);
+    if (m_batch_size > 0) {
+        m_worker = std::thread(&FileCloser::workerLoop, this);
+    }
 }
 
 FileCloser::~FileCloser() {
@@ -53,6 +55,12 @@ FileCloser::~FileCloser() {
 }
 
 void FileCloser::scheduleClose(std::unique_ptr<std::ofstream> file) {
+    if (m_batch_size == 0) {
+        if (file && file->is_open()) {
+            file->close();
+        }
+        return;
+    }
     std::unique_lock<std::mutex> lock(m_mutex);
     m_pending.push_back(std::move(file));
     if (m_pending.size() >= m_batch_size || m_shutdown) {
@@ -66,7 +74,9 @@ void FileCloser::workerLoop() {
 
         {
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait(lock, [this] { return m_pending.size() >= m_batch_size || m_shutdown; });
+            m_cv.wait(lock, [this] {
+                return (!m_pending.empty() && m_pending.size() >= m_batch_size) || m_shutdown;
+            });
 
             if (m_shutdown && m_pending.empty()) return;
 
