@@ -288,16 +288,15 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
     const bool pre_allocate = gConfigLSMIO.preAllocate;
 
     auto [sstable_path, sst_file_ptr] = m_file_pool->acquire();
+    if (!sst_file_ptr || !sst_file_ptr->is_open() || sst_file_ptr->fail()) {
+        std::cerr << "[SSTableManager] ERROR: Failed to acquire valid SSTable file: "
+                  << sstable_path << std::endl;
+        return false;
+    }
     std::ofstream& sst_file = *sst_file_ptr;
 
     if (!f_buffer.empty()) {
         sst_file.rdbuf()->pubsetbuf(f_buffer.data(), f_buffer.size());
-    }
-
-    if (!sst_file) {
-        std::cerr << "[SSTableManager] ERROR: Failed to acquire SSTable file: " << sstable_path
-                  << std::endl;
-        return false;
     }
 
     L0Index new_index;
@@ -305,11 +304,20 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
     new_index.offsets.reserve(f_memtable.count());
 
     std::string record_buf;
-    uint64_t current_offset = sst_file.tellp();
+    uint64_t current_offset = 0;
+    if (!manual_offset) {
+        auto p = sst_file.tellp();
+        if (p != std::ofstream::pos_type(-1)) {
+            current_offset = static_cast<uint64_t>(p);
+        }
+    }
 
     f_memtable.forEach([&](const std::string& f_key, const std::string& f_value) {
         if (!manual_offset) {
-            current_offset = static_cast<uint64_t>(sst_file.tellp());
+            auto p = sst_file.tellp();
+            if (p != std::ofstream::pos_type(-1)) {
+                current_offset = static_cast<uint64_t>(p);
+            }
         }
         new_index.offsets.emplace_back(f_key, current_offset);
 
@@ -320,20 +328,22 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
         record_buf.append(f_value);
         sst_file.write(record_buf.data(), record_buf.size());
 
-        if (manual_offset) {
-            current_offset += record_buf.size();
-        }
+        current_offset += record_buf.size();
     });
 
     if (footer_index) {
         uint64_t footer_offset = current_offset;
         if (!manual_offset) {
-            footer_offset = static_cast<uint64_t>(sst_file.tellp());
+            auto p = sst_file.tellp();
+            if (p != std::ofstream::pos_type(-1)) {
+                footer_offset = static_cast<uint64_t>(p);
+            }
         }
 
         record_buf.clear();
         appendLe32(record_buf, static_cast<uint32_t>(new_index.offsets.size()));
         sst_file.write(record_buf.data(), record_buf.size());
+        current_offset += record_buf.size();
 
         for (const auto& entry : new_index.offsets) {
             record_buf.clear();
@@ -341,12 +351,14 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
             record_buf.append(entry.first);
             appendLe64(record_buf, entry.second);
             sst_file.write(record_buf.data(), record_buf.size());
+            current_offset += record_buf.size();
         }
 
         record_buf.clear();
         appendLe64(record_buf, footer_offset);
         appendLe32(record_buf, SSTableManager::FOOTER_MAGIC);
         sst_file.write(record_buf.data(), record_buf.size());
+        current_offset += record_buf.size();
     }
 
     sst_file.flush();
@@ -354,12 +366,19 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
         std::cerr << "[SSTableManager] ERROR: Failed to write or flush SSTable: " << sstable_path
                   << std::endl;
         sst_file.close();
-        std::filesystem::remove(sstable_path);
+        std::error_code ec;
+        std::filesystem::remove(sstable_path, ec);
         return false;
     }
 
     if (pre_allocate) {
-        uint64_t final_eof = static_cast<uint64_t>(sst_file.tellp());
+        uint64_t final_eof = current_offset;
+        if (!manual_offset) {
+            auto p = sst_file.tellp();
+            if (p != std::ofstream::pos_type(-1)) {
+                final_eof = static_cast<uint64_t>(p);
+            }
+        }
         sst_file.close();
         std::error_code ec;
         std::filesystem::resize_file(sstable_path, final_eof, ec);
@@ -632,7 +651,7 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
 
     m_file_pool =
         std::make_unique<FilePool>(m_db_path, "L0-", ".sst", f_file_pool_size, max_id + 1, f_pre_alloc_bytes);
-    m_file_closer = std::make_unique<FileCloser>(f_file_pool_size);
+    m_file_closer = std::make_unique<FileCloser>(std::max<size_t>(1, f_file_pool_size));
 }
 
 }  // namespace lsmio

@@ -30,8 +30,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <filesystem>
 #include <lsmio/manager/store/native/StoreNative.hpp>
+#include <thread>
+#include <vector>
 
 using namespace lsmio;
 
@@ -262,7 +265,7 @@ TEST_F(NativeStoreExtendedTest, DefaultConfigAutoTuneDisabled) {
 }
 
 TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
-    std::string dbPath = "test_native_readonly_suppress";
+    std::string dbPath = "test_native_readonly_open_pool";
     CleanDir(dbPath);
 
     int writer_sst_count = 0;
@@ -300,6 +303,112 @@ TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
         }
         EXPECT_EQ(reader_sst_count, writer_sst_count);
         reader.close();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, ReadOnlyPreallocSuppression) {
+    std::string dbPath = "test_native_readonly_prealloc_suppress";
+    CleanDir(dbPath);
+
+    // Step 1: Write initial data with overWrite = true
+    {
+        gConfigLSMIO.preAllocate = true;
+        gConfigLSMIO.filePoolSize = 4;
+        LSMIOStoreNative store(dbPath, true);
+        for (int i = 0; i < 20; ++i) {
+            store.put("k" + std::to_string(i), "v" + std::to_string(i));
+        }
+        EXPECT_TRUE(store.writeBarrier());
+        store.close();
+    }
+
+    // Step 2: Count SSTables after write close
+    size_t sst_count_before = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        if (entry.path().extension() == ".sst") {
+            sst_count_before++;
+        }
+    }
+
+    // Step 3: Reopen with overWrite = false (read-only mode), preAllocate = true
+    {
+        gConfigLSMIO.preAllocate = true;
+        gConfigLSMIO.filePoolSize = 4;
+        LSMIOStoreNative read_store(dbPath, false);
+
+        for (int i = 0; i < 20; ++i) {
+            std::string val;
+            EXPECT_TRUE(read_store.get("k" + std::to_string(i), &val));
+            EXPECT_EQ(val, "v" + std::to_string(i));
+        }
+        read_store.close();
+    }
+
+    // Step 4: Verify ZERO new SSTable files were created during read mode
+    size_t sst_count_after = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        if (entry.path().extension() == ".sst") {
+            sst_count_after++;
+        }
+    }
+    EXPECT_EQ(sst_count_before, sst_count_after);
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, ConcurrentPreallocMidStreamRotation) {
+    std::string dbPath = "test_native_concurrent_prealloc";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.writeBufferSize = 1 * 1024 * 1024;  // 1 MiB buffer
+    gConfigLSMIO.preAllocate = true;
+    gConfigLSMIO.manualOffset = true;
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        const int num_threads = 4;
+        const int records_per_thread = 50;
+        std::string payload(32 * 1024, 'X');  // 32 KiB * 200 = 6.4 MiB > 1 MiB buffer
+
+        std::vector<std::thread> workers;
+        std::atomic<bool> write_failed{false};
+
+        for (int t = 0; t < num_threads; ++t) {
+            workers.emplace_back([&store, t, &payload, &write_failed]() {
+                for (int i = 0; i < records_per_thread; ++i) {
+                    std::string key = "th_" + std::to_string(t) + "_k_" + std::to_string(i);
+                    if (!store.put(key, payload)) {
+                        write_failed.store(true);
+                        break;
+                    }
+                }
+            });
+        }
+
+        for (auto& w : workers) {
+            w.join();
+        }
+
+        EXPECT_FALSE(write_failed.load());
+        EXPECT_TRUE(store.writeBarrier());
+
+        // Verify all records readable
+        for (int t = 0; t < num_threads; ++t) {
+            for (int i = 0; i < records_per_thread; ++i) {
+                std::string key = "th_" + std::to_string(t) + "_k_" + std::to_string(i);
+                std::string val;
+                EXPECT_TRUE(store.get(key, &val)) << "Failed to read " << key;
+                EXPECT_EQ(val.size(), payload.size());
+            }
+        }
+
+        store.close();
+    } catch (const std::exception& e) {
+        FAIL() << "Unexpected exception: " << e.what();
     }
 
     CleanDir(dbPath);

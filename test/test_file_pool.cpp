@@ -77,3 +77,59 @@ TEST_F(FilePoolTest, PreAllocation) {
     auto fsize = std::filesystem::file_size(f1.first);
     EXPECT_EQ(fsize, size);
 }
+
+TEST_F(FilePoolTest, ZeroPoolSizeOnDemand) {
+    size_t size = 1024 * 1024;  // 1MB
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", 0, 100, size);
+
+    // No worker thread was spawned; zero files should exist initially
+    size_t file_count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(test_dir)) {
+        if (entry.path().extension() == ".sst") {
+            file_count++;
+        }
+    }
+    EXPECT_EQ(file_count, 0);
+
+    // acquire() must create file synchronously on-demand
+    auto f = pool.acquire();
+    ASSERT_TRUE(f.second != nullptr);
+    EXPECT_TRUE(f.second->is_open());
+    f.second->close();
+
+    EXPECT_TRUE(std::filesystem::exists(f.first));
+    EXPECT_EQ(std::filesystem::file_size(f.first), size);
+}
+
+TEST_F(FilePoolTest, GracefulShutdownDrain) {
+    auto pool = std::make_unique<lsmio::FilePool>(test_dir, "L0-", ".sst", 2, 200, 0);
+    // Acquire files until empty
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    auto f1 = pool->acquire();
+    auto f2 = pool->acquire();
+
+    // Call shutdown explicitly and verify acquire() on empty shutdown pool returns {"", nullptr}
+    pool->shutdown();
+    auto f3 = pool->acquire();
+    EXPECT_EQ(f3.first, "");
+    EXPECT_EQ(f3.second, nullptr);
+
+    // Reset pool while empty (invoking destructor with shutdown flag)
+    pool.reset();
+
+    // Acquire on empty shutdown pool with pool_size = 0 must return {"", nullptr} without throwing
+    lsmio::FilePool empty_pool(test_dir, "L0-", ".sst", 0, 300, 0);
+    empty_pool.shutdown();
+    auto f4 = empty_pool.acquire();
+    EXPECT_EQ(f4.first, "");
+    EXPECT_EQ(f4.second, nullptr);
+}
+
+TEST_F(FilePoolTest, NonExistentDirectoryFailureClean) {
+    std::string bad_dir = test_dir + "/non_existent_subdir/nested";
+    lsmio::FilePool pool(bad_dir, "L0-", ".sst", 0, 400, 1024 * 1024);
+    auto f = pool.acquire();
+    EXPECT_EQ(f.first, "");
+    EXPECT_EQ(f.second, nullptr);
+}
+

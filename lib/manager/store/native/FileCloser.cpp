@@ -28,6 +28,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <algorithm>
 #include <iostream>
 #include <lsmio/manager/store/native/FileCloser.hpp>
 

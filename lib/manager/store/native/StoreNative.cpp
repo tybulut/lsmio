@@ -98,15 +98,17 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
     }
 
     size_t pre_alloc_bytes = 0;
-    if (gConfigLSMIO.preAllocate) {
-        pre_alloc_bytes = m_memtable_max_size_bytes;
+    size_t file_pool_size = 0;
+    if (f_over_write) {
+        if (gConfigLSMIO.preAllocate) {
+            pre_alloc_bytes = m_memtable_max_size_bytes;
+        }
+        file_pool_size = gConfigLSMIO.filePoolSize;
     }
 
     // Initialize SSTableManager (which handles FilePool, Recovery, etc.)
-    // For read-only open, suppress FilePool background pre-allocations by setting pool size to 0
-    size_t pool_size = m_read_only ? 0 : gConfigLSMIO.filePoolSize;
     m_sstable_manager =
-        std::make_unique<SSTableManager>(_dbPath, pool_size, pre_alloc_bytes);
+        std::make_unique<SSTableManager>(_dbPath, file_pool_size, pre_alloc_bytes);
 
     // Start the background flush thread only if not read-only
     if (!m_read_only) {
@@ -166,7 +168,11 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
 }
 
 LSMIOStoreNative::~LSMIOStoreNative() {
-    close();
+    try {
+        close();
+    } catch (...) {
+        // Suppress any unforeseen exceptions in destructor
+    }
 }
 
 void LSMIOStoreNative::close() {
@@ -191,7 +197,11 @@ void LSMIOStoreNative::close() {
         m_immutable_memtables.pop_front();
 
         lock.unlock();
-        FlushMemtableToL0(std::move(memtable_to_flush));
+        try {
+            FlushMemtableToL0(std::move(memtable_to_flush));
+        } catch (...) {
+            m_bg_error.store(true, std::memory_order_release);
+        }
         lock.lock();
     }
 
@@ -227,8 +237,10 @@ void LSMIOStoreNative::FlushWorkLoop() {
             try {
                 FlushMemtableToL0(std::move(memtable_to_flush));
             } catch (const std::exception& e) {
+                m_bg_error.store(true, std::memory_order_release);
                 std::cerr << "[NATIVE] ERROR in FlushWorkLoop: " << e.what() << std::endl;
             } catch (...) {
+                m_bg_error.store(true, std::memory_order_release);
                 std::cerr << "[NATIVE] UNKNOWN ERROR in FlushWorkLoop" << std::endl;
             }
 
@@ -248,8 +260,16 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable) 
 
     // Delegate to SSTableManager
     // We pass m_flush_buffer for reuse
-    if (!m_sstable_manager->flushMemtable(*f_memtable, m_flush_buffer)) {
-        m_bg_error = true;
+    try {
+        if (!m_sstable_manager || !m_sstable_manager->flushMemtable(*f_memtable, m_flush_buffer)) {
+            m_bg_error.store(true, std::memory_order_release);
+        }
+    } catch (const std::exception& e) {
+        m_bg_error.store(true, std::memory_order_release);
+        std::cerr << "[NATIVE] Exception in FlushMemtableToL0: " << e.what() << std::endl;
+    } catch (...) {
+        m_bg_error.store(true, std::memory_order_release);
+        std::cerr << "[NATIVE] Unknown exception in FlushMemtableToL0" << std::endl;
     }
 }
 
