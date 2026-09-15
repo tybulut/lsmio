@@ -130,7 +130,7 @@ class LustreConfiguratorTest(unittest.TestCase):
                 f_block_size="64K",
                 f_stripe_count=16,
                 f_block_bytes=65536,
-                f_key_count=65536,
+                f_key_count=32768,
                 f_segment_count=16384,
             ),
             Combination(
@@ -154,7 +154,7 @@ class LustreConfiguratorTest(unittest.TestCase):
                 f_block_size="64K",
                 f_stripe_count=4,
                 f_block_bytes=65536,
-                f_key_count=65536,
+                f_key_count=32768,
                 f_segment_count=16384,
             ),
         )

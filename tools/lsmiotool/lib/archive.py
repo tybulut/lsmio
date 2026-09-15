@@ -32,7 +32,8 @@
 
 import os
 import shutil
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple, Union
 
 
 class ArchiveError(Exception):
@@ -166,76 +167,173 @@ class ArchiveEngine:
         return VariantCatalogue.getInfix(clean_setup, f_variant)
 
     @classmethod
-    def resolveTargetDirectory(cls, f_dest_dir: str, f_arm_id: str) -> str:
-        """Calculates collision-free archive destination path.
+    def resolvePairTargetDirectories(
+        cls,
+        f_dest_dir: Union[str, Path],
+        f_arm_id: str,
+    ) -> Tuple[str, str]:
+        """Atomically resolves synchronized target paths for paired (:run, :base) archives."""
+        if not f_dest_dir or not str(f_dest_dir).strip():
+            raise ArchiveError(f"dest_dir must be a non-empty path, got: {f_dest_dir!r}")
+        if not isinstance(f_arm_id, str) or not f_arm_id.strip():
+            raise ArchiveError(f"arm_id must be a non-empty string, got: {f_arm_id!r}")
 
-        Format:
-            Base target: <f_dest_dir>/outputs-<f_arm_id>
-            Collision suffix: <f_dest_dir>/outputs-<f_arm_id>-1, -2, ...
-        """
-        if not isinstance(f_dest_dir, str) or not f_dest_dir.strip():
-            raise ArchiveError(
-                f"dest_dir must be a non-empty string, got: {f_dest_dir!r}"
-            )
-        f_abs_dest = os.path.abspath(f_dest_dir)
-        base_name = f"outputs-{f_arm_id}" if f_arm_id else "outputs"
-        base_path = os.path.join(f_abs_dest, base_name)
-        if not os.path.exists(base_path):
-            return base_path
-        f_suffix = 1
-        while os.path.exists(f"{base_path}-{f_suffix}"):
-            f_suffix += 1
-        return f"{base_path}-{f_suffix}"
+        dest_root = Path(os.path.abspath(str(f_dest_dir)))
+        run_base = dest_root / f"outputs-{f_arm_id}:run"
+        base_base = dest_root / f"outputs-{f_arm_id}:base"
+
+        if not run_base.exists() and not base_base.exists():
+            return (str(run_base), str(base_base))
+
+        suffix = 1
+        while (dest_root / f"outputs-{f_arm_id}:run-{suffix}").exists() or \
+              (dest_root / f"outputs-{f_arm_id}:base-{suffix}").exists():
+            suffix += 1
+
+        return (
+            str(dest_root / f"outputs-{f_arm_id}:run-{suffix}"),
+            str(dest_root / f"outputs-{f_arm_id}:base-{suffix}"),
+        )
+
+    @classmethod
+    def resolveTargetDirectory(
+        cls,
+        f_dest_dir: Union[str, Path],
+        f_arm_id: str,
+        f_role: Optional[str] = None,
+    ) -> str:
+        """Calculates collision-free archive destination path, returning str (INV-PAIR-8)."""
+        if not f_dest_dir or not str(f_dest_dir).strip():
+            raise ArchiveError(f"dest_dir must be a non-empty path, got: {f_dest_dir!r}")
+        dest_root = Path(os.path.abspath(str(f_dest_dir)))
+        if f_role:
+            base_name = f"outputs-{f_arm_id}:{f_role}"
+        else:
+            base_name = f"outputs-{f_arm_id}" if f_arm_id else "outputs"
+        base_path = dest_root / base_name
+        if not base_path.exists():
+            return str(base_path)
+        suffix = 1
+        while (dest_root / f"{base_name}-{suffix}").exists():
+            suffix += 1
+        return str(dest_root / f"{base_name}-{suffix}")
 
     @classmethod
     def executeArchive(
         cls,
-        f_source_dir: str,
-        f_dest_root: str,
+        f_source_dir: Union[str, Path],
+        f_dest_root: Union[str, Path],
         f_arm_id: str,
+        f_role: Optional[str] = None,
+        f_target_path: Optional[Union[str, Path]] = None,
     ) -> str:
-        """Atomically moves f_source_dir to collision-free target and recreates f_source_dir.
+        """Atomically moves f_source_dir to collision-free target, returning str (INV-PAIR-8)."""
+        if not f_source_dir or not str(f_source_dir).strip():
+            raise ArchiveError(f"source_dir must be a non-empty path, got: {f_source_dir!r}")
+        abs_source = Path(os.path.abspath(str(f_source_dir)))
+        if not abs_source.exists():
+            raise ArchiveError(f"Active output directory does not exist: {abs_source}")
+        if not abs_source.is_dir():
+            raise ArchiveError(f"Active output path is not a directory: {abs_source}")
 
-        Returns:
-            Absolute path to archived target directory.
+        target_path = (
+            Path(os.path.abspath(str(f_target_path)))
+            if f_target_path is not None
+            else Path(cls.resolveTargetDirectory(f_dest_root, f_arm_id, f_role))
+        )
 
-        Raises:
-            ArchiveError: If source does not exist or move operation fails.
-        """
-        if not isinstance(f_source_dir, str) or not f_source_dir.strip():
-            raise ArchiveError(
-                f"source_dir must be a non-empty string, got: {f_source_dir!r}"
-            )
-        f_abs_source = os.path.abspath(f_source_dir)
-        if not os.path.exists(f_abs_source):
-            raise ArchiveError(
-                f"Active output directory does not exist: {f_abs_source}"
-            )
-        if not os.path.isdir(f_abs_source):
-            raise ArchiveError(
-                f"Active output path is not a directory: {f_abs_source}"
-            )
+        # Ensure aggregated reports exist prior to moving into archive
+        report_file = abs_source / "lsm-report.csv"
+        if not report_file.is_file():
+            try:
+                if any(abs_source.glob("*/*/out-*.txt*")):
+                    from lsmiotool.lib.output import LsmioAggOutput
 
-        f_target_dir = cls.resolveTargetDirectory(f_dest_root, f_arm_id)
+                    agg = LsmioAggOutput(str(abs_source), f_scale="baseline")
+                    agg.generateReports(f_out_dir=str(abs_source))
+            except Exception:
+                pass
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            os.makedirs(os.path.abspath(f_dest_root), exist_ok=True)
-        except Exception as f_err:
-            raise ArchiveError(
-                f"Failed to create destination directory {f_dest_root}: {f_err}"
-            ) from f_err
-
-        try:
-            shutil.move(f_abs_source, f_target_dir)
-        except Exception as f_err:
-            raise ArchiveError(
-                f"Failed to move {f_abs_source} to {f_target_dir}: {f_err}"
-            ) from f_err
+            shutil.move(str(abs_source), str(target_path))
+        except Exception as err:
+            raise ArchiveError(f"Failed to move {abs_source} to {target_path}: {err}") from err
 
         try:
-            os.makedirs(f_abs_source, exist_ok=True)
-        except Exception as f_err:
+            abs_source.mkdir(parents=True, exist_ok=True)
+        except Exception as err:
             raise ArchiveError(
-                f"Failed to recreate active output directory {f_abs_source}: {f_err}"
-            ) from f_err
+                f"Failed to recreate active output directory {abs_source}: {err}"
+            ) from err
 
-        return f_target_dir
+        return str(target_path)
+
+    @classmethod
+    def replicateArchive(
+        cls,
+        f_source_dir: Union[str, Path],
+        f_dest_root: Union[str, Path],
+        f_arm_id: str,
+        f_role: str = "base",
+        f_target_path: Optional[Union[str, Path]] = None,
+    ) -> str:
+        """Copies staged baseline output to destination archive, returning str path (INV-PAIR-8)."""
+        if not f_source_dir or not str(f_source_dir).strip():
+            raise ArchiveError(f"source_dir must be a non-empty path, got: {f_source_dir!r}")
+        abs_source = Path(os.path.abspath(str(f_source_dir)))
+        if not abs_source.exists():
+            raise ArchiveError(f"Staged baseline directory does not exist: {abs_source}")
+        if not abs_source.is_dir():
+            raise ArchiveError(f"Staged baseline path is not a directory: {abs_source}")
+
+        target_path = (
+            Path(os.path.abspath(str(f_target_path)))
+            if f_target_path is not None
+            else Path(cls.resolveTargetDirectory(f_dest_root, f_arm_id, f_role))
+        )
+
+        # Ensure aggregated reports exist prior to replicating staged baseline
+        report_file = abs_source / "lsm-report.csv"
+        if not report_file.is_file():
+            try:
+                if any(abs_source.glob("*/*/out-*.txt*")):
+                    from lsmiotool.lib.output import LsmioAggOutput
+
+                    agg = LsmioAggOutput(str(abs_source), f_scale="baseline")
+                    agg.generateReports(f_out_dir=str(abs_source))
+            except Exception:
+                pass
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copytree(str(abs_source), str(target_path))
+        except Exception as err:
+            raise ArchiveError(f"Failed to replicate {abs_source} to {target_path}: {err}") from err
+        return str(target_path)
+
+    @classmethod
+    def executePairedArchive(
+        cls,
+        f_run_source_dir: Union[str, Path],
+        f_base_source_dir: Union[str, Path],
+        f_dest_root: Union[str, Path],
+        f_arm_id: str,
+    ) -> Tuple[str, str]:
+        """Atomically archives paired variant run (:run) and staged baseline (:base)."""
+        target_run, target_base = cls.resolvePairTargetDirectories(f_dest_root, f_arm_id)
+        cls.executeArchive(
+            f_source_dir=f_run_source_dir,
+            f_dest_root=f_dest_root,
+            f_arm_id=f_arm_id,
+            f_role="run",
+            f_target_path=target_run,
+        )
+        cls.replicateArchive(
+            f_source_dir=f_base_source_dir,
+            f_dest_root=f_dest_root,
+            f_arm_id=f_arm_id,
+            f_role="base",
+            f_target_path=target_base,
+        )
+        return (target_run, target_base)

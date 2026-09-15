@@ -1007,7 +1007,7 @@ class LsmioAdapter(BenchmarkAdapter):
     }
 
     BLOCK_SIZE_MAP: Dict[str, Tuple[int, int]] = {
-        "64K": (65536, 65536),
+        "64K": (65536, 32768),
         "1M": (1048576, 4096),
         "8M": (8388608, 1024),
     }

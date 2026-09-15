@@ -82,6 +82,14 @@ def batch_job_orchestration(
     """
     # Ensure environment and directories are set up before running jobs
     all_dirs: Dict[str, str] = setup_job_environment_and_dirs(bm_path)
+    if bm_type == "lsmio":
+        lsm_outputs = os.environ.get(
+            "LSM_DIR_OBASE",
+            os.path.join(bm_path, "lsmio", "outputs"),
+        )
+        if os.path.isdir(lsm_outputs):
+            shutil.rmtree(lsm_outputs)
+        os.makedirs(lsm_outputs, exist_ok=True)
     rf_list: List[int] = [16, 4]
     bs_list: List[str] = ["8M", "1M", "64K"]
     for rf in rf_list:
@@ -454,7 +462,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
         # Map block size to numeric values as in the shell script
         if bs == "64K":
             bsb = "65536"
-            sg = "65536"
+            sg = "32768"
         elif bs == "1M":
             bsb = "1048576"
             sg = "4096"

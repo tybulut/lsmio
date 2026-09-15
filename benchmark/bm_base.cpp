@@ -34,12 +34,15 @@
 #include <signal.h>
 
 #include <CLI/CLI.hpp>
+#include <filesystem>
 #include <algorithm>
 #include <array>
 #include <iostream>
 #include <lsmio/lsmio.hpp>
+#include <numeric>
 #include <random>
 #include <stdexcept>
+#include <vector>
 
 BMConfig gConfigBM;
 
@@ -220,7 +223,10 @@ void BMBase::writeBenchmarkResults() {
 std::string genOptionsToString() {
     std::stringstream optStream;
 
-    optStream << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
+    optStream << " version: " << LSMIO_VERSION_STR << "\n"
+              << " gitBranch: " << LSMIO_GIT_BRANCH << "\n"
+              << " gitCommit: " << LSMIO_GIT_COMMIT_HASH << "\n"
+              << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
               << "\n useLSMIOPlugin: " << gConfigBM.useLSMIOPlugin
               << "\n loopAll: " << gConfigBM.loopAll << "\n verbose: " << gConfigBM.verbose
               << "\n debug: " << gConfigBM.debug << "\n mpi-barrier: " << gConfigBM.useMPIBarrier
@@ -234,7 +240,8 @@ std::string genOptionsToString() {
               << "\n\n useBloomFilter: " << lsmio::gConfigLSMIO.useBloomFilter
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
-              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP << "\n useLevelDB: "
+              << "\n enableMMAP: " << lsmio::gConfigLSMIO.enableMMAP
+              << "\n enablePread: " << lsmio::gConfigLSMIO.enablePread << "\n useLevelDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::LevelDB ? "yes" : "no")
               << "\n useRocksDB: "
               << (lsmio::gConfigLSMIO.storageType == lsmio::StorageType::RocksDB ? "yes" : "no")
@@ -268,6 +275,12 @@ std::string genOptionsToString() {
 int BMBase::beginMain(int argc, char **argv) {
     CLI::App app{"LSMIO Benchmark"};
     try {
+        std::string binaryName = std::filesystem::path(argv[0]).filename().string();
+        std::string versionInfo = binaryName + " version " + LSMIO_VERSION_STR +
+                                  " (branch: " + LSMIO_GIT_BRANCH +
+                                  ", commit: " + LSMIO_GIT_COMMIT_HASH + ")";
+        app.set_version_flag("-V,--version", versionInfo, "Print version information and exit");
+
         app.add_option("-o,--output-file", gConfigBM.fileName, "output file")->required();
         app.add_option("-d,--output-dir", gConfigBM.dirName, "output directory");
         app.add_flag("-v,--verbose", gConfigBM.verbose, "verbose mode (default: not-verbose)");
@@ -298,6 +311,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                      "use MMAP read/write (default: no MMAP)");
+        app.add_flag("--lsmio-pread", lsmio::gConfigLSMIO.enablePread,
+                     "use persistent descriptor pread() read (default: no pread)");
 
         bool flag_use_leveldb = false;
         bool flag_use_rocksdb = false;
@@ -311,7 +326,7 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_option("--lsmio-ts", lsmio::gConfigLSMIO.transferSize,
                        "transfer size (default: 64K)");
 
-        app.add_flag("--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
+        app.add_flag("--lsmio-always-flush,--lsmo-always-flush", lsmio::gConfigLSMIO.alwaysFlush,
                      "disable batching and makes read available immediately after "
                      "write (default: no)");
         app.add_option("--lsmio-batch-size", lsmio::gConfigLSMIO.asyncBatchSize,
@@ -351,7 +366,7 @@ int BMBase::beginMain(int argc, char **argv) {
                      "append the Dense Index Footer to the SSTable (default: false)");
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
-        app.add_flag("--lsmio-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
+        app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
                      "enable filesystem auto-tuning (default: false)");
 
         app.parse(argc, argv);
@@ -377,14 +392,14 @@ int BMBase::beginMain(int argc, char **argv) {
                 "ERROR: --lsmio-wbuffer is too small: it must exceed --lsmio-max-key plus 1M of "
                 "record overhead.");
         }
-    } catch (const CLI::CallForHelp &e) {
+    } catch (const CLI::ParseError &e) {
         exit(app.exit(e));
     } catch (std::runtime_error &e) {
         std::cerr << "ERROR: " << e.what() << std::endl;
         std::cerr << app.help() << std::flush;
         exit(1);
     } catch (...) {
-        std::cerr << "ERROR: Uknown" << std::endl;
+        std::cerr << "ERROR: Unknown" << std::endl;
         exit(2);
     }
 

@@ -41,6 +41,35 @@ list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/ProjectOptions.cmake)
 lsmio_setup_options()
 
+execute_process(
+  COMMAND git rev-parse --abbrev-ref HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT_VARIABLE LSMIO_GIT_BRANCH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+execute_process(
+  COMMAND git rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT_VARIABLE LSMIO_GIT_COMMIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+
+if(NOT LSMIO_GIT_BRANCH)
+  set(LSMIO_GIT_BRANCH "unknown")
+endif()
+
+if(NOT LSMIO_GIT_COMMIT_HASH)
+  set(LSMIO_GIT_COMMIT_HASH "unknown")
+endif()
+
+add_compile_definitions(
+  LSMIO_VERSION_STR="${LSMIO_VERSION}"
+  LSMIO_GIT_BRANCH="${LSMIO_GIT_BRANCH}"
+  LSMIO_GIT_COMMIT_HASH="${LSMIO_GIT_COMMIT_HASH}"
+)
+
 # Defines
 add_subdirectory(include)
 include(PackageTLX)

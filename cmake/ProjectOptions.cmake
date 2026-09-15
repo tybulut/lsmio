@@ -50,7 +50,7 @@ macro(lsmio_print_build_config)
   message("  Build options:")
 
   set(LIB_TYPE "")
-  if(LSMIO_BUILD_SHARED_LIBS)
+  if(BUILD_SHARED_LIBS)
     set(LIB_TYPE " (shared)")
   else()
     set(LIB_TYPE " (static)")

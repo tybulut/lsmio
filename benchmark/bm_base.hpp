@@ -46,7 +46,7 @@ class BMBase {
     std::string _benchResultsWrite = "";
     std::string _benchResultsRead = "";
 
-    int *pRandomKeyIndex;
+    int *pRandomKeyIndex = nullptr;
 
     static bool useMPI;
     static int mpiWorldSize;
