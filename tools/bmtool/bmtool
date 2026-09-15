@@ -33,7 +33,7 @@ BM_USAGE="Usage:
 $0 <cmd> <benchmark> <scale> [<variants>] [options]
 
 cmds:
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>]
+  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>] [--versioned]
   parse <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd]
   archive <lsmio> <local|bake|small|large|baseline> [<variant>] [--dest=<path>]
   dirs
@@ -79,6 +79,7 @@ Options:
   --out-dir <dir> Archive destination directory (default: \$BM_PATH/lsmio-archive)
                   Aliases: --output-dir <dir>, --dest <dir>, --dest=<dir>
   --time <hours>  Explicit job walltime limit in hours (aliases: --walltime, --wallhour)
+  --versioned     Execute versioned comparison run against reference baseline
   -h, --help      Display this comprehensive help guide and exit 0
 "
 
@@ -165,6 +166,7 @@ BM_ARCHIVE_DEST=""
 BM_ARCHIVE_OVERRIDE=""
 BM_RESUME="no"
 DO_ARCHIVE="no"
+BM_VERSIONED="no"
 EXPANDED_VARIANTS="default"
 
 if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "archive" ]; then
@@ -186,6 +188,10 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
     # Parse baseline options
     while [ $# -gt 0 ]; do
       case "$1" in
+        --versioned)
+          [ "$BM_VERSIONED" != "yes" ] || fatal_error "Duplicate '--versioned' option specified"
+          BM_VERSIONED="yes"
+          ;;
         --ssd)
           LUSTRE_SSD=on
           ;;
@@ -235,6 +241,16 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
 
     # Validate variant usage
     if [ "$JOB_TOOL" = "lsmio" ]; then
+      if [ "$BM_VERSIONED" = "yes" ]; then
+        if [ -n "$BM_VARIANTS_RAW" ] && [ "$BM_VARIANTS_RAW" != "default" ] && [ "$BM_VARIANTS_RAW" != "base" ]; then
+          fatal_error "Combining --versioned with any variant specification ('$BM_VARIANTS_RAW') is prohibited; versioned runs evaluate baseline performance only."
+        fi
+        if [ "$BM_ARCHIVE_OVERRIDE" = "no" ]; then
+          fatal_error "Cannot specify '--no-archive' with '--versioned'."
+        fi
+        BM_ARCHIVE_OVERRIDE="yes"
+      fi
+
       EXPANDED_VARIANTS="$(bm_expand_variants "$BM_VARIANTS_RAW")" || fatal_error "Variant validation failed"
       # Count variant items
       VAR_COUNT=0
@@ -279,6 +295,9 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
         DO_ARCHIVE="no"
       fi
     else
+      if [ "$BM_VERSIONED" = "yes" ]; then
+        fatal_error "--versioned flag is supported exclusively for 'lsmio baseline'."
+      fi
       # For non-lsmio benchmarks, variant is strictly rejected (INV-ARCH-3)
       if [ -n "$BM_VARIANTS_RAW" ]; then
         fatal_error "Benchmark '$JOB_TOOL' does not support variant configurations; variants are supported exclusively for 'lsmio'."
@@ -385,8 +404,14 @@ if [ "$BM_CMD" = "run" ]; then
       export BM_RESUME
       export VAR_COUNT
       export BM_WALLHOUR_OVERRIDE
+      export BM_VERSIONED
 
-      if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
+      if [ "$BM_VERSIONED" = "yes" ]; then
+        export BM_PAIRED_RUN="yes"
+        export DO_ARCHIVE="yes"
+        echo "=== Submitting versioned baseline comparison job ==="
+        run_baseline_job "$BM_TYPE" || fatal_error "Versioned baseline job failed during execution"
+      elif [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
         export BM_PAIRED_RUN="yes"
         export DO_ARCHIVE="yes"
         if [ -n "$BM_ARCHIVE_OVERRIDE" ]; then

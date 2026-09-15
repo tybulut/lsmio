@@ -49,7 +49,7 @@ common cmds:
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>]
+  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -78,7 +78,7 @@ Options:
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
@@ -104,6 +104,7 @@ Options:
   --time <hours>
                 Explicit job walltime limit in hours (aliases: --walltime, --wallhour, clamped to [1, 48]).
                 Overrides default dynamic scaling (2 + total_runs * 2 hours, granting 120 minutes per matrix run + 2 hours safety headroom).
+  --versioned   Execute versioned comparison run against reference baseline.
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
@@ -393,6 +394,7 @@ class RunCliParser:
         f_out_dir: Optional[str] = None
         f_wallhour: Optional[int] = None
         f_walltime: Optional[str] = None
+        f_versioned: bool = False
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -402,6 +404,11 @@ class RunCliParser:
                     raise RunCliParseError("Duplicate '--ssd' option specified.")
                 f_is_ssd = True
                 f_trailing_ssd_seen = True
+                f_idx += 1
+            elif f_tok == "--versioned":
+                if f_versioned:
+                    raise RunCliParseError("Duplicate '--versioned' option specified.")
+                f_versioned = True
                 f_idx += 1
             elif f_tok == "--setup":
                 if f_setup_name is not None:
@@ -489,6 +496,7 @@ class RunCliParser:
                     "--time=",
                     "--walltime=",
                     "--wallhour=",
+                    "--versioned=",
                 )
             ):
                 flag_name = f_tok.split("=")[0]
@@ -502,6 +510,19 @@ class RunCliParser:
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
 
+        if f_versioned:
+            if f_scale != "baseline" or f_benchmark != "lsmio":
+                raise RunCliParseError(
+                    "--versioned is supported exclusively for 'lsmio baseline'."
+                )
+            if f_variants != (None,) and f_variants != ():
+                raise RunCliParseError(
+                    "Combining '--versioned' with any variant specification (e.g. 'all', 'footer') is rejected atomically."
+                )
+            if f_archive is False:
+                raise RunCliParseError("Cannot specify '--no-archive' with '--versioned'.")
+            f_archive = True
+
         return RunRequest(
             f_target=f_benchmark,
             f_scale=f_scale,
@@ -514,6 +535,7 @@ class RunCliParser:
             f_out_dir=f_out_dir,
             f_wallhour=f_wallhour,
             f_walltime=f_walltime,
+            f_versioned=f_versioned,
         )
 
 

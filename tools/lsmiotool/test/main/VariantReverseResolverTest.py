@@ -216,6 +216,44 @@ class VariantReverseResolverTest(unittest.TestCase):
         )
         self.assertIsNone(res_default.role)
 
+    def testVersionedRunAndBaseResolution(self) -> None:
+        """Validates reverse resolution and formatting of versioned directories."""
+        r_run = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d:run")
+        self.assertIsNotNone(r_run)
+        self.assertEqual(r_run.backend, "native")
+        self.assertEqual(r_run.variant, "version-main-a1b2c3d")
+        self.assertEqual(r_run.role, "run")
+        self.assertIsNone(r_run.collision)
+        self.assertEqual(r_run.display_label, "main (a1b2c3d)")
+
+        r_base = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d:base")
+        self.assertIsNotNone(r_base)
+        self.assertEqual(r_base.backend, "native")
+        self.assertEqual(r_base.variant, "version-main-a1b2c3d")
+        self.assertEqual(r_base.role, "base")
+        self.assertIsNone(r_base.collision)
+        self.assertEqual(r_base.display_label, "main (a1b2c3d)")
+
+    def testVersionedBranchWithSanitizedSpecialCharacters(self) -> None:
+        """Validates that sanitized branches with internal hyphens format correctly."""
+        r = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfix-1-a1b2c3d:run")
+        self.assertIsNotNone(r)
+        self.assertEqual(r.variant, "version-tybulut-bugfix-1-a1b2c3d")
+        self.assertEqual(r.display_label, "tybulut-bugfix-1 (a1b2c3d)")
+
+    def testVersionedCollisionSuffixHandling(self) -> None:
+        """Validates that collision suffixes on versioned runs append cleanly."""
+        r = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d:run-2")
+        self.assertIsNotNone(r)
+        self.assertEqual(r.collision, "2")
+        self.assertEqual(r.display_label, "main (a1b2c3d)-2")
+
+    def testVersionedNonNativeBackend(self) -> None:
+        """Validates that non-native backends prefix the backend name."""
+        r = VariantReverseResolver.resolve("outputs-rocksdb-version-main-a1b2c3d:run")
+        self.assertIsNotNone(r)
+        self.assertEqual(r.display_label, "rocksdb-main (a1b2c3d)")
+
 
 if __name__ == "__main__":
     unittest.main()

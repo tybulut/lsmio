@@ -78,7 +78,7 @@ case "$BASE_BACKEND" in
     BIN_NAME="bm_adios"
     ;;
   NATIVE)
-    BIN_NAME="bm_native"
+    BIN_NAME="${BM_BIN_NAME:-bm_native}"
     ;;
   ROCKSDB)
     BIN_NAME="bm_rocksdb"

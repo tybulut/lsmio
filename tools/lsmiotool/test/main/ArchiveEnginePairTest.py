@@ -181,6 +181,25 @@ class ArchiveEnginePairTest(unittest.TestCase):
                 mock_agg.generateReports.assert_called_once_with(f_out_dir=os.path.abspath(source_dir))
                 self.assertTrue(os.path.exists(target))
 
+    def testVersionedArmIdPairResolution(self) -> None:
+        """Validates that versioned arm IDs resolve to symmetrical :run and :base targets."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            arm_id = "native-version-main-a1b2c3d"
+            run_tgt, base_tgt = ArchiveEngine.resolvePairTargetDirectories(temp_dir, arm_id)
+            self.assertEqual(run_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:run"))
+            self.assertEqual(base_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:base"))
+
+    def testVersionedArmIdSynchronizedCollision(self) -> None:
+        """Validates that pre-existing versioned directories advance both twins synchronously."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            arm_id = "native-version-main-a1b2c3d"
+            run_0 = os.path.join(temp_dir, f"outputs-{arm_id}:run")
+            os.makedirs(run_0)
+
+            run_1, base_1 = ArchiveEngine.resolvePairTargetDirectories(temp_dir, arm_id)
+            self.assertEqual(run_1, os.path.join(temp_dir, f"outputs-{arm_id}:run-1"))
+            self.assertEqual(base_1, os.path.join(temp_dir, f"outputs-{arm_id}:base-1"))
+
 
 if __name__ == "__main__":
     unittest.main()

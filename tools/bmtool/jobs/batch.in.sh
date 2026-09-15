@@ -64,7 +64,84 @@ run_matrix_workload() {
   done
 }
 
-if [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
+if [ "$BM_VERSIONED" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
+  # -------------------------------------------------------------------------
+  # Phase 1: Golden Reference Baseline (bm_native:main -> role :base)
+  # -------------------------------------------------------------------------
+  if [ ! -x "$SB_BIN/bm_native:main" ]; then
+    fatal_error "Reference binary $SB_BIN/bm_native:main not found. Build and install reference baseline via: ./build.sh install:main"
+  fi
+
+  echo "=== [Intra-Allocation] Step 1: Running Reference Main Baseline (bm_native:main) ==="
+  BM_BIN_NAME="bm_native:main"
+  export BM_BIN_NAME
+  BM_VARIANT=""
+  export BM_VARIANT
+  . $BM_DIRNAME/include/dirs-cleanup.in.sh
+  rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
+  . $BM_DIRNAME/jobs/lsmio-setup.in.sh
+  run_matrix_workload
+
+  if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+    . $BM_DIRNAME/parse/lsmio-parse.sh
+  fi
+
+  STAGING_BASE="$BM_PATH/lsmio/outputs-baseline-staged"
+  rm -rf "$STAGING_BASE"
+  mv "$LSM_DIR_OBASE" "$STAGING_BASE"
+  mkdir -p "$LSM_DIR_OBASE"
+
+  # -------------------------------------------------------------------------
+  # Phase 2: Active Target Baseline (bm_native -> role :run)
+  # -------------------------------------------------------------------------
+  if [ ! -x "$SB_BIN/bm_native" ]; then
+    fatal_error "Active target binary $SB_BIN/bm_native not found. Build and install via: ./build.sh install"
+  fi
+
+  GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed -E 's/[^a-zA-Z0-9_-]/-/g')
+  VERSION_VARIANT="version-${SANITIZED_BRANCH}-${GIT_HASH}"
+  ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$VERSION_VARIANT")" || ARM_ID="native-${VERSION_VARIANT}"
+
+  echo "=== [Intra-Allocation] Step 2: Running Active Target Baseline (bm_native) (ARM_ID: ${ARM_ID}) ==="
+  BM_BIN_NAME="bm_native"
+  export BM_BIN_NAME
+  BM_VARIANT="$VERSION_VARIANT"
+  export BM_VARIANT
+  . $BM_DIRNAME/include/dirs-cleanup.in.sh
+  . $BM_DIRNAME/jobs/lsmio-setup.in.sh
+  run_matrix_workload
+
+  if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+    . $BM_DIRNAME/parse/lsmio-parse.sh
+  fi
+
+  PAIR_SUFFIX=""
+  BASE_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
+  BASE_BASE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:base"
+  if [ -e "$BASE_RUN" ] || [ -e "$BASE_BASE" ]; then
+    k=1
+    while [ -e "${BASE_RUN}-${k}" ] || [ -e "${BASE_BASE}-${k}" ]; do
+      k=$(( k + 1 ))
+    done
+    PAIR_SUFFIX="-$k"
+  fi
+
+  BM_ROLE="run" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+  # -------------------------------------------------------------------------
+  # Phase 3: Restore & Archive Golden Reference (Role :base)
+  # -------------------------------------------------------------------------
+  echo "=== [Intra-Allocation] Step 3: Archiving Reference Baseline (Role: base) ==="
+  rm -rf "$LSM_DIR_OBASE"
+  cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
+  BM_ROLE="base" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+  rm -rf "$STAGING_BASE"
+  . $BM_DIRNAME/include/dirs-cleanup.in.sh
+
+elif [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   echo "=== [Intra-Allocation] Step 1: Running Shared Pre-Baseline ==="
   BM_VARIANT=""
   export BM_VARIANT

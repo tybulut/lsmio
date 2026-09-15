@@ -411,6 +411,7 @@ class RunRequest:
         "m_out_dir",
         "m_wallhour",
         "m_walltime",
+        "m_versioned",
         "_frozen",
     )
 
@@ -427,6 +428,7 @@ class RunRequest:
         f_out_dir: Optional[Union[str, Path]] = None,
         f_wallhour: Optional[int] = None,
         f_walltime: Optional[str] = None,
+        f_versioned: bool = False,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
             raise PlanValidationError(
@@ -502,6 +504,7 @@ class RunRequest:
         super().__setattr__("m_out_dir", f_clean_out_dir)
         super().__setattr__("m_wallhour", f_wallhour)
         super().__setattr__("m_walltime", f_walltime.strip() if f_walltime else None)
+        super().__setattr__("m_versioned", bool(f_versioned))
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -583,6 +586,14 @@ class RunRequest:
     def storage(self) -> StorageClass:
         return StorageClass.SSD if self.m_ssd else StorageClass.HDD
 
+    @property
+    def versioned(self) -> bool:
+        return self.m_versioned
+
+    @property
+    def is_versioned(self) -> bool:
+        return self.m_versioned
+
     def toDict(self) -> Dict[str, Any]:
         f_dict: Dict[str, Any] = {
             "target": self.m_target,
@@ -604,6 +615,8 @@ class RunRequest:
             f_dict["wallhour"] = self.m_wallhour
         if self.m_walltime is not None:
             f_dict["walltime"] = self.m_walltime
+        if self.m_versioned:
+            f_dict["versioned"] = True
         return f_dict
 
     def __repr__(self) -> str:
@@ -618,7 +631,8 @@ class RunRequest:
             f"resume={self.m_resume!r}, "
             f"out_dir={self.m_out_dir!r}, "
             f"wallhour={self.m_wallhour!r}, "
-            f"walltime={self.m_walltime!r})"
+            f"walltime={self.m_walltime!r}, "
+            f"versioned={self.m_versioned!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -634,6 +648,7 @@ class RunRequest:
                 and self.m_out_dir == f_other.m_out_dir
                 and self.m_wallhour == f_other.m_wallhour
                 and self.m_walltime == f_other.m_walltime
+                and self.m_versioned == f_other.m_versioned
             )
         return False
 
@@ -1461,6 +1476,16 @@ class RunPlanner:
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_request.walltime is not None:
                 f_walltime = f_request.walltime
+            elif (
+                f_scale == "baseline"
+                and f_target == "lsmio"
+                and f_resource_policy.walltime_policy == "slurm_nodes"
+                and getattr(f_request, "versioned", False)
+            ):
+                total_runs = 2
+                calculated_hours = 2 + (total_runs * 2)
+                f_wallhour = max(4, min(48, calculated_hours))
+                f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
                 f_scale == "baseline"
                 and f_target == "lsmio"

@@ -11,6 +11,7 @@ DO_TEST=false
 DO_XTEST=false
 DO_PTEST=false
 DO_INSTALL=false
+INSTALL_TAG=""
 DO_COVERAGE=false
 
 detect_num_cores() {
@@ -120,6 +121,14 @@ while [[ $# -gt 0 ]]; do
     install)
       DO_INSTALL=true
       ;;
+    install:*)
+      DO_INSTALL=true
+      INSTALL_TAG="${1#install:}"
+      if [ -z "$INSTALL_TAG" ]; then
+        echo "ERROR: install tag cannot be empty (e.g. ./build.sh install:main)" >&2
+        exit 1
+      fi
+      ;;
     coverage)
       DO_COVERAGE=true
       DO_TEST=true
@@ -137,7 +146,7 @@ fi
 cmake -B build \
   -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
   -DBUILD_SHARED_LIBS=On \
-  -DCMAKE_INSTALL_PREFIX:PATH=$HOME/src/usr \
+  -DCMAKE_INSTALL_PREFIX:PATH="${PREFIX:-$HOME/src/usr}" \
   -DLSMIO_ENABLE_COVERAGE=$DO_COVERAGE
 
 pushd build
@@ -166,6 +175,15 @@ fi
 
 if [ "$DO_INSTALL" = true ]; then
   make install || exit 1
+  if [ -n "$INSTALL_TAG" ]; then
+    INSTALL_PREFIX="${PREFIX:-$HOME/src/usr}"
+    INSTALL_BIN_DIR="${INSTALL_PREFIX}/bin"
+    for bm in bm_native bm_rocksdb bm_leveldb bm_manager bm_adios; do
+      if [ -f "${INSTALL_BIN_DIR}/${bm}" ]; then
+        cp -f "${INSTALL_BIN_DIR}/${bm}" "${INSTALL_BIN_DIR}/${bm}:${INSTALL_TAG}"
+      fi
+    done
+  fi
 fi
 
 if [ "$DO_COVERAGE" = true ]; then

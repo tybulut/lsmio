@@ -37,7 +37,9 @@ fi
 
 # Task 4.2.4: Mechanical Arm Identifier Derivation
 : "${BM_SETUP:=NATIVE-M}"
-ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$BM_VARIANT")" || fatal_error "Invalid variant: [$BM_VARIANT]"
+if [ -z "$ARM_ID" ]; then
+  ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$BM_VARIANT")" || fatal_error "Invalid variant: [$BM_VARIANT]"
+fi
 # Task 4.2.5: Symmetrical Paired & Standalone Collision Resolution Engine
 if [ -n "$BM_ROLE" ]; then
   # Symmetrical Paired Archiving (INV-PAIR-2)

@@ -381,6 +381,9 @@ class VariantCatalogue:
             spec_tokens, spec_flags = cls._VARIANT_SPECS[stripped]
             return VariantRecord(stripped, spec_tokens, spec_flags)
 
+        if stripped.startswith("version-"):
+            return VariantRecord(stripped, stripped, ("--lsmio-no-autotune",))
+
         raise UnknownVariantError(f_key, cls.supportedVariants())
 
     @classmethod
@@ -462,6 +465,21 @@ class VariantReverseResolver:
         f_collision: Optional[str] = None,
     ) -> str:
         """Formats canonical display label based on backend, variant, and collision suffix."""
+        if f_variant.startswith("version-"):
+            payload = f_variant[len("version-"):]
+            if "-" in payload:
+                branch, commit_hash = payload.rsplit("-", 1)
+                lbl = f"{branch} ({commit_hash})"
+            else:
+                lbl = payload
+
+            if f_backend != "native":
+                lbl = f"{f_backend}-{lbl}"
+
+            if f_collision is not None:
+                return f"{lbl}-{f_collision}"
+            return lbl
+
         if f_backend == "native":
             if f_collision is not None:
                 return f"{f_variant}-{f_collision}"

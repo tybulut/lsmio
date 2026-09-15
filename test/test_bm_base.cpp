@@ -29,6 +29,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <string>
 #include <unordered_map>
@@ -172,6 +173,41 @@ TEST_F(BMBaseTest, MemorySafetyNoLeak) {
     EXPECT_EQ(bm.writePrepareCalls, 10);
     EXPECT_EQ(bm.readPrepareCalls, 10);
     EXPECT_EQ(bm.getRandomKeyIndex(), nullptr);
+}
+
+TEST(BMBaseVersionTest, CleanExitOnVersionFlag) {
+    char *argv[] = {(char *)"test_bm_base", (char *)"--version", nullptr};
+    int argc = 2;
+
+    ASSERT_EXIT(
+        {
+            dup2(STDERR_FILENO, STDOUT_FILENO);
+            BMBase::beginMain(argc, argv);
+        },
+        ::testing::ExitedWithCode(0),
+        ".*version.*branch:.*commit:.*"
+    );
+}
+
+TEST(BMBaseVersionTest, CleanExitOnShortVersionFlag) {
+    char *argv[] = {(char *)"test_bm_base", (char *)"-V", nullptr};
+    int argc = 2;
+
+    ASSERT_EXIT(
+        {
+            dup2(STDERR_FILENO, STDOUT_FILENO);
+            BMBase::beginMain(argc, argv);
+        },
+        ::testing::ExitedWithCode(0),
+        ".*version.*branch:.*commit:.*"
+    );
+}
+
+TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {
+    std::string optStr = genOptionsToString();
+    EXPECT_NE(optStr.find("version: "), std::string::npos);
+    EXPECT_NE(optStr.find("gitBranch: "), std::string::npos);
+    EXPECT_NE(optStr.find("gitCommit: "), std::string::npos);
 }
 
 int main(int argc, char **argv) {

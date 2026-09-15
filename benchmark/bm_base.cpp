@@ -34,6 +34,7 @@
 #include <signal.h>
 
 #include <CLI/CLI.hpp>
+#include <filesystem>
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -263,7 +264,10 @@ void BMBase::writeBenchmarkResults() {
 std::string genOptionsToString() {
     std::stringstream optStream;
 
-    optStream << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
+    optStream << " version: " << LSMIO_VERSION_STR << "\n"
+              << " gitBranch: " << LSMIO_GIT_BRANCH << "\n"
+              << " gitCommit: " << LSMIO_GIT_COMMIT_HASH << "\n"
+              << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
               << "\n useLSMIOPlugin: " << gConfigBM.useLSMIOPlugin
               << "\n loopAll: " << gConfigBM.loopAll << "\n verbose: " << gConfigBM.verbose
               << "\n debug: " << gConfigBM.debug << "\n mpi-barrier: " << gConfigBM.useMPIBarrier
@@ -312,6 +316,12 @@ std::string genOptionsToString() {
 int BMBase::beginMain(int argc, char **argv) {
     CLI::App app{"LSMIO Benchmark"};
     try {
+        std::string binaryName = std::filesystem::path(argv[0]).filename().string();
+        std::string versionInfo = binaryName + " version " + LSMIO_VERSION_STR +
+                                  " (branch: " + LSMIO_GIT_BRANCH +
+                                  ", commit: " + LSMIO_GIT_COMMIT_HASH + ")";
+        app.set_version_flag("-V,--version", versionInfo, "Print version information and exit");
+
         app.add_option("-o,--output-file", gConfigBM.fileName, "output file")->required();
         app.add_option("-d,--output-dir", gConfigBM.dirName, "output directory");
         app.add_flag("-v,--verbose", gConfigBM.verbose, "verbose mode (default: not-verbose)");
@@ -423,14 +433,14 @@ int BMBase::beginMain(int argc, char **argv) {
                 "ERROR: --lsmio-wbuffer is too small: it must exceed --lsmio-max-key plus 1M of "
                 "record overhead.");
         }
-    } catch (const CLI::CallForHelp &e) {
+    } catch (const CLI::ParseError &e) {
         exit(app.exit(e));
     } catch (std::runtime_error &e) {
         std::cerr << "ERROR: " << e.what() << std::endl;
         std::cerr << app.help() << std::flush;
         exit(1);
     } catch (...) {
-        std::cerr << "ERROR: Uknown" << std::endl;
+        std::cerr << "ERROR: Unknown" << std::endl;
         exit(2);
     }
 

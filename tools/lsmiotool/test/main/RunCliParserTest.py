@@ -541,5 +541,42 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(f_req_high.wallhour, 48)
         self.assertEqual(f_req_high.walltime, "48:00:00")
 
+    def testVersionedBaselineSuccess(self) -> None:
+        """Validates that --versioned successfully parses under baseline and sets versioned=True."""
+        req = parseRunArguments(["lsmio", "baseline", "--versioned"])
+        self.assertTrue(req.versioned)
+        self.assertTrue(req.is_versioned)
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "baseline")
+        self.assertTrue(req.archive)
+
+    def testVersionedRejectsVariantsAtomically(self) -> None:
+        """Validates that combining --versioned with any variant is rejected (INV-VER-1)."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "footer", "--versioned"])
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "all", "--versioned"])
+
+    def testVersionedRejectsNonBaselineScale(self) -> None:
+        """Validates that --versioned on non-baseline scale is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "small", "--versioned"])
+
+    def testVersionedRejectsNonLsmioTarget(self) -> None:
+        """Validates that --versioned on non-lsmio target is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["ior", "baseline", "--versioned"])
+
+    def testVersionedRejectsDuplicateFlag(self) -> None:
+        """Validates that duplicate --versioned is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "--versioned", "--versioned"])
+
+    def testVersionedRejectsNoArchive(self) -> None:
+        """Validates that --no-archive with --versioned is rejected."""
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "baseline", "--versioned", "--no-archive"])
 
 
+if __name__ == "__main__":
+    unittest.main()

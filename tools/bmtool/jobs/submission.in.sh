@@ -28,6 +28,17 @@ batch_run() {
     else
       wallhour=$_user_hours
     fi
+  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
+    total_runs=2
+    # 120 min per baseline run (maximum safety margin for 64K workloads) + 2 hours base headroom
+    calculated_hours=$(( 2 + total_runs * 2 ))
+    if [ "$calculated_hours" -lt 4 ]; then
+      wallhour=4
+    elif [ "$calculated_hours" -gt 48 ]; then
+      wallhour=48
+    else
+      wallhour=$calculated_hours
+    fi
   elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
     if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
       _cnt=0
@@ -79,7 +90,7 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi

@@ -21,6 +21,10 @@ resolve_variant() {
       BM_VARIANT_TOKENS=""
       BM_VARIANT_FLAGS="--lsmio-no-autotune"
       ;;
+    version-*)
+      BM_VARIANT_TOKENS="$var"
+      BM_VARIANT_FLAGS="--lsmio-no-autotune"
+      ;;
     footer)
       BM_VARIANT_TOKENS="footer"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index"
