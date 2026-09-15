@@ -30,8 +30,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <filesystem>
 #include <lsmio/manager/store/native/StoreNative.hpp>
+#include <thread>
+#include <vector>
 
 using namespace lsmio;
 
@@ -150,6 +153,262 @@ TEST_F(NativeStoreExtendedTest, LargeWriteFlush) {
     } catch (const std::exception& e) {
         std::cerr << "EXCEPTION: " << e.what() << std::endl;
         FAIL() << "Exception thrown";
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
+    std::string dbPath = "test_native_autotune_lustre";
+    CleanDir(dbPath);
+
+    // Explicitly set baseline parameters before tuning
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
+
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 8);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneLustre: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
+    std::string dbPath = "test_native_autotune_gpfs";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 6;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(GPFS_SUPER_MAGIC);
+
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 12);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneGPFS: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneLocalFsNoMutation) {
+    std::string dbPath = "test_native_autotune_local";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = true;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        // 0xEF53 is EXT4_SUPER_MAGIC
+        store.autoTuneParameters(0xEF53);
+
+        EXPECT_FALSE(gConfigLSMIO.footerIndex);
+        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneLocalFsNoMutation: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
+    std::string dbPath = "test_native_autotune_disabled";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.autoTuneParameters = false;
+    gConfigLSMIO.footerIndex = false;
+    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.writeBufferNumber = 4;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
+
+        EXPECT_FALSE(gConfigLSMIO.footerIndex);
+        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
+    } catch (const std::exception& e) {
+        FAIL() << "Exception during AutoTuneDisabledBypass: " << e.what();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, DefaultConfigAutoTuneDisabled) {
+    lsmio::LSMIOConfig config;
+    EXPECT_FALSE(config.autoTuneParameters);
+    EXPECT_FALSE(gConfigLSMIO.autoTuneParameters);
+}
+
+TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
+    std::string dbPath = "test_native_readonly_open_pool";
+    CleanDir(dbPath);
+
+    int writer_sst_count = 0;
+    // First create a DB and write a key, then close
+    {
+        LSMIOStoreNative writer(dbPath, true, false);
+        std::string key = "key1";
+        std::string val = "val1";
+        EXPECT_TRUE(writer.put(key, val));
+        writer.close();
+
+        for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+            if (entry.path().extension() == ".sst") {
+                writer_sst_count++;
+            }
+        }
+    }
+
+    // Now open read-only
+    {
+        LSMIOStoreNative reader(dbPath, false, true);
+        std::string val;
+        EXPECT_TRUE(reader.get("key1", &val));
+        EXPECT_EQ(val, "val1");
+
+        // Verify that mutations are rejected in read-only mode
+        EXPECT_FALSE(reader.put("key2", "val2"));
+
+        // Count .sst files: reader must not have pre-allocated any new pool files
+        int reader_sst_count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+            if (entry.path().extension() == ".sst") {
+                reader_sst_count++;
+            }
+        }
+        EXPECT_EQ(reader_sst_count, writer_sst_count);
+        reader.close();
+    }
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, ReadOnlyPreallocSuppression) {
+    std::string dbPath = "test_native_readonly_prealloc_suppress";
+    CleanDir(dbPath);
+
+    // Step 1: Write initial data with overWrite = true
+    {
+        gConfigLSMIO.preAllocate = true;
+        gConfigLSMIO.filePoolSize = 4;
+        LSMIOStoreNative store(dbPath, true);
+        for (int i = 0; i < 20; ++i) {
+            store.put("k" + std::to_string(i), "v" + std::to_string(i));
+        }
+        EXPECT_TRUE(store.writeBarrier());
+        store.close();
+    }
+
+    // Step 2: Count SSTables after write close
+    size_t sst_count_before = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        if (entry.path().extension() == ".sst") {
+            sst_count_before++;
+        }
+    }
+
+    // Step 3: Reopen with overWrite = false (read-only mode), preAllocate = true
+    {
+        gConfigLSMIO.preAllocate = true;
+        gConfigLSMIO.filePoolSize = 4;
+        LSMIOStoreNative read_store(dbPath, false);
+
+        for (int i = 0; i < 20; ++i) {
+            std::string val;
+            EXPECT_TRUE(read_store.get("k" + std::to_string(i), &val));
+            EXPECT_EQ(val, "v" + std::to_string(i));
+        }
+        read_store.close();
+    }
+
+    // Step 4: Verify ZERO new SSTable files were created during read mode
+    size_t sst_count_after = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        if (entry.path().extension() == ".sst") {
+            sst_count_after++;
+        }
+    }
+    EXPECT_EQ(sst_count_before, sst_count_after);
+
+    CleanDir(dbPath);
+}
+
+TEST_F(NativeStoreExtendedTest, ConcurrentPreallocMidStreamRotation) {
+    std::string dbPath = "test_native_concurrent_prealloc";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.writeBufferSize = 1 * 1024 * 1024;  // 1 MiB buffer
+    gConfigLSMIO.preAllocate = true;
+    gConfigLSMIO.manualOffset = true;
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.filePoolSize = 4;
+
+    try {
+        LSMIOStoreNative store(dbPath, true);
+        const int num_threads = 4;
+        const int records_per_thread = 50;
+        std::string payload(32 * 1024, 'X');  // 32 KiB * 200 = 6.4 MiB > 1 MiB buffer
+
+        std::vector<std::thread> workers;
+        std::atomic<bool> write_failed{false};
+
+        for (int t = 0; t < num_threads; ++t) {
+            workers.emplace_back([&store, t, &payload, &write_failed]() {
+                for (int i = 0; i < records_per_thread; ++i) {
+                    std::string key = "th_" + std::to_string(t) + "_k_" + std::to_string(i);
+                    if (!store.put(key, payload)) {
+                        write_failed.store(true);
+                        break;
+                    }
+                }
+            });
+        }
+
+        for (auto& w : workers) {
+            w.join();
+        }
+
+        EXPECT_FALSE(write_failed.load());
+        EXPECT_TRUE(store.writeBarrier());
+
+        // Verify all records readable
+        for (int t = 0; t < num_threads; ++t) {
+            for (int i = 0; i < records_per_thread; ++i) {
+                std::string key = "th_" + std::to_string(t) + "_k_" + std::to_string(i);
+                std::string val;
+                EXPECT_TRUE(store.get(key, &val)) << "Failed to read " << key;
+                EXPECT_EQ(val.size(), payload.size());
+            }
+        }
+
+        store.close();
+    } catch (const std::exception& e) {
+        FAIL() << "Unexpected exception: " << e.what();
     }
 
     CleanDir(dbPath);

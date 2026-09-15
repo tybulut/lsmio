@@ -150,8 +150,9 @@ class LSMIOConfig {
     /// index overhead. Returns 0 when writeBufferSize is too small to hold any value.
     size_t getMaxValueLen() const {
         if (writeBufferSize <= 0) return 0;
-        size_t overhead = maxKeyLen + (1 * 1024 * 1024);
         size_t buffer = static_cast<size_t>(writeBufferSize);
+        size_t reserved = std::min(static_cast<size_t>(1 * 1024 * 1024), buffer / 8);
+        size_t overhead = maxKeyLen + reserved;
         return buffer > overhead ? buffer - overhead : 0;
     }
     /// @brief Default write file size. 64-bit: 8 * writeBufferSize overflows int

@@ -50,6 +50,14 @@
 #include "MemtableVectorSort.hpp"
 #include "SSTableManager.hpp"
 
+#ifndef LUSTRE_SUPER_MAGIC
+#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
+#endif
+
+#ifndef GPFS_SUPER_MAGIC
+#define GPFS_SUPER_MAGIC 0x47504653
+#endif
+
 namespace lsmio {
 
 class LSMIOStoreNative : public LSMIOStore {
@@ -78,6 +86,7 @@ class LSMIOStoreNative : public LSMIOStore {
     std::atomic<bool> m_shutting_down{false};
     std::atomic<bool> m_flush_in_progress{false};
     std::atomic<bool> m_bg_error{false};
+    bool m_read_only{false};
 
     void FlushWorkLoop();
     void FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable);
@@ -90,7 +99,8 @@ class LSMIOStoreNative : public LSMIOStore {
     bool dbCleanup() override;
 
   public:
-    LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write = false);
+    LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write = false,
+                     const bool f_read_only = false);
     ~LSMIOStoreNative() override;
 
     void autoTuneParameters(uint64_t f_fs_magic);

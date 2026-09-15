@@ -354,3 +354,52 @@ TEST_F(SSTableManagerTest, FallbackStreamWhenBothDisabled) {
     EXPECT_EQ(val, "stream_v");
 }
 
+TEST_F(SSTableManagerTest, PreallocManualOffsetAndFooterIndex) {
+    gConfigLSMIO.preAllocate = true;
+    gConfigLSMIO.manualOffset = true;
+    gConfigLSMIO.footerIndex = true;
+
+    constexpr size_t pre_alloc_bytes = 128 * 1024;
+    mgr = std::make_unique<SSTableManager>(dbPath, 4, pre_alloc_bytes);
+
+    MemtableVectorNoSort m;
+    for (int i = 0; i < 50; ++i) {
+        m.add("key_" + std::to_string(i), "value_" + std::to_string(i));
+    }
+    std::vector<char> buf(4096);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+    mgr.reset();
+
+    // Verify trimmed SSTable file size and trailer magic
+    bool found_trimmed = false;
+    for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+        if (entry.path().extension() == ".sst") {
+            auto sz = std::filesystem::file_size(entry.path());
+            if (sz > 0 && sz < pre_alloc_bytes) {
+                found_trimmed = true;
+                // Verify magic bytes at end of trimmed file
+                std::ifstream f(entry.path(), std::ios::binary);
+                ASSERT_TRUE(f.is_open());
+                f.seekg(sz - 4);
+                char magic_buf[4];
+                f.read(magic_buf, 4);
+                uint32_t magic = (static_cast<uint8_t>(magic_buf[0])) |
+                                 (static_cast<uint8_t>(magic_buf[1]) << 8) |
+                                 (static_cast<uint8_t>(magic_buf[2]) << 16) |
+                                 (static_cast<uint8_t>(magic_buf[3]) << 24);
+                EXPECT_EQ(magic, lsmio::SSTableManager::FOOTER_MAGIC);
+            }
+        }
+    }
+    EXPECT_TRUE(found_trimmed);
+
+    // Verify state recovery and all keys present
+    auto new_mgr = std::make_unique<SSTableManager>(dbPath, 4, 0);
+    for (int i = 0; i < 50; ++i) {
+        std::string val;
+        EXPECT_TRUE(new_mgr->get("key_" + std::to_string(i), val));
+        EXPECT_EQ(val, "value_" + std::to_string(i));
+    }
+}
+
+

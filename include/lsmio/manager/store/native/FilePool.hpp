@@ -54,6 +54,7 @@ class FilePool {
     // The stream is open and ready for writing.
     // If the pool is empty, this blocks until a file is available.
     std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
+    void shutdown();
 
   private:
     std::string m_directory;
@@ -71,6 +72,8 @@ class FilePool {
     std::condition_variable m_cv_wait;  // Wait for item in pool
     std::atomic<bool> m_shutdown{false};
     std::atomic<uint64_t> m_next_id;
+
+    std::pair<std::string, std::unique_ptr<std::ofstream>> createFile();
 
     void replenish();
 };
