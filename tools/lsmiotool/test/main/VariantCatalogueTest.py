@@ -43,7 +43,7 @@ from lsmiotool.lib.variants import (
 class VariantCatalogueTest(unittest.TestCase):
     """Unit test suite verifying declarative variant catalog, mappings, and immutability."""
 
-    EXPECTED_37_VARIANTS = {
+    EXPECTED_49_VARIANTS = {
         "footer": ("footer", ("--lsmio-no-autotune", "--lsmio-footer-index")),
         "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
         "footer-btree": (
@@ -202,11 +202,134 @@ class VariantCatalogueTest(unittest.TestCase):
                 "8",
             ),
         ),
+        "footer-pread-pool-8": (
+            "footer-pread-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "footer-pread-manoff": (
+            "footer-pread-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pread-manoff-pool-8": (
+            "footer-pread-manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "footer-map-pread": (
+            "footer-map-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-btree-pread": (
+            "footer-btree-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-vsort-pread": (
+            "footer-vsort-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-btree-manoff-pread": (
+            "footer-btree-manoff-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-map-manoff-pread": (
+            "footer-map-manoff-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-map-manoff-mmap": (
+            "footer-map-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-map": (
+            "footer-map",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+            ),
+        ),
+        "footer-map-manoff": (
+            "footer-map-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "manoff-pool-8": (
+            "manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
         "autotune": (
             "autotune",
             ("--lsmio-autotune",),
         ),
     }
+
+    EXPECTED_37_VARIANTS = EXPECTED_49_VARIANTS
 
     def testDefaultAndBaseKeysReturnEmpty(self) -> None:
         """Assert None, empty strings, 'base', and 'default' resolve to empty VariantRecord."""
@@ -228,16 +351,16 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertEqual(rec.flagsString, "")
             self.assertTrue(VariantCatalogue.isValid(key))
 
-    def testAll37NonEmptyVariants(self) -> None:
-        """Assert all 37 non-empty keys match tokens and engine CLI flags."""
+    def testAll49NonEmptyVariants(self) -> None:
+        """Assert all 49 non-empty keys match tokens and engine CLI flags."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
-        self.assertEqual(len(supported), 37)
-        self.assertEqual(len(self.EXPECTED_37_VARIANTS), 37)
+        self.assertEqual(len(supported), 49)
+        self.assertEqual(len(self.EXPECTED_49_VARIANTS), 49)
         self.assertEqual(supported, all_keys)
-        self.assertEqual(set(supported), set(self.EXPECTED_37_VARIANTS.keys()))
+        self.assertEqual(set(supported), set(self.EXPECTED_49_VARIANTS.keys()))
 
-        for key, (expected_tokens, expected_flags) in self.EXPECTED_37_VARIANTS.items():
+        for key, (expected_tokens, expected_flags) in self.EXPECTED_49_VARIANTS.items():
             rec = VariantCatalogue.resolve(key)
             self.assertEqual(rec.key, key)
             self.assertEqual(rec.tokens, expected_tokens)

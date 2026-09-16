@@ -254,6 +254,39 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r.display_label, "rocksdb-main (a1b2c3d)")
 
+    def testNewDigitVariants(self) -> None:
+        """Validates reverse resolution of new variants ending in digits."""
+        r1 = VariantReverseResolver.resolve("outputs-native-footer-pread-pool-8")
+        self.assertIsNotNone(r1)
+        self.assertEqual(r1.variant, "footer-pread-pool-8")
+        self.assertIsNone(r1.collision)
+        self.assertEqual(r1.display_label, "footer-pread-pool-8")
+
+        r2 = VariantReverseResolver.resolve("outputs-native-footer-pread-pool-8-1")
+        self.assertIsNotNone(r2)
+        self.assertEqual(r2.variant, "footer-pread-pool-8")
+        self.assertEqual(r2.collision, "1")
+        self.assertEqual(r2.display_label, "footer-pread-pool-8-1")
+
+        r3 = VariantReverseResolver.resolve("outputs-native-footer-pread-pool-8:run")
+        self.assertIsNotNone(r3)
+        self.assertEqual(r3.variant, "footer-pread-pool-8")
+        self.assertEqual(r3.role, "run")
+        self.assertIsNone(r3.collision)
+
+        r4 = VariantReverseResolver.resolve("outputs-native-manoff-pool-8")
+        self.assertIsNotNone(r4)
+        self.assertEqual(r4.variant, "manoff-pool-8")
+        self.assertIsNone(r4.collision)
+
+        r5 = VariantReverseResolver.resolve("outputs-native-footer-pread-manoff-pool-8:run-2")
+        self.assertIsNotNone(r5)
+        self.assertEqual(r5.variant, "footer-pread-manoff-pool-8")
+        self.assertEqual(r5.role, "run")
+        self.assertEqual(r5.collision, "2")
+        self.assertEqual(r5.display_label, "footer-pread-manoff-pool-8-2")
+
 
 if __name__ == "__main__":
     unittest.main()
+

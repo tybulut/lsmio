@@ -580,9 +580,9 @@ Under paired execution workflows, the archiving engine automatically coordinates
 
 ---
 
-## 6. Canonical 37-Variant Catalogue
+## 6. Canonical 49-Variant Catalogue
 
-The LSMIO toolchain maintains an authoritative catalog of 37 non-empty variants, synchronized across `lsmiotool` (`VariantCatalogue._VARIANT_SPECS` in Python) and legacy `bmtool` (`resolve_variant()` in POSIX shell).
+The LSMIO toolchain maintains an authoritative catalog of 49 non-empty variants, synchronized across `lsmiotool` (`VariantCatalogue._VARIANT_SPECS` in Python) and legacy `bmtool` (`resolve_variant()` in POSIX shell).
 
 | # | Variant Identifier | Correlation Tokens | CLI Engine Flags | Key Feature / Architecture Evaluated |
 |:---|:---|:---|:---|:---|
@@ -623,11 +623,23 @@ The LSMIO toolchain maintains an authoritative catalog of 37 non-empty variants,
 | 35 | `footer-btree-manoff-mmap` | `footer-btree-manoff-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, B-tree memtable, manual offsets, memory-mapped reads. |
 | 36 | `footer-manoff-pool-8` | `footer-manoff-pool-8` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8` | Dense Index Footer, manual offsets, 8-file pre-allocation pool. |
 | 37 | `autotune` | `autotune` | `--lsmio-autotune` | Adaptive filesystem auto-tuning (matches `footer-manoff-pool-8` on Lustre/GPFS, `base` on local FS). |
+| 38 | `footer-pread-pool-8` | `footer-pread-pool-8` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-pread --lsmio-pool 8` | Dense Index Footer, persistent `pread()`, and 8-file pre-allocation pool. |
+| 39 | `footer-pread-manoff` | `footer-pread-manoff` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-pread --lsmio-manual-offset` | Dense Index Footer, persistent `pread()`, and manual byte offset tracking. |
+| 40 | `footer-pread-manoff-pool-8` | `footer-pread-manoff-pool-8` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-pread --lsmio-manual-offset --lsmio-pool 8` | Dense Index Footer, persistent `pread()`, manual offsets, and 8-file pool. |
+| 41 | `footer-map-pread` | `footer-map-pread` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-pread` | Dense Index Footer, `std::map` memtable, and persistent `pread()`. |
+| 42 | `footer-btree-pread` | `footer-btree-pread` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-pread` | Dense Index Footer, B-tree memtable, and persistent `pread()`. |
+| 43 | `footer-vsort-pread` | `footer-vsort-pread` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-pread` | Dense Index Footer, sorted vector memtable, and persistent `pread()`. |
+| 44 | `footer-btree-manoff-pread` | `footer-btree-manoff-pread` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-pread` | Dense Index Footer, B-tree memtable, manual offsets, and persistent `pread()`. |
+| 45 | `footer-map-manoff-pread` | `footer-map-manoff-pread` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-manual-offset --lsmio-pread` | Dense Index Footer, `std::map` memtable, manual offsets, and persistent `pread()`. |
+| 46 | `footer-map-manoff-mmap` | `footer-map-manoff-mmap` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-manual-offset --lsmio-mmap` | Dense Index Footer, `std::map` memtable, manual offsets, and zero-copy `mmap`. |
+| 47 | `footer-map` | `footer-map` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map` | Dense Index Footer combined with `std::map` memtable. |
+| 48 | `footer-map-manoff` | `footer-map-manoff` | `--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-manual-offset` | Dense Index Footer, `std::map` memtable, and manual byte offsets. |
+| 49 | `manoff-pool-8` | `manoff-pool-8` | `--lsmio-no-autotune --lsmio-manual-offset --lsmio-pool 8` | Manual byte offset tracking combined with 8-file pre-allocation pool. |
 
 > [!NOTE]
-> In addition to the 37 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, auto-tuning enabled by default, and no extra flags).
-> Together with `default`, these 37 variants form the canonical sequence of all 38 matrix variants (`VariantCatalogue.canonicalVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell), which is expanded automatically via the `all` keyword in `lsmiotool run lsmio baseline all` and `bmtool run lsmio baseline all`.
+> In addition to the 49 non-empty variants above, the empty baseline variant (`base` or `default`) uses standard defaults (128MB write buffer, `vector-no-sort` memtable, auto-tuning enabled by default, and no extra flags).
+> Together with `default`, these 49 variants form the canonical sequence of all 50 matrix variants (`VariantCatalogue.canonicalVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell), which is expanded automatically via the `all` keyword in `lsmiotool run lsmio baseline all` and `bmtool run lsmio baseline all`.
 >
-> Variants 1 through 36 explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference.
+> Variants 1 through 49 (except `autotune`) explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference.
 >
-> **Buffer Sizing Standard**: In accordance with experimental rigor, read-path optimization variants (`pread`, `mmap`, `footer-pread`, `footer-mmap`) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.
+> **Buffer Sizing Standard**: In accordance with experimental rigor, read-path optimization variants (`pread`, `mmap`, `footer-pread`, `footer-mmap`, etc.) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.

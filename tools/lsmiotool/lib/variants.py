@@ -310,6 +310,127 @@ class VariantCatalogue:
                 "8",
             ),
         ),
+        "footer-pread-pool-8": (
+            "footer-pread-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "footer-pread-manoff": (
+            "footer-pread-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pread-manoff-pool-8": (
+            "footer-pread-manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "footer-map-pread": (
+            "footer-map-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-btree-pread": (
+            "footer-btree-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-vsort-pread": (
+            "footer-vsort-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-btree-manoff-pread": (
+            "footer-btree-manoff-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-map-manoff-pread": (
+            "footer-map-manoff-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-map-manoff-mmap": (
+            "footer-map-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+            ),
+        ),
+        "footer-map": (
+            "footer-map",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+            ),
+        ),
+        "footer-map-manoff": (
+            "footer-map-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "manoff-pool-8": (
+            "manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
         "autotune": (
             "autotune",
             ("--lsmio-autotune",),
