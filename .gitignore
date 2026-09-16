@@ -9,3 +9,7 @@ __pycache__
 # benchmark scripts logs dir
 tools/bmtool/logs
 
+# temp
+tmp
+temp
+
