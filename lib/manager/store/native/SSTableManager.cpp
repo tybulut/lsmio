@@ -34,6 +34,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -492,35 +493,36 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
         f_out_value.assign(f_node.m_mmap_ptr + f_offset + 8 + key_len, val_len);
         return true;
     } else if (f_node.m_read_fd >= 0) {
-        constexpr size_t PREAD_SPECULATIVE_BUF_SIZE = 64 * 1024;
-        char stack_buf[PREAD_SPECULATIVE_BUF_SIZE];
-        ssize_t bytes_read = ::pread(f_node.m_read_fd, stack_buf, sizeof(stack_buf), f_offset);
+        constexpr size_t PREAD_SPECULATIVE_BUF_SIZE = 128 * 1024;
+        static thread_local std::array<char, PREAD_SPECULATIVE_BUF_SIZE> tl_pread_buf;
+        ssize_t bytes_read =
+            ::pread(f_node.m_read_fd, tl_pread_buf.data(), tl_pread_buf.size(), f_offset);
         if (bytes_read < static_cast<ssize_t>(8 + f_key.size())) {
             return false;
         }
 
-        uint32_t key_len = unpackLe32(stack_buf);
+        uint32_t key_len = unpackLe32(tl_pread_buf.data());
         if (key_len != f_key.size() || key_len > READ_MAX_KEY_LEN) {
             return false;
         }
 
-        if (std::memcmp(stack_buf + 4, f_key.data(), key_len) != 0) {
+        if (std::memcmp(tl_pread_buf.data() + 4, f_key.data(), key_len) != 0) {
             return false;
         }
 
-        uint32_t val_len = unpackLe32(stack_buf + 4 + key_len);
+        uint32_t val_len = unpackLe32(tl_pread_buf.data() + 4 + key_len);
         if (val_len > READ_MAX_VAL_LEN) {
             return false;
         }
 
         uint64_t total_record_len = 8ULL + key_len + val_len;
         if (static_cast<uint64_t>(bytes_read) >= total_record_len) {
-            f_out_value.assign(stack_buf + 8 + key_len, val_len);
+            f_out_value.assign(tl_pread_buf.data() + 8 + key_len, val_len);
             return true;
         } else {
             f_out_value.resize(val_len);
             uint64_t val_in_buf = static_cast<uint64_t>(bytes_read) - (8ULL + key_len);
-            std::memcpy(f_out_value.data(), stack_buf + 8 + key_len, val_in_buf);
+            std::memcpy(f_out_value.data(), tl_pread_buf.data() + 8 + key_len, val_in_buf);
             uint64_t remaining_bytes = val_len - val_in_buf;
             uint64_t second_offset = f_offset + static_cast<uint64_t>(bytes_read);
             ssize_t n2 = ::pread(f_node.m_read_fd, f_out_value.data() + val_in_buf, remaining_bytes,
