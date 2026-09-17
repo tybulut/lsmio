@@ -115,6 +115,9 @@ class LSMIOStoreNative : public LSMIOStore {
     bool writeBarrier() override;
 
     // Accessors for testing
+    bool isReadOnly() const noexcept {
+        return m_read_only;
+    }
     size_t getMemtableMaxSize() const {
         return m_memtable_max_size_bytes;
     }

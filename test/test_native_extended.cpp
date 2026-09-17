@@ -273,6 +273,7 @@ TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
     // First create a DB and write a key, then close
     {
         LSMIOStoreNative writer(dbPath, true, false);
+        EXPECT_FALSE(writer.isReadOnly());
         std::string key = "key1";
         std::string val = "val1";
         EXPECT_TRUE(writer.put(key, val));
@@ -285,9 +286,13 @@ TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
         }
     }
 
+    // Assert gConfigLSMIO.readOnly defaults to true
+    EXPECT_TRUE(gConfigLSMIO.readOnly);
+
     // Now open read-only
     {
-        LSMIOStoreNative reader(dbPath, false, true);
+        LSMIOStoreNative reader(dbPath, false, gConfigLSMIO.readOnly);
+        EXPECT_TRUE(reader.isReadOnly());
         std::string val;
         EXPECT_TRUE(reader.get("key1", &val));
         EXPECT_EQ(val, "val1");
@@ -304,6 +309,14 @@ TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {
         }
         EXPECT_EQ(reader_sst_count, writer_sst_count);
         reader.close();
+    }
+
+    // Now verify read-write open with explicit read_only = false
+    {
+        LSMIOStoreNative reader_rw(dbPath, false, false);
+        EXPECT_FALSE(reader_rw.isReadOnly());
+        EXPECT_TRUE(reader_rw.put("key2", "val2"));
+        reader_rw.close();
     }
 
     CleanDir(dbPath);

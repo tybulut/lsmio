@@ -208,6 +208,7 @@ TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {
     EXPECT_NE(optStr.find("version: "), std::string::npos);
     EXPECT_NE(optStr.find("gitBranch: "), std::string::npos);
     EXPECT_NE(optStr.find("gitCommit: "), std::string::npos);
+    EXPECT_NE(optStr.find("readOnly: true"), std::string::npos);
 }
 
 int main(int argc, char **argv) {

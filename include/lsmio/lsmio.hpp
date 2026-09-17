@@ -172,6 +172,8 @@ class LSMIOConfig {
     bool manualOffset = true;
     /// @brief Flag to write Dense Index Footer to the SSTable
     bool footerIndex = true;
+    /// @brief Flag to open store in read-only mode during read operations (default: true)
+    bool readOnly = true;
 };
 
 /// Global configuration instance for LSMIO.

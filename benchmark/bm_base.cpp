@@ -308,6 +308,7 @@ std::string genOptionsToString() {
               << "\n footerIndex: " << (lsmio::gConfigLSMIO.footerIndex ? "true" : "false")
               << "\n writeBufferNumber: " << lsmio::gConfigLSMIO.writeBufferNumber
               << "\n autoTuneParameters: " << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
+              << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
               << "\n";
 
     return optStream.str();
@@ -409,6 +410,11 @@ int BMBase::beginMain(int argc, char **argv) {
                        "number of write buffers (default: 4)");
         app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
                      "enable filesystem auto-tuning (default: false)");
+        app.add_flag(
+            "--lsmio-read-only,--lsmio-readonly,--lsmio-ro,"
+            "!--lsmio-no-read-only,!--lsmio-no-readonly,!--lsmio-no-ro",
+            lsmio::gConfigLSMIO.readOnly,
+            "open store in read-only mode during read operations (default: true)");
 
         app.parse(argc, argv);
 
