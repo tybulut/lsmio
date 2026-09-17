@@ -286,6 +286,24 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertEqual(r5.collision, "2")
         self.assertEqual(r5.display_label, "footer-pread-manoff-pool-8-2")
 
+    def testStreamlinedVariants(self) -> None:
+        """Validates reverse resolution of streamlined variants based on new engine defaults."""
+        cases = [
+            ("outputs-native-mmap-btree", "native", "mmap-btree", None, "mmap-btree"),
+            ("outputs-native-mmap-vsort:run", "native", "mmap-vsort", "run", "mmap-vsort"),
+            ("outputs-native-prealloc-vsort:run-1", "native", "prealloc-vsort", "run", "prealloc-vsort-1"),
+            ("outputs-native-pool-8-mmap", "native", "pool-8-mmap", None, "pool-8-mmap"),
+            ("outputs-native-legacy", "native", "legacy", None, "legacy"),
+            ("outputs-native-no-pread", "native", "no-pread", None, "no-pread"),
+        ]
+        for folder, exp_backend, exp_var, exp_role, exp_label in cases:
+            r = VariantReverseResolver.resolve(folder)
+            self.assertIsNotNone(r, f"Failed to resolve {folder}")
+            self.assertEqual(r.backend, exp_backend)
+            self.assertEqual(r.variant, exp_var)
+            self.assertEqual(r.role, exp_role)
+            self.assertEqual(r.display_label, exp_label)
+
 
 if __name__ == "__main__":
     unittest.main()

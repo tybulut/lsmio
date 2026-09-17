@@ -193,11 +193,11 @@ class VariantCatalogue:
         ),
         "bfilter": ("bfilter", ("--lsmio-no-autotune", "--lsmio-bfilter")),
         "wal": ("wal", ("--lsmio-no-autotune", "--lsmio-wal")),
-        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap")),
+        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap", "--lsmio-no-pread")),
         "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
         "footer-mmap": (
             "footer-mmap",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap", "--lsmio-no-pread"),
         ),
         "footer-pread": (
             "footer-pread",
@@ -262,6 +262,7 @@ class VariantCatalogue:
                 "vector-sort",
                 "--lsmio-manual-offset",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-vsort-manoff": (
@@ -276,7 +277,14 @@ class VariantCatalogue:
         ),
         "footer-pool-8-mmap": (
             "footer-pool-8-mmap",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pool", "8", "--lsmio-mmap"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
         ),
         "footer-manoff-pool-8-mmap": (
             "footer-manoff-pool-8-mmap",
@@ -287,6 +295,7 @@ class VariantCatalogue:
                 "--lsmio-pool",
                 "8",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-btree-manoff-mmap": (
@@ -298,6 +307,7 @@ class VariantCatalogue:
                 "btree",
                 "--lsmio-manual-offset",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-manoff-pool-8": (
@@ -401,6 +411,7 @@ class VariantCatalogue:
                 "map",
                 "--lsmio-manual-offset",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-map": (
@@ -431,11 +442,123 @@ class VariantCatalogue:
                 "8",
             ),
         ),
+        "vnosort": (
+            "vnosort",
+            ("--lsmio-no-autotune", "--lsmio-memtable", "vector-no-sort"),
+        ),
+        "no-pread": (
+            "no-pread",
+            ("--lsmio-no-autotune", "--lsmio-no-pread"),
+        ),
+        "no-footer": (
+            "no-footer",
+            ("--lsmio-no-autotune", "--lsmio-no-footer-index"),
+        ),
+        "no-manoff": (
+            "no-manoff",
+            ("--lsmio-no-autotune", "--lsmio-no-manual-offset"),
+        ),
+        "legacy": (
+            "legacy",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-no-footer-index",
+                "--lsmio-no-manual-offset",
+                "--lsmio-no-pread",
+                "--lsmio-memtable",
+                "vector-no-sort",
+            ),
+        ),
+        "prealloc-vsort": (
+            "prealloc-vsort",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-prealloc",
+            ),
+        ),
+        "prealloc-btree": (
+            "prealloc-btree",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-prealloc",
+            ),
+        ),
+        "prealloc-wbuf-512m": (
+            "prealloc-wbuf-512m",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-wbuffer",
+                "536870912",
+                "--lsmio-prealloc",
+            ),
+        ),
+        "mmap-vsort": (
+            "mmap-vsort",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
+        "mmap-btree": (
+            "mmap-btree",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
+        "pool-8-mmap": (
+            "pool-8-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
         "autotune": (
             "autotune",
             ("--lsmio-autotune",),
         ),
     }
+
+    _CANONICAL_VARIANTS: Tuple[str, ...] = (
+        "vsort",
+        "btree",
+        "vnosort",
+        "mmap",
+        "no-pread",
+        "no-footer",
+        "no-manoff",
+        "legacy",
+        "prealloc",
+        "wbuf-512m",
+        "wbuf-32m",
+        "pool-8",
+        "prealloc-vsort",
+        "prealloc-btree",
+        "prealloc-wbuf-512m",
+        "mmap-vsort",
+        "mmap-btree",
+        "pool-8-mmap",
+        "flush",
+        "batch-2048",
+        "bfilter",
+        "wal",
+        "compress",
+        "sync",
+        "autotune",
+    )
 
     @classmethod
     def stripBackendPrefix(cls, f_key: str) -> str:
@@ -458,7 +581,7 @@ class VariantCatalogue:
 
     @classmethod
     def supportedVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 37 supported non-empty variant keys in canonical order."""
+        """Returns tuple of all supported non-empty variant keys in canonical order."""
         return tuple(cls._VARIANT_SPECS.keys())
 
     @classmethod
@@ -468,8 +591,8 @@ class VariantCatalogue:
 
     @classmethod
     def canonicalVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 38 matrix variant keys in canonical order ('default' followed by 37 variants)."""
-        return ("default",) + cls.supportedVariants()
+        """Returns tuple of all 26 streamlined matrix variant keys in canonical order ('default' followed by 25 variants)."""
+        return ("default",) + cls._CANONICAL_VARIANTS
 
     @classmethod
     def resolve(cls, f_key: Optional[str] = None) -> VariantRecord:

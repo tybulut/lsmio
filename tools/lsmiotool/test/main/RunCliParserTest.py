@@ -441,11 +441,11 @@ class RunCliParserTest(unittest.TestCase):
         self.assertFalse(f_req.resume)
 
     def testBaselineScaleWithAllKeyword(self) -> None:
-        """Task 2.5.2: Asserts 'all' keyword expands to all 50 canonical matrix variants with auto-archive enabled."""
+        """Task 2.5.2: Asserts 'all' keyword expands to all 26 canonical matrix variants with auto-archive enabled."""
         f_req = parseRunArguments(["lsmio", "baseline", "all"])
-        self.assertEqual(len(f_req.variants), 50)
+        self.assertEqual(len(f_req.variants), 26)
         self.assertIsNone(f_req.variants[0])  # default/base variant
-        self.assertEqual(f_req.variants[1], "footer")
+        self.assertEqual(f_req.variants[1], "vsort")
         self.assertEqual(f_req.variants[-1], "autotune")
         self.assertIsNone(f_req.variant)
         self.assertTrue(f_req.effective_archive)
