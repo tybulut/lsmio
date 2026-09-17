@@ -115,7 +115,7 @@ class LSMIOConfig {
     /// @brief Flag to enable memory-mapped files.
     bool enableMMAP = false;
     /// @brief Flag to enable persistent read file descriptors and atomic pread().
-    bool enablePread = false;
+    bool enablePread = true;
     /// @brief Flag to enable data compression.
     bool compression = false;
 
@@ -167,11 +167,11 @@ class LSMIOConfig {
 
     // NativeStore specific settings
     /// @brief Memtable implementation to use (vector-no-sort, vector-sort, map, btree)
-    MemtableType memtable = MemtableType::VectorNoSort;
+    MemtableType memtable = MemtableType::Map;
     /// @brief Flag to bypass tellp() and manually track offsets
-    bool manualOffset = false;
+    bool manualOffset = true;
     /// @brief Flag to write Dense Index Footer to the SSTable
-    bool footerIndex = false;
+    bool footerIndex = true;
 };
 
 /// Global configuration instance for LSMIO.

@@ -352,8 +352,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                      "use MMAP read/write (default: no MMAP)");
-        app.add_flag("--lsmio-pread", lsmio::gConfigLSMIO.enablePread,
-                     "use persistent descriptor pread() read (default: no pread)");
+        app.add_flag("--lsmio-pread,!--lsmio-no-pread", lsmio::gConfigLSMIO.enablePread,
+                     "use persistent descriptor pread() read (default: pread)");
 
         bool flag_use_leveldb = false;
         bool flag_use_rocksdb = false;
@@ -397,14 +397,14 @@ int BMBase::beginMain(int argc, char **argv) {
 
         app.add_option("--lsmio-memtable", lsmio::gConfigLSMIO.memtable,
                        "memtable implementation to use: vector-no-sort, vector-sort, map, btree "
-                       "(default: vector-no-sort)")
+                       "(default: map)")
             ->transform(CLI::CheckedTransformer(memtableMap, CLI::ignore_case));
         app.add_option("--lsmio-max-key", lsmio::gConfigLSMIO.maxKeyLen,
                        "maximum accepted key length in bytes (default: 256K)");
-        app.add_flag("--lsmio-manual-offset", lsmio::gConfigLSMIO.manualOffset,
-                     "bypass tellp() and manually track offsets (default: false)");
-        app.add_flag("--lsmio-footer-index", lsmio::gConfigLSMIO.footerIndex,
-                     "append the Dense Index Footer to the SSTable (default: false)");
+        app.add_flag("--lsmio-manual-offset,!--lsmio-no-manual-offset", lsmio::gConfigLSMIO.manualOffset,
+                     "bypass tellp() and manually track offsets (default: true)");
+        app.add_flag("--lsmio-footer-index,!--lsmio-no-footer-index", lsmio::gConfigLSMIO.footerIndex,
+                     "append the Dense Index Footer to the SSTable (default: true)");
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
         app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,

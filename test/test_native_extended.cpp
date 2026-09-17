@@ -158,14 +158,14 @@ TEST_F(NativeStoreExtendedTest, LargeWriteFlush) {
     CleanDir(dbPath);
 }
 
-TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
+TEST_F(NativeStoreExtendedTest, AutoTuneLustreNoMutation) {
     std::string dbPath = "test_native_autotune_lustre";
     CleanDir(dbPath);
 
-    // Explicitly set baseline parameters before tuning
+    // AutoTune is a non-mutating hook; optimal settings are engine defaults
     gConfigLSMIO.autoTuneParameters = true;
-    gConfigLSMIO.footerIndex = false;
-    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.manualOffset = true;
     gConfigLSMIO.writeBufferNumber = 4;
     gConfigLSMIO.filePoolSize = 4;
 
@@ -175,8 +175,7 @@ TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
 
         EXPECT_TRUE(gConfigLSMIO.footerIndex);
         EXPECT_TRUE(gConfigLSMIO.manualOffset);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 8);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneLustre: " << e.what();
     }
@@ -184,13 +183,13 @@ TEST_F(NativeStoreExtendedTest, AutoTuneLustre) {
     CleanDir(dbPath);
 }
 
-TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
+TEST_F(NativeStoreExtendedTest, AutoTuneGPFSNoMutation) {
     std::string dbPath = "test_native_autotune_gpfs";
     CleanDir(dbPath);
 
     gConfigLSMIO.autoTuneParameters = true;
-    gConfigLSMIO.footerIndex = false;
-    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.manualOffset = true;
     gConfigLSMIO.writeBufferNumber = 6;
     gConfigLSMIO.filePoolSize = 4;
 
@@ -200,8 +199,7 @@ TEST_F(NativeStoreExtendedTest, AutoTuneGPFS) {
 
         EXPECT_TRUE(gConfigLSMIO.footerIndex);
         EXPECT_TRUE(gConfigLSMIO.manualOffset);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 2 * gConfigLSMIO.writeBufferNumber);
-        EXPECT_EQ(gConfigLSMIO.filePoolSize, 12);
+        EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneGPFS: " << e.what();
     }
@@ -214,8 +212,8 @@ TEST_F(NativeStoreExtendedTest, AutoTuneLocalFsNoMutation) {
     CleanDir(dbPath);
 
     gConfigLSMIO.autoTuneParameters = true;
-    gConfigLSMIO.footerIndex = false;
-    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.manualOffset = true;
     gConfigLSMIO.writeBufferNumber = 4;
     gConfigLSMIO.filePoolSize = 4;
 
@@ -224,8 +222,8 @@ TEST_F(NativeStoreExtendedTest, AutoTuneLocalFsNoMutation) {
         // 0xEF53 is EXT4_SUPER_MAGIC
         store.autoTuneParameters(0xEF53);
 
-        EXPECT_FALSE(gConfigLSMIO.footerIndex);
-        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
         EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneLocalFsNoMutation: " << e.what();
@@ -239,8 +237,8 @@ TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
     CleanDir(dbPath);
 
     gConfigLSMIO.autoTuneParameters = false;
-    gConfigLSMIO.footerIndex = false;
-    gConfigLSMIO.manualOffset = false;
+    gConfigLSMIO.footerIndex = true;
+    gConfigLSMIO.manualOffset = true;
     gConfigLSMIO.writeBufferNumber = 4;
     gConfigLSMIO.filePoolSize = 4;
 
@@ -248,8 +246,8 @@ TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
         LSMIOStoreNative store(dbPath, true);
         store.autoTuneParameters(LUSTRE_SUPER_MAGIC);
 
-        EXPECT_FALSE(gConfigLSMIO.footerIndex);
-        EXPECT_FALSE(gConfigLSMIO.manualOffset);
+        EXPECT_TRUE(gConfigLSMIO.footerIndex);
+        EXPECT_TRUE(gConfigLSMIO.manualOffset);
         EXPECT_EQ(gConfigLSMIO.filePoolSize, 4);
     } catch (const std::exception& e) {
         FAIL() << "Exception during AutoTuneDisabledBypass: " << e.what();
@@ -258,10 +256,13 @@ TEST_F(NativeStoreExtendedTest, AutoTuneDisabledBypass) {
     CleanDir(dbPath);
 }
 
-TEST_F(NativeStoreExtendedTest, DefaultConfigAutoTuneDisabled) {
+TEST_F(NativeStoreExtendedTest, DefaultConfigOptimalSettings) {
     lsmio::LSMIOConfig config;
     EXPECT_FALSE(config.autoTuneParameters);
-    EXPECT_FALSE(gConfigLSMIO.autoTuneParameters);
+    EXPECT_TRUE(config.footerIndex);
+    EXPECT_TRUE(config.manualOffset);
+    EXPECT_TRUE(config.enablePread);
+    EXPECT_EQ(config.memtable, lsmio::MemtableType::Map);
 }
 
 TEST_F(NativeStoreExtendedTest, ReadOnlyOpenSuppressesFilePool) {

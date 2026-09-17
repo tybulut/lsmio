@@ -123,48 +123,17 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
     }
 
     std::string fs_type = "Unknown/Local";
-    bool is_parallel_fs = false;
-
     if (f_fs_magic == LUSTRE_SUPER_MAGIC) {
         fs_type = "Lustre";
-        is_parallel_fs = true;
     } else if (f_fs_magic == GPFS_SUPER_MAGIC) {
         fs_type = "GPFS";
-        is_parallel_fs = true;
     }
 
     LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
               << std::hex << f_fs_magic << std::dec << ")";
-
-    if (is_parallel_fs) {
-        LOG(WARNING) << "[NATIVE] autotune-triggered: parallel filesystem detected (" << fs_type << ")";
-
-        bool prev_footerIndex = gConfigLSMIO.footerIndex;
-        bool prev_manualOffset = gConfigLSMIO.manualOffset;
-        int prev_filePoolSize = gConfigLSMIO.filePoolSize;
-
-        gConfigLSMIO.footerIndex = true;
-        gConfigLSMIO.manualOffset = true;
-        gConfigLSMIO.filePoolSize = 2 * gConfigLSMIO.writeBufferNumber;
-
-        std::cout << "[LSMIO] Autotune: " << fs_type << " detected -> "
-                  << "footerIndex=true, manualOffset=true, filePoolSize="
-                  << gConfigLSMIO.filePoolSize << std::endl;
-
-        LOG(INFO) << "[NATIVE] autotune: footerIndex changed from "
-                  << (prev_footerIndex ? "true" : "false") << " to "
-                  << (gConfigLSMIO.footerIndex ? "true" : "false");
-        LOG(INFO) << "[NATIVE] autotune: manualOffset changed from "
-                  << (prev_manualOffset ? "true" : "false") << " to "
-                  << (gConfigLSMIO.manualOffset ? "true" : "false");
-        LOG(INFO) << "[NATIVE] autotune: filePoolSize changed from "
-                  << prev_filePoolSize << " to " << gConfigLSMIO.filePoolSize;
-    }
-
-    LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
-              << (m_memtable_max_size_bytes / 1024 / 1024)
-              << "MB, writeBufferNumber=" << m_max_immutable_memtables
-              << ", filePoolSize=" << gConfigLSMIO.filePoolSize;
+    // Autotune is kept as an introspection hook but does not mutate configuration;
+    // optimal engine settings (footerIndex, manualOffset, enablePread, memtable=map)
+    // are now the global engine defaults in LSMIOConfig.
 }
 
 LSMIOStoreNative::~LSMIOStoreNative() {
