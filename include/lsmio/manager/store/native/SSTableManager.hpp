@@ -48,6 +48,18 @@ class SSTableManager {
   public:
     static constexpr uint32_t FOOTER_MAGIC = 0x4C534D49;
 
+    // Size of the speculative single-pass pread buffer in readValueAt(). Sized
+    // with headroom over the current benchmark default (8 + 16-byte key +
+    // 65535-byte value = 65559 B) so the common case never falls back to a
+    // second pread (BUG-3). It is a fixed constant, not a config-derived
+    // value: LSMIOConfig::getMaxValueLen() is a write-buffer capacity ceiling
+    // (~127 MB by default), not a record-size estimate, and would be
+    // actively wrong to use here. Any record whose framing + key + value
+    // exceeds this still falls back to the correct (but slower) two-pread
+    // path — see getPreadSlowPathCount() for visibility into how often that
+    // happens.
+    static constexpr size_t PREAD_SPECULATIVE_BUF_SIZE = 128 * 1024;
+
     SSTableManager(const std::string& f_db_path, size_t f_file_pool_size, size_t f_pre_alloc_bytes);
     ~SSTableManager();
 
@@ -67,6 +79,15 @@ class SSTableManager {
               std::set<std::string>& f_deleted_keys);
 
     void close();
+
+    // Count of pread() reads that exceeded PREAD_SPECULATIVE_BUF_SIZE and
+    // fell back to the second, tail-fetching pread (BUG-3's slow path).
+    // A nonzero, growing count on a workload expected to fit in one pass is
+    // the signal that the fixed buffer size is now undersized for the
+    // configured record size.
+    uint64_t getPreadSlowPathCount() const noexcept {
+        return m_pread_slow_path_count.load(std::memory_order_relaxed);
+    }
 
   private:
     std::string m_db_path;
@@ -103,6 +124,7 @@ class SSTableManager {
     };
 
     std::atomic<IndexNode*> m_head{nullptr};
+    std::atomic<uint64_t> m_pread_slow_path_count{0};
 
     // Helper to read from specific node/offset
     bool readValueAt(const IndexNode& f_node, uint64_t f_offset, const std::string& f_key,

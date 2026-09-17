@@ -30,12 +30,14 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <lsmio/manager/store/native/MemtableVectorNoSort.hpp>
 #include <lsmio/manager/store/native/SSTableManager.hpp>
 #include <lsmio/manager/store/native/StoreNative.hpp>
 #include <stdexcept>
+#include <thread>
 
 using namespace lsmio;
 
@@ -300,11 +302,17 @@ TEST_F(SSTableManagerTest, PreadReadSmallAndLarge) {
     EXPECT_TRUE(mgr->get("medium_key", val));
     EXPECT_EQ(val.size(), 65535);
     EXPECT_EQ(val, medium_val);
+    // BUG-3 regression: this exact size (8 + 10-byte key + 65535 = 65553 B)
+    // exceeded the old 64 KiB buffer and would have silently taken the slow
+    // path there. Both paths return the correct value, so only a counter
+    // (not the value assertions above) can prove the fast path was taken.
+    EXPECT_EQ(mgr->getPreadSlowPathCount(), 0u);
 
     // Slow path (> 128 KiB)
     EXPECT_TRUE(mgr->get("large_key", val));
     EXPECT_EQ(val.size(), 160 * 1024);
     EXPECT_EQ(val, large_val);
+    EXPECT_EQ(mgr->getPreadSlowPathCount(), 1u);
 
     EXPECT_FALSE(mgr->get("non_existent", val));
 
@@ -325,6 +333,92 @@ TEST_F(SSTableManagerTest, PreadReadSmallAndLarge) {
     EXPECT_EQ(val, medium_val);
     EXPECT_TRUE(new_mgr->get("small_key", val));
     EXPECT_EQ(val, "small_val");
+}
+
+// BUG-3's original defect was an off-by-23 miscalculation of the speculative
+// buffer's fast/slow-path boundary. PreadReadSmallAndLarge above tests values
+// comfortably clear of that boundary on both sides; this test pins the exact
+// edge the `>=` comparison in readValueAt() must get right.
+TEST_F(SSTableManagerTest, PreadBufferExactBoundary) {
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = true;
+
+    // Both keys are the same length so the record-length arithmetic differs
+    // only in val_len, isolating exactly the boundary being tested.
+    const std::string key_at_edge = "edge_key_a";
+    const std::string key_over_edge = "edge_key_b";
+    ASSERT_EQ(key_at_edge.size(), key_over_edge.size());
+
+    const size_t framing = 8;
+    const size_t val_at_edge =
+        SSTableManager::PREAD_SPECULATIVE_BUF_SIZE - framing - key_at_edge.size();
+    const size_t val_over_edge = val_at_edge + 1;
+
+    std::string val_edge_data(val_at_edge, 'E');
+    std::string val_over_data(val_over_edge, 'O');
+
+    MemtableVectorNoSort m;
+    m.add(key_at_edge, val_edge_data);
+    m.add(key_over_edge, val_over_data);
+
+    std::vector<char> buf(128 * 1024);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+
+    std::string val;
+    // Exactly fills the buffer: total_record_len == PREAD_SPECULATIVE_BUF_SIZE,
+    // so the `>=` comparison must take the fast path.
+    EXPECT_TRUE(mgr->get(key_at_edge, val));
+    EXPECT_EQ(val, val_edge_data);
+    EXPECT_EQ(mgr->getPreadSlowPathCount(), 0u);
+
+    // One byte over: total_record_len == PREAD_SPECULATIVE_BUF_SIZE + 1, so
+    // the `>=` comparison must take the slow path.
+    EXPECT_TRUE(mgr->get(key_over_edge, val));
+    EXPECT_EQ(val, val_over_data);
+    EXPECT_EQ(mgr->getPreadSlowPathCount(), 1u);
+}
+
+// The fix moved the pread scratch buffer from a per-call stack array (safe by
+// construction -- every call frame owns its own copy) to a thread_local array
+// (safe per-thread, but shared across sequential calls on that thread).
+// readValueAt() is non-reentrant so this is safe today; this test guards
+// against a future edit that accidentally drops `thread_local`, which would
+// let concurrent threads observe each other's buffer contents.
+TEST_F(SSTableManagerTest, ConcurrentPreadNoCrossThreadCorruption) {
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = true;
+
+    const int num_threads = 8;
+    const size_t val_size = 50000;
+    MemtableVectorNoSort m;
+    std::vector<std::string> expected(num_threads);
+    for (int t = 0; t < num_threads; ++t) {
+        std::string key = "thread_key_" + std::to_string(t);
+        expected[t] = std::string(val_size, static_cast<char>('A' + t));
+        m.add(key, expected[t]);
+    }
+
+    std::vector<char> buf(128 * 1024);
+    ASSERT_TRUE(mgr->flushMemtable(m, buf));
+
+    std::atomic<int> mismatches{0};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&, t]() {
+            std::string key = "thread_key_" + std::to_string(t);
+            for (int i = 0; i < 20; ++i) {
+                std::string val;
+                if (!mgr->get(key, val) || val != expected[t]) {
+                    mismatches.fetch_add(1);
+                }
+            }
+        });
+    }
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    EXPECT_EQ(mismatches.load(), 0);
 }
 
 TEST_F(SSTableManagerTest, MmapAndPreadCombined) {

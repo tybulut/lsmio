@@ -44,12 +44,15 @@ namespace lsmio {
 
 FilePool::FilePool(const std::string& f_directory, const std::string& f_prefix,
                    const std::string& f_suffix, size_t f_pool_size, uint64_t f_start_id,
-                   size_t f_pre_allocation_size)
+                   size_t f_pre_allocation_size, std::chrono::milliseconds f_acquire_timeout,
+                   std::function<void()> f_test_replenish_delay_hook)
     : m_directory(f_directory),
       m_prefix(f_prefix),
       m_suffix(f_suffix),
       m_pool_size(f_pool_size),
       m_pre_allocation_size(f_pre_allocation_size),
+      m_acquire_timeout(f_acquire_timeout),
+      m_test_replenish_delay_hook(std::move(f_test_replenish_delay_hook)),
       m_next_id(f_start_id) {
     if (m_pool_size > 0) {
         m_worker = std::thread(&FilePool::replenish, this);
@@ -82,7 +85,7 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
     }
 
     std::unique_lock<std::mutex> lock(m_mutex);
-    m_cv_wait.wait_for(lock, std::chrono::seconds(2), [this] {
+    m_cv_wait.wait_for(lock, m_acquire_timeout, [this] {
         return !m_pool.empty() || m_shutdown.load(std::memory_order_relaxed);
     });
 
@@ -223,6 +226,9 @@ void FilePool::replenish() {
         }
 
         // Generate file outside lock
+        if (m_test_replenish_delay_hook) {
+            m_test_replenish_delay_hook();
+        }
         auto file_entry = createFile();
         if (!file_entry.second) {
             // Creation failed; back off briefly before retrying

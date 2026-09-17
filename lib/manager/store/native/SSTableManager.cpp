@@ -493,7 +493,6 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
         f_out_value.assign(f_node.m_mmap_ptr + f_offset + 8 + key_len, val_len);
         return true;
     } else if (f_node.m_read_fd >= 0) {
-        constexpr size_t PREAD_SPECULATIVE_BUF_SIZE = 128 * 1024;
         static thread_local std::array<char, PREAD_SPECULATIVE_BUF_SIZE> tl_pread_buf;
         ssize_t bytes_read =
             ::pread(f_node.m_read_fd, tl_pread_buf.data(), tl_pread_buf.size(), f_offset);
@@ -520,6 +519,7 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             f_out_value.assign(tl_pread_buf.data() + 8 + key_len, val_len);
             return true;
         } else {
+            m_pread_slow_path_count.fetch_add(1, std::memory_order_relaxed);
             f_out_value.resize(val_len);
             uint64_t val_in_buf = static_cast<uint64_t>(bytes_read) - (8ULL + key_len);
             std::memcpy(f_out_value.data(), tl_pread_buf.data() + 8 + key_len, val_in_buf);
