@@ -401,5 +401,3 @@ TEST_F(SSTableManagerTest, PreallocManualOffsetAndFooterIndex) {
         EXPECT_EQ(val, "value_" + std::to_string(i));
     }
 }
-
-

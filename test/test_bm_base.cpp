@@ -31,11 +31,11 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <lsmio/lsmio.hpp>
 #include <string>
 #include <unordered_map>
 
 #include "bm_base.hpp"
-#include <lsmio/lsmio.hpp>
 
 class MockBM : public BMBase {
   public:
@@ -92,10 +92,18 @@ class MockBM : public BMBase {
     }
 
     // Public inspectors for internal BMBase protected state
-    const std::string &getBenchResultsWrite() const { return _benchResultsWrite; }
-    const std::string &getBenchResultsRead() const { return _benchResultsRead; }
-    const lsmio::Benchmark &getBenchmark() const { return _bm; }
-    int *getRandomKeyIndex() const { return pRandomKeyIndex; }
+    const std::string &getBenchResultsWrite() const {
+        return _benchResultsWrite;
+    }
+    const std::string &getBenchResultsRead() const {
+        return _benchResultsRead;
+    }
+    const lsmio::Benchmark &getBenchmark() const {
+        return _bm;
+    }
+    int *getRandomKeyIndex() const {
+        return pRandomKeyIndex;
+    }
 };
 
 class BMBaseTest : public ::testing::Test {
@@ -184,9 +192,7 @@ TEST(BMBaseVersionTest, CleanExitOnVersionFlag) {
             dup2(STDERR_FILENO, STDOUT_FILENO);
             BMBase::beginMain(argc, argv);
         },
-        ::testing::ExitedWithCode(0),
-        ".*version.*branch:.*commit:.*"
-    );
+        ::testing::ExitedWithCode(0), ".*version.*branch:.*commit:.*");
 }
 
 TEST(BMBaseVersionTest, CleanExitOnShortVersionFlag) {
@@ -198,9 +204,7 @@ TEST(BMBaseVersionTest, CleanExitOnShortVersionFlag) {
             dup2(STDERR_FILENO, STDOUT_FILENO);
             BMBase::beginMain(argc, argv);
         },
-        ::testing::ExitedWithCode(0),
-        ".*version.*branch:.*commit:.*"
-    );
+        ::testing::ExitedWithCode(0), ".*version.*branch:.*commit:.*");
 }
 
 TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {

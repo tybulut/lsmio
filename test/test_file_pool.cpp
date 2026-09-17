@@ -192,4 +192,3 @@ TEST_F(FilePoolTest, NonExistentDirectoryFailureClean) {
     EXPECT_EQ(f.first, "");
     EXPECT_EQ(f.second, nullptr);
 }
-

@@ -72,13 +72,14 @@ bool MemtableVectorSort::get(const std::string& f_key, std::string& f_value) con
     return false;
 }
 
-void MemtableVectorSort::scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
-                    std::set<std::string>& f_deleted_keys) const {
+void MemtableVectorSort::scan(const std::string& f_prefix,
+                              std::map<std::string, std::string>& f_results,
+                              std::set<std::string>& f_deleted_keys) const {
     auto it = std::lower_bound(m_data.begin(), m_data.end(), f_prefix, EntryKeyLess{});
 
     for (; it != m_data.end(); ++it) {
         if (it->first.compare(0, f_prefix.size(), f_prefix) != 0) {
-            break; // Stop scanning once we're past the prefix
+            break;  // Stop scanning once we're past the prefix
         }
         applyScanEntry(it->first, it->second, f_results, f_deleted_keys);
     }
@@ -96,7 +97,8 @@ size_t MemtableVectorSort::count() const {
     return m_data.size();
 }
 
-void MemtableVectorSort::forEach(std::function<void(const std::string& f_key, const std::string& f_value)> f_callback) const {
+void MemtableVectorSort::forEach(
+    std::function<void(const std::string& f_key, const std::string& f_value)> f_callback) const {
     for (const auto& pair : m_data) {
         f_callback(pair.first, pair.second);
     }

@@ -103,8 +103,8 @@ int64_t Benchmark::duration() const {
 
 void Benchmark::addIteration(const std::string& name, int64_t duration, double bytes, double ops) {
     if (duration <= 0) {
-        LOG(WARNING) << "Benchmark::addIteration: Rejected non-positive duration ("
-                     << duration << " us) for metric '" << name << "'." << std::endl;
+        LOG(WARNING) << "Benchmark::addIteration: Rejected non-positive duration (" << duration
+                     << " us) for metric '" << name << "'." << std::endl;
         _failedIterations[name]++;
         return;
     }

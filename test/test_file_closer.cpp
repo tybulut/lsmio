@@ -11,9 +11,9 @@ class FileCloserTest : public ::testing::Test {
     void SetUp() override {
         const ::testing::TestInfo* const test_info =
             ::testing::UnitTest::GetInstance()->current_test_info();
-        test_dir = (std::filesystem::current_path() /
-                    (std::string("test_closer_") + test_info->name()))
-                       .string();
+        test_dir =
+            (std::filesystem::current_path() / (std::string("test_closer_") + test_info->name()))
+                .string();
 
         if (std::filesystem::exists(test_dir)) std::filesystem::remove_all(test_dir);
         std::filesystem::create_directory(test_dir);
@@ -69,4 +69,3 @@ TEST_F(FileCloserTest, ZeroBatchSizeClosesFile) {
     in >> content;
     EXPECT_EQ(content, "test_data");
 }
-

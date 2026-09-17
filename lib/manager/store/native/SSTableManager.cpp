@@ -121,18 +121,17 @@ struct OffsetEntryKeyLess {
 // offset). Shared by flush and recovery so both resolve duplicates to the
 // same physical record.
 void dedupOffsets(std::vector<std::pair<std::string, uint64_t>>& f_offsets) {
-    std::sort(f_offsets.begin(), f_offsets.end(),
-              [](const std::pair<std::string, uint64_t>& a,
-                 const std::pair<std::string, uint64_t>& b) {
-                  if (a.first != b.first) return a.first < b.first;
-                  return a.second > b.second;
-              });
+    std::sort(
+        f_offsets.begin(), f_offsets.end(),
+        [](const std::pair<std::string, uint64_t>& a, const std::pair<std::string, uint64_t>& b) {
+            if (a.first != b.first) return a.first < b.first;
+            return a.second > b.second;
+        });
 
-    auto last = std::unique(f_offsets.begin(), f_offsets.end(),
-                            [](const std::pair<std::string, uint64_t>& a,
-                               const std::pair<std::string, uint64_t>& b) {
-                                return a.first == b.first;
-                            });
+    auto last =
+        std::unique(f_offsets.begin(), f_offsets.end(),
+                    [](const std::pair<std::string, uint64_t>& a,
+                       const std::pair<std::string, uint64_t>& b) { return a.first == b.first; });
     f_offsets.erase(last, f_offsets.end());
 }
 
@@ -223,7 +222,8 @@ void SSTableManager::IndexNode::initReader(bool f_enable_mmap, bool f_enable_pre
             struct stat st;
             bool stat_ok = (::fstat(fd, &st) == 0);
             if (stat_ok && st.st_size > 0) {
-                void* ptr = ::mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
+                void* ptr =
+                    ::mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
                 if (ptr != MAP_FAILED) {
                     m_mmap_ptr = static_cast<char*>(ptr);
                     m_mmap_len = static_cast<size_t>(st.st_size);
@@ -262,7 +262,8 @@ void SSTableManager::IndexNode::closeReader() noexcept {
     }
 }
 
-SSTableManager::SSTableManager(const std::string& f_db_path, size_t f_file_pool_size, size_t f_pre_alloc_bytes)
+SSTableManager::SSTableManager(const std::string& f_db_path, size_t f_file_pool_size,
+                               size_t f_pre_alloc_bytes)
     : m_db_path(f_db_path) {
     recoverState(f_file_pool_size, f_pre_alloc_bytes);
 }
@@ -403,7 +404,8 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
     IndexNode* old_head = m_head.load(std::memory_order_relaxed);
     do {
         new_node->next = old_head;
-    } while (!m_head.compare_exchange_weak(old_head, new_node, std::memory_order_release, std::memory_order_relaxed));
+    } while (!m_head.compare_exchange_weak(old_head, new_node, std::memory_order_release,
+                                           std::memory_order_relaxed));
     return true;
 }
 
@@ -430,7 +432,8 @@ bool SSTableManager::get(const std::string& f_key, std::string& f_value) {
     return false;
 }
 
-bool SSTableManager::scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
+bool SSTableManager::scan(const std::string& f_prefix,
+                          std::map<std::string, std::string>& f_results,
                           std::set<std::string>& f_deleted_keys) {
     bool found_any = false;
     IndexNode* curr = m_head.load(std::memory_order_acquire);
@@ -482,8 +485,7 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
         }
 
         uint32_t val_len = unpackLe32(f_node.m_mmap_ptr + f_offset + 4 + key_len);
-        if (val_len > READ_MAX_VAL_LEN ||
-            f_node.m_mmap_len - (f_offset + 8 + key_len) < val_len) {
+        if (val_len > READ_MAX_VAL_LEN || f_node.m_mmap_len - (f_offset + 8 + key_len) < val_len) {
             return false;
         }
 
@@ -521,8 +523,8 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             std::memcpy(f_out_value.data(), stack_buf + 8 + key_len, val_in_buf);
             uint64_t remaining_bytes = val_len - val_in_buf;
             uint64_t second_offset = f_offset + static_cast<uint64_t>(bytes_read);
-            ssize_t n2 = ::pread(f_node.m_read_fd, f_out_value.data() + val_in_buf,
-                                 remaining_bytes, second_offset);
+            ssize_t n2 = ::pread(f_node.m_read_fd, f_out_value.data() + val_in_buf, remaining_bytes,
+                                 second_offset);
             if (n2 != static_cast<ssize_t>(remaining_bytes)) {
                 f_out_value.clear();
                 return false;
@@ -649,8 +651,8 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
         std::cout << "[NATIVE] Recovery complete." << std::endl;
     }
 
-    m_file_pool =
-        std::make_unique<FilePool>(m_db_path, "L0-", ".sst", f_file_pool_size, max_id + 1, f_pre_alloc_bytes);
+    m_file_pool = std::make_unique<FilePool>(m_db_path, "L0-", ".sst", f_file_pool_size, max_id + 1,
+                                             f_pre_alloc_bytes);
     m_file_closer = std::make_unique<FileCloser>(std::max<size_t>(1, f_file_pool_size));
 }
 

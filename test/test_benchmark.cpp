@@ -150,7 +150,8 @@ TEST(lsmioBenchmark, MixedValidAndInvalidIterations) {
 
 TEST(lsmioBenchmark, FailedSummaryFormatting) {
     lsmio::Benchmark bm;
-    // Verify formatSummary returns "sumName, FAILED" without trailing newline when zero valid iterations exist
+    // Verify formatSummary returns "sumName, FAILED" without trailing newline when zero valid
+    // iterations exist
     std::string summary = bm.formatSummary("iwrite", "write");
     EXPECT_EQ(summary, "write, FAILED");
 

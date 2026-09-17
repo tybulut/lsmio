@@ -50,20 +50,25 @@
 #include <mutex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
-#include <stdexcept>
 
 namespace lsmio {
 
 std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
     switch (gConfigLSMIO.memtable) {
-        case MemtableType::VectorSort: return std::make_unique<MemtableVectorSort>();
-        case MemtableType::Map: return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
-        case MemtableType::BTree: return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
-        case MemtableType::VectorNoSort: return std::make_unique<MemtableVectorNoSort>();
-        default: throw std::invalid_argument("Unknown MemtableType");
+        case MemtableType::VectorSort:
+            return std::make_unique<MemtableVectorSort>();
+        case MemtableType::Map:
+            return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
+        case MemtableType::BTree:
+            return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
+        case MemtableType::VectorNoSort:
+            return std::make_unique<MemtableVectorNoSort>();
+        default:
+            throw std::invalid_argument("Unknown MemtableType");
     }
 }
 
@@ -71,15 +76,17 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
                                    const bool f_read_only)
     : LSMIOStore(f_db_path, f_over_write),
       m_memtable_max_size_bytes(gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
-                                                                : 32 * 1024 * 1024),
+                                                                 : 32 * 1024 * 1024),
       m_max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
-                                                                  : 4),  // Default 4
+                                                                   : 4),  // Default 4
       m_max_key_len(gConfigLSMIO.maxKeyLen),
       m_max_value_len(gConfigLSMIO.getMaxValueLen()),
       m_active_memtable(createMemtable()),
       m_flush_buffer(m_memtable_max_size_bytes),
       m_read_only(f_read_only) {
-    if (m_max_value_len == 0) throw std::invalid_argument("writeBufferSize is too small to accommodate maxKeyLen and overhead");
+    if (m_max_value_len == 0)
+        throw std::invalid_argument(
+            "writeBufferSize is too small to accommodate maxKeyLen and overhead");
     // Ensure database directory exists
     if (f_over_write) {
         std::filesystem::remove_all(_dbPath);
@@ -107,8 +114,7 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
     }
 
     // Initialize SSTableManager (which handles FilePool, Recovery, etc.)
-    m_sstable_manager =
-        std::make_unique<SSTableManager>(_dbPath, file_pool_size, pre_alloc_bytes);
+    m_sstable_manager = std::make_unique<SSTableManager>(_dbPath, file_pool_size, pre_alloc_bytes);
 
     // Start the background flush thread only if not read-only
     if (!m_read_only) {
@@ -313,7 +319,8 @@ bool LSMIOStoreNative::get(const std::string f_key, std::string* f_value) {
 
         if (!found) {
             // --- 2. Check immutable memtables (Newest to oldest) ---
-            for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend(); ++it) {
+            for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend();
+                 ++it) {
                 if ((*it)->get(f_key, result)) {
                     found = true;
                     break;

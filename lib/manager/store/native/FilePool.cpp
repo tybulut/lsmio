@@ -106,7 +106,8 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
 
     static std::atomic<bool> warned_starved{false};
     if (!warned_starved.exchange(true)) {
-        std::cerr << "[FilePool] WARNING: Pool starved or wait expired; creating SSTable synchronously on demand"
+        std::cerr << "[FilePool] WARNING: Pool starved or wait expired; creating SSTable "
+                     "synchronously on demand"
                   << std::endl;
     }
 
@@ -126,22 +127,21 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::createFile() {
     if (m_pre_allocation_size > 0) {
         int fd = ::open(full_path.c_str(), O_WRONLY | O_CREAT, 0644);
         if (fd < 0) {
-            std::cerr << "[FilePool] Pre-alloc open failed: " << full_path << " "
-                      << strerror(errno) << std::endl;
+            std::cerr << "[FilePool] Pre-alloc open failed: " << full_path << " " << strerror(errno)
+                      << std::endl;
             return {"", nullptr};
         }
 
 #ifdef __APPLE__
-        fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0,
-                          (off_t)m_pre_allocation_size};
+        fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, (off_t)m_pre_allocation_size};
         if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
             store.fst_flags = F_ALLOCATEALL;
             fcntl(fd, F_PREALLOCATE, &store);
         }
         int tr_res = ::ftruncate(fd, m_pre_allocation_size);
         if (tr_res != 0) {
-            std::cerr << "[FilePool] ftruncate failed on " << full_path << ": "
-                      << strerror(errno) << std::endl;
+            std::cerr << "[FilePool] ftruncate failed on " << full_path << ": " << strerror(errno)
+                      << std::endl;
             ::close(fd);
             std::error_code ec;
             std::filesystem::remove(full_path, ec);
@@ -162,16 +162,16 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::createFile() {
             int trunc_ret = ::ftruncate(fd, m_pre_allocation_size);
             if (trunc_ret != 0) {
                 int err = errno;
-                std::cerr << "[FilePool] ERROR: ftruncate fallback failed for " << full_path
-                          << ": " << strerror(err) << std::endl;
+                std::cerr << "[FilePool] ERROR: ftruncate fallback failed for " << full_path << ": "
+                          << strerror(err) << std::endl;
                 ::close(fd);
                 std::error_code ec;
                 std::filesystem::remove(full_path, ec);
                 return {"", nullptr};
             }
         } else if (falloc_ret != 0) {
-            std::cerr << "[FilePool] ERROR: posix_fallocate failed for " << full_path
-                      << ": " << strerror(falloc_ret) << " (code " << falloc_ret << ")" << std::endl;
+            std::cerr << "[FilePool] ERROR: posix_fallocate failed for " << full_path << ": "
+                      << strerror(falloc_ret) << " (code " << falloc_ret << ")" << std::endl;
             ::close(fd);
             std::error_code ec;
             std::filesystem::remove(full_path, ec);
@@ -201,7 +201,8 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::createFile() {
     if (m_pre_allocation_size > 0) {
         ofs->seekp(0);
         if (ofs->fail()) {
-            std::cerr << "[FilePool] seekp(0) failed on preallocated file: " << full_path << std::endl;
+            std::cerr << "[FilePool] seekp(0) failed on preallocated file: " << full_path
+                      << std::endl;
             ofs->close();
             std::error_code ec;
             std::filesystem::remove(full_path, ec);
