@@ -56,6 +56,10 @@ class FilePool {
     std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
     void shutdown();
 
+    size_t getFallbackCreations() const noexcept {
+        return m_fallback_creations.load(std::memory_order_relaxed);
+    }
+
   private:
     std::string m_directory;
     std::string m_prefix;
@@ -72,6 +76,7 @@ class FilePool {
     std::condition_variable m_cv_wait;  // Wait for item in pool
     std::atomic<bool> m_shutdown{false};
     std::atomic<uint64_t> m_next_id;
+    std::atomic<size_t> m_fallback_creations{0};
 
     std::pair<std::string, std::unique_ptr<std::ofstream>> createFile();
 

@@ -82,7 +82,7 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
     }
 
     std::unique_lock<std::mutex> lock(m_mutex);
-    bool ready = m_cv_wait.wait_for(lock, std::chrono::seconds(10), [this] {
+    m_cv_wait.wait_for(lock, std::chrono::seconds(2), [this] {
         return !m_pool.empty() || m_shutdown.load(std::memory_order_relaxed);
     });
 
@@ -90,23 +90,28 @@ std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::acquire() {
         return {"", nullptr};
     }
 
-    if (!ready && m_pool.empty()) {
-        std::cerr << "[FilePool] ERROR: Timeout waiting for available SSTable file from pool"
+    if (!m_pool.empty()) {
+        auto result = std::move(m_pool.front());
+        m_pool.pop_front();
+
+        // Wake up worker to replenish
+        m_cv.notify_one();
+
+        return result;
+    }
+
+    // Pool is starved (background worker delayed by MDS contention or rapid flush rate).
+    // Do NOT abort the store; release lock and fall back to synchronous on-demand file creation.
+    lock.unlock();
+
+    static std::atomic<bool> warned_starved{false};
+    if (!warned_starved.exchange(true)) {
+        std::cerr << "[FilePool] WARNING: Pool starved or wait expired; creating SSTable synchronously on demand"
                   << std::endl;
-        return {"", nullptr};
     }
 
-    if (m_pool.empty()) {
-        return {"", nullptr};
-    }
-
-    auto result = std::move(m_pool.front());
-    m_pool.pop_front();
-
-    // Wake up worker to replenish
-    m_cv.notify_one();
-
-    return result;
+    m_fallback_creations.fetch_add(1, std::memory_order_relaxed);
+    return createFile();
 }
 
 std::pair<std::string, std::unique_ptr<std::ofstream>> FilePool::createFile() {

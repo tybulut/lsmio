@@ -125,6 +125,66 @@ TEST_F(FilePoolTest, GracefulShutdownDrain) {
     EXPECT_EQ(f4.second, nullptr);
 }
 
+TEST_F(FilePoolTest, RapidAcquiresNeverDropUnderStarvation) {
+    size_t size = 64 * 1024;
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", 1, 500, size);
+
+    // Rapid consecutive acquires must never return nullptr even when pool is drained
+    std::vector<std::pair<std::string, std::unique_ptr<std::ofstream>>> files;
+    std::set<std::string> unique_paths;
+
+    for (int i = 0; i < 10; ++i) {
+        auto f = pool.acquire();
+        ASSERT_NE(f.second, nullptr) << "acquire() returned null stream on iteration " << i;
+        EXPECT_TRUE(f.second->is_open());
+        EXPECT_TRUE(std::filesystem::exists(f.first));
+        unique_paths.insert(f.first);
+        files.push_back(std::move(f));
+    }
+
+    EXPECT_EQ(files.size(), 10);
+    EXPECT_EQ(unique_paths.size(), 10);
+
+    for (auto& f : files) {
+        f.second->close();
+        EXPECT_EQ(std::filesystem::file_size(f.first), size);
+    }
+}
+
+TEST_F(FilePoolTest, ConcurrentAcquiresNoDataLoss) {
+    size_t size = 64 * 1024;
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", 2, 600, size);
+
+    const int num_threads = 8;
+    const int acquires_per_thread = 5;
+    std::vector<std::thread> threads;
+    std::mutex paths_mutex;
+    std::set<std::string> acquired_paths;
+    std::atomic<bool> any_failed{false};
+
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&]() {
+            for (int i = 0; i < acquires_per_thread; ++i) {
+                auto f = pool.acquire();
+                if (!f.second || !f.second->is_open()) {
+                    any_failed.store(true);
+                    return;
+                }
+                f.second->close();
+                std::lock_guard<std::mutex> guard(paths_mutex);
+                acquired_paths.insert(f.first);
+            }
+        });
+    }
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    EXPECT_FALSE(any_failed.load());
+    EXPECT_EQ(acquired_paths.size(), num_threads * acquires_per_thread);
+}
+
 TEST_F(FilePoolTest, NonExistentDirectoryFailureClean) {
     std::string bad_dir = test_dir + "/non_existent_subdir/nested";
     lsmio::FilePool pool(bad_dir, "L0-", ".sst", 0, 400, 1024 * 1024);
