@@ -85,7 +85,8 @@ Arguments:
   <scale>       Supported scales: local, bake, small, large, baseline
                 (Note: 'lmp large' is strictly unsupported and rejected)
   <variants>    Optional single variant, comma-separated list of variants
-                (e.g. footer,manoff,autotune), or 'all' for all 38 matrix variants.
+                (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
+                or 'all' for all registered matrix variants.
                 Only supported for 'lsmio baseline'.
 
 Options:
@@ -94,7 +95,7 @@ Options:
                 Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE-M, ROCKSDB-M, LSMIO).
                 Note: '--setup=value' syntax is strictly rejected; use '--setup <name>'.
   --archive     Force automatic post-run archiving after each variant run.
-                (Default: enabled when multiple variants or 'all' specified; disabled for single variant)
+                (Default: enabled when multiple variants, 'most', or 'all' specified; disabled for single variant)
   --no-archive  Disable automatic post-run archiving after variant execution.
   --resume      Skip variant execution if target archive directory (outputs-<arm_id>) already exists.
   --out-dir <path>
@@ -368,8 +369,10 @@ class RunCliParser:
 
                     expanded_tokens: List[str] = []
                     for t in raw_tokens:
-                        if t.lower() == "all":
-                            expanded_tokens.extend(VariantCatalogue.canonicalVariants())
+                        if t.lower() == "most":
+                            expanded_tokens.extend(VariantCatalogue.mostVariants())
+                        elif t.lower() == "all":
+                            expanded_tokens.extend(VariantCatalogue.allVariants())
                         else:
                             expanded_tokens.append(t)
 

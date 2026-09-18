@@ -42,7 +42,8 @@ When executing `bmtool run lsmio baseline [<variants>]`:
 - **Omitted** or **`default`** / **`base`**: Executes default baseline configuration (empty variant).
 - **Single variant key**: e.g., `bmtool run lsmio baseline footer`
 - **Comma-separated list**: e.g., `bmtool run lsmio baseline footer,manoff,autotune`, executed sequentially in order.
-- **Keyword `all`**: Expands to the canonical sequence of all 38 matrix variants (`default` followed by the 37 non-empty variant keys).
+- **Keyword `most`**: Expands to the streamlined canonical sequence of 26 matrix variants (`default` followed by the 25 non-empty core variant keys).
+- **Keyword `all`**: Expands to the exhaustive matrix of all registered variants (`default` followed by all 60 non-empty variants, including historical composite variants).
 
 #### Paired Baseline & Variant Execution (`INV-PAIR-1`):
 When one or more non-empty variants are specified:
@@ -78,7 +79,7 @@ bmtool run lsmio baseline pread,footer-pread --versioned
 - `--versioned`: Executes paired baseline comparison benchmarking the current working branch binary against the golden reference binary (`$SB_BIN/bm_native:main`). Can be run unconfigured or combined with one or more specific variants (e.g. `legacy`). Symmetrically archives `:run` and `:base` directories for automated delta comparison.
 - `--ssd`: Selects SSD storage root instead of HDD.
 - `--archive`: Force automatic archiving after each variant execution.
-  - **Automatic archive default rules**: Automatically defaults to `yes` when multiple variants ($N > 1$) or `all` is specified; defaults to `no` for single-variant ($N = 1$) or default baseline runs (`INV-MULTI-2`).
+  - **Automatic archive default rules**: Automatically defaults to `yes` when multiple variants ($N > 1$), `most`, or `all` is specified; defaults to `no` for single-variant ($N = 1$) or default baseline runs (`INV-MULTI-2`).
 - `--no-archive`: Disables automatic archiving after variant execution (forces `no`). Specifying both `--archive` and `--no-archive` is rejected.
 - `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}` or `outputs-${ARM_ID}:run`) already exists in the destination directory (`INV-MULTI-3`, `INV-PAIR-7`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
 - `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory (default: `$BM_PATH/lsmio-archive`).
@@ -161,16 +162,17 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
   - **Omitted** or **`default`** / **`base`**: Executes the default baseline configuration (empty variant).
   - **Single variant key**: e.g., `footer`, `btree`, `manoff`, `autotune`.
   - **Comma-separated list**: e.g., `footer,manoff,autotune`, executed sequentially in specified order.
-  - **Keyword `all`**: Expands to all 38 matrix variants in canonical order (`default` followed by 37 non-empty variant keys).
+  - **Keyword `most`**: Expands to the streamlined canonical sequence of 26 matrix variants (`default` followed by the 25 non-empty core variant keys).
+  - **Keyword `all`**: Expands to all registered matrix variants in exhaustive order (`default` followed by all supported non-empty variant keys).
   *(Note: Non-lsmio benchmarks or non-baseline scales reject variant specifications atomically before execution.)*
 - `--versioned`: Enables versioned baseline comparison for `lsmio baseline`. Benchmarks the active working branch against the golden reference binary (`$SB_BIN/bm_native:main`). Supports execution with or without specific variants (e.g. `lsmiotool run lsmio baseline legacy --versioned`). Automatically activates paired delta archiving and dynamically scales walltime allocation based on the variant count.
 - `--ssd`: Selects SSD storage class root. Default storage class is HDD.
 - `--setup <name>`: Explicitly overrides the benchmark setup profile.
   - **Syntax rule**: `--setup <name>` must be specified as two separate arguments. Syntax `--setup=value` is strictly rejected.
 - `--archive` / `--no-archive`: Automatic post-run archiving control:
-  - **Automatic archive default rules**: When multiple variants are specified ($N > 1$) or `all` is used, `--archive` defaults to `yes` to ensure each variant's outputs are safely archived before the next variant executes. When a single variant ($N = 1$) or default baseline is specified, `--archive` defaults to `no` for backward compatibility (`INV-MULTI-2`).
+  - **Automatic archive default rules**: When multiple variants are specified ($N > 1$) or `most` / `all` is used, `--archive` defaults to `yes` to ensure each variant's outputs are safely archived before the next variant executes. When a single variant ($N = 1$) or default baseline is specified, `--archive` defaults to `no` for backward compatibility (`INV-MULTI-2`).
   - `--archive`: Explicitly forces post-run archiving even for single-variant runs.
-  - `--no-archive`: Explicitly disables post-run archiving (forces `no`) even when multiple variants or `all` are selected.
+  - `--no-archive`: Explicitly disables post-run archiving (forces `no`) even when multiple variants or `most` / `all` are selected.
   - Specifying both `--archive` and `--no-archive` is rejected as an error.
 - `--resume`: Idempotent pre-run resumption (`INV-MULTI-3`):
   - Before executing each variant, checks if the target archive directory (`outputs-${ARM_ID}`) already exists under the archive destination directory.
@@ -610,8 +612,8 @@ Under paired execution workflows, the archiving engine automatically coordinates
 
 The LSMIO toolchain maintains an authoritative catalog of variants configured against the modern engine defaults (`footerIndex=true`, `manualOffset=true`, `enablePread=true`, `memtable=map`).
 
-### 6.1 Streamlined Canonical Matrix (26 Variants)
-The canonical sequence evaluated by `all` (`lsmiotool run lsmio baseline all` and `bmtool run lsmio baseline all`) comprises `default` followed by 25 clean, non-redundant variants:
+### 6.1 Streamlined Canonical Matrix (`most` — 26 Variants)
+The canonical sequence evaluated by `most` (`lsmiotool run lsmio baseline most` and `bmtool run lsmio baseline most`) comprises `default` followed by 25 clean, non-redundant variants:
 
 | # | Variant Identifier | Correlation Tokens | CLI Engine Flags | Key Feature / Architecture Evaluated |
 |:---|:---|:---|:---|:---|
@@ -642,12 +644,14 @@ The canonical sequence evaluated by `all` (`lsmiotool run lsmio baseline all` an
 | 24 | `sync` | `sync` | `--lsmio-no-autotune --sync` | Enforces synchronous write-through I/O. |
 | 25 | `autotune` | `autotune` | `--lsmio-autotune` | Autotune introspection flag. |
 
-### 6.2 Backwards-Compatible Historical Aliases
+### 6.2 Exhaustive Matrix (`all` — All Registered Variants) & Backwards-Compatible Historical Aliases
 All 49 historical composite keys (e.g. `footer-map-manoff-pread`, `footer-btree-manoff-mmap`, `footer-pool-8-mmap`, `footer-pread`, etc.) remain registered in `VariantCatalogue` and `resolve_variant()` to ensure existing benchmark archive folders (`outputs-*`) and legacy scripts resolve cleanly. All historical `mmap` variants include `--lsmio-no-pread` to eliminate dual-handle resource contention under the new defaults.
+
+When `all` is specified (`lsmiotool run lsmio baseline all` or `bmtool run lsmio baseline all`), it expands to the exhaustive sequence of `default` followed by all 60 supported variant keys registered in `VariantCatalogue.allVariants()` / `$LSMIO_ALL_VARIANTS`.
 
 > [!NOTE]
 > The baseline variant (`base` or `default`) uses standard engine defaults (128MB write buffer, `std::map` memtable, dense footer indexing, manual byte offsets, persistent `pread()`, and auto-tuning non-mutating).
-> Together with `default`, these 25 variants form the canonical sequence of all 26 matrix variants (`VariantCatalogue.canonicalVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell), which is expanded automatically via the `all` keyword in `lsmiotool run lsmio baseline all` and `bmtool run lsmio baseline all`.
+> Together with `default`, these 25 variants form the canonical sequence of all 26 matrix variants (`VariantCatalogue.mostVariants()` / `VariantCatalogue.canonicalVariants()` in Python and `LSMIO_MOST_VARIANTS` in shell), which is expanded automatically via the `most` keyword in `lsmiotool run lsmio baseline most` and `bmtool run lsmio baseline most`. The `all` keyword expands to the exhaustive suite (`VariantCatalogue.allVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell).
 >
 > Variants 1 through 25 (except `autotune`) explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference.
 >

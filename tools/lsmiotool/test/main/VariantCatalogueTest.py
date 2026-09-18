@@ -476,6 +476,31 @@ class VariantCatalogueTest(unittest.TestCase):
         self.assertEqual(canonical[0], "default")
         self.assertEqual(canonical[1:], self.EXPECTED_CANONICAL_25_VARIANTS)
 
+    def testMostVariants(self) -> None:
+        """Assert 'mostVariants' returns the 26 canonical matrix variants and aliases canonicalVariants."""
+        most = VariantCatalogue.mostVariants()
+        self.assertEqual(len(most), 26)
+        self.assertEqual(most, VariantCatalogue.canonicalVariants())
+        self.assertEqual(most[0], "default")
+        self.assertEqual(most[1:], self.EXPECTED_CANONICAL_25_VARIANTS)
+        for var in most:
+            self.assertTrue(VariantCatalogue.isValid(var))
+            rec = VariantCatalogue.resolve(var)
+            self.assertIsInstance(rec, VariantRecord)
+
+    def testAllVariants(self) -> None:
+        """Assert 'allVariants' returns 'default' followed by all supported non-empty variants."""
+        all_vars = VariantCatalogue.allVariants()
+        supported = VariantCatalogue.supportedVariants()
+        self.assertEqual(len(all_vars), len(supported) + 1)
+        self.assertEqual(len(all_vars), 61)
+        self.assertEqual(all_vars[0], "default")
+        self.assertEqual(all_vars[1:], supported)
+        for var in all_vars:
+            self.assertTrue(VariantCatalogue.isValid(var))
+            rec = VariantCatalogue.resolve(var)
+            self.assertIsInstance(rec, VariantRecord)
+
     def testAll60NonEmptyVariants(self) -> None:
         """Assert all 60 non-empty keys match tokens and engine CLI flags."""
         supported = VariantCatalogue.supportedVariants()
