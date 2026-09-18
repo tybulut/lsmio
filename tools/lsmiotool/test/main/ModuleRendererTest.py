@@ -117,12 +117,12 @@ class ModuleRendererTest(unittest.TestCase):
         self.assertEqual(f_viking2_cmds[8], "module load OpenMPI/4.1.5-GCC-12.3.0")
         self.assertEqual(f_viking2_cmds[-1], "module load texlive/20230313-GCC-12.3.0")
 
-        # Archer2 (16 modules)
+        # Archer2 (17 modules)
         f_archer2_cmds = ModuleSetup.renderCommands("ARCHER2")
-        self.assertEqual(len(f_archer2_cmds), 17)
+        self.assertEqual(len(f_archer2_cmds), 18)
         self.assertEqual(f_archer2_cmds[0], "module purge")
         self.assertEqual(f_archer2_cmds[1], "module load PrgEnv-gnu")
-        self.assertEqual(f_archer2_cmds[-1], "module load cray-fftw/3.3.10.5")
+        self.assertEqual(f_archer2_cmds[-1], "module load matplotlib")
 
         # Isambard (27 modules)
         f_isambard_cmds = ModuleSetup.renderCommands("ISAMBARD")

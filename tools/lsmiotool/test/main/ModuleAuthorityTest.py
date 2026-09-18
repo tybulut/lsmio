@@ -227,11 +227,11 @@ class ModuleAuthorityTest(unittest.TestCase):
         self.assertEqual(f_isambard_mods[0], "modules/3.2.11.4")
         self.assertEqual(f_isambard_mods[-1], "gdb4hpc/4.10.6")
 
-        # Archer2 (16 modules)
+        # Archer2 (17 modules)
         f_archer2_mods = self.m_hpc_modules.getModules("ARCHER2")
-        self.assertEqual(len(f_archer2_mods), 16)
+        self.assertEqual(len(f_archer2_mods), 17)
         self.assertEqual(f_archer2_mods[0], "PrgEnv-gnu")
-        self.assertEqual(f_archer2_mods[-1], "cray-fftw/3.3.10.5")
+        self.assertEqual(f_archer2_mods[-1], "matplotlib")
 
         # DEV (0 modules)
         f_dev_mods = self.m_hpc_modules.getModules("DEV")

@@ -112,6 +112,7 @@ craype-x86-rome
 craype-x86-spr
 craype-x86-trento
 cray-fftw/3.3.10.5
+matplotlib
 "
   load_modules "$MODULES"
 }
