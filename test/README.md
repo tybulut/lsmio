@@ -68,8 +68,9 @@ All tests should be run through `./build.sh` or `ctest`.
 # Compile and run default test suite
 ./build.sh test
 
-# Or run directly from the build directory in parallel
-cd build && ctest -j8 --output-on-failure
+# Run one binary's tests (builds just that target; keep the regex anchored to
+# its tests, since other binaries are not rebuilt)
+./build.sh itest '^FilePoolTest\.' test_file_pool
 ```
 
 ### 2.2 Extended Full Test Suite (`xtest`)

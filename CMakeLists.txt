@@ -70,6 +70,19 @@ add_compile_definitions(
   LSMIO_GIT_COMMIT_HASH="${LSMIO_GIT_COMMIT_HASH}"
 )
 
+# Linker: prefer lld when the toolchain supports it; it is multi-threaded and
+# links much faster than GNU ld. Opt out with -DLSMIO_USE_LLD=OFF. Skipped on
+# Apple, whose default linker is already fast, and on CMake < 3.18, which lacks
+# check_linker_flag.
+option(LSMIO_USE_LLD "Link with lld when available" ON)
+if(LSMIO_USE_LLD AND NOT APPLE AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+  include(CheckLinkerFlag)
+  check_linker_flag(CXX "-fuse-ld=lld" LSMIO_HAS_LLD)
+  if(LSMIO_HAS_LLD)
+    add_link_options(-fuse-ld=lld)
+  endif()
+endif()
+
 # Defines
 add_subdirectory(include)
 include(PackageTLX)

@@ -3,11 +3,23 @@
 export BS_SCRIPT=`realpath $0`
 export BS_DIRNAME=`dirname $BS_SCRIPT`
 
+# Work from the repository root regardless of the caller's directory.
+cd "$BS_DIRNAME" || exit 1
+
+# Repository root, and the build tree relative to it. BUILD_DIR may be a
+# symlink to an out-of-tree build (see "Optional out-of-tree builds" below);
+# every path in this script goes through it.
+ROOT_DIR="$(pwd)"
+BUILD_DIR="build"
+
 # Default values
 BUILD_TYPE="RELEASE"
 DO_CLEAN=false
 DO_MAKE=false
 DO_TEST=false
+DO_ITEST=false
+ITEST_REGEX=""
+ITEST_TARGET=""
 DO_XTEST=false
 DO_PTEST=false
 DO_INSTALL=false
@@ -112,6 +124,24 @@ while [[ $# -gt 0 ]]; do
     test)
       DO_TEST=true
       ;;
+    itest)
+      # itest <TestRegex> [make_target]: build make_target (default: all),
+      # then run the tests matching TestRegex.
+      DO_ITEST=true
+      ITEST_REGEX=$2
+      if [ -z "$ITEST_REGEX" ]; then
+        echo "ERROR: usage: ./build.sh itest <TestRegex> [make_target]" >&2
+        exit 1
+      fi
+      shift
+      case "$2" in
+        ""|-*|debug|clean|make|test|itest|xtest|ptest|install|install:*|coverage) ;;
+        *)
+          ITEST_TARGET=$2
+          shift
+          ;;
+      esac
+      ;;
     xtest)
       DO_XTEST=true
       ;;
@@ -138,22 +168,88 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if [ "$DO_CLEAN" = true ]; then
-  rm -rf build \
-  && mkdir -p build
+# Optional out-of-tree builds. If $HOME/scratch/builds exists, the build tree
+# lives in $HOME/scratch/builds/lsmio-<name>/build and ./build is a symlink to
+# it. <name> is the checked-out branch, detached-<path hash>, or
+# nogit-<path hash>, so each branch keeps its own tree. Otherwise ./build is a
+# normal in-tree directory.
+SCRATCH_ROOT="$HOME/scratch/builds"
+SCRATCH_DIR=""
+if [ -d "$SCRATCH_ROOT" ]; then
+  _path_hash=$(printf '%s' "$(pwd -P)" | shasum | cut -c1-8)
+  # Use git only if this directory is itself the repo root; a non-git copy
+  # nested inside another repo would otherwise inherit that repo's branch.
+  if [ "$(git rev-parse --show-toplevel 2>/dev/null)" != "$(pwd -P)" ]; then
+    _name="nogit-$_path_hash"
+  elif _branch=$(git symbolic-ref --short -q HEAD); then
+    # A branch is checked out in at most one worktree, so this is unique.
+    _name="$_branch"
+  else
+    _name="detached-$_path_hash"
+  fi
+  _scratch_dir="$SCRATCH_ROOT/lsmio-$(printf '%s' "$_name" | tr -c 'A-Za-z0-9._-' '-')"
+  if mkdir -p "$_scratch_dir/build" 2>/dev/null && [ -w "$_scratch_dir" ]; then
+    SCRATCH_DIR="$_scratch_dir"
+  else
+    echo "WARNING: $SCRATCH_ROOT is not writable; using the in-tree build directory." >&2
+  fi
 fi
 
-cmake -B build \
+if [ -n "$SCRATCH_DIR" ]; then
+  if [ "$DO_CLEAN" = true ]; then
+    # Empty the out-of-tree build but keep ./build a symlink. A plain
+    # `rm -rf build` on a symlink removes only the link.
+    find "$SCRATCH_DIR/build" -mindepth 1 -delete || exit 1
+    rm -rf "$BUILD_DIR" || exit 1
+  fi
+  if [ -L "$BUILD_DIR" ]; then
+    # Repoint after a branch switch; each branch keeps its own tree.
+    if [ "$(readlink "$BUILD_DIR")" != "$SCRATCH_DIR/build" ]; then
+      ln -sfn "$SCRATCH_DIR/build" "$BUILD_DIR" || exit 1
+    fi
+  elif [ -e "$BUILD_DIR" ]; then
+    # Replace an in-tree build with the out-of-tree one. A CMake tree records
+    # its absolute path and can't be moved, so it is removed and reconfigured.
+    # Anything that doesn't look like a CMake tree is left alone.
+    if [ -f "$BUILD_DIR/CMakeCache.txt" ] || [ -d "$BUILD_DIR/CMakeFiles" ] \
+       || [ -z "$(ls -A "$BUILD_DIR")" ]; then
+      echo "NOTICE: replacing the in-tree $BUILD_DIR/ with a symlink to $SCRATCH_DIR/build; a full rebuild follows." >&2
+      rm -rf "$BUILD_DIR" && ln -s "$SCRATCH_DIR/build" "$BUILD_DIR" || exit 1
+    else
+      echo "WARNING: $ROOT_DIR/$BUILD_DIR is not a CMake build tree; left in place and used as is." >&2
+    fi
+  else
+    ln -s "$SCRATCH_DIR/build" "$BUILD_DIR" || exit 1
+  fi
+else
+  if [ "$DO_CLEAN" = true ]; then
+    rm -rf "$BUILD_DIR" \
+    && mkdir -p "$BUILD_DIR"
+  fi
+  if [ -L "$BUILD_DIR" ] && [ ! -e "$BUILD_DIR" ]; then
+    echo "ERROR: $BUILD_DIR is a symlink to $(readlink "$BUILD_DIR"), which does not exist." >&2
+    echo "       Restore it, or run './build.sh clean' to use an in-tree build directory." >&2
+    exit 1
+  fi
+fi
+
+cmake -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
   -DBUILD_SHARED_LIBS=On \
   -DCMAKE_INSTALL_PREFIX:PATH="${PREFIX:-$HOME/src/usr}" \
   -DLSMIO_ENABLE_COVERAGE=$DO_COVERAGE
 
-pushd build
+pushd "$BUILD_DIR"
 
 # make is implied if test or install are requested
 if [ "$DO_MAKE" = true ] || [ "$DO_TEST" = true ] || [ "$DO_INSTALL" = true ]; then
   make -j$JOBS || exit 1
+elif [ "$DO_ITEST" = true ]; then
+  make -j$JOBS $ITEST_TARGET || exit 1
+fi
+
+if [ "$DO_ITEST" = true ]; then
+  ctest -j$JOBS -R "$ITEST_REGEX" --output-on-failure || exit 1
 fi
 
 CTEST_FAILED=0
@@ -214,7 +310,7 @@ if [ "$DO_COVERAGE" = true ]; then
       -ignore-filename-regex="(test|benchmark|/usr/|/opt/|/Applications/)" \
       $(find lib -name "*.dylib")
       
-    echo "Coverage report generated at build/coverage_report/index.html"
+    echo "Coverage report generated at $BUILD_DIR/coverage_report/index.html"
   else
     # Linux/GCC: Use lcov
     # Capture coverage data
@@ -227,7 +323,7 @@ if [ "$DO_COVERAGE" = true ]; then
     
     # Generate HTML report
     genhtml coverage.filtered.info --output-directory coverage_report
-    echo "Coverage report generated at build/coverage_report/index.html"
+    echo "Coverage report generated at $BUILD_DIR/coverage_report/index.html"
   fi
 fi
 
