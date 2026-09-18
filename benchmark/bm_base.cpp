@@ -146,46 +146,87 @@ int BMBase::benchRead(long long *duration) {
 }
 
 int BMBase::benchIteration(int iteration, bool opt) {
-    int exitCode = 0;
+    int exitCode = lsmio::BM_SUCCESS;
     long long duration = 0;
 
-    pRandomKeyIndex = new int[gConfigBM.keyCount];
-    for (int i = 0; i < gConfigBM.keyCount; i++) pRandomKeyIndex[i] = i;
-
+    // RAII Permutation Container: eliminates heap leak
+    std::vector<int> randomKeyIndices(gConfigBM.keyCount);
+    std::iota(randomKeyIndices.begin(), randomKeyIndices.end(), 0);
     std::random_device rd;
     std::mt19937 g(rd());
-    std::shuffle(&pRandomKeyIndex[0], &pRandomKeyIndex[gConfigBM.keyCount], g);
+    std::shuffle(randomKeyIndices.begin(), randomKeyIndices.end(), g);
+    pRandomKeyIndex = randomKeyIndices.data();
 
     double bytes = (double)gConfigBM.keyCount * gConfigBM.valueSize;
     if (useMPI) bytes *= mpiSize;
 
+    // --- WRITE PHASE ---
     writePrepare(opt);
-    if (benchWrite(&duration) != 0) {
-        LOG(ERROR) << "ERROR: benchWrite(): failed." << std::endl;
-        duration = -1;
-        exitCode += 1;
+    int writeStatus = benchWrite(&duration);
+    int localWriteFail = (writeStatus != 0) ? 1 : 0;
+    int globalWriteFail = 0;
+
+    if (useMPI) {
+        MPI_Allreduce(&localWriteFail, &globalWriteFail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    } else {
+        globalWriteFail = localWriteFail;
     }
-    _bm.addIteration("iwrite", duration, bytes, gConfigBM.keyCount);
+
+    if (globalWriteFail != 0) {
+        LOG(ERROR) << "BMBase::benchIteration: benchWrite failed on one or more ranks (localStatus: "
+                   << writeStatus << ")." << std::endl;
+        exitCode |= lsmio::BM_ERR_WRITE;
+        // Tier 1 suppression: DO NOT call _bm.addIteration("iwrite")!
+    } else {
+        _bm.addIteration("iwrite", duration, bytes, gConfigBM.keyCount);
+    }
     writeCleanup();
 
-    readPrepare(opt);
-    if (benchRead(&duration) != 0) {
-        LOG(ERROR) << "ERROR: benchRead(): failed." << std::endl;
-        duration = -1;
-        exitCode += 1;
+    // Fail-Fast Check: If write phase failed, skip read phase entirely
+    if (globalWriteFail != 0) {
+        pRandomKeyIndex = nullptr;
+        return exitCode;
     }
-    _bm.addIteration("iread", duration, bytes, gConfigBM.keyCount);
+
+    // --- READ PHASE ---
+    readPrepare(opt);
+    int readStatus = benchRead(&duration);
+    int localReadFail = (readStatus != 0) ? 1 : 0;
+    int globalReadFail = 0;
+
+    if (useMPI) {
+        MPI_Allreduce(&localReadFail, &globalReadFail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    } else {
+        globalReadFail = localReadFail;
+    }
+
+    if (globalReadFail != 0) {
+        LOG(ERROR) << "BMBase::benchIteration: benchRead failed on one or more ranks (localStatus: "
+                   << readStatus << ")." << std::endl;
+        exitCode |= lsmio::BM_ERR_READ;
+        // Tier 1 suppression: DO NOT call _bm.addIteration("iread")!
+    } else {
+        _bm.addIteration("iread", duration, bytes, gConfigBM.keyCount);
+    }
     readCleanup();
 
+    pRandomKeyIndex = nullptr;
     return exitCode;
 }
 
 int BMBase::benchSuite(std::string bmPrefix, bool opt) {
-    int exitCode = 0;
+    int exitCode = lsmio::BM_SUCCESS;
     long long readTotal = 0, writeTotal = 0;
 
     for (int iter = 0; iter < gConfigBM.iterations; iter++) {
-        benchIteration(iter, opt);
+        int iterStatus = benchIteration(iter, opt);
+        if (iterStatus != lsmio::BM_SUCCESS) {
+            exitCode |= iterStatus;
+            LOG(ERROR) << "BMBase::benchSuite: Iteration " << iter
+                       << " failed with status " << iterStatus
+                       << ". Halting suite execution immediately without retry." << std::endl;
+            break;  // Zero Retries / Fail-Fast
+        }
     }
 
     _benchResultsWrite += "\nIteration-WRITE: " + bmPrefix + "\n";
@@ -267,6 +308,7 @@ std::string genOptionsToString() {
               << "\n footerIndex: " << (lsmio::gConfigLSMIO.footerIndex ? "true" : "false")
               << "\n writeBufferNumber: " << lsmio::gConfigLSMIO.writeBufferNumber
               << "\n autoTuneParameters: " << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
+              << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
               << "\n";
 
     return optStream.str();
@@ -311,8 +353,8 @@ int BMBase::beginMain(int argc, char **argv) {
                      "use write-ahead log (default: no WAL)");
         app.add_flag("--lsmio-mmap", lsmio::gConfigLSMIO.enableMMAP,
                      "use MMAP read/write (default: no MMAP)");
-        app.add_flag("--lsmio-pread", lsmio::gConfigLSMIO.enablePread,
-                     "use persistent descriptor pread() read (default: no pread)");
+        app.add_flag("--lsmio-pread,!--lsmio-no-pread", lsmio::gConfigLSMIO.enablePread,
+                     "use persistent descriptor pread() read (default: pread)");
 
         bool flag_use_leveldb = false;
         bool flag_use_rocksdb = false;
@@ -356,18 +398,23 @@ int BMBase::beginMain(int argc, char **argv) {
 
         app.add_option("--lsmio-memtable", lsmio::gConfigLSMIO.memtable,
                        "memtable implementation to use: vector-no-sort, vector-sort, map, btree "
-                       "(default: vector-no-sort)")
+                       "(default: map)")
             ->transform(CLI::CheckedTransformer(memtableMap, CLI::ignore_case));
         app.add_option("--lsmio-max-key", lsmio::gConfigLSMIO.maxKeyLen,
                        "maximum accepted key length in bytes (default: 256K)");
-        app.add_flag("--lsmio-manual-offset", lsmio::gConfigLSMIO.manualOffset,
-                     "bypass tellp() and manually track offsets (default: false)");
-        app.add_flag("--lsmio-footer-index", lsmio::gConfigLSMIO.footerIndex,
-                     "append the Dense Index Footer to the SSTable (default: false)");
+        app.add_flag("--lsmio-manual-offset,!--lsmio-no-manual-offset", lsmio::gConfigLSMIO.manualOffset,
+                     "bypass tellp() and manually track offsets (default: true)");
+        app.add_flag("--lsmio-footer-index,!--lsmio-no-footer-index", lsmio::gConfigLSMIO.footerIndex,
+                     "append the Dense Index Footer to the SSTable (default: true)");
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
         app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
                      "enable filesystem auto-tuning (default: false)");
+        app.add_flag(
+            "--lsmio-read-only,--lsmio-readonly,--lsmio-ro,"
+            "!--lsmio-no-read-only,!--lsmio-no-readonly,!--lsmio-no-ro",
+            lsmio::gConfigLSMIO.readOnly,
+            "open store in read-only mode during read operations (default: true)");
 
         app.parse(argc, argv);
 

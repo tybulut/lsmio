@@ -50,47 +50,50 @@
 #include <mutex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
-#include <stdexcept>
-
-#ifndef LUSTRE_SUPER_MAGIC
-#define LUSTRE_SUPER_MAGIC 0x0BD00BD0
-#endif
-
-#ifndef GPFS_SUPER_MAGIC
-#define GPFS_SUPER_MAGIC 0x47504653
-#endif
 
 namespace lsmio {
 
 std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
     switch (gConfigLSMIO.memtable) {
-        case MemtableType::VectorSort: return std::make_unique<MemtableVectorSort>();
-        case MemtableType::Map: return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
-        case MemtableType::BTree: return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
-        case MemtableType::VectorNoSort: return std::make_unique<MemtableVectorNoSort>();
-        default: throw std::invalid_argument("Unknown MemtableType");
+        case MemtableType::VectorSort:
+            return std::make_unique<MemtableVectorSort>();
+        case MemtableType::Map:
+            return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
+        case MemtableType::BTree:
+            return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
+        case MemtableType::VectorNoSort:
+            return std::make_unique<MemtableVectorNoSort>();
+        default:
+            throw std::invalid_argument("Unknown MemtableType");
     }
 }
 
-LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write)
+LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_over_write,
+                                   const bool f_read_only)
     : LSMIOStore(f_db_path, f_over_write),
       m_memtable_max_size_bytes(gConfigLSMIO.writeBufferSize > 0 ? gConfigLSMIO.writeBufferSize
-                                                                : 32 * 1024 * 1024),
+                                                                 : 32 * 1024 * 1024),
       m_max_immutable_memtables(gConfigLSMIO.writeBufferNumber > 0 ? gConfigLSMIO.writeBufferNumber
-                                                                  : 4),  // Default 4
+                                                                   : 4),  // Default 4
       m_max_key_len(gConfigLSMIO.maxKeyLen),
       m_max_value_len(gConfigLSMIO.getMaxValueLen()),
       m_active_memtable(createMemtable()),
-      m_flush_buffer(m_memtable_max_size_bytes) {
-    if (m_max_value_len == 0) throw std::invalid_argument("writeBufferSize is too small to accommodate maxKeyLen and overhead");
+      m_flush_buffer(m_memtable_max_size_bytes),
+      m_read_only(f_read_only) {
+    if (m_max_value_len == 0)
+        throw std::invalid_argument(
+            "writeBufferSize is too small to accommodate maxKeyLen and overhead");
     // Ensure database directory exists
     if (f_over_write) {
         std::filesystem::remove_all(_dbPath);
     }
-    std::filesystem::create_directories(_dbPath);
+    if (!m_read_only || f_over_write) {
+        std::filesystem::create_directories(_dbPath);
+    }
 
     if (gConfigLSMIO.autoTuneParameters) {
         struct statfs fs_info;
@@ -102,45 +105,49 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
     }
 
     size_t pre_alloc_bytes = 0;
-    if (gConfigLSMIO.preAllocate) {
-        pre_alloc_bytes = m_memtable_max_size_bytes;
+    size_t file_pool_size = 0;
+    if (f_over_write) {
+        if (gConfigLSMIO.preAllocate) {
+            pre_alloc_bytes = m_memtable_max_size_bytes;
+        }
+        file_pool_size = gConfigLSMIO.filePoolSize;
     }
 
     // Initialize SSTableManager (which handles FilePool, Recovery, etc.)
-    m_sstable_manager =
-        std::make_unique<SSTableManager>(_dbPath, gConfigLSMIO.filePoolSize, pre_alloc_bytes);
+    m_sstable_manager = std::make_unique<SSTableManager>(_dbPath, file_pool_size, pre_alloc_bytes);
 
-    // Start the background flush thread
-    m_shutting_down = false;
-    m_flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
+    // Start the background flush thread only if not read-only
+    if (!m_read_only) {
+        m_shutting_down = false;
+        m_flush_thread = std::thread(&LSMIOStoreNative::FlushWorkLoop, this);
+    }
 }
 
 void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
-    std::string fs_type = "Unknown/Local";
-    bool is_parallel_fs = false;
+    if (!gConfigLSMIO.autoTuneParameters) {
+        return;
+    }
 
+    std::string fs_type = "Unknown/Local";
     if (f_fs_magic == LUSTRE_SUPER_MAGIC) {
         fs_type = "Lustre";
-        is_parallel_fs = true;
     } else if (f_fs_magic == GPFS_SUPER_MAGIC) {
         fs_type = "GPFS";
-        is_parallel_fs = true;
     }
 
     LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
               << std::hex << f_fs_magic << std::dec << ")";
-
-    if (is_parallel_fs) {
-        // TODO(tybulut): Adjust writer thread pool size
-    }
-
-    LOG(INFO) << "[NATIVE] Final Tuning: writeBufferSize="
-              << (m_memtable_max_size_bytes / 1024 / 1024)
-              << "MB, writeBufferNumber=" << m_max_immutable_memtables;
+    // Autotune is kept as an introspection hook but does not mutate configuration;
+    // optimal engine settings (footerIndex, manualOffset, enablePread, memtable=map)
+    // are now the global engine defaults in LSMIOConfig.
 }
 
 LSMIOStoreNative::~LSMIOStoreNative() {
-    close();
+    try {
+        close();
+    } catch (...) {
+        // Suppress any unforeseen exceptions in destructor
+    }
 }
 
 void LSMIOStoreNative::close() {
@@ -165,7 +172,11 @@ void LSMIOStoreNative::close() {
         m_immutable_memtables.pop_front();
 
         lock.unlock();
-        FlushMemtableToL0(std::move(memtable_to_flush));
+        try {
+            FlushMemtableToL0(std::move(memtable_to_flush));
+        } catch (...) {
+            m_bg_error.store(true, std::memory_order_release);
+        }
         lock.lock();
     }
 
@@ -201,8 +212,10 @@ void LSMIOStoreNative::FlushWorkLoop() {
             try {
                 FlushMemtableToL0(std::move(memtable_to_flush));
             } catch (const std::exception& e) {
+                m_bg_error.store(true, std::memory_order_release);
                 std::cerr << "[NATIVE] ERROR in FlushWorkLoop: " << e.what() << std::endl;
             } catch (...) {
+                m_bg_error.store(true, std::memory_order_release);
                 std::cerr << "[NATIVE] UNKNOWN ERROR in FlushWorkLoop" << std::endl;
             }
 
@@ -222,8 +235,16 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable) 
 
     // Delegate to SSTableManager
     // We pass m_flush_buffer for reuse
-    if (!m_sstable_manager->flushMemtable(*f_memtable, m_flush_buffer)) {
-        m_bg_error = true;
+    try {
+        if (!m_sstable_manager || !m_sstable_manager->flushMemtable(*f_memtable, m_flush_buffer)) {
+            m_bg_error.store(true, std::memory_order_release);
+        }
+    } catch (const std::exception& e) {
+        m_bg_error.store(true, std::memory_order_release);
+        std::cerr << "[NATIVE] Exception in FlushMemtableToL0: " << e.what() << std::endl;
+    } catch (...) {
+        m_bg_error.store(true, std::memory_order_release);
+        std::cerr << "[NATIVE] Unknown exception in FlushMemtableToL0" << std::endl;
     }
 }
 
@@ -237,6 +258,7 @@ bool LSMIOStoreNative::stopBatch() {
 
 bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string f_key,
                                       const std::string f_value, bool f_flush) {
+    if (m_read_only) return false;
     if (m_bg_error.load(std::memory_order_relaxed)) return false;
     std::string actual_value = f_value;
     if (f_m_type == MutationType::Del) {
@@ -297,7 +319,8 @@ bool LSMIOStoreNative::get(const std::string f_key, std::string* f_value) {
 
         if (!found) {
             // --- 2. Check immutable memtables (Newest to oldest) ---
-            for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend(); ++it) {
+            for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend();
+                 ++it) {
                 if ((*it)->get(f_key, result)) {
                     found = true;
                     break;

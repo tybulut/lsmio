@@ -32,9 +32,11 @@
 #define _LSMIO_FILE_POOL_HPP_
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -45,15 +47,33 @@ namespace lsmio {
 
 class FilePool {
   public:
+    // f_acquire_timeout bounds how long acquire() waits for the background
+    // replenish thread before falling back to synchronous on-demand creation
+    // on the caller thread (BUG-5). The default preserves production behavior;
+    // tests may pass a short timeout to make starvation reliably reachable
+    // without waiting out a production-length window.
+    // f_test_replenish_delay_hook, if set, is invoked once per replenish()
+    // loop iteration immediately before createFile() on the background
+    // thread only. It exists to make acquire()'s starvation/fallback path
+    // deterministically testable (blocking the hook stalls the pool
+    // indefinitely without depending on real, environment-variable file
+    // creation latency) and MUST remain a no-op (nullptr) in production use.
     FilePool(const std::string& f_directory, const std::string& f_prefix,
              const std::string& f_suffix, size_t f_pool_size, uint64_t f_start_id,
-             size_t f_pre_allocation_size = 0);
+             size_t f_pre_allocation_size = 0,
+             std::chrono::milliseconds f_acquire_timeout = std::chrono::seconds(2),
+             std::function<void()> f_test_replenish_delay_hook = nullptr);
     ~FilePool();
 
     // Returns a pair of {file_path, file_stream}
     // The stream is open and ready for writing.
     // If the pool is empty, this blocks until a file is available.
     std::pair<std::string, std::unique_ptr<std::ofstream>> acquire();
+    void shutdown();
+
+    size_t getFallbackCreations() const noexcept {
+        return m_fallback_creations.load(std::memory_order_relaxed);
+    }
 
   private:
     std::string m_directory;
@@ -61,6 +81,8 @@ class FilePool {
     std::string m_suffix;
     size_t m_pool_size;
     size_t m_pre_allocation_size;
+    std::chrono::milliseconds m_acquire_timeout;
+    std::function<void()> m_test_replenish_delay_hook;
 
     // Pool stores pairs of {path, stream}
     std::deque<std::pair<std::string, std::unique_ptr<std::ofstream>>> m_pool;
@@ -71,6 +93,9 @@ class FilePool {
     std::condition_variable m_cv_wait;  // Wait for item in pool
     std::atomic<bool> m_shutdown{false};
     std::atomic<uint64_t> m_next_id;
+    std::atomic<size_t> m_fallback_creations{0};
+
+    std::pair<std::string, std::unique_ptr<std::ofstream>> createFile();
 
     void replenish();
 };

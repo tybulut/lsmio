@@ -345,7 +345,7 @@ class ProfileSchemaTest(unittest.TestCase):
             },
         )
         self.assertEqual(f_archer2.install_prefix, "/work/e281/e281/{user}/usr")
-        self.assertEqual(len(f_archer2.modules), 16)
+        self.assertEqual(len(f_archer2.modules), 17)
         self.assertEqual(f_archer2.modules[0], "PrgEnv-gnu")
         self.assertEqual(
             f_archer2.resources["small"],

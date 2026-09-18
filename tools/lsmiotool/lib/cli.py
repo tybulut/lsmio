@@ -515,10 +515,6 @@ class RunCliParser:
                 raise RunCliParseError(
                     "--versioned is supported exclusively for 'lsmio baseline'."
                 )
-            if f_variants != (None,) and f_variants != ():
-                raise RunCliParseError(
-                    "Combining '--versioned' with any variant specification (e.g. 'all', 'footer') is rejected atomically."
-                )
             if f_archive is False:
                 raise RunCliParseError("Cannot specify '--no-archive' with '--versioned'.")
             f_archive = True

@@ -49,6 +49,7 @@ class Benchmark {
     std::chrono::steady_clock::time_point _start;
     std::chrono::steady_clock::time_point _stop;
     std::multimap<std::string, std::tuple<int64_t, double, double>> _iterations;
+    std::map<std::string, int> _failedIterations;
 
   public:
     /**
@@ -125,6 +126,14 @@ class Benchmark {
      * Clear all recorded iterations.
      */
     void clearIterations();
+
+    /**
+     * Get the count of failed/rejected iterations for a given metric.
+     * @param name Name of the iteration metric.
+     * @return Count of failed iterations.
+     */
+    int failedIterations(const std::string &name) const;
+    int getFailedCount(const std::string &name) const { return failedIterations(name); }
 };
 
 }  // namespace lsmio

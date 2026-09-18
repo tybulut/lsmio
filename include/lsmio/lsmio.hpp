@@ -115,7 +115,7 @@ class LSMIOConfig {
     /// @brief Flag to enable memory-mapped files.
     bool enableMMAP = false;
     /// @brief Flag to enable persistent read file descriptors and atomic pread().
-    bool enablePread = false;
+    bool enablePread = true;
     /// @brief Flag to enable data compression.
     bool compression = false;
 
@@ -150,8 +150,9 @@ class LSMIOConfig {
     /// index overhead. Returns 0 when writeBufferSize is too small to hold any value.
     size_t getMaxValueLen() const {
         if (writeBufferSize <= 0) return 0;
-        size_t overhead = maxKeyLen + (1 * 1024 * 1024);
         size_t buffer = static_cast<size_t>(writeBufferSize);
+        size_t reserved = std::min(static_cast<size_t>(1 * 1024 * 1024), buffer / 8);
+        size_t overhead = maxKeyLen + reserved;
         return buffer > overhead ? buffer - overhead : 0;
     }
     /// @brief Default write file size. 64-bit: 8 * writeBufferSize overflows int
@@ -166,11 +167,13 @@ class LSMIOConfig {
 
     // NativeStore specific settings
     /// @brief Memtable implementation to use (vector-no-sort, vector-sort, map, btree)
-    MemtableType memtable = MemtableType::VectorNoSort;
+    MemtableType memtable = MemtableType::Map;
     /// @brief Flag to bypass tellp() and manually track offsets
-    bool manualOffset = false;
+    bool manualOffset = true;
     /// @brief Flag to write Dense Index Footer to the SSTable
-    bool footerIndex = false;
+    bool footerIndex = true;
+    /// @brief Flag to open store in read-only mode during read operations (default: true)
+    bool readOnly = true;
 };
 
 /// Global configuration instance for LSMIO.

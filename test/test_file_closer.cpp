@@ -11,9 +11,9 @@ class FileCloserTest : public ::testing::Test {
     void SetUp() override {
         const ::testing::TestInfo* const test_info =
             ::testing::UnitTest::GetInstance()->current_test_info();
-        test_dir = (std::filesystem::current_path() /
-                    (std::string("test_closer_") + test_info->name()))
-                       .string();
+        test_dir =
+            (std::filesystem::current_path() / (std::string("test_closer_") + test_info->name()))
+                .string();
 
         if (std::filesystem::exists(test_dir)) std::filesystem::remove_all(test_dir);
         std::filesystem::create_directory(test_dir);
@@ -51,4 +51,21 @@ TEST_F(FileCloserTest, ZeroBatchSizeNoWorker) {
     closer.scheduleClose(std::move(f1));
 
     EXPECT_TRUE(std::filesystem::exists(p1));
+}
+
+TEST_F(FileCloserTest, ZeroBatchSizeClosesFile) {
+    lsmio::FileCloser closer(0);
+
+    std::string p1 = test_dir + "/f1_zero_batch.txt";
+    auto f1 = std::make_unique<std::ofstream>(p1);
+    *f1 << "test_data";
+
+    closer.scheduleClose(std::move(f1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    EXPECT_TRUE(std::filesystem::exists(p1));
+    std::ifstream in(p1);
+    std::string content;
+    in >> content;
+    EXPECT_EQ(content, "test_data");
 }

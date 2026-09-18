@@ -193,11 +193,11 @@ class VariantCatalogue:
         ),
         "bfilter": ("bfilter", ("--lsmio-no-autotune", "--lsmio-bfilter")),
         "wal": ("wal", ("--lsmio-no-autotune", "--lsmio-wal")),
-        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap")),
+        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap", "--lsmio-no-pread")),
         "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
         "footer-mmap": (
             "footer-mmap",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap"),
+            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap", "--lsmio-no-pread"),
         ),
         "footer-pread": (
             "footer-pread",
@@ -262,6 +262,7 @@ class VariantCatalogue:
                 "vector-sort",
                 "--lsmio-manual-offset",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-vsort-manoff": (
@@ -276,7 +277,14 @@ class VariantCatalogue:
         ),
         "footer-pool-8-mmap": (
             "footer-pool-8-mmap",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pool", "8", "--lsmio-mmap"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
         ),
         "footer-manoff-pool-8-mmap": (
             "footer-manoff-pool-8-mmap",
@@ -287,6 +295,7 @@ class VariantCatalogue:
                 "--lsmio-pool",
                 "8",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-btree-manoff-mmap": (
@@ -298,6 +307,7 @@ class VariantCatalogue:
                 "btree",
                 "--lsmio-manual-offset",
                 "--lsmio-mmap",
+                "--lsmio-no-pread",
             ),
         ),
         "footer-manoff-pool-8": (
@@ -310,11 +320,245 @@ class VariantCatalogue:
                 "8",
             ),
         ),
+        "footer-pread-pool-8": (
+            "footer-pread-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "footer-pread-manoff": (
+            "footer-pread-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "footer-pread-manoff-pool-8": (
+            "footer-pread-manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-pread",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "footer-map-pread": (
+            "footer-map-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-btree-pread": (
+            "footer-btree-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-vsort-pread": (
+            "footer-vsort-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-btree-manoff-pread": (
+            "footer-btree-manoff-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-manual-offset",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-map-manoff-pread": (
+            "footer-map-manoff-pread",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+                "--lsmio-pread",
+            ),
+        ),
+        "footer-map-manoff-mmap": (
+            "footer-map-manoff-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
+        "footer-map": (
+            "footer-map",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+            ),
+        ),
+        "footer-map-manoff": (
+            "footer-map-manoff",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "map",
+                "--lsmio-manual-offset",
+            ),
+        ),
+        "manoff-pool-8": (
+            "manoff-pool-8",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-manual-offset",
+                "--lsmio-pool",
+                "8",
+            ),
+        ),
+        "vnosort": (
+            "vnosort",
+            ("--lsmio-no-autotune", "--lsmio-memtable", "vector-no-sort"),
+        ),
+        "no-pread": (
+            "no-pread",
+            ("--lsmio-no-autotune", "--lsmio-no-pread"),
+        ),
+        "no-footer": (
+            "no-footer",
+            ("--lsmio-no-autotune", "--lsmio-no-footer-index"),
+        ),
+        "no-manoff": (
+            "no-manoff",
+            ("--lsmio-no-autotune", "--lsmio-no-manual-offset"),
+        ),
+        "legacy": (
+            "legacy",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-no-footer-index",
+                "--lsmio-no-manual-offset",
+                "--lsmio-no-pread",
+                "--lsmio-memtable",
+                "vector-no-sort",
+            ),
+        ),
+        "prealloc-vsort": (
+            "prealloc-vsort",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-prealloc",
+            ),
+        ),
+        "prealloc-btree": (
+            "prealloc-btree",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-prealloc",
+            ),
+        ),
+        "prealloc-wbuf-512m": (
+            "prealloc-wbuf-512m",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-wbuffer",
+                "536870912",
+                "--lsmio-prealloc",
+            ),
+        ),
+        "mmap-vsort": (
+            "mmap-vsort",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "vector-sort",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
+        "mmap-btree": (
+            "mmap-btree",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
+        "pool-8-mmap": (
+            "pool-8-mmap",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-pool",
+                "8",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        ),
         "autotune": (
             "autotune",
             ("--lsmio-autotune",),
         ),
     }
+
+    _CANONICAL_VARIANTS: Tuple[str, ...] = (
+        "vsort",
+        "btree",
+        "vnosort",
+        "mmap",
+        "no-pread",
+        "no-footer",
+        "no-manoff",
+        "legacy",
+        "prealloc",
+        "wbuf-512m",
+        "wbuf-32m",
+        "pool-8",
+        "prealloc-vsort",
+        "prealloc-btree",
+        "prealloc-wbuf-512m",
+        "mmap-vsort",
+        "mmap-btree",
+        "pool-8-mmap",
+        "flush",
+        "batch-2048",
+        "bfilter",
+        "wal",
+        "compress",
+        "sync",
+        "autotune",
+    )
 
     @classmethod
     def stripBackendPrefix(cls, f_key: str) -> str:
@@ -337,7 +581,7 @@ class VariantCatalogue:
 
     @classmethod
     def supportedVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 37 supported non-empty variant keys in canonical order."""
+        """Returns tuple of all supported non-empty variant keys in canonical order."""
         return tuple(cls._VARIANT_SPECS.keys())
 
     @classmethod
@@ -347,8 +591,8 @@ class VariantCatalogue:
 
     @classmethod
     def canonicalVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all 38 matrix variant keys in canonical order ('default' followed by 37 variants)."""
-        return ("default",) + cls.supportedVariants()
+        """Returns tuple of all 26 streamlined matrix variant keys in canonical order ('default' followed by 25 variants)."""
+        return ("default",) + cls._CANONICAL_VARIANTS
 
     @classmethod
     def resolve(cls, f_key: Optional[str] = None) -> VariantRecord:
@@ -382,6 +626,13 @@ class VariantCatalogue:
             return VariantRecord(stripped, spec_tokens, spec_flags)
 
         if stripped.startswith("version-"):
+            payload = stripped[len("version-"):]
+            for cand_var in sorted(cls.supportedVariants(), key=len, reverse=True):
+                if payload.endswith(f"-{cand_var}"):
+                    prefix = payload[:-len(cand_var) - 1]
+                    if "-" in prefix:
+                        spec = cls._VARIANT_SPECS[cand_var]
+                        return VariantRecord(stripped, stripped, spec[1])
             return VariantRecord(stripped, stripped, ("--lsmio-no-autotune",))
 
         raise UnknownVariantError(f_key, cls.supportedVariants())
@@ -467,11 +718,23 @@ class VariantReverseResolver:
         """Formats canonical display label based on backend, variant, and collision suffix."""
         if f_variant.startswith("version-"):
             payload = f_variant[len("version-"):]
+            sub_variant = None
+            for cand_var in sorted(VariantCatalogue.supportedVariants(), key=len, reverse=True):
+                if payload.endswith(f"-{cand_var}"):
+                    prefix = payload[:-len(cand_var) - 1]
+                    if "-" in prefix:
+                        sub_variant = cand_var
+                        payload = prefix
+                        break
+
             if "-" in payload:
                 branch, commit_hash = payload.rsplit("-", 1)
                 lbl = f"{branch} ({commit_hash})"
             else:
                 lbl = payload
+
+            if sub_variant is not None:
+                lbl = f"{lbl} [{sub_variant}]"
 
             if f_backend != "native":
                 lbl = f"{f_backend}-{lbl}"
@@ -524,6 +787,15 @@ class VariantReverseResolver:
             if combined_candidate in VariantCatalogue.supportedVariants():
                 variant = combined_candidate
                 collision = None
+            elif variant.startswith("version-"):
+                sub_cand = combined_candidate[len("version-"):]
+                for v in VariantCatalogue.supportedVariants():
+                    if sub_cand.endswith(f"-{v}"):
+                        prefix = sub_cand[:-len(v) - 1]
+                        if "-" in prefix:
+                            variant = combined_candidate
+                            collision = None
+                            break
 
         # Step 5: Canonicalize baseline alias
         if variant in ("", "default", "native"):

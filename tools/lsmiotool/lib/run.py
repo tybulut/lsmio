@@ -1482,7 +1482,8 @@ class RunPlanner:
                 and f_resource_policy.walltime_policy == "slurm_nodes"
                 and getattr(f_request, "versioned", False)
             ):
-                total_runs = 2
+                var_cnt = sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
+                total_runs = (1 + var_cnt) if var_cnt > 0 else 2
                 calculated_hours = 2 + (total_runs * 2)
                 f_wallhour = max(4, min(48, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
