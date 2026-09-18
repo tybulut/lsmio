@@ -626,6 +626,13 @@ class VariantCatalogue:
             return VariantRecord(stripped, spec_tokens, spec_flags)
 
         if stripped.startswith("version-"):
+            payload = stripped[len("version-"):]
+            for cand_var in sorted(cls.supportedVariants(), key=len, reverse=True):
+                if payload.endswith(f"-{cand_var}"):
+                    prefix = payload[:-len(cand_var) - 1]
+                    if "-" in prefix:
+                        spec = cls._VARIANT_SPECS[cand_var]
+                        return VariantRecord(stripped, stripped, spec[1])
             return VariantRecord(stripped, stripped, ("--lsmio-no-autotune",))
 
         raise UnknownVariantError(f_key, cls.supportedVariants())
@@ -711,11 +718,23 @@ class VariantReverseResolver:
         """Formats canonical display label based on backend, variant, and collision suffix."""
         if f_variant.startswith("version-"):
             payload = f_variant[len("version-"):]
+            sub_variant = None
+            for cand_var in sorted(VariantCatalogue.supportedVariants(), key=len, reverse=True):
+                if payload.endswith(f"-{cand_var}"):
+                    prefix = payload[:-len(cand_var) - 1]
+                    if "-" in prefix:
+                        sub_variant = cand_var
+                        payload = prefix
+                        break
+
             if "-" in payload:
                 branch, commit_hash = payload.rsplit("-", 1)
                 lbl = f"{branch} ({commit_hash})"
             else:
                 lbl = payload
+
+            if sub_variant is not None:
+                lbl = f"{lbl} [{sub_variant}]"
 
             if f_backend != "native":
                 lbl = f"{f_backend}-{lbl}"
@@ -768,6 +787,15 @@ class VariantReverseResolver:
             if combined_candidate in VariantCatalogue.supportedVariants():
                 variant = combined_candidate
                 collision = None
+            elif variant.startswith("version-"):
+                sub_cand = combined_candidate[len("version-"):]
+                for v in VariantCatalogue.supportedVariants():
+                    if sub_cand.endswith(f"-{v}"):
+                        prefix = sub_cand[:-len(v) - 1]
+                        if "-" in prefix:
+                            variant = combined_candidate
+                            collision = None
+                            break
 
         # Step 5: Canonicalize baseline alias
         if variant in ("", "default", "native"):

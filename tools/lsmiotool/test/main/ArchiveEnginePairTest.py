@@ -189,6 +189,14 @@ class ArchiveEnginePairTest(unittest.TestCase):
             self.assertEqual(run_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:run"))
             self.assertEqual(base_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:base"))
 
+    def testVersionedWithVariantArmIdPairResolution(self) -> None:
+        """Validates that versioned arm IDs with variant suffix resolve symmetrically."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            arm_id = "native-version-tybulut-bugfixes-437400d-legacy"
+            run_tgt, base_tgt = ArchiveEngine.resolvePairTargetDirectories(temp_dir, arm_id)
+            self.assertEqual(run_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:run"))
+            self.assertEqual(base_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:base"))
+
     def testVersionedArmIdSynchronizedCollision(self) -> None:
         """Validates that pre-existing versioned directories advance both twins synchronously."""
         with tempfile.TemporaryDirectory() as temp_dir:

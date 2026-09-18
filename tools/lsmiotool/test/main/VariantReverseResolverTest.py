@@ -254,6 +254,43 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r.display_label, "rocksdb-main (a1b2c3d)")
 
+    def testVersionedWithVariant(self) -> None:
+        """Validates reverse resolution and formatting of versioned directories with variants (Variation B.1)."""
+        r_run = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfixes-437400d-legacy:run")
+        self.assertIsNotNone(r_run)
+        self.assertEqual(r_run.backend, "native")
+        self.assertEqual(r_run.variant, "version-tybulut-bugfixes-437400d-legacy")
+        self.assertEqual(r_run.role, "run")
+        self.assertIsNone(r_run.collision)
+        self.assertEqual(r_run.display_label, "tybulut-bugfixes (437400d) [legacy]")
+
+        r_base = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfixes-437400d-legacy:base")
+        self.assertIsNotNone(r_base)
+        self.assertEqual(r_base.backend, "native")
+        self.assertEqual(r_base.variant, "version-tybulut-bugfixes-437400d-legacy")
+        self.assertEqual(r_base.role, "base")
+        self.assertIsNone(r_base.collision)
+        self.assertEqual(r_base.display_label, "tybulut-bugfixes (437400d) [legacy]")
+
+        r_footer_pread = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d-footer-pread:run")
+        self.assertIsNotNone(r_footer_pread)
+        self.assertEqual(r_footer_pread.display_label, "main (a1b2c3d) [footer-pread]")
+
+        r_non_native = VariantReverseResolver.resolve("outputs-rocksdb-version-main-a1b2c3d-legacy:run")
+        self.assertIsNotNone(r_non_native)
+        self.assertEqual(r_non_native.display_label, "rocksdb-main (a1b2c3d) [legacy]")
+
+        r_digit_var = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d-pool-8")
+        self.assertIsNotNone(r_digit_var)
+        self.assertEqual(r_digit_var.display_label, "main (a1b2c3d) [pool-8]")
+
+    def testVersionedWithVariantCollision(self) -> None:
+        """Validates that collision suffixes on versioned runs with variants append cleanly."""
+        r = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfixes-437400d-legacy:run-1")
+        self.assertIsNotNone(r)
+        self.assertEqual(r.collision, "1")
+        self.assertEqual(r.display_label, "tybulut-bugfixes (437400d) [legacy]-1")
+
     def testNewDigitVariants(self) -> None:
         """Validates reverse resolution of new variants ending in digits."""
         r1 = VariantReverseResolver.resolve("outputs-native-footer-pread-pool-8")

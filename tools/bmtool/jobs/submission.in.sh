@@ -29,7 +29,23 @@ batch_run() {
       wallhour=$_user_hours
     fi
   elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
-    total_runs=2
+    if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
+      if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
+        _cnt=0
+        _r="$EXPANDED_VARIANTS"
+        while [ -n "$_r" ]; do
+          case "$_r" in
+            *,*) _cnt=$(( _cnt + 1 )); _r="${_r#*,}" ;;
+            *) _cnt=$(( _cnt + 1 )); _r="" ;;
+          esac
+        done
+        total_runs=$(( 1 + _cnt ))
+      else
+        total_runs=$(( 1 + VAR_COUNT ))
+      fi
+    else
+      total_runs=2
+    fi
     # 120 min per baseline run (maximum safety margin for 64K workloads) + 2 hours base headroom
     calculated_hours=$(( 2 + total_runs * 2 ))
     if [ "$calculated_hours" -lt 4 ]; then

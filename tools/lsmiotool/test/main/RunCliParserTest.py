@@ -550,12 +550,19 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(req.scale, "baseline")
         self.assertTrue(req.archive)
 
-    def testVersionedRejectsVariantsAtomically(self) -> None:
-        """Validates that combining --versioned with any variant is rejected (INV-VER-1)."""
-        with self.assertRaises(RunCliParseError):
-            parseRunArguments(["lsmio", "baseline", "footer", "--versioned"])
-        with self.assertRaises(RunCliParseError):
-            parseRunArguments(["lsmio", "baseline", "all", "--versioned"])
+    def testVersionedAcceptsVariants(self) -> None:
+        """Validates that combining --versioned with variants is supported (Variation B.1)."""
+        req_single = parseRunArguments(["lsmio", "baseline", "legacy", "--versioned"])
+        self.assertTrue(req_single.versioned)
+        self.assertEqual(req_single.variant, "legacy")
+        self.assertEqual(req_single.variants, ("legacy",))
+        self.assertTrue(req_single.archive)
+
+        req_multi = parseRunArguments(["lsmio", "baseline", "footer,legacy", "--versioned"])
+        self.assertTrue(req_multi.versioned)
+        self.assertEqual(req_multi.variant, "footer")
+        self.assertEqual(req_multi.variants, ("footer", "legacy"))
+        self.assertTrue(req_multi.archive)
 
     def testVersionedRejectsNonBaselineScale(self) -> None:
         """Validates that --versioned on non-baseline scale is rejected."""

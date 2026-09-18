@@ -101,45 +101,97 @@ if [ "$BM_VERSIONED" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
   SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed -E 's/[^a-zA-Z0-9_-]/-/g')
-  VERSION_VARIANT="version-${SANITIZED_BRANCH}-${GIT_HASH}"
-  ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$VERSION_VARIANT")" || ARM_ID="native-${VERSION_VARIANT}"
 
-  echo "=== [Intra-Allocation] Step 2: Running Active Target Baseline (bm_native) (ARM_ID: ${ARM_ID}) ==="
-  BM_BIN_NAME="bm_native"
-  export BM_BIN_NAME
-  BM_VARIANT="$VERSION_VARIANT"
-  export BM_VARIANT
-  . $BM_DIRNAME/include/dirs-cleanup.in.sh
-  . $BM_DIRNAME/jobs/lsmio-setup.in.sh
-  run_matrix_workload
+  if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
+    _rem="$EXPANDED_VARIANTS"
+    while [ -n "$_rem" ]; do
+      case "$_rem" in
+        *,*) _v="${_rem%%,*}"; _rem="${_rem#*,}" ;;
+        *) _v="$_rem"; _rem="" ;;
+      esac
+      [ "$_v" != "default" ] && [ "$_v" != "base" ] || continue
+      VERSION_VARIANT="version-${SANITIZED_BRANCH}-${GIT_HASH}-${_v}"
+      ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$VERSION_VARIANT")" || ARM_ID="native-${VERSION_VARIANT}"
+      TARGET_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
+      if [ "$BM_RESUME" = "yes" ] && [ -d "$TARGET_RUN" ]; then
+        echo "[RESUME] Skipping versioned variant '${_v}'"
+        continue
+      fi
+      echo "=== [Intra-Allocation] Step 2: Running Active Target Versioned Variant '${_v}' (ARM_ID: ${ARM_ID}) ==="
+      BM_BIN_NAME="bm_native"
+      export BM_BIN_NAME
+      BM_VARIANT="$_v"
+      export BM_VARIANT
+      . $BM_DIRNAME/include/dirs-cleanup.in.sh
+      . $BM_DIRNAME/jobs/lsmio-setup.in.sh
+      run_matrix_workload
 
-  if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
-    . $BM_DIRNAME/parse/lsmio-parse.sh
-  fi
+      if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+        . $BM_DIRNAME/parse/lsmio-parse.sh
+      fi
 
-  PAIR_SUFFIX=""
-  BASE_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
-  BASE_BASE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:base"
-  if [ -e "$BASE_RUN" ] || [ -e "$BASE_BASE" ]; then
-    k=1
-    while [ -e "${BASE_RUN}-${k}" ] || [ -e "${BASE_BASE}-${k}" ]; do
-      k=$(( k + 1 ))
+      PAIR_SUFFIX=""
+      BASE_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
+      BASE_BASE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:base"
+      if [ -e "$BASE_RUN" ] || [ -e "$BASE_BASE" ]; then
+        k=1
+        while [ -e "${BASE_RUN}-${k}" ] || [ -e "${BASE_BASE}-${k}" ]; do
+          k=$(( k + 1 ))
+        done
+        PAIR_SUFFIX="-$k"
+      fi
+
+      BM_ROLE="run" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+      echo "=== [Intra-Allocation] Step 3: Archiving Reference Baseline for '${_v}' (Role: base) ==="
+      rm -rf "$LSM_DIR_OBASE"
+      cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
+      BM_ROLE="base" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+      . $BM_DIRNAME/include/dirs-cleanup.in.sh
     done
-    PAIR_SUFFIX="-$k"
+    rm -rf "$STAGING_BASE"
+  else
+    VERSION_VARIANT="version-${SANITIZED_BRANCH}-${GIT_HASH}"
+    ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$VERSION_VARIANT")" || ARM_ID="native-${VERSION_VARIANT}"
+
+    echo "=== [Intra-Allocation] Step 2: Running Active Target Baseline (bm_native) (ARM_ID: ${ARM_ID}) ==="
+    BM_BIN_NAME="bm_native"
+    export BM_BIN_NAME
+    BM_VARIANT="$VERSION_VARIANT"
+    export BM_VARIANT
+    . $BM_DIRNAME/include/dirs-cleanup.in.sh
+    . $BM_DIRNAME/jobs/lsmio-setup.in.sh
+    run_matrix_workload
+
+    if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+      . $BM_DIRNAME/parse/lsmio-parse.sh
+    fi
+
+    PAIR_SUFFIX=""
+    BASE_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
+    BASE_BASE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:base"
+    if [ -e "$BASE_RUN" ] || [ -e "$BASE_BASE" ]; then
+      k=1
+      while [ -e "${BASE_RUN}-${k}" ] || [ -e "${BASE_BASE}-${k}" ]; do
+        k=$(( k + 1 ))
+      done
+      PAIR_SUFFIX="-$k"
+    fi
+
+    BM_ROLE="run" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+    # -------------------------------------------------------------------------
+    # Phase 3: Restore & Archive Golden Reference (Role :base)
+    # -------------------------------------------------------------------------
+    echo "=== [Intra-Allocation] Step 3: Archiving Reference Baseline (Role: base) ==="
+    rm -rf "$LSM_DIR_OBASE"
+    cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
+    BM_ROLE="base" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+    rm -rf "$STAGING_BASE"
+    . $BM_DIRNAME/include/dirs-cleanup.in.sh
   fi
-
-  BM_ROLE="run" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
-
-  # -------------------------------------------------------------------------
-  # Phase 3: Restore & Archive Golden Reference (Role :base)
-  # -------------------------------------------------------------------------
-  echo "=== [Intra-Allocation] Step 3: Archiving Reference Baseline (Role: base) ==="
-  rm -rf "$LSM_DIR_OBASE"
-  cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
-  BM_ROLE="base" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
-
-  rm -rf "$STAGING_BASE"
-  . $BM_DIRNAME/include/dirs-cleanup.in.sh
 
 elif [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   echo "=== [Intra-Allocation] Step 1: Running Shared Pre-Baseline ==="
