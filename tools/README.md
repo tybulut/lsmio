@@ -57,7 +57,25 @@ When one or more non-empty variants are specified:
 - **Synchronized Suffix Locking**: If archive collision occurs (e.g. `outputs-native-footer:run` exists), synchronized `-N` collision resolution assigns an identical suffix to both twins simultaneously (`outputs-native-footer:run-1` and `outputs-native-footer:base-1`), preventing suffix divergence.
 - **Standalone Baseline Isolation (`INV-PAIR-3`)**: Invocations without variants or with `default`/`base` (e.g., `bmtool run lsmio baseline`) archive strictly to unadorned `outputs-native` (or `outputs-native-N` upon collision) without role delimiters (`:run` or `:base`).
 
+#### Versioned Baseline Comparison (`--versioned`):
+To benchmark code modifications on an active working branch against the golden reference baseline (`bm_native:main`), `bmtool` provides the `--versioned` flag:
+```bash
+# Compare unconfigured active branch against golden reference:
+bmtool run lsmio baseline --versioned
+
+# Compare active branch under specific engine variant(s) against golden reference (Variation B.1):
+bmtool run lsmio baseline legacy --versioned
+bmtool run lsmio baseline pread,footer-pread --versioned
+```
+- **Intra-Allocation Symmetrical Twin Execution**:
+  - **Step 1 (Reference Baseline)**: Executes the compiled golden reference binary (`$SB_BIN/bm_native:main`) once within the compute node allocation and stages its outputs to `$STAGING_BASE`.
+  - **Step 2 (Active Target Run)**: Iterates over the requested variants (e.g. `legacy`), executing the active working branch binary (`bm_native`) with the appropriate variant flags and archiving directly to `outputs-native-version-<branch>-<hash>-<variant>:run`.
+  - **Step 3 (Reference Twin Baseline)**: Copies the staged golden baseline outputs and archives them symmetrically as `outputs-native-version-<branch>-<hash>-<variant>:base`.
+- **Dynamic Walltime Scaling**: Automatically scales total allocation walltime to $2 + 2 \times (1 + N_{\text{variants}})$ hours (120 minutes per matrix run + 2 hours base safety headroom).
+- **Mandatory Archiving**: Automatically sets `--archive` to `yes` (`--no-archive` is rejected).
+
 #### Options:
+- `--versioned`: Executes paired baseline comparison benchmarking the current working branch binary against the golden reference binary (`$SB_BIN/bm_native:main`). Can be run unconfigured or combined with one or more specific variants (e.g. `legacy`). Symmetrically archives `:run` and `:base` directories for automated delta comparison.
 - `--ssd`: Selects SSD storage root instead of HDD.
 - `--archive`: Force automatic archiving after each variant execution.
   - **Automatic archive default rules**: Automatically defaults to `yes` when multiple variants ($N > 1$) or `all` is specified; defaults to `no` for single-variant ($N = 1$) or default baseline runs (`INV-MULTI-2`).
@@ -119,12 +137,12 @@ lsmiotool run <workload> <scale> [<variants>] [options]
 
 Full invocation signature:
 ```bash
-lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>]
+lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
 ```bash
-lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>]
+lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
 ```
 
 #### Arguments & Options:
@@ -145,6 +163,7 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
   - **Comma-separated list**: e.g., `footer,manoff,autotune`, executed sequentially in specified order.
   - **Keyword `all`**: Expands to all 38 matrix variants in canonical order (`default` followed by 37 non-empty variant keys).
   *(Note: Non-lsmio benchmarks or non-baseline scales reject variant specifications atomically before execution.)*
+- `--versioned`: Enables versioned baseline comparison for `lsmio baseline`. Benchmarks the active working branch against the golden reference binary (`$SB_BIN/bm_native:main`). Supports execution with or without specific variants (e.g. `lsmiotool run lsmio baseline legacy --versioned`). Automatically activates paired delta archiving and dynamically scales walltime allocation based on the variant count.
 - `--ssd`: Selects SSD storage class root. Default storage class is HDD.
 - `--setup <name>`: Explicitly overrides the benchmark setup profile.
   - **Syntax rule**: `--setup <name>` must be specified as two separate arguments. Syntax `--setup=value` is strictly rejected.
@@ -557,6 +576,13 @@ When `<archive_folder>` contains paired variant runs (`outputs-*-<variant>:run` 
   - **Green (`#2ca02c`)**: Positive performance improvement ($\Delta > 0$).
   - **Red (`#d62728`)**: Performance regression ($\Delta < 0$).
 - **Negative Delta Preservation**: Negative values are preserved directly without clamping, ensuring accurate visibility into performance regressions.
+
+#### Versioned Variant Labeling (Variation B.1):
+When `<archive_folder>` contains paired versioned archives generated via `--versioned`, `VariantReverseResolver` automatically formats the X-axis category labels on comparison charts:
+- **With variant (Variation B.1)**: `outputs-native-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `<branch> (<hash>) [<variant>]` (e.g., `tybulut-bugfixes (437400d) [legacy]`).
+- **Without variant**: `outputs-native-version-<branch>-<hash>:run` $\rightarrow$ `<branch> (<hash>)` (e.g., `main (437400d)`).
+- **With collision suffix**: `outputs-native-version-<branch>-<hash>-<variant>:run-1` $\rightarrow$ `<branch> (<hash>) [<variant>]-1`.
+- **Non-native backend**: `outputs-rocksdb-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `rocksdb-<branch> (<hash>) [<variant>]`.
 
 #### Legacy Absolute Comparison Mode:
 If `<archive_folder>` contains unpaired directories without `:run` and `:base` suffixes, the command falls back to rendering standard multi-bar absolute throughput comparison charts (`compare-variants-<op>-c<stripes>-b<blocksize>.png`).
