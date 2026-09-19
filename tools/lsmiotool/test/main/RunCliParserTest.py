@@ -39,7 +39,7 @@ from lsmiotool.lib.cli import (
 )
 from lsmiotool.lib.run import RunRequest
 from lsmiotool.lib.site import StorageClass
-from lsmiotool.lib.variants import UnknownVariantError
+from lsmiotool.lib.variants import UnknownVariantError, VariantCatalogue
 
 
 class RunCliParserTest(unittest.TestCase):
@@ -440,12 +440,24 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(f_req.effective_archive)
         self.assertFalse(f_req.resume)
 
-    def testBaselineScaleWithAllKeyword(self) -> None:
-        """Task 2.5.2: Asserts 'all' keyword expands to all 26 canonical matrix variants with auto-archive enabled."""
-        f_req = parseRunArguments(["lsmio", "baseline", "all"])
+    def testBaselineScaleWithMostKeyword(self) -> None:
+        """Asserts 'most' keyword expands to all 26 canonical matrix variants with auto-archive enabled."""
+        f_req = parseRunArguments(["lsmio", "baseline", "most"])
         self.assertEqual(len(f_req.variants), 26)
         self.assertIsNone(f_req.variants[0])  # default/base variant
         self.assertEqual(f_req.variants[1], "vsort")
+        self.assertEqual(f_req.variants[-1], "autotune")
+        self.assertIsNone(f_req.variant)
+        self.assertTrue(f_req.effective_archive)
+
+    def testBaselineScaleWithAllKeyword(self) -> None:
+        """Asserts 'all' keyword expands to all registered matrix variants with auto-archive enabled."""
+        f_req = parseRunArguments(["lsmio", "baseline", "all"])
+        all_vars = VariantCatalogue.allVariants()
+        self.assertEqual(len(f_req.variants), len(all_vars))
+        self.assertEqual(len(f_req.variants), 61)
+        self.assertIsNone(f_req.variants[0])  # default/base variant
+        self.assertEqual(f_req.variants[1], "footer")
         self.assertEqual(f_req.variants[-1], "autotune")
         self.assertIsNone(f_req.variant)
         self.assertTrue(f_req.effective_archive)

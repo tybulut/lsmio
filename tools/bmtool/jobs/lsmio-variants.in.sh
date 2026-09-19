@@ -283,16 +283,24 @@ resolve_variant() {
 }
 
 # Streamlined canonical sequence of 26 matrix variants (base default + 25 non-empty keys)
-LSMIO_ALL_VARIANTS="default,vsort,btree,vnosort,mmap,no-pread,no-footer,no-manoff,legacy,prealloc,wbuf-512m,wbuf-32m,pool-8,prealloc-vsort,prealloc-btree,prealloc-wbuf-512m,mmap-vsort,mmap-btree,pool-8-mmap,flush,batch-2048,bfilter,wal,compress,sync,autotune"
+LSMIO_MOST_VARIANTS="default,vsort,btree,vnosort,mmap,no-pread,no-footer,no-manoff,legacy,prealloc,wbuf-512m,wbuf-32m,pool-8,prealloc-vsort,prealloc-btree,prealloc-wbuf-512m,mmap-vsort,mmap-btree,pool-8-mmap,flush,batch-2048,bfilter,wal,compress,sync,autotune"
+export LSMIO_MOST_VARIANTS
+
+# Exhaustive sequence of all 61 matrix variants (base default + all 60 registered non-empty keys)
+LSMIO_ALL_VARIANTS="default,footer,btree,footer-btree,map,vsort,prealloc,footer-prealloc,manoff,footer-manoff,wbuf-512m,wbuf-32m,footer-wbuf-512m,footer-btree-prealloc,bfilter,wal,mmap,pread,footer-mmap,footer-pread,compress,sync,pool-8,flush,batch-2048,manoff-prealloc,wbuf-512m-manoff-prealloc,footer-wbuf-32m,footer-pool-8,footer-wbuf-512m-manoff-prealloc,footer-vsort-manoff-prealloc,footer-vsort-manoff-mmap,footer-vsort-manoff,footer-pool-8-mmap,footer-manoff-pool-8-mmap,footer-btree-manoff-mmap,footer-manoff-pool-8,footer-pread-pool-8,footer-pread-manoff,footer-pread-manoff-pool-8,footer-map-pread,footer-btree-pread,footer-vsort-pread,footer-btree-manoff-pread,footer-map-manoff-pread,footer-map-manoff-mmap,footer-map,footer-map-manoff,manoff-pool-8,vnosort,no-pread,no-footer,no-manoff,legacy,prealloc-vsort,prealloc-btree,prealloc-wbuf-512m,mmap-vsort,mmap-btree,pool-8-mmap,autotune"
 export LSMIO_ALL_VARIANTS
 
 # Expands and validates a raw variant argument into a canonical comma-separated list.
-# Handles: omitted/empty, 'default', 'base', single variant, comma list, or 'all'.
+# Handles: omitted/empty, 'default', 'base', single variant, comma list, 'most', or 'all'.
 # Returns 0 on success (printing comma-separated tokens), 1 on validation error.
 bm_expand_variants() {
   _raw="$1"
   if [ -z "$_raw" ] || [ "$_raw" = "default" ] || [ "$_raw" = "base" ]; then
     echo "default"
+    return 0
+  fi
+  if [ "$_raw" = "most" ]; then
+    echo "$LSMIO_MOST_VARIANTS"
     return 0
   fi
   if [ "$_raw" = "all" ]; then
@@ -318,6 +326,12 @@ bm_expand_variants() {
     case "$_item" in
       ""|default|base)
         _norm="default"
+        ;;
+      most)
+        _norm="$LSMIO_MOST_VARIANTS"
+        ;;
+      all)
+        _norm="$LSMIO_ALL_VARIANTS"
         ;;
       *)
         if ! resolve_variant "$_item" >/dev/null 2>&1; then

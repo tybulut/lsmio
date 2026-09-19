@@ -595,6 +595,16 @@ class VariantCatalogue:
         return ("default",) + cls._CANONICAL_VARIANTS
 
     @classmethod
+    def mostVariants(cls) -> Tuple[str, ...]:
+        """Returns tuple of all 26 streamlined matrix variant keys in canonical order (alias for canonicalVariants)."""
+        return cls.canonicalVariants()
+
+    @classmethod
+    def allVariants(cls) -> Tuple[str, ...]:
+        """Returns tuple of all variants in exhaustive catalog ('default' followed by all supported non-empty variants)."""
+        return ("default",) + cls.supportedVariants()
+
+    @classmethod
     def resolve(cls, f_key: Optional[str] = None) -> VariantRecord:
         """Resolves variant key into a canonical VariantRecord.
 
