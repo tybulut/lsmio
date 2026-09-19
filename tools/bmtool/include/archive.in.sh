@@ -14,8 +14,16 @@ fi
 . $BM_DIRNAME/jobs/lsmio-vars.in.sh
 . $BM_DIRNAME/jobs/lsmio-variants.in.sh
 
-# Task 4.2.2: Destination resolution (default to $BM_PATH/lsmio-archive if omitted)
-: "${BM_ARCHIVE_DEST:=$BM_PATH/lsmio-archive}"
+# Task 4.2.2: Destination resolution under Approach 2 (INV-BACKEND-3)
+if [ -z "$BM_ARCHIVE_DEST" ]; then
+  if [ "$BM_MODE" = "backends" ]; then
+    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive/backends/$BM_SCALE"
+  elif [ "$BM_SCALE" = "baseline" ]; then
+    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive/variants"
+  else
+    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive"
+  fi
+fi
 
 # Task 4.2.3: Active output directory check
 [ -d "$LSM_DIR_OBASE" ] || fatal_error "Active output directory does not exist: $LSM_DIR_OBASE"

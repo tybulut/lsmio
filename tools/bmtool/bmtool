@@ -31,10 +31,13 @@
 
 BM_USAGE="Usage:
 $0 <cmd> <benchmark> <scale> [<variants>] [options]
+$0 <run|parse> lsmio backends <scale> [<backends>] [options]
 
 cmds:
   run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>] [--versioned]
+  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>]
   parse <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd]
+  parse lsmio backends <local|bake|small|large>
   archive <lsmio> <local|bake|small|large|baseline> [<variant>] [--dest=<path>]
   dirs
   load-modules
@@ -44,6 +47,7 @@ BM_HELP_TEXT="LSMIO Benchmark Suite Orchestration CLI (bmtool)
 
 Usage:
   $0 <cmd> <benchmark> <scale> [<variants>] [options]
+  $0 <run|parse> lsmio backends <scale> [<backends>] [options]
 
 Commands:
   run             Execute benchmark jobs across HPC compute nodes
@@ -63,12 +67,17 @@ Scales:
   small           1, 2, 4, 8, 16, 24, 32, 40, 48 tasks on 1 task/node
   large           4, 8, 16, 32, 64, 128, 192, 256 tasks on 4 tasks/node
   baseline        Standardized baseline scaling evaluation
+  backends        Multi-backend intra-allocation scaling (e.g. 'run lsmio backends small')
 
-Variants (for 'lsmio baseline'):
-  omitted / base  Execute default baseline configuration
-  <variant>       Single variant key (e.g. footer, btree, mmap, autotune)
-  <v1>,<v2>,...   Comma-separated list (e.g. footer,manoff,autotune)
-  all             Canonical sequence of all 38 matrix variants
+Variants / Backends:
+  For 'lsmio baseline':
+    omitted / base  Execute default baseline configuration
+    <variant>       Single variant key (e.g. footer, btree, mmap, autotune)
+    <v1>,<v2>,...   Comma-separated list (e.g. footer,manoff,autotune)
+    all             Canonical sequence of all 60 matrix variants
+  For 'lsmio backends <scale>':
+    omitted         Default canonical sequence: adios2,native,rocksdb
+    <b1>,<b2>,...   Comma-separated backend list (e.g. adios2,native,rocksdb)
 
 Options:
   --ssd           Use SSD storage instead of HDD
@@ -152,14 +161,8 @@ if [ "$PASS_CMD" = "archive" -a "$JOB_TOOL" != "lsmio" ]; then
   fatal_error "archive command is currently only supported for lsmio."
 fi
 
-if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "archive" ]; then
-  JOB_SCALE="$3"
-
-  if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" -a "$JOB_SCALE" != "baseline" ]; then
-    fatal_error "Unknown second argument for $PASS_CMD cmd: [$JOB_SCALE]"
-  fi
-fi
-
+BM_MODE="standard"
+BM_BACKENDS="adios2,native,rocksdb"
 BM_VARIANTS_RAW=""
 BM_VARIANT=""
 BM_ARCHIVE_DEST=""
@@ -169,8 +172,44 @@ DO_ARCHIVE="no"
 BM_VERSIONED="no"
 EXPANDED_VARIANTS="default"
 
-if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "archive" ]; then
+if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
+  if [ "$JOB_TOOL" = "lsmio" ] && [ "$3" = "backends" ]; then
+    BM_MODE="backends"
+    JOB_SCALE="$4"
+    if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" ]; then
+      fatal_error "Unknown scale for backends $PASS_CMD cmd: [$JOB_SCALE]. Must be one of: local, bake, small, large."
+    fi
+    if [ $# -ge 5 ]; then
+      case "$5" in
+        --*)
+          BM_BACKENDS="adios2,native,rocksdb"
+          shift 4
+          ;;
+        *)
+          BM_BACKENDS="$5"
+          shift 5
+          ;;
+      esac
+    else
+      BM_BACKENDS="adios2,native,rocksdb"
+      shift 4
+    fi
+  else
+    JOB_SCALE="$3"
+    if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" -a "$JOB_SCALE" != "baseline" ]; then
+      fatal_error "Unknown second argument for $PASS_CMD cmd: [$JOB_SCALE]"
+    fi
+    shift 3
+  fi
+elif [ "$PASS_CMD" = "archive" ]; then
+  JOB_SCALE="$3"
+  if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" -a "$JOB_SCALE" != "baseline" ]; then
+    fatal_error "Unknown second argument for $PASS_CMD cmd: [$JOB_SCALE]"
+  fi
   shift 3
+fi
+
+if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "archive" ]; then
   if [ "$JOB_SCALE" = "baseline" ]; then
     # Positional variant token (if present and not starting with --)
     if [ $# -gt 0 ]; then
@@ -304,8 +343,57 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
       DO_ARCHIVE="no"
     fi
   else
-    # Legacy scales: local, bake, small, large
-    if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
+    # Legacy scales and backends mode options parsing
+    if [ "$BM_MODE" = "backends" ]; then
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --ssd)
+            LUSTRE_SSD=on
+            ;;
+          --archive)
+            [ "$BM_ARCHIVE_OVERRIDE" != "no" ] || fatal_error "Cannot specify both --archive and --no-archive"
+            BM_ARCHIVE_OVERRIDE="yes"
+            ;;
+          --no-archive)
+            [ "$BM_ARCHIVE_OVERRIDE" != "yes" ] || fatal_error "Cannot specify both --archive and --no-archive"
+            BM_ARCHIVE_OVERRIDE="no"
+            ;;
+          --resume)
+            BM_RESUME="yes"
+            ;;
+          --time=*|--walltime=*|--wallhour=*)
+            BM_WALLHOUR_OVERRIDE="${1#*=}"
+            ;;
+          --time|--walltime|--wallhour)
+            _opt="$1"
+            shift
+            [ $# -gt 0 ] || fatal_error "Option $_opt requires an argument"
+            BM_WALLHOUR_OVERRIDE="$1"
+            ;;
+          --dest=*|--out-dir=*|--output-dir=*)
+            BM_ARCHIVE_DEST="${1#*=}"
+            ;;
+          --dest|--out-dir|--output-dir)
+            _opt="$1"
+            shift
+            [ $# -gt 0 ] || fatal_error "Option $_opt requires an argument"
+            BM_ARCHIVE_DEST="$1"
+            ;;
+          *)
+            fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
+            ;;
+        esac
+        shift
+      done
+
+      # Validate wallhour override if supplied
+      if [ -n "$BM_WALLHOUR_OVERRIDE" ]; then
+        case "$BM_WALLHOUR_OVERRIDE" in
+          ''|*[!0-9]*) fatal_error "Invalid --time/--wallhour value: [$BM_WALLHOUR_OVERRIDE] (must be positive integer)" ;;
+          *) [ "$BM_WALLHOUR_OVERRIDE" -gt 0 ] || fatal_error "--time/--wallhour must be greater than 0" ;;
+        esac
+      fi
+    elif [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
       if [ $# -gt 0 ]; then
         if [ "$1" = "--ssd" ]; then
           LUSTRE_SSD=on
@@ -341,10 +429,23 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
   fi
 fi
 
+# Resolve default BM_ARCHIVE_DEST under Approach 2
+if [ -z "$BM_ARCHIVE_DEST" ]; then
+  if [ "$BM_MODE" = "backends" ]; then
+    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive/backends/$JOB_SCALE"
+  elif [ "$JOB_SCALE" = "baseline" ]; then
+    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive/variants"
+  else
+    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive"
+  fi
+fi
+
 echo "Entered cmd summary:
 - Passed cmd: $PASS_CMD
 - Cmd param-1: $JOB_TOOL
 - Cmd param-2: $JOB_SCALE
+- Cmd mode: $BM_MODE
+- Cmd backends: $BM_BACKENDS
 - Cmd optional param: SSD=$LUSTRE_SSD
 - Cmd optional param: Variant=$BM_VARIANT
 - Cmd optional param: Archive Dest=$BM_ARCHIVE_DEST
@@ -357,15 +458,19 @@ Executing...
 "
 
 # Execute
-# Export: BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_VARIANT,BM_ARCHIVE_DEST,BM_SETUP
+# Export: BM_CMD,BM_TYPE,BM_SCALE,BM_MODE,BM_BACKENDS,BM_SSD,BM_VARIANT,BM_ARCHIVE_DEST,BM_SETUP,BM_WALLHOUR_OVERRIDE,BM_RESUME
 : "${BM_SETUP:=NATIVE-M}"
 export BM_SETUP
 export BM_CMD="$PASS_CMD"
 export BM_TYPE="$JOB_TOOL"
 export BM_SCALE="$JOB_SCALE"
+export BM_MODE="$BM_MODE"
+export BM_BACKENDS="$BM_BACKENDS"
 export BM_SSD="$LUSTRE_SSD"
 export BM_VARIANT="$BM_VARIANT"
 export BM_ARCHIVE_DEST="$BM_ARCHIVE_DEST"
+export BM_WALLHOUR_OVERRIDE="$BM_WALLHOUR_OVERRIDE"
+export BM_RESUME="$BM_RESUME"
 
 . $BM_DIRNAME/include/vars.in.sh
 

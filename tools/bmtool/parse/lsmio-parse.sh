@@ -5,12 +5,16 @@
 #LSM_DIR_OBASE=/.../benchmark/lsmio-archive/lsmio-large-rocksdb/outputs
 
 generate_aggregates() {
-  if [ "$1" = "small" ]; then
+  if [ "$1" = "bake" ]; then
+    NODES="1 2 4 8"
+  elif [ "$1" = "small" ]; then
     NODES="1 2 4 8 16 24 32 40 48"
   elif [ "$1" = "large" ]; then
     NODES="1 2 4 8 16 32 48 64"
   elif [ "$1" = "baseline" ]; then
     NODES="8"
+  elif [ "$1" = "local" ]; then
+    NODES="1"
   fi
 
   for n in $NODES
@@ -66,7 +70,32 @@ generate_report() {
   done
 }
 
-if [ "$BM_SCALE" = "small" ]; then
+if [ "$BM_MODE" = "backends" ]; then
+  : "${BM_ARCHIVE_DEST:=$BM_PATH/lsmio-archive/backends/$BM_SCALE}"
+  _b_list="adios native rocksdb"
+  if [ -n "$BM_BACKENDS" ]; then
+    _b_list=$(echo "$BM_BACKENDS" | tr ',' ' ')
+  fi
+  for _b in $_b_list; do
+    case "$_b" in
+      adios|adios2) _arm="adios" ;;
+      native) _arm="native" ;;
+      rocksdb) _arm="rocksdb" ;;
+      leveldb) _arm="leveldb" ;;
+      *) _arm="$_b" ;;
+    esac
+    _backend_dir="${BM_ARCHIVE_DEST}/outputs-${_arm}"
+    if [ -d "$_backend_dir" ]; then
+      echo "=== Generating aggregates and report for backend: $_arm ($BM_SCALE) ==="
+      LSM_DIR_OBASE="$_backend_dir"
+      generate_aggregates "$BM_SCALE"
+      generate_report
+    fi
+  done
+elif [ "$BM_SCALE" = "bake" ]; then
+  generate_aggregates $BM_SCALE
+  generate_report
+elif [ "$BM_SCALE" = "small" ]; then
   generate_aggregates $BM_SCALE
   generate_report
 elif [ "$BM_SCALE" = "large" ]; then
@@ -76,7 +105,7 @@ elif [ "$BM_SCALE" = "baseline" ]; then
   generate_aggregates $BM_SCALE
   generate_report
 else
-  fatal_error "Please pass either small, large, or baseline for lsmio parsing."
+  fatal_error "Please pass either bake, small, large, or baseline for lsmio parsing."
 fi
 
 

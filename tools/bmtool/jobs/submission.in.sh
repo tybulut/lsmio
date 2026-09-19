@@ -17,8 +17,9 @@ batch_run() {
 
   nodes=`echo "$concurrency / $pernode" | bc`
   export BM_NUM_TASKS=$concurrency
+  export BM_NUM_NODES=$nodes
 
-  # Dynamic Walltime Scaling & Explicit Override (INV-PAIR-1)
+  # Dynamic Walltime Scaling & Explicit Override (INV-BACKEND-2, INV-PAIR-1)
   if [ -n "$BM_WALLHOUR_OVERRIDE" ] || [ -n "$BM_WALLHOUR" ]; then
     _user_hours="${BM_WALLHOUR_OVERRIDE:-$BM_WALLHOUR}"
     if [ "$_user_hours" -lt 1 ]; then
@@ -27,6 +28,26 @@ batch_run() {
       wallhour=48
     else
       wallhour=$_user_hours
+    fi
+  elif [ "$BM_MODE" = "backends" ]; then
+    _bcnt=0
+    _brem="$BM_BACKENDS"
+    while [ -n "$_brem" ]; do
+      case "$_brem" in
+        *,*) _bcnt=$(( _bcnt + 1 )); _brem="${_brem#*,}" ;;
+        *) _bcnt=$(( _bcnt + 1 )); _brem="" ;;
+      esac
+    done
+    [ "$_bcnt" -gt 0 ] || _bcnt=1
+    time_per_backend=$(( nodes / 3 ))
+    [ "$time_per_backend" -gt 0 ] || time_per_backend=1
+    calculated_hours=$(( 2 + _bcnt * time_per_backend ))
+    if [ "$calculated_hours" -lt 1 ]; then
+      wallhour=1
+    elif [ "$calculated_hours" -gt 48 ]; then
+      wallhour=48
+    else
+      wallhour=$calculated_hours
     fi
   elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
     if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
@@ -106,7 +127,7 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED,BM_MODE,BM_BACKENDS,BM_NUM_NODES \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi

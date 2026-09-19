@@ -590,6 +590,22 @@ class CompareNodesMain(BaseMain):
             log.Console.error(f"Directory not found: {target_dir}")
             sys.exit(1)
 
+        canonical_backend_labels: Dict[str, str] = {
+            "outputs-adios": "adios2",
+            "outputs-adios2": "adios2",
+            "adios": "adios2",
+            "adios2": "adios2",
+            "outputs-native": "native",
+            "native": "native",
+            "outputs-rocksdb": "rocksdb",
+            "rocksdb": "rocksdb",
+        }
+        canonical_order: Dict[str, int] = {
+            "adios2": 0,
+            "native": 1,
+            "rocksdb": 2,
+        }
+
         entries = sorted(os.listdir(target_dir))
         plot_data_list: List[plot.PlotData] = []
         is_read = self.m_op == "read"
@@ -604,7 +620,18 @@ class CompareNodesMain(BaseMain):
                         is_read, self.m_stripes, self.m_bs
                     )
                     if x_series and y_series:
-                        plot_data_list.append(plot.PlotData(entry, x_series, y_series))
+                        legend_label = canonical_backend_labels.get(entry)
+                        if legend_label is None:
+                            entry_lower = entry.lower()
+                            if "adios" in entry_lower:
+                                legend_label = "adios2"
+                            elif entry_lower in ("outputs-native", "native"):
+                                legend_label = "native"
+                            elif "rocksdb" in entry_lower:
+                                legend_label = "rocksdb"
+                            else:
+                                legend_label = entry
+                        plot_data_list.append(plot.PlotData(legend_label, x_series, y_series))
 
         if not plot_data_list:
             log.Console.warning(
@@ -612,20 +639,37 @@ class CompareNodesMain(BaseMain):
             )
             return 0
 
+        # Sort plot series by canonical precedence: [adios2, native, rocksdb] (INV-BACKEND-5)
+        plot_data_list.sort(key=lambda p: (canonical_order.get(p.legend, 999), p.legend))
+
         base_name = os.path.basename(target_dir.rstrip(os.sep))
-        title = f"Comparison: {base_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
+
+        # Output directory mirroring and scale identification under Approach 2 (INV-BACKEND-4)
+        norm_target = os.path.normpath(target_dir)
+        path_parts = norm_target.split(os.sep)
+
+        base_out = self.resolveDirectory(self.m_output_dir) if self.m_output_dir else os.getcwd()
+        b_indices = [i for i, part in enumerate(path_parts) if part == "backends"]
+        v_indices = [i for i, part in enumerate(path_parts) if part == "variants"]
+
+        if b_indices:
+            b_idx = b_indices[-1]
+            scale_name = path_parts[b_idx + 1] if b_idx + 1 < len(path_parts) else base_name
+            out_dir = os.path.join(base_out, "backends", scale_name)
+        elif v_indices:
+            scale_name = "variants"
+            out_dir = os.path.join(base_out, "variants")
+        else:
+            scale_name = base_name
+            out_dir = base_out
+
+        os.makedirs(out_dir, exist_ok=True)
+        title = f"Comparison: {scale_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
         meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
 
-        # Output directory resolution (INV-ARCH-9: fixes legacy hardcoded os.getcwd())
-        out_dir = (
-            self.resolveDirectory(self.m_output_dir)
-            if self.m_output_dir
-            else os.getcwd()
-        )
-        os.makedirs(out_dir, exist_ok=True)
         output_filename = os.path.join(
             out_dir,
-            f"compare-{base_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
+            f"compare-{scale_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
         )
         bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
         bar_plot.plot(output_filename)

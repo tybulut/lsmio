@@ -596,6 +596,83 @@ class RunCliParserTest(unittest.TestCase):
         with self.assertRaises(RunCliParseError):
             parseRunArguments(["lsmio", "baseline", "--versioned", "--no-archive"])
 
+    def testBackendsModeDefaultBackends(self) -> None:
+        """Validates that 'run lsmio backends <scale>' parses with default backends and mode='backends'."""
+        req = parseRunArguments(["run", "lsmio", "backends", "small"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "small")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("adios2", "native", "rocksdb"))
+        self.assertFalse(req.ssd)
+        self.assertIsNone(req.setup)
+
+        d = req.toDict()
+        self.assertEqual(d["mode"], "backends")
+        self.assertEqual(d["backends"], ["adios2", "native", "rocksdb"])
+        self.assertEqual(d["target"], "lsmio")
+        self.assertEqual(d["scale"], "small")
+
+    def testBackendsModeCustomBackends(self) -> None:
+        """Validates that custom comma-separated backends are parsed and normalized."""
+        req = parseRunArguments(["lsmio", "backends", "large", "native,rocksdb"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "large")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("native", "rocksdb"))
+
+        d = req.toDict()
+        self.assertEqual(d["backends"], ["native", "rocksdb"])
+
+    def testBackendsModeTrailingOptions(self) -> None:
+        """Validates that trailing options like --ssd, --resume, --time, --out-dir are handled in backends mode."""
+        req = parseRunArguments([
+            "lsmio", "backends", "bake", "adios2",
+            "--ssd", "--resume", "--time", "12",
+            "--out-dir", "/tmp/archive", "--no-archive"
+        ])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "bake")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("adios2",))
+        self.assertTrue(req.ssd)
+        self.assertTrue(req.resume)
+        self.assertEqual(req.wallhour, 12)
+        self.assertEqual(req.walltime, "12:00:00")
+        self.assertEqual(req.out_dir, "/tmp/archive")
+        self.assertFalse(req.archive)
+
+    def testBackendsModeDefaultBackendsWithTrailingOptions(self) -> None:
+        """Validates default backends when options follow scale immediately."""
+        req = parseRunArguments(["lsmio", "backends", "local", "--ssd", "--resume"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "local")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("adios2", "native", "rocksdb"))
+        self.assertTrue(req.ssd)
+        self.assertTrue(req.resume)
+
+    def testBackendsModeInvalidScales(self) -> None:
+        """Validates that invalid scales, missing scale, or baseline are rejected in backends mode."""
+        # Baseline is not valid for backends mode
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "baseline"])
+
+        # Unknown scale
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "huge"])
+
+        # Missing scale
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends"])
+
+        # Option before scale
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "--ssd"])
+
+        # Empty backends specification
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "small", ",,,"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -79,11 +79,14 @@ Options:
 
 RUN_HELP_TEXT = """Usage:
   lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned]
+  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
   <scale>       Supported scales: local, bake, small, large, baseline
                 (Note: 'lmp large' is strictly unsupported and rejected)
+  <backends>    Optional comma-separated list of backends to run (default: adios2,native,rocksdb).
+                Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
                 or 'all' for all registered matrix variants.
@@ -113,9 +116,11 @@ Global Options (preserved for legacy compatibility):
 
 PARSE_HELP_TEXT = """Usage:
   lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
+  lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>]
 
 Arguments:
   <target>      Target run root path, manifest file path, or benchmark name (ior, lsmio, lmp).
+  <scale>       Supported scales for backends mode: local, bake, small, large.
 
 Options:
   --output-dir <dir>
@@ -329,34 +334,67 @@ class RunCliParser:
         if len(f_post_run_tokens) < 2:
             raise RunCliParseError("Missing required positional argument: <scale>")
 
-        # Validate scale (positional 1)
-        f_scale_tok = f_post_run_tokens[1]
-        if f_scale_tok.startswith("-"):
-            if f_scale_tok == "--setup":
+        # Check for 'backends' mode syntax: lsmiotool run lsmio backends <scale> [<backends>]
+        f_mode: str = "standard"
+        f_backends: Optional[Tuple[str, ...]] = None
+        f_variants: Tuple[Optional[str], ...] = (None,)
+        f_variant_name: Optional[str] = None
+
+        if f_benchmark == "lsmio" and f_post_run_tokens[1].strip().lower() == "backends":
+            f_mode = "backends"
+            if len(f_post_run_tokens) < 3:
                 raise RunCliParseError(
-                    "Prohibit '--setup' placed between positional arguments."
+                    "Missing required positional argument: <scale> for 'run lsmio backends'"
                 )
-            elif f_scale_tok == "--ssd":
+            f_scale_tok = f_post_run_tokens[2]
+            if f_scale_tok.startswith("-"):
                 raise RunCliParseError(
-                    "Prohibit '--ssd' placed between positional arguments."
+                    f"Unexpected option {f_scale_tok!r} placed before scale in 'run lsmio backends'."
                 )
-            else:
+            f_scale = f_scale_tok.strip().lower()
+            valid_backend_scales = frozenset({"local", "bake", "small", "large"})
+            if f_scale not in valid_backend_scales:
                 raise RunCliParseError(
-                    f"Unexpected option {f_scale_tok!r} placed between positional arguments."
+                    f"Invalid scale for backends mode: {f_scale_tok!r}. Must be one of: {sorted(valid_backend_scales)}"
                 )
 
-        f_scale = f_scale_tok.strip().lower()
-        if f_scale not in cls.VALID_SCALES:
-            raise RunCliParseError(
-                f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
-            )
+            f_trailing_tokens = f_post_run_tokens[3:]
+            if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                f_backends_raw = f_trailing_tokens[0].strip()
+                f_trailing_tokens = f_trailing_tokens[1:]
+                parsed_b = [b.strip().lower() for b in f_backends_raw.split(",") if b.strip()]
+                if not parsed_b:
+                    raise RunCliParseError("Backends specification cannot be empty.")
+                f_backends = tuple(parsed_b)
+            else:
+                f_backends = ("adios2", "native", "rocksdb")
+        else:
+            # Validate scale (positional 1)
+            f_scale_tok = f_post_run_tokens[1]
+            if f_scale_tok.startswith("-"):
+                if f_scale_tok == "--setup":
+                    raise RunCliParseError(
+                        "Prohibit '--setup' placed between positional arguments."
+                    )
+                elif f_scale_tok == "--ssd":
+                    raise RunCliParseError(
+                        "Prohibit '--ssd' placed between positional arguments."
+                    )
+                else:
+                    raise RunCliParseError(
+                        f"Unexpected option {f_scale_tok!r} placed between positional arguments."
+                    )
+
+            f_scale = f_scale_tok.strip().lower()
+            if f_scale not in cls.VALID_SCALES:
+                raise RunCliParseError(
+                    f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
+                )
+
+            f_trailing_tokens = f_post_run_tokens[2:]
 
         # Parse trailing options and optional positional variant
         from lsmiotool.lib.variants import VariantCatalogue
-
-        f_trailing_tokens = f_post_run_tokens[2:]
-        f_variants: Tuple[Optional[str], ...] = (None,)
-        f_variant_name: Optional[str] = None
 
         if f_scale == "baseline":
             if f_benchmark == "lsmio":
@@ -525,6 +563,8 @@ class RunCliParser:
         return RunRequest(
             f_target=f_benchmark,
             f_scale=f_scale,
+            f_mode=f_mode,
+            f_backends=f_backends,
             f_ssd=f_is_ssd,
             f_setup=f_setup_name,
             f_variant=f_variant_name,
@@ -549,16 +589,31 @@ def parseRunArguments(
 class ParseRequest:
     """Immutable parsed and validated parse request."""
 
-    __slots__ = ("m_target", "m_output_dir", "m_format", "_frozen")
+    __slots__ = ("m_target", "m_mode", "m_scale", "m_output_dir", "m_format", "_frozen")
 
     def __init__(
         self,
         f_target: str,
         f_output_dir: Optional[str] = None,
         f_format: str = "csv",
+        f_mode: str = "standard",
+        f_scale: Optional[str] = None,
     ) -> None:
+        if f_output_dir in ("standard", "backends") and f_scale is None:
+            f_mode = f_output_dir
+            f_scale = f_format if f_format not in ("csv", "json") else None
+            f_output_dir = None
+            f_format = "csv"
         if not isinstance(f_target, str) or not f_target.strip():
             raise ValueError(f"target must be a non-empty string, got: {f_target!r}")
+        if not isinstance(f_mode, str) or not f_mode.strip():
+            raise ValueError(f"mode must be a non-empty string, got: {f_mode!r}")
+        if f_scale is not None and (
+            not isinstance(f_scale, str) or not f_scale.strip()
+        ):
+            raise ValueError(
+                f"scale must be a non-empty string or None, got: {f_scale!r}"
+            )
         if f_output_dir is not None and (
             not isinstance(f_output_dir, str) or not f_output_dir.strip()
         ):
@@ -572,6 +627,11 @@ class ParseRequest:
             raise ValueError(f"format must be 'csv' or 'json', got: {f_format!r}")
 
         super().__setattr__("m_target", f_target.strip())
+        super().__setattr__("m_mode", f_mode.strip().lower())
+        super().__setattr__(
+            "m_scale",
+            f_scale.strip().lower() if f_scale is not None else None,
+        )
         super().__setattr__(
             "m_output_dir",
             f_output_dir.strip() if f_output_dir is not None else None,
@@ -596,6 +656,14 @@ class ParseRequest:
         return self.m_target
 
     @property
+    def mode(self) -> str:
+        return self.m_mode
+
+    @property
+    def scale(self) -> Optional[str]:
+        return self.m_scale
+
+    @property
     def output_dir(self) -> Optional[str]:
         return self.m_output_dir
 
@@ -608,15 +676,22 @@ class ParseRequest:
         return self.m_format
 
     def toDict(self) -> Dict[str, Any]:
-        return {
+        f_dict: Dict[str, Any] = {
             "target": self.m_target,
             "output_dir": self.m_output_dir,
             "format": self.m_format,
         }
+        if self.m_mode != "standard":
+            f_dict["mode"] = self.m_mode
+        if self.m_scale is not None:
+            f_dict["scale"] = self.m_scale
+        return f_dict
 
     def __repr__(self) -> str:
         return (
             f"ParseRequest(target={self.m_target!r}, "
+            f"mode={self.m_mode!r}, "
+            f"scale={self.m_scale!r}, "
             f"output_dir={self.m_output_dir!r}, "
             f"format={self.m_format!r})"
         )
@@ -625,6 +700,8 @@ class ParseRequest:
         if isinstance(f_other, ParseRequest):
             return (
                 self.m_target == f_other.m_target
+                and self.m_mode == f_other.m_mode
+                and self.m_scale == f_other.m_scale
                 and self.m_output_dir == f_other.m_output_dir
                 and self.m_format == f_other.m_format
             )
@@ -698,6 +775,28 @@ class ParseCliParser:
             raise ParseCliParseError("Target cannot be empty.")
 
         f_remaining_tokens = f_tokens_copy[1:]
+        f_mode: str = "standard"
+        f_scale: Optional[str] = None
+
+        if (
+            f_target.lower() == "lsmio"
+            and f_remaining_tokens
+            and f_remaining_tokens[0].lower() == "backends"
+        ):
+            f_mode = "backends"
+            f_remaining_tokens.pop(0)
+            if not f_remaining_tokens or f_remaining_tokens[0].startswith("-"):
+                raise ParseCliParseError(
+                    "Missing required positional argument: <scale> for 'parse lsmio backends'"
+                )
+            f_scale_tok = f_remaining_tokens.pop(0).strip().lower()
+            valid_scales = frozenset({"local", "bake", "small", "large"})
+            if f_scale_tok not in valid_scales:
+                raise ParseCliParseError(
+                    f"Invalid scale for backends parse: {f_scale_tok!r}. Must be one of: {sorted(valid_scales)}"
+                )
+            f_scale = f_scale_tok
+
         f_output_dir: Optional[str] = None
         f_format: str = "csv"
         f_format_seen: bool = False
@@ -750,6 +849,8 @@ class ParseCliParser:
 
         return ParseRequest(
             f_target=f_target,
+            f_mode=f_mode,
+            f_scale=f_scale,
             f_output_dir=f_output_dir,
             f_format=f_format,
         )

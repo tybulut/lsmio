@@ -307,6 +307,60 @@ class ParseCliParserTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ParseRequest(f_target="ior", f_format="xml")
 
+    def testBackendsModeParseSuccess(self) -> None:
+        """Validates 'parse lsmio backends <scale>' parsing with default options."""
+        req = parseParseArguments(["lsmio", "backends", "small"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.scale, "small")
+        self.assertIsNone(req.output_dir)
+        self.assertEqual(req.format, "csv")
+
+        d = req.toDict()
+        self.assertEqual(d["target"], "lsmio")
+        self.assertEqual(d["mode"], "backends")
+        self.assertEqual(d["scale"], "small")
+        self.assertIsNone(d["output_dir"])
+        self.assertEqual(d["format"], "csv")
+
+    def testBackendsModeParseWithLeadingParseAndOptions(self) -> None:
+        """Validates 'parse lsmio backends <scale>' with explicit options and leading command."""
+        req = parseParseArguments([
+            "parse", "lsmio", "backends", "large",
+            "--output-dir", "/tmp/reports", "--format", "json"
+        ])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.scale, "large")
+        self.assertEqual(req.output_dir, "/tmp/reports")
+        self.assertEqual(req.format, "json")
+
+    def testBackendsModeParseMissingScale(self) -> None:
+        """Validates that missing scale in backends parse mode raises ParseCliParseError."""
+        with self.assertRaises(ParseCliParseError):
+            parseParseArguments(["lsmio", "backends"])
+        with self.assertRaises(ParseCliParseError):
+            parseParseArguments(["lsmio", "backends", "--format", "json"])
+
+    def testBackendsModeParseInvalidScale(self) -> None:
+        """Validates that invalid scale (including baseline) in backends parse mode raises ParseCliParseError."""
+        with self.assertRaises(ParseCliParseError):
+            parseParseArguments(["lsmio", "backends", "baseline"])
+        with self.assertRaises(ParseCliParseError):
+            parseParseArguments(["lsmio", "backends", "unknown_scale"])
+
+    def testBackendsModeParseRequestDirectConstruction(self) -> None:
+        """Validates direct ParseRequest instantiation with backends mode and scale."""
+        req = ParseRequest(f_target="lsmio", f_mode="backends", f_scale="bake")
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.scale, "bake")
+        self.assertIn("mode='backends'", repr(req))
+        self.assertIn("scale='bake'", repr(req))
+
+        with self.assertRaises(ValueError):
+            ParseRequest(f_target="lsmio", f_mode="")
+
 
 if __name__ == "__main__":
     unittest.main()

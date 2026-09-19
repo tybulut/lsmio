@@ -403,6 +403,8 @@ class RunRequest:
     __slots__ = (
         "m_target",
         "m_scale",
+        "m_mode",
+        "m_backends",
         "m_ssd",
         "m_setup",
         "m_variants",
@@ -419,6 +421,8 @@ class RunRequest:
         self,
         f_target: str,
         f_scale: str,
+        f_mode: str = "standard",
+        f_backends: Optional[Sequence[str]] = None,
         f_ssd: bool = False,
         f_setup: Optional[str] = None,
         f_variant: Optional[str] = None,
@@ -430,6 +434,12 @@ class RunRequest:
         f_walltime: Optional[str] = None,
         f_versioned: bool = False,
     ) -> None:
+        if isinstance(f_mode, bool):
+            f_ssd = f_mode
+            f_setup = f_backends if isinstance(f_backends, str) else None
+            f_mode = "standard"
+            f_backends = None
+
         if not isinstance(f_target, str) or not f_target.strip():
             raise PlanValidationError(
                 f"target must be a non-empty string, got: {f_target!r}"
@@ -438,6 +448,23 @@ class RunRequest:
             raise PlanValidationError(
                 f"scale must be a non-empty string, got: {f_scale!r}"
             )
+        if not isinstance(f_mode, str) or not f_mode.strip():
+            raise PlanValidationError(f"mode must be a non-empty string, got: {f_mode!r}")
+        m_mode = f_mode.strip().lower()
+
+        if f_backends is not None:
+            if not isinstance(f_backends, (list, tuple)):
+                raise PlanValidationError("backends must be a sequence of strings")
+            m_backends: Optional[Tuple[str, ...]] = tuple(
+                b.strip().lower() for b in f_backends if isinstance(b, str) and b.strip()
+            )
+            if not m_backends and m_mode == "backends":
+                m_backends = ("adios2", "native", "rocksdb")
+        elif m_mode == "backends":
+            m_backends = ("adios2", "native", "rocksdb")
+        else:
+            m_backends = None
+
         if not isinstance(f_ssd, bool):
             raise PlanValidationError(f"ssd must be a boolean, got: {f_ssd!r}")
         if f_setup is not None and (
@@ -496,6 +523,8 @@ class RunRequest:
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
+        super().__setattr__("m_mode", m_mode)
+        super().__setattr__("m_backends", m_backends)
         super().__setattr__("m_ssd", f_ssd)
         super().__setattr__("m_setup", f_setup.strip().upper() if f_setup else None)
         super().__setattr__("m_variants", m_variants)
@@ -526,6 +555,14 @@ class RunRequest:
     @property
     def scale(self) -> str:
         return self.m_scale
+
+    @property
+    def mode(self) -> str:
+        return self.m_mode
+
+    @property
+    def backends(self) -> Optional[Tuple[str, ...]]:
+        return self.m_backends
 
     @property
     def ssd(self) -> bool:
@@ -601,6 +638,10 @@ class RunRequest:
             "ssd": self.m_ssd,
             "setup": self.m_setup,
         }
+        if self.m_mode != "standard":
+            f_dict["mode"] = self.m_mode
+        if self.m_backends:
+            f_dict["backends"] = list(self.m_backends)
         if self.variant is not None:
             f_dict["variant"] = self.variant
         if self.m_variants and (len(self.m_variants) > 1 or self.m_variants != (self.variant,)):
@@ -623,6 +664,8 @@ class RunRequest:
         return (
             f"RunRequest(target={self.m_target!r}, "
             f"scale={self.m_scale!r}, "
+            f"mode={self.m_mode!r}, "
+            f"backends={self.m_backends!r}, "
             f"ssd={self.m_ssd!r}, "
             f"setup={self.m_setup!r}, "
             f"variant={self.variant!r}, "
@@ -640,6 +683,8 @@ class RunRequest:
             return (
                 self.m_target == f_other.m_target
                 and self.m_scale == f_other.m_scale
+                and self.m_mode == f_other.m_mode
+                and self.m_backends == f_other.m_backends
                 and self.m_ssd == f_other.m_ssd
                 and self.m_setup == f_other.m_setup
                 and self.m_variants == f_other.m_variants
@@ -1470,12 +1515,21 @@ class RunPlanner:
         # 5. ScheduledPointResources calculation
         f_scheduled_points: List[ScheduledPointResources] = []
         for f_sp in f_scale_points:
-            # Walltime calculation (INV-PAIR-1)
+            # Walltime calculation (INV-BACKEND-2, INV-PAIR-1)
             if f_request.wallhour is not None:
                 f_wallhour = max(1, min(48, f_request.wallhour))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_request.walltime is not None:
                 f_walltime = f_request.walltime
+            elif (
+                getattr(f_request, "mode", "standard") == "backends"
+                and f_resource_policy.walltime_policy == "slurm_nodes"
+            ):
+                n_backends = len(getattr(f_request, "backends", None) or ("adios2", "native", "rocksdb"))
+                time_per_backend = max(1, f_sp.nodes // 3)
+                calc_hours = 2 + (n_backends * time_per_backend)
+                f_wallhour = max(1, min(48, calc_hours))
+                f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
                 f_scale == "baseline"
                 and f_target == "lsmio"
@@ -1615,6 +1669,8 @@ class RunPlanner:
         f_normalized_request = RunRequest(
             f_target=f_target,
             f_scale=f_scale,
+            f_mode=getattr(f_request, "mode", "standard"),
+            f_backends=getattr(f_request, "backends", None),
             f_ssd=f_request.ssd,
             f_setup=f_norm_setup,
             f_variant=f_request.variant,
@@ -1622,6 +1678,9 @@ class RunPlanner:
             f_archive=f_request.archive,
             f_resume=f_request.resume,
             f_out_dir=f_request.out_dir,
+            f_wallhour=f_request.wallhour,
+            f_walltime=f_request.walltime,
+            f_versioned=f_request.versioned,
         )
 
         if f_target == "lmp":
