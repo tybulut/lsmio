@@ -49,7 +49,7 @@ batch_run() {
     else
       wallhour=$calculated_hours
     fi
-  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
+  elif [ "$BM_SCALE" = "variants" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
     if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
       if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
         _cnt=0
@@ -76,7 +76,7 @@ batch_run() {
     else
       wallhour=$calculated_hours
     fi
-  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
+  elif [ "$BM_SCALE" = "variants" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
     if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
       _cnt=0
       _r="$EXPANDED_VARIANTS"

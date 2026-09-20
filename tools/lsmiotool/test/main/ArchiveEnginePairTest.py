@@ -177,7 +177,7 @@ class ArchiveEnginePairTest(unittest.TestCase):
                     f_arm_id="native-footer",
                 )
 
-                mock_agg_cls.assert_called_once_with(os.path.abspath(source_dir), f_scale="baseline")
+                mock_agg_cls.assert_called_once_with(os.path.abspath(source_dir), f_scale="variants")
                 mock_agg.generateReports.assert_called_once_with(f_out_dir=os.path.abspath(source_dir))
                 self.assertTrue(os.path.exists(target))
 

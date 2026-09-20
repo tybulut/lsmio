@@ -55,13 +55,13 @@ class ArchiveTest(unittest.TestCase):
         """Tasks 4.5.1: Asserts ArchiveRequest fields, properties, immutability, and validation."""
         req = ArchiveRequest(
             f_target="lsmio",
-            f_scale="baseline",
+            f_scale="variants",
             f_variant="footer",
             f_dest="/tmp/archive",
         )
 
         self.assertEqual(req.target, "lsmio")
-        self.assertEqual(req.scale, "baseline")
+        self.assertEqual(req.scale, "variants")
         self.assertEqual(req.variant, "footer")
         self.assertEqual(req.dest, "/tmp/archive")
 
@@ -87,7 +87,7 @@ class ArchiveTest(unittest.TestCase):
             d,
             {
                 "target": "lsmio",
-                "scale": "baseline",
+                "scale": "variants",
                 "variant": "footer",
                 "dest": "/tmp/archive",
             },
@@ -97,7 +97,7 @@ class ArchiveTest(unittest.TestCase):
         self.assertIn("ArchiveRequest", repr(req))
         req2 = ArchiveRequest(
             f_target="lsmio",
-            f_scale="baseline",
+            f_scale="variants",
             f_variant="footer",
             f_dest="/tmp/archive",
         )
@@ -130,14 +130,14 @@ class ArchiveTest(unittest.TestCase):
             ["archive", "lsmio", "baseline", "footer", "--dest", "/tmp/archive"]
         )
         self.assertEqual(req1.target, "lsmio")
-        self.assertEqual(req1.scale, "baseline")
+        self.assertEqual(req1.scale, "variants")
         self.assertEqual(req1.variant, "footer")
         self.assertEqual(req1.dest, "/tmp/archive")
 
         # 2. Without leading 'archive'
         req2 = parseArchiveArguments(["lsmio", "baseline", "footer-btree"])
         self.assertEqual(req2.target, "lsmio")
-        self.assertEqual(req2.scale, "baseline")
+        self.assertEqual(req2.scale, "variants")
         self.assertEqual(req2.variant, "footer-btree")
         self.assertIsNone(req2.dest)
 
@@ -150,7 +150,7 @@ class ArchiveTest(unittest.TestCase):
 
         # 4. Baseline scale without variant
         req5 = parseArchiveArguments(["lsmio", "baseline"])
-        self.assertEqual(req5.scale, "baseline")
+        self.assertEqual(req5.scale, "variants")
         self.assertIsNone(req5.variant)
 
         # 5. Legacy scales without variant
@@ -167,7 +167,7 @@ class ArchiveTest(unittest.TestCase):
         # 7. Case insensitivity
         req7 = parseArchiveArguments(["LSMIO", "BASELINE", "FOOTER-BTREE"])
         self.assertEqual(req7.target, "lsmio")
-        self.assertEqual(req7.scale, "baseline")
+        self.assertEqual(req7.scale, "variants")
         self.assertEqual(req7.variant, "footer-btree")
 
     def testArchiveCliParserRejections(self) -> None:
@@ -465,6 +465,77 @@ class ArchiveTest(unittest.TestCase):
         )
         ret_code = main_inst.run()
         self.assertEqual(ret_code, 1)
+
+
+class ArchiveDestResolverTest(unittest.TestCase):
+    """Asserts resolveArchiveDest mirrors bmtool/include/archive-dest.in.sh."""
+
+    def testDefaultPartitioning(self) -> None:
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="backends", f_scale="small"),
+            "/bm/lsmio-archive/backends/small",
+        )
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="standard", f_scale="variants"),
+            "/bm/lsmio-archive/variants",
+        )
+        for f_scale in ("local", "bake", "small", "large"):
+            self.assertEqual(
+                resolveArchiveDest("/bm", f_mode="standard", f_scale=f_scale),
+                "/bm/lsmio-archive/baseline",
+            )
+
+    def testDeprecatedBaselineScaleMapsToVariants(self) -> None:
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="standard", f_scale="baseline"),
+            "/bm/lsmio-archive/variants",
+        )
+
+    def testExplicitDestForms(self) -> None:
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        # Absolute paths are used as given
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="/abs/path"),
+            "/abs/path",
+        )
+        # Root-relative shorthand resolves against the benchmark root
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="/lsmio-archive/custom"),
+            "/bm/lsmio-archive/custom",
+        )
+        # A similarly-named absolute path is NOT relocated (path-component match)
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="/lsmio-archive-other"),
+            "/lsmio-archive-other",
+        )
+        # Relative paths resolve against the benchmark root, as bmtool does
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="rel/path"),
+            "/bm/rel/path",
+        )
+        # Whitespace-only values count as unset and fall through to the default
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="   "),
+            "/bm/lsmio-archive/baseline",
+        )
+
+    def testTokenNormalisation(self) -> None:
+        """Mixed-case mode/scale tokens normalise, matching the shell resolver."""
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="BACKENDS", f_scale="Small"),
+            "/bm/lsmio-archive/backends/small",
+        )
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="standard", f_scale="Variants"),
+            "/bm/lsmio-archive/variants",
+        )
 
 
 if __name__ == "__main__":

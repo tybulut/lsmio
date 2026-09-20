@@ -11,7 +11,7 @@ generate_aggregates() {
     NODES="1 2 4 8 16 24 32 40 48"
   elif [ "$1" = "large" ]; then
     NODES="1 2 4 8 16 32 48 64"
-  elif [ "$1" = "baseline" ]; then
+  elif [ "$1" = "variants" ]; then
     NODES="8"
   elif [ "$1" = "local" ]; then
     NODES="1"
@@ -71,7 +71,8 @@ generate_report() {
 }
 
 if [ "$BM_MODE" = "backends" ]; then
-  : "${BM_ARCHIVE_DEST:=$BM_PATH/lsmio-archive/backends/$BM_SCALE}"
+  . $BM_DIRNAME/include/archive-dest.in.sh
+  bm_resolve_archive_dest
   _b_list="adios native rocksdb"
   if [ -n "$BM_BACKENDS" ]; then
     _b_list=$(echo "$BM_BACKENDS" | tr ',' ' ')
@@ -101,11 +102,11 @@ elif [ "$BM_SCALE" = "small" ]; then
 elif [ "$BM_SCALE" = "large" ]; then
   generate_aggregates $BM_SCALE
   generate_report
-elif [ "$BM_SCALE" = "baseline" ]; then
+elif [ "$BM_SCALE" = "variants" ]; then
   generate_aggregates $BM_SCALE
   generate_report
 else
-  fatal_error "Please pass either bake, small, large, or baseline for lsmio parsing."
+  fatal_error "Please pass either bake, small, large, or variants for lsmio parsing."
 fi
 
 

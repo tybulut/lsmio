@@ -1365,6 +1365,9 @@ class RunPlanner:
         ),
     )
 
+    # Deprecated spelling retained so older manifests and scripts keep working
+    SCALE_ALIASES: Dict[str, str] = {"baseline": "variants"}
+
     SCALE_MATRICES: Dict[str, Tuple[ScalePoint, ...]] = {
         "local": (ScalePoint(f_tasks=1, f_ppn=1, f_nodes=1),),
         "bake": (
@@ -1394,7 +1397,7 @@ class RunPlanner:
             ScalePoint(f_tasks=192, f_ppn=4, f_nodes=48),
             ScalePoint(f_tasks=256, f_ppn=4, f_nodes=64),
         ),
-        "baseline": (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),),
+        "variants": (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),),
     }
 
     DEFAULT_SETUPS: Dict[str, str] = {
@@ -1472,6 +1475,7 @@ class RunPlanner:
             )
 
         f_scale = f_request.scale.strip().lower()
+        f_scale = cls.SCALE_ALIASES.get(f_scale, f_scale)
         if f_scale not in cls.SCALE_MATRICES:
             raise PlanValidationError(
                 f"Unknown scale '{f_request.scale}'. Allowed: {sorted(cls.SCALE_MATRICES.keys())}"
@@ -1531,7 +1535,7 @@ class RunPlanner:
                 f_wallhour = max(1, min(48, calc_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
-                f_scale == "baseline"
+                f_scale == "variants"
                 and f_target == "lsmio"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
                 and getattr(f_request, "versioned", False)
@@ -1542,7 +1546,7 @@ class RunPlanner:
                 f_wallhour = max(4, min(48, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
-                f_scale == "baseline"
+                f_scale == "variants"
                 and f_target == "lsmio"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
                 and any(v not in (None, "", "default", "base") for v in f_request.variants)
@@ -3995,6 +3999,7 @@ class RunOrchestrator:
                 )
 
             f_scale = f_request.scale.strip().lower()
+            f_scale = RunPlanner.SCALE_ALIASES.get(f_scale, f_scale)
             if f_scale not in RunPlanner.SCALE_MATRICES:
                 raise PreflightError(
                     f"Unknown scale '{f_request.scale}'. Allowed: {sorted(RunPlanner.SCALE_MATRICES.keys())}"
@@ -4187,11 +4192,18 @@ class RunOrchestrator:
                 if f_environ is not None
                 else (f_environment if f_environment is not None else self.m_environ)
             )
-            f_dest_root = (
+            from lsmiotool.lib.archive import resolveArchiveDest
+
+            f_explicit_dest = (
                 f_request.out_dir
                 or (f_eff_environ and f_eff_environ.get("BM_ARCHIVE_DEST"))
                 or os.environ.get("BM_ARCHIVE_DEST")
-                or os.path.join(f_benchmark_root, "lsmio-archive")
+            )
+            f_dest_root = resolveArchiveDest(
+                f_benchmark_root,
+                f_mode=getattr(f_request, "mode", None),
+                f_scale=getattr(f_request, "scale", None),
+                f_explicit=f_explicit_dest,
             )
 
             f_planner_obj = self.m_planner or RunPlanner

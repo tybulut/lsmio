@@ -144,6 +144,54 @@ class ArchiveRequest:
         return hash((self.m_target, self.m_scale, self.m_variant, self.m_dest))
 
 
+def resolveArchiveDest(
+    f_benchmark_root: str,
+    f_mode: Optional[str] = None,
+    f_scale: Optional[str] = None,
+    f_explicit: Optional[str] = None,
+) -> str:
+    """Resolve the archive destination root, mirroring bmtool/include/archive-dest.in.sh.
+
+    Layout (three destinations under <benchmark_root>/lsmio-archive):
+        backends/<scale>  multi-backend intra-allocation runs (mode 'backends')
+        variants          variant matrix runs (scale 'variants')
+        baseline          plain scaling runs (local, bake, small, large)
+
+    Args:
+        f_benchmark_root: Benchmark root ($BM_PATH equivalent).
+        f_mode: Launch mode ('backends' or 'standard'); None means standard.
+        f_scale: Scale token ('variants' or a plain scale); 'baseline' is the
+            deprecated spelling of 'variants'.
+        f_explicit: Explicit destination from --dest / --out-dir or BM_ARCHIVE_DEST.
+            Absolute paths are used as given, except a path starting with
+            '/lsmio-archive' which is treated as benchmark-root relative;
+            relative paths resolve against the benchmark root.
+
+    Returns:
+        Absolute archive destination root.
+    """
+    f_root = os.path.join(f_benchmark_root, "lsmio-archive")
+
+    f_val = str(f_explicit).strip() if f_explicit else ""
+    if f_val:
+        if f_val == "/lsmio-archive" or f_val.startswith("/lsmio-archive/"):
+            return os.path.join(f_benchmark_root, f_val.lstrip("/"))
+        if os.path.isabs(f_val):
+            return f_val
+        return os.path.join(f_benchmark_root, f_val)
+
+    f_norm_mode = (f_mode or "standard").strip().lower()
+    f_norm_scale = (f_scale or "").strip().lower()
+    if f_norm_scale == "baseline":
+        f_norm_scale = "variants"
+
+    if f_norm_mode == "backends":
+        return os.path.join(f_root, "backends", f_norm_scale) if f_norm_scale else os.path.join(f_root, "backends")
+    if f_norm_scale == "variants":
+        return os.path.join(f_root, "variants")
+    return os.path.join(f_root, "baseline")
+
+
 class ArchiveEngine:
     """Core engine executing move-on-archive semantics with collision avoidance."""
 
@@ -249,7 +297,7 @@ class ArchiveEngine:
                 if any(abs_source.glob("*/*/out-*.txt*")):
                     from lsmiotool.lib.output import LsmioAggOutput
 
-                    agg = LsmioAggOutput(str(abs_source), f_scale="baseline")
+                    agg = LsmioAggOutput(str(abs_source), f_scale="variants")
                     agg.generateReports(f_out_dir=str(abs_source))
             except Exception:
                 pass
@@ -300,7 +348,7 @@ class ArchiveEngine:
                 if any(abs_source.glob("*/*/out-*.txt*")):
                     from lsmiotool.lib.output import LsmioAggOutput
 
-                    agg = LsmioAggOutput(str(abs_source), f_scale="baseline")
+                    agg = LsmioAggOutput(str(abs_source), f_scale="variants")
                     agg.generateReports(f_out_dir=str(abs_source))
             except Exception:
                 pass

@@ -14,7 +14,7 @@ if [ "$BM_TYPE" = "ior" ]; then
 elif [ "$BM_TYPE" = "lsmio" ]; then
   JOB_BIN="$BM_DIRNAME/jobs/lsmio-benchmark.sh"
   . $BM_DIRNAME/jobs/lsmio-vars.in.sh
-  if [ -n "$BM_NUM_TASKS" ] && [ "$BM_SCALE" != "baseline" ]; then
+  if [ -n "$BM_NUM_TASKS" ] && [ "$BM_SCALE" != "variants" ]; then
     rm -rf "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" && mkdir -p "$LSM_DIR_OBASE"
   else
     rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
@@ -81,6 +81,10 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
   else
     _node_idx="$BM_NUM_TASKS"
   fi
+
+  # Resolve BM_ARCHIVE_DEST inside the allocation (same rules as bmtool)
+  . $BM_DIRNAME/include/archive-dest.in.sh
+  bm_resolve_archive_dest
 
   _backend_tokens="$BM_BACKENDS"
   while [ -n "$_backend_tokens" ]; do
@@ -151,8 +155,11 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
     mkdir -p "${BM_ARCHIVE_DEST}/outputs-${ARM_ID}"
     rm -rf "$TARGET_NODE_DIR"
     if [ -d "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" ]; then
-      cp -Rp "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" "$TARGET_NODE_DIR"
-      rm -rf "${LSM_DIR_OBASE}/${BM_NUM_TASKS}"
+      if cp -Rp "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" "$TARGET_NODE_DIR"; then
+        rm -rf "${LSM_DIR_OBASE}/${BM_NUM_TASKS}"
+      else
+        echo "WARNING: Failed to copy ${LSM_DIR_OBASE}/${BM_NUM_TASKS} to $TARGET_NODE_DIR; preserving live directory" >&2
+      fi
     fi
 
     # 4. Post-execution Lustre OST Sanitization

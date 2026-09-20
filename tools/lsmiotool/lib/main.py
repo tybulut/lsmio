@@ -86,7 +86,7 @@ class ParseLegacyMain(BaseMain):
     """ParseLegacy command for processing benchmark output logs."""
 
     VALID_MODES: FrozenSet[str] = frozenset(
-        {"local", "bake", "small", "large", "baseline"}
+        {"local", "bake", "small", "large", "variants", "baseline"}
     )
 
     m_command: str
@@ -118,7 +118,7 @@ class ParseLegacyMain(BaseMain):
                 "Command to execute has to be in: " + str(allowed_commands)
             )
             sys.exit(1)
-        allowed_modes = ["local", "bake", "small", "large", "baseline"]
+        allowed_modes = ["local", "bake", "small", "large", "variants", "baseline"]
         if self.m_mode not in self.VALID_MODES:
             log.Console.error("Command mode has to be in: " + str(allowed_modes))
             sys.exit(1)
@@ -904,9 +904,9 @@ class CompareVariantsMain(BaseMain):
             from lsmiotool.lib.output import LsmioAggOutput, MissingDataError
 
             try:
-                agg = LsmioAggOutput(f_child_path, f_scale="baseline")
+                agg = LsmioAggOutput(f_child_path, f_scale="variants")
             except TypeError:
-                agg = LsmioAggOutput(f_input=f_child_path, f_scale="baseline")
+                agg = LsmioAggOutput(f_input=f_child_path, f_scale="variants")
             try:
                 agg.generateReports(f_out_dir=f_child_path)
             except TypeError:
@@ -1672,22 +1672,26 @@ class ArchiveMain(BaseMain):
                         f_source_dir = os.path.join(os.getcwd(), "outputs")
 
             # 3. Resolve destination root
-            f_dest_root = self.m_request.dest or self.m_dest_dir
-            if f_dest_root is None:
-                if "BM_ARCHIVE_DEST" in os.environ:
-                    f_dest_root = os.environ["BM_ARCHIVE_DEST"]
-                else:
-                    f_bm_root = None
-                    if self.m_runtime_layout is not None:
-                        f_bm_root = getattr(
-                            self.m_runtime_layout, "benchmark_root", None
-                        ) or getattr(
-                            self.m_runtime_layout, "benchmarkRoot", None
-                        )
-                    if f_bm_root:
-                        f_dest_root = os.path.join(f_bm_root, "lsmio-archive")
-                    else:
-                        f_dest_root = os.path.join(os.getcwd(), "lsmio-archive")
+            from lsmiotool.lib.archive import resolveArchiveDest
+
+            f_explicit_dest = (
+                self.m_request.dest
+                or self.m_dest_dir
+                or os.environ.get("BM_ARCHIVE_DEST")
+            )
+            f_bm_root = None
+            if self.m_runtime_layout is not None:
+                f_bm_root = getattr(
+                    self.m_runtime_layout, "benchmark_root", None
+                ) or getattr(
+                    self.m_runtime_layout, "benchmarkRoot", None
+                )
+            f_dest_root = resolveArchiveDest(
+                f_bm_root or os.getcwd(),
+                f_mode=None,
+                f_scale=getattr(self.m_request, "scale", None),
+                f_explicit=f_explicit_dest,
+            )
 
             # 4. Perform atomic move-on-archive and clean recreation
             f_target_dir = ArchiveEngine.executeArchive(

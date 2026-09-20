@@ -572,8 +572,9 @@ class RunPlanTest(unittest.TestCase):
 
     def testBaselineScalePointTopology(self) -> None:
         """Tasks 2.4.1 (INV-ARCH-1): Asserts baseline scale matrix has single point ScalePoint(8, 1, 8)."""
-        self.assertIn("baseline", RunPlanner.SCALE_MATRICES)
-        f_baseline_points = RunPlanner.SCALE_MATRICES["baseline"]
+        self.assertIn("variants", RunPlanner.SCALE_MATRICES)
+        self.assertEqual(RunPlanner.SCALE_ALIASES.get("baseline"), "variants")
+        f_baseline_points = RunPlanner.SCALE_MATRICES["variants"]
         self.assertEqual(len(f_baseline_points), 1)
         self.assertEqual(f_baseline_points, (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),))
         self.assertEqual(f_baseline_points[0].tasks, 8)

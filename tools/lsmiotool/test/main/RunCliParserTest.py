@@ -315,29 +315,41 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(f_req.ssd)
         self.assertEqual(f_req.setup, "BASE")
 
+    def testVariantsScaleTokenAndLegacyAlias(self) -> None:
+        """Asserts 'variants' is the canonical scale token and 'baseline' still aliases to it."""
+        f_req = parseRunArguments(["lsmio", "variants"])
+        self.assertEqual(f_req.scale, "variants")
+
+        f_req_variant = parseRunArguments(["lsmio", "variants", "footer"])
+        self.assertEqual(f_req_variant.scale, "variants")
+        self.assertEqual(f_req_variant.variant, "footer")
+
+        f_req_legacy = parseRunArguments(["lsmio", "baseline"])
+        self.assertEqual(f_req_legacy.scale, f_req.scale)
+
     def testBaselineScaleWithoutVariant(self) -> None:
         """Tasks 2.3.1: Asserts baseline scale parsing without variant key."""
         f_req = parseRunArguments(["lsmio", "baseline"])
         self.assertEqual(f_req.target, "lsmio")
-        self.assertEqual(f_req.scale, "baseline")
+        self.assertEqual(f_req.scale, "variants")
         self.assertIsNone(f_req.variant)
         self.assertFalse(f_req.ssd)
         self.assertIsNone(f_req.setup)
 
         f_req_cmd = parseRunArguments(["run", "lsmio", "baseline"])
         self.assertEqual(f_req_cmd.target, "lsmio")
-        self.assertEqual(f_req_cmd.scale, "baseline")
+        self.assertEqual(f_req_cmd.scale, "variants")
         self.assertIsNone(f_req_cmd.variant)
 
         f_req_ssd = parseRunArguments(["lsmio", "baseline", "--ssd"])
         self.assertEqual(f_req_ssd.target, "lsmio")
-        self.assertEqual(f_req_ssd.scale, "baseline")
+        self.assertEqual(f_req_ssd.scale, "variants")
         self.assertIsNone(f_req_ssd.variant)
         self.assertTrue(f_req_ssd.ssd)
 
         f_req_setup = parseRunArguments(["lsmio", "baseline", "--setup", "native-m"])
         self.assertEqual(f_req_setup.target, "lsmio")
-        self.assertEqual(f_req_setup.scale, "baseline")
+        self.assertEqual(f_req_setup.scale, "variants")
         self.assertIsNone(f_req_setup.variant)
         self.assertEqual(f_req_setup.setup, "NATIVE-M")
 
@@ -345,18 +357,18 @@ class RunCliParserTest(unittest.TestCase):
         """Tasks 2.3.2: Asserts baseline scale parsing with positional variant key."""
         f_req1 = parseRunArguments(["lsmio", "baseline", "footer-btree"])
         self.assertEqual(f_req1.target, "lsmio")
-        self.assertEqual(f_req1.scale, "baseline")
+        self.assertEqual(f_req1.scale, "variants")
         self.assertEqual(f_req1.variant, "footer-btree")
         self.assertFalse(f_req1.ssd)
 
         f_req2 = parseRunArguments(["run", "lsmio", "baseline", "footer"])
         self.assertEqual(f_req2.target, "lsmio")
-        self.assertEqual(f_req2.scale, "baseline")
+        self.assertEqual(f_req2.scale, "variants")
         self.assertEqual(f_req2.variant, "footer")
 
         f_req3 = parseRunArguments(["lsmio", "baseline", "wbuf-512m"])
         self.assertEqual(f_req3.target, "lsmio")
-        self.assertEqual(f_req3.scale, "baseline")
+        self.assertEqual(f_req3.scale, "variants")
         self.assertEqual(f_req3.variant, "wbuf-512m")
 
     def testBaselineScaleWithVariantAndOptions(self) -> None:
@@ -365,7 +377,7 @@ class RunCliParserTest(unittest.TestCase):
             ["lsmio", "baseline", "wbuf-512m", "--ssd", "--setup", "NATIVE-M"]
         )
         self.assertEqual(f_req.target, "lsmio")
-        self.assertEqual(f_req.scale, "baseline")
+        self.assertEqual(f_req.scale, "variants")
         self.assertEqual(f_req.variant, "wbuf-512m")
         self.assertTrue(f_req.ssd)
         self.assertEqual(f_req.setup, "NATIVE-M")
@@ -374,7 +386,7 @@ class RunCliParserTest(unittest.TestCase):
             ["--ssd", "run", "lsmio", "baseline", "footer-prealloc", "--setup", "ROCKSDB-M"]
         )
         self.assertEqual(f_req2.target, "lsmio")
-        self.assertEqual(f_req2.scale, "baseline")
+        self.assertEqual(f_req2.scale, "variants")
         self.assertEqual(f_req2.variant, "footer-prealloc")
         self.assertTrue(f_req2.ssd)
         self.assertEqual(f_req2.setup, "ROCKSDB-M")
@@ -421,13 +433,13 @@ class RunCliParserTest(unittest.TestCase):
         """Tasks 2.3.5: Asserts baseline scale is accepted for IOR and LMP when variant is omitted."""
         f_req_ior = parseRunArguments(["ior", "baseline", "--ssd"])
         self.assertEqual(f_req_ior.target, "ior")
-        self.assertEqual(f_req_ior.scale, "baseline")
+        self.assertEqual(f_req_ior.scale, "variants")
         self.assertIsNone(f_req_ior.variant)
         self.assertTrue(f_req_ior.ssd)
 
         f_req_lmp = parseRunArguments(["lmp", "baseline", "--setup", "LSMIO"])
         self.assertEqual(f_req_lmp.target, "lmp")
-        self.assertEqual(f_req_lmp.scale, "baseline")
+        self.assertEqual(f_req_lmp.scale, "variants")
         self.assertIsNone(f_req_lmp.variant)
         self.assertEqual(f_req_lmp.setup, "LSMIO")
 
@@ -559,7 +571,7 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(req.versioned)
         self.assertTrue(req.is_versioned)
         self.assertEqual(req.target, "lsmio")
-        self.assertEqual(req.scale, "baseline")
+        self.assertEqual(req.scale, "variants")
         self.assertTrue(req.archive)
 
     def testVersionedAcceptsVariants(self) -> None:

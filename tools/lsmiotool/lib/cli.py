@@ -49,7 +49,7 @@ common cmds:
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -68,12 +68,13 @@ ARCHIVE_HELP_TEXT = """Usage:
 
 Arguments:
   <benchmark>   Supported benchmarks: lsmio
-  <scale>       Supported scales: local, bake, small, large, baseline
-  <variant>     Optional variant configuration for 'lsmio baseline'
-                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio baseline'.
+  <scale>       Supported scales: local, bake, small, large, variants
+                ('baseline' is accepted as the deprecated spelling of 'variants')
+  <variant>     Optional variant configuration for 'lsmio variants'
+                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio variants'.
 
 Options:
-  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive).
+  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
 """
 
@@ -83,14 +84,14 @@ RUN_HELP_TEXT = """Usage:
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
-  <scale>       Supported scales: local, bake, small, large, baseline
+  <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
   <backends>    Optional comma-separated list of backends to run (default: adios2,native,rocksdb).
                 Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
                 or 'all' for all registered matrix variants.
-                Only supported for 'lsmio baseline'.
+                Only supported for 'lsmio variants'.
 
 Options:
   --ssd         Use SSD storage class (default: HDD).
@@ -102,7 +103,7 @@ Options:
   --no-archive  Disable automatic post-run archiving after variant execution.
   --resume      Skip variant execution if target archive directory (outputs-<arm_id>) already exists.
   --out-dir <path>
-                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive).
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
@@ -213,8 +214,9 @@ class RunCliParser:
 
     Positional Arguments:
         <benchmark>: Required. One of: ior, lsmio, lmp.
-        <scale>: Required. One of: local, bake, small, large, baseline.
-        <variant>: Optional. Supported exclusively for 'lsmio baseline'.
+        <scale>: Required. One of: local, bake, small, large, variants
+            ('baseline' is the deprecated spelling of 'variants').
+        <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
         --ssd: Storage class SSD (default HDD)
@@ -226,7 +228,9 @@ class RunCliParser:
     """
 
     VALID_BENCHMARKS = frozenset({"ior", "lsmio", "lmp"})
-    VALID_SCALES = frozenset({"local", "bake", "small", "large", "baseline"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
+    # Deprecated spelling retained so existing scripts keep working
+    SCALE_ALIASES = {"baseline": "variants"}
 
     @classmethod
     def parse(
@@ -386,6 +390,7 @@ class RunCliParser:
                     )
 
             f_scale = f_scale_tok.strip().lower()
+            f_scale = cls.SCALE_ALIASES.get(f_scale, f_scale)
             if f_scale not in cls.VALID_SCALES:
                 raise RunCliParseError(
                     f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
@@ -396,7 +401,7 @@ class RunCliParser:
         # Parse trailing options and optional positional variant
         from lsmiotool.lib.variants import VariantCatalogue
 
-        if f_scale == "baseline":
+        if f_scale == "variants":
             if f_benchmark == "lsmio":
                 if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                     f_variant_tok = f_trailing_tokens[0]
@@ -496,7 +501,15 @@ class RunCliParser:
                     )
                 if not f_val.strip():
                     raise RunCliParseError(f"Destination path after {f_tok!r} cannot be empty.")
-                f_out_dir = str(Path(f_val.strip()).resolve())
+                # Absolute paths are normalised here; relative paths stay verbatim and
+                # are resolved against the benchmark root by archive.resolveArchiveDest,
+                # matching bmtool/include/archive-dest.in.sh.
+                f_dest_val = f_val.strip()
+                f_out_dir = (
+                    str(Path(f_dest_val).resolve())
+                    if os.path.isabs(f_dest_val)
+                    else f_dest_val
+                )
                 f_idx += 2
             elif f_tok in ("--time", "--walltime", "--wallhour"):
                 if f_wallhour is not None or f_walltime is not None:
@@ -552,9 +565,9 @@ class RunCliParser:
                 )
 
         if f_versioned:
-            if f_scale != "baseline" or f_benchmark != "lsmio":
+            if f_scale != "variants" or f_benchmark != "lsmio":
                 raise RunCliParseError(
-                    "--versioned is supported exclusively for 'lsmio baseline'."
+                    "--versioned is supported exclusively for 'lsmio variants'."
                 )
             if f_archive is False:
                 raise RunCliParseError("Cannot specify '--no-archive' with '--versioned'.")
@@ -869,16 +882,19 @@ class ArchiveCliParser:
 
     Positional Arguments:
         <benchmark>: Required. Must be 'lsmio'.
-        <scale>: Required. One of: local, bake, small, large, baseline.
-        <variant>: Optional. Supported exclusively for 'lsmio baseline'.
+        <scale>: Required. One of: local, bake, small, large, variants
+            ('baseline' is the deprecated spelling of 'variants').
+        <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
-        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive).
+        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
     """
 
     VALID_BENCHMARKS = frozenset({"lsmio"})
-    VALID_SCALES = frozenset({"local", "bake", "small", "large", "baseline"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
+    # Deprecated spelling retained so existing scripts keep working
+    SCALE_ALIASES = {"baseline": "variants"}
 
     @classmethod
     def parse(
@@ -895,7 +911,7 @@ class ArchiveCliParser:
 
         Raises:
             ArchiveCliParseError: If syntax, arity, flags, or values are invalid.
-            UnknownVariantError: If variant is invalid for baseline scale.
+            UnknownVariantError: If variant is invalid for variants scale.
         """
         if f_argv is None or isinstance(f_argv, (str, bytes)):
             raise ArchiveCliParseError(
@@ -972,6 +988,7 @@ class ArchiveCliParser:
             )
 
         f_scale = f_scale_tok.strip().lower()
+        f_scale = cls.SCALE_ALIASES.get(f_scale, f_scale)
         if f_scale not in cls.VALID_SCALES:
             raise ArchiveCliParseError(
                 f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
@@ -983,7 +1000,7 @@ class ArchiveCliParser:
         f_trailing_tokens = f_post_archive_tokens[2:]
         f_variant_name: Optional[str] = None
 
-        if f_scale == "baseline":
+        if f_scale == "variants":
             if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                 f_variant_tok = f_trailing_tokens[0]
                 f_trailing_tokens = f_trailing_tokens[1:]

@@ -15,15 +15,8 @@ fi
 . $BM_DIRNAME/jobs/lsmio-variants.in.sh
 
 # Task 4.2.2: Destination resolution under Approach 2 (INV-BACKEND-3)
-if [ -z "$BM_ARCHIVE_DEST" ]; then
-  if [ "$BM_MODE" = "backends" ]; then
-    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive/backends/$BM_SCALE"
-  elif [ "$BM_SCALE" = "baseline" ]; then
-    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive/variants"
-  else
-    BM_ARCHIVE_DEST="$BM_PATH/lsmio-archive"
-  fi
-fi
+. $BM_DIRNAME/include/archive-dest.in.sh
+bm_resolve_archive_dest
 
 # Task 4.2.3: Active output directory check
 [ -d "$LSM_DIR_OBASE" ] || fatal_error "Active output directory does not exist: $LSM_DIR_OBASE"
@@ -38,7 +31,7 @@ if [ "${BM_TYPE:-lsmio}" = "lsmio" ] && [ ! -f "${LSM_DIR_OBASE}/lsm-report.csv"
     fi
   done
   if [ "$_have_logs" -eq 1 ]; then
-    : "${BM_SCALE:=baseline}"
+    : "${BM_SCALE:=variants}"
     . $BM_DIRNAME/parse/lsmio-parse.sh
   fi
 fi
