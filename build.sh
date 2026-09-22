@@ -81,7 +81,7 @@ detect_optimal_jobs() {
 
   # 2. Memory budget: reserve 4 GiB floor for OS/services, allocate ~1.5 GiB per compiler/linker job
   if [ "$total_ram_gb" -gt 4 ]; then
-    ram_jobs=$(( (total_ram_gb - 4) * 2 / 3 ))
+    ram_jobs=$(( (total_ram_gb - 4) * 4 / 5 ))
     [ "$ram_jobs" -lt 1 ] && ram_jobs=1
   elif [ "$total_ram_gb" -gt 0 ]; then
     ram_jobs=1
