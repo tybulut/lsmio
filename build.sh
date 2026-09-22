@@ -33,14 +33,33 @@ INSTALL_TAG=""
 DO_COVERAGE=false
 
 detect_num_cores() {
+  # 1. macOS physical cores
+  if command -v sysctl >/dev/null 2>&1; then
+    local phys_cpu
+    phys_cpu=$(sysctl -n hw.physicalcpu 2>/dev/null)
+    if [ -n "$phys_cpu" ] && [ "$phys_cpu" -gt 0 ] 2>/dev/null; then
+      echo "$phys_cpu"
+      return
+    fi
+  fi
+
+  # 2. Linux physical cores (excluding hyper-threads)
+  if command -v lscpu >/dev/null 2>&1; then
+    local phys_cores
+    phys_cores=$(lscpu -p=Core,Socket 2>/dev/null | grep -v '^#' | sort -u | wc -l)
+    if [ -n "$phys_cores" ] && [ "$phys_cores" -gt 0 ] 2>/dev/null; then
+      echo "$phys_cores"
+      return
+    fi
+  fi
+
+  # 3. Fallback to logical processors
   if command -v nproc >/dev/null 2>&1; then
-    nproc 2>/dev/null || echo 0
-  elif command -v sysctl >/dev/null 2>&1; then
-    sysctl -n hw.logicalcpu 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0
+    nproc 2>/dev/null || echo 4
   elif command -v getconf >/dev/null 2>&1; then
-    getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0
+    getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4
   else
-    echo 0
+    echo 4
   fi
 }
 
