@@ -51,11 +51,13 @@ run_matrix_workload() {
         cp -r lmp-reaxff $DIRS_BM_BASE/c$rf/b$bs/
       fi
 
+      # --kill-on-bad-exit: one failed rank ends the step; otherwise the
+      # surviving ranks block in MPI until the job hits its time limit
       if [ "$HPC_MANAGER" = "slurm" ]; then
         if [ "$HPC_ENV" = "archer2" ]; then
-          srun -p standard --export=ALL ${JOB_BIN} $rf $bs
+          srun -p standard --kill-on-bad-exit=1 --export=ALL ${JOB_BIN} $rf $bs
         else
-          srun --export=ALL ${JOB_BIN} $rf $bs
+          srun --kill-on-bad-exit=1 --export=ALL ${JOB_BIN} $rf $bs
         fi
       elif [ "$HPC_MANAGER" = "pbs" ]; then
         aprun -n $BM_NUM_TASKS -N $BM_NUM_CORES ${JOB_BIN} $rf $bs
@@ -64,6 +66,9 @@ run_matrix_workload() {
       fi
 
       sleep 3
+
+      # Free this point's data now so peak quota usage is one point, not six
+      rm -rf -- "${DIRS_BM_BASE:?DIRS_BM_BASE is unset or empty}/c$rf/b$bs"/*
     done
   done
 }
