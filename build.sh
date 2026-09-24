@@ -326,7 +326,10 @@ fi
 CTEST_FAILED=0
 if [ "$DO_TEST" = true ]; then
   if [ "$DO_COVERAGE" = true ]; then
-    export LLVM_PROFILE_FILE="coverage-%p.profraw"
+    # Clang builds only (GCC uses gcov .gcda files, merged in place). %4m merges
+    # profiles online into a pool of 4 files per binary instead of one file
+    # per test process; the coverage-*.profraw glob below still matches them.
+    export LLVM_PROFILE_FILE="coverage-%4m.profraw"
   fi
   log "Running all tests (ctest -j$JOBS)"
   ctest -j$JOBS || CTEST_FAILED=1
