@@ -329,6 +329,10 @@ if [ "$DO_TEST" = true ]; then
     # Clang builds only (GCC uses gcov .gcda files, merged in place). %4m merges
     # profiles online into a pool of 4 files per binary instead of one file
     # per test process; the coverage-*.profraw glob below still matches them.
+    # Start from empty pools: %4m merges into existing files, and the runtime
+    # silently refuses to merge into a pool written by an incompatible build.
+    find . -name "coverage-*.profraw" -delete
+    rm -f coverage.profdata
     export LLVM_PROFILE_FILE="coverage-%4m.profraw"
   fi
   log "Running all tests (ctest -j$JOBS)"
