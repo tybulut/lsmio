@@ -91,11 +91,24 @@ def _buildTestSuite(f_modules):
 
 
 lsmiotool_test_module_names = _discoverTestModuleNames()
-lsmiotool_tests = _importTestModules(lsmiotool_test_module_names)
+_lsmiotool_tests = None
+
+
+def _getTests():
+    global _lsmiotool_tests
+    if _lsmiotool_tests is None:
+        _lsmiotool_tests = _importTestModules(lsmiotool_test_module_names)
+    return _lsmiotool_tests
+
+
+def __getattr__(name):
+    if name == "lsmiotool_tests":
+        return _getTests()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 def suite():
-    return _buildTestSuite(lsmiotool_tests)
+    return _buildTestSuite(_getTests())
 
 
 def run_and_report(*f_module_names: str) -> int:
