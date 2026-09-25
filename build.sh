@@ -267,11 +267,13 @@ else
   log "Build directory: $ROOT_DIR/$BUILD_DIR (in-tree)"
 fi
 
+INSTALL_PREFIX="${PREFIX:-${PROJECT_DIR:-$HOME/src/usr}}"
+
 log "Configuring a $BUILD_TYPE build (cmake, coverage: $DO_COVERAGE)"
 cmake -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
   -DBUILD_SHARED_LIBS=On \
-  -DCMAKE_INSTALL_PREFIX:PATH="${PREFIX:-$HOME/src/usr}" \
+  -DCMAKE_INSTALL_PREFIX:PATH="$INSTALL_PREFIX" \
   -DLSMIO_ENABLE_COVERAGE=$DO_COVERAGE
 
 pushd "$BUILD_DIR" > /dev/null || exit 1
@@ -350,10 +352,9 @@ if [ "$DO_PTEST" = true ]; then
 fi
 
 if [ "$DO_INSTALL" = true ]; then
-  log "Installing to ${PREFIX:-$HOME/src/usr} (make install)"
+  log "Installing to ${INSTALL_PREFIX} (make install)"
   make install || exit 1
   if [ -n "$INSTALL_TAG" ]; then
-    INSTALL_PREFIX="${PREFIX:-$HOME/src/usr}"
     INSTALL_BIN_DIR="${INSTALL_PREFIX}/bin"
     for bm in bm_native bm_rocksdb bm_leveldb bm_manager bm_adios; do
       if [ -f "${INSTALL_BIN_DIR}/${bm}" ]; then

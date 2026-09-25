@@ -100,24 +100,31 @@ batch_run() {
       wallhour=$calculated_hours
     fi
   else
-    wallhour=`echo "2 + ($nodes / 3)" | bc`
+    wallhour=$(( 2 + nodes / 3 ))
+    [ "$wallhour" -gt 0 ] || wallhour=1
   fi
 
   if [ "$QSUBMIT" = "sbatch" ]; then
     # ARCHER2's standard partition allocates whole nodes and rejects --mem;
     # other Slurm sites need an explicit per-job memory request.
+    # On ARCHER2, standard QoS allows up to 24h; >24h requires qos=long (up to 96h).
     if [ "$HPC_ENV" = "archer2" ]; then
-      SBATCH_EXTRA="--partition=standard --qos=standard"
+      if [ "$wallhour" -gt 24 ]; then
+        SBATCH_EXTRA="--partition=standard --qos=long"
+      else
+        SBATCH_EXTRA="--partition=standard --qos=standard"
+      fi
     else
       SBATCH_EXTRA="--mem=8gb"
     fi
     sbatch \
       $SBATCH_EXTRA \
+      --chdir="$BM_DIRNAME" \
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
       --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
-      --time=$wallhour:00:00 \
+      --time=$(printf "%02d:00:00" "$wallhour") \
       --account="$SB_ACCOUNT" \
       --mail-user="$SB_EMAIL" \
       ${job_script}.sbatch
