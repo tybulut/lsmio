@@ -692,7 +692,7 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(req.resume)
         self.assertEqual(req.wallhour, 12)
         self.assertEqual(req.walltime, "12:00:00")
-        self.assertEqual(req.out_dir, "/tmp/archive")
+        self.assertEqual(req.out_dir, str(Path("/tmp/archive").resolve()))
         self.assertFalse(req.archive)
 
     def testBackendsModeDefaultBackendsWithTrailingOptions(self) -> None:
