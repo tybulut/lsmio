@@ -1543,7 +1543,9 @@ def parseWalltimeToSeconds(f_time_str: str) -> int:
             minutes = int_parts[1]
             seconds = 0
             if hours >= 24:
-                raise ValueError(f"Hours must be < 24 in D-HH:MM format: {f_time_str!r}")
+                raise ValueError(
+                    f"Hours must be < 24 in D-HH:MM format: {f_time_str!r}"
+                )
             if minutes >= 60:
                 raise ValueError(f"Minutes must be < 60 in walltime: {f_time_str!r}")
         else:
@@ -1559,7 +1561,9 @@ def parseWalltimeToSeconds(f_time_str: str) -> int:
         if "-" in f_time_str and hours >= 24:
             raise ValueError(f"Hours must be < 24 in D-HH:MM:SS format: {f_time_str!r}")
         if minutes >= 60 or seconds >= 60:
-            raise ValueError(f"Minutes and seconds must be < 60 in walltime: {f_time_str!r}")
+            raise ValueError(
+                f"Minutes and seconds must be < 60 in walltime: {f_time_str!r}"
+            )
     else:
         raise ValueError(f"Invalid walltime format (too many segments): {f_time_str!r}")
 
@@ -1741,9 +1745,17 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
 
         # Resolve QoS: explicit parameter > point.qos > resource policy qos
         f_effective_qos = f_qos
-        if f_effective_qos is None and hasattr(f_point, "qos") and f_point.qos is not None:
+        if (
+            f_effective_qos is None
+            and hasattr(f_point, "qos")
+            and f_point.qos is not None
+        ):
             f_effective_qos = f_point.qos
-        elif f_effective_qos is None and f_res_policy is not None and getattr(f_res_policy, "qos", None) is not None:
+        elif (
+            f_effective_qos is None
+            and f_res_policy is not None
+            and getattr(f_res_policy, "qos", None) is not None
+        ):
             f_effective_qos = f_res_policy.qos
 
         if f_effective_qos is not None:
@@ -1841,9 +1853,7 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
             f_walltime=getattr(f_spec.resources, "walltime", None)
             if f_spec.resources
             else None,
-            f_qos=getattr(f_spec.resources, "qos", None)
-            if f_spec.resources
-            else None,
+            f_qos=getattr(f_spec.resources, "qos", None) if f_spec.resources else None,
         )
         return cls.renderScript(
             f_backend=SchedulerKind.SLURM,

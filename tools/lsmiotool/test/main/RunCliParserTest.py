@@ -383,7 +383,15 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(f_req.setup, "NATIVE-M")
 
         f_req2 = parseRunArguments(
-            ["--ssd", "run", "lsmio", "baseline", "footer-prealloc", "--setup", "ROCKSDB-M"]
+            [
+                "--ssd",
+                "run",
+                "lsmio",
+                "baseline",
+                "footer-prealloc",
+                "--setup",
+                "ROCKSDB-M",
+            ]
         )
         self.assertEqual(f_req2.target, "lsmio")
         self.assertEqual(f_req2.scale, "variants")
@@ -423,11 +431,15 @@ class RunCliParserTest(unittest.TestCase):
         """Tasks 2.3.5 (INV-ARCH-3): Asserts positional variants on non-lsmio benchmarks are strictly rejected."""
         with self.assertRaises(RunCliParseError) as f_ctx_ior:
             parseRunArguments(["ior", "baseline", "footer"])
-        self.assertIn("variants are supported exclusively for 'lsmio'", str(f_ctx_ior.exception))
+        self.assertIn(
+            "variants are supported exclusively for 'lsmio'", str(f_ctx_ior.exception)
+        )
 
         with self.assertRaises(RunCliParseError) as f_ctx_lmp:
             parseRunArguments(["lmp", "baseline", "footer"])
-        self.assertIn("variants are supported exclusively for 'lsmio'", str(f_ctx_lmp.exception))
+        self.assertIn(
+            "variants are supported exclusively for 'lsmio'", str(f_ctx_lmp.exception)
+        )
 
     def testBaselineIorAndLmpAllowedWithoutVariant(self) -> None:
         """Tasks 2.3.5: Asserts baseline scale is accepted for IOR and LMP when variant is omitted."""
@@ -480,17 +492,26 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(f_req_arch.archive)
         self.assertTrue(f_req_arch.effective_archive)
 
-        f_req_no_arch = parseRunArguments(["lsmio", "baseline", "footer,manoff", "--no-archive"])
+        f_req_no_arch = parseRunArguments(
+            ["lsmio", "baseline", "footer,manoff", "--no-archive"]
+        )
         self.assertFalse(f_req_no_arch.archive)
         self.assertFalse(f_req_no_arch.effective_archive)
 
         with self.assertRaises(RunCliParseError) as f_ctx_conflict:
-            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--no-archive"])
-        self.assertIn("Cannot specify both '--archive' and '--no-archive'", str(f_ctx_conflict.exception))
+            parseRunArguments(
+                ["lsmio", "baseline", "footer", "--archive", "--no-archive"]
+            )
+        self.assertIn(
+            "Cannot specify both '--archive' and '--no-archive'",
+            str(f_ctx_conflict.exception),
+        )
 
         with self.assertRaises(RunCliParseError) as f_ctx_dup:
             parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--archive"])
-        self.assertIn("Duplicate '--archive' option specified", str(f_ctx_dup.exception))
+        self.assertIn(
+            "Duplicate '--archive' option specified", str(f_ctx_dup.exception)
+        )
 
     def testResumeOptionFlag(self) -> None:
         """Task 2.5.4: Asserts --resume flag sets resume=True and rejects duplicates."""
@@ -505,12 +526,16 @@ class RunCliParserTest(unittest.TestCase):
         """Task 2.5.5: Asserts --out-dir, --output-dir, and --dest aliases populate out_dir."""
         f_expected = str(Path("/tmp/my-lsmio-archive").resolve())
         for f_flag in ("--out-dir", "--output-dir", "--dest"):
-            f_req = parseRunArguments(["lsmio", "baseline", "footer", f_flag, "/tmp/my-lsmio-archive"])
+            f_req = parseRunArguments(
+                ["lsmio", "baseline", "footer", f_flag, "/tmp/my-lsmio-archive"]
+            )
             self.assertEqual(f_req.out_dir, f_expected)
 
         with self.assertRaises(RunCliParseError) as f_ctx_missing:
             parseRunArguments(["lsmio", "baseline", "footer", "--out-dir"])
-        self.assertIn("Missing value after '--out-dir' option", str(f_ctx_missing.exception))
+        self.assertIn(
+            "Missing value after '--out-dir' option", str(f_ctx_missing.exception)
+        )
 
     def testOutDirEqualsSyntaxRejected(self) -> None:
         """Task 2.5.6: Asserts syntax with '=' delimiter is rejected for all destination and archive flags."""
@@ -525,6 +550,7 @@ class RunCliParserTest(unittest.TestCase):
     def testRunHelpDisplaysMultiVariantAndOptions(self) -> None:
         """Task 2.5.7: Asserts --help text contains multi-variant and options documentation."""
         from lsmiotool.lib.cli import LSMIOTOOL_HELP, RUN_HELP_TEXT
+
         self.assertIn("--archive", RUN_HELP_TEXT)
         self.assertIn("--no-archive", RUN_HELP_TEXT)
         self.assertIn("--resume", RUN_HELP_TEXT)
@@ -538,12 +564,16 @@ class RunCliParserTest(unittest.TestCase):
             self.assertEqual(f_req.wallhour, 8)
             self.assertEqual(f_req.walltime, "08:00:00")
 
-        f_req_hms = parseRunArguments(["lsmio", "baseline", "footer", "--time", "06:30:00"])
+        f_req_hms = parseRunArguments(
+            ["lsmio", "baseline", "footer", "--time", "06:30:00"]
+        )
         self.assertEqual(f_req_hms.walltime, "06:30:00")
 
         # Duplicate detection
         with self.assertRaises(RunCliParseError) as f_ctx_dup:
-            parseRunArguments(["lsmio", "baseline", "footer", "--time", "4", "--wallhour", "8"])
+            parseRunArguments(
+                ["lsmio", "baseline", "footer", "--time", "4", "--wallhour", "8"]
+            )
         self.assertIn("Duplicate walltime option specified", str(f_ctx_dup.exception))
 
         # Equals syntax rejection
@@ -582,7 +612,9 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(req_single.variants, ("legacy",))
         self.assertTrue(req_single.archive)
 
-        req_multi = parseRunArguments(["lsmio", "baseline", "footer,legacy", "--versioned"])
+        req_multi = parseRunArguments(
+            ["lsmio", "baseline", "footer,legacy", "--versioned"]
+        )
         self.assertTrue(req_multi.versioned)
         self.assertEqual(req_multi.variant, "footer")
         self.assertEqual(req_multi.variants, ("footer", "legacy"))
@@ -637,11 +669,21 @@ class RunCliParserTest(unittest.TestCase):
 
     def testBackendsModeTrailingOptions(self) -> None:
         """Validates that trailing options like --ssd, --resume, --time, --out-dir are handled in backends mode."""
-        req = parseRunArguments([
-            "lsmio", "backends", "bake", "adios2",
-            "--ssd", "--resume", "--time", "12",
-            "--out-dir", "/tmp/archive", "--no-archive"
-        ])
+        req = parseRunArguments(
+            [
+                "lsmio",
+                "backends",
+                "bake",
+                "adios2",
+                "--ssd",
+                "--resume",
+                "--time",
+                "12",
+                "--out-dir",
+                "/tmp/archive",
+                "--no-archive",
+            ]
+        )
         self.assertEqual(req.target, "lsmio")
         self.assertEqual(req.scale, "bake")
         self.assertEqual(req.mode, "backends")

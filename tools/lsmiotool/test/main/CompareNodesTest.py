@@ -82,9 +82,15 @@ class CompareNodesTest(unittest.TestCase):
     def testCanonicalLegendMapping(self) -> None:
         """Verifies directory names map to canonical legends ('adios2', 'native', 'rocksdb')."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "small")
-        self._create_report(os.path.join(target_dir, "outputs-adios"), 4, "1M", "write", 1000.0)
-        self._create_report(os.path.join(target_dir, "outputs-native"), 4, "1M", "write", 1500.0)
-        self._create_report(os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "write", 800.0)
+        self._create_report(
+            os.path.join(target_dir, "outputs-adios"), 4, "1M", "write", 1000.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "write", 1500.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "write", 800.0
+        )
 
         out_dir = os.path.join(self.m_base_path, "png")
         req = CompareNodesRequest(
@@ -117,9 +123,15 @@ class CompareNodesTest(unittest.TestCase):
         """Verifies plot data is sorted strictly in [adios2, native, rocksdb] order regardless of folder order."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "bake")
         # Deliberately create in reverse order: rocksdb, native, adios
-        self._create_report(os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "read", 700.0)
-        self._create_report(os.path.join(target_dir, "outputs-native"), 4, "1M", "read", 1200.0)
-        self._create_report(os.path.join(target_dir, "outputs-adios"), 4, "1M", "read", 950.0)
+        self._create_report(
+            os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "read", 700.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "read", 1200.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-adios"), 4, "1M", "read", 950.0
+        )
 
         out_dir = os.path.join(self.m_base_path, "png")
         cnm = main.CompareNodesMain(
@@ -145,9 +157,15 @@ class CompareNodesTest(unittest.TestCase):
     def testFallbackPatternMapping(self) -> None:
         """Verifies substring pattern matching for non-standard directory names containing backend keywords."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "local")
-        self._create_report(os.path.join(target_dir, "my-rocksdb-run"), 4, "1M", "write", 600.0)
-        self._create_report(os.path.join(target_dir, "arm-adios"), 4, "1M", "write", 850.0)
-        self._create_report(os.path.join(target_dir, "native"), 4, "1M", "write", 1100.0)
+        self._create_report(
+            os.path.join(target_dir, "my-rocksdb-run"), 4, "1M", "write", 600.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "arm-adios"), 4, "1M", "write", 850.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "native"), 4, "1M", "write", 1100.0
+        )
 
         out_dir = os.path.join(self.m_base_path, "png")
         cnm = main.CompareNodesMain(target_dir, "write", 4, "1M", out_dir)
@@ -166,9 +184,13 @@ class CompareNodesTest(unittest.TestCase):
 
     def testApproach2PathMirroringBackends(self) -> None:
         """Verifies Approach 2 output path mirroring under <out_dir>/backends/<scale>/."""
-        target_dir = os.path.join(self.m_base_path, "lsmio-archive", "backends", "small")
+        target_dir = os.path.join(
+            self.m_base_path, "lsmio-archive", "backends", "small"
+        )
         self._create_report(os.path.join(target_dir, "outputs-adios"), 4, "1M", "write")
-        self._create_report(os.path.join(target_dir, "outputs-native"), 4, "1M", "write")
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "write"
+        )
 
         out_dir = os.path.join(self.m_base_path, "png")
         req = CompareNodesRequest(
@@ -190,14 +212,20 @@ class CompareNodesTest(unittest.TestCase):
             expected_dir = os.path.join(out_dir, "backends", "small")
             expected_file = os.path.join(expected_dir, "compare-small-write-4-1M.png")
 
-            self.assertTrue(os.path.isdir(expected_dir), f"Directory {expected_dir} must be created")
+            self.assertTrue(
+                os.path.isdir(expected_dir), f"Directory {expected_dir} must be created"
+            )
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
     def testApproach2PathMirroringVariants(self) -> None:
         """Verifies Approach 2 output path mirroring under <out_dir>/variants/."""
         target_dir = os.path.join(self.m_base_path, "lsmio-archive", "variants")
-        self._create_report(os.path.join(target_dir, "native-variant-a"), 4, "1M", "read")
-        self._create_report(os.path.join(target_dir, "native-variant-b"), 4, "1M", "read")
+        self._create_report(
+            os.path.join(target_dir, "native-variant-a"), 4, "1M", "read"
+        )
+        self._create_report(
+            os.path.join(target_dir, "native-variant-b"), 4, "1M", "read"
+        )
 
         out_dir = os.path.join(self.m_base_path, "png")
         req = CompareNodesRequest(
@@ -219,13 +247,17 @@ class CompareNodesTest(unittest.TestCase):
             expected_dir = os.path.join(out_dir, "variants")
             expected_file = os.path.join(expected_dir, "compare-variants-read-4-1M.png")
 
-            self.assertTrue(os.path.isdir(expected_dir), f"Directory {expected_dir} must be created")
+            self.assertTrue(
+                os.path.isdir(expected_dir), f"Directory {expected_dir} must be created"
+            )
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
     def testLegacyFlatArchivePathFallback(self) -> None:
         """Verifies legacy unpartitioned archives save directly to <out_dir>/ without subfolder."""
         target_dir = os.path.join(self.m_base_path, "legacy_archive_run")
-        self._create_report(os.path.join(target_dir, "outputs-native"), 4, "1M", "write")
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "write"
+        )
 
         out_dir = os.path.join(self.m_base_path, "custom_plots")
         req = CompareNodesRequest(
@@ -244,7 +276,9 @@ class CompareNodesTest(unittest.TestCase):
             exit_code = cnm.run()
             self.assertEqual(exit_code, 0)
 
-            expected_file = os.path.join(out_dir, "compare-legacy_archive_run-write-4-1M.png")
+            expected_file = os.path.join(
+                out_dir, "compare-legacy_archive_run-write-4-1M.png"
+            )
             self.assertTrue(os.path.isdir(out_dir))
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
@@ -252,7 +286,9 @@ class CompareNodesTest(unittest.TestCase):
         """Verifies default workload parameters (stripes=4, bs=1M) and custom values."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "large")
         self._create_report(os.path.join(target_dir, "outputs-adios"), 4, "1M", "write")
-        self._create_report(os.path.join(target_dir, "outputs-native"), 4, "1M", "write")
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "write"
+        )
 
         # 1. Defaults: stripes=4, bs=1M
         cnm_default = main.CompareNodesMain(f_folder=target_dir, f_op="write")
@@ -260,7 +296,10 @@ class CompareNodesTest(unittest.TestCase):
         self.assertEqual(cnm_default.bs, "1M")
         self.assertEqual(cnm_default.blocksize, "1M")
 
-        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls, patch("os.getcwd", return_value=self.m_base_path):
+        with (
+            patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls,
+            patch("os.getcwd", return_value=self.m_base_path),
+        ):
             mock_plot_instance = MagicMock()
             mock_plot_cls.return_value = mock_plot_instance
 
@@ -275,7 +314,9 @@ class CompareNodesTest(unittest.TestCase):
 
         # 2. Custom parameters: stripes=16, bs=8M, op=read
         self._create_report(os.path.join(target_dir, "outputs-adios"), 16, "8M", "read")
-        self._create_report(os.path.join(target_dir, "outputs-native"), 16, "8M", "read")
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 16, "8M", "read"
+        )
 
         out_dir = os.path.join(self.m_base_path, "custom_out")
         cnm_custom = main.CompareNodesMain(
@@ -301,15 +342,23 @@ class CompareNodesTest(unittest.TestCase):
             self.assertIn("8M", meta_data.title)
             self.assertIn("READ", meta_data.title)
 
-            expected_file = os.path.join(out_dir, "backends", "large", "compare-large-read-16-8M.png")
+            expected_file = os.path.join(
+                out_dir, "backends", "large", "compare-large-read-16-8M.png"
+            )
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
     def testEndToEndPlotFileGeneration(self) -> None:
         """Functional end-to-end test verifying actual image file creation on disk without mock."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "bake")
-        self._create_report(os.path.join(target_dir, "outputs-adios"), 4, "1M", "write", 1100.0)
-        self._create_report(os.path.join(target_dir, "outputs-native"), 4, "1M", "write", 1400.0)
-        self._create_report(os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "write", 950.0)
+        self._create_report(
+            os.path.join(target_dir, "outputs-adios"), 4, "1M", "write", 1100.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "write", 1400.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "write", 950.0
+        )
 
         out_dir = os.path.join(self.m_base_path, "png")
         req = CompareNodesRequest(
@@ -323,9 +372,16 @@ class CompareNodesTest(unittest.TestCase):
         exit_code = cnm.run()
         self.assertEqual(exit_code, 0)
 
-        expected_png = os.path.join(out_dir, "backends", "bake", "compare-bake-write-4-1M.png")
-        self.assertTrue(os.path.isfile(expected_png), f"Generated plot {expected_png} must exist on disk")
-        self.assertGreater(os.path.getsize(expected_png), 0, "Generated plot file must not be empty")
+        expected_png = os.path.join(
+            out_dir, "backends", "bake", "compare-bake-write-4-1M.png"
+        )
+        self.assertTrue(
+            os.path.isfile(expected_png),
+            f"Generated plot {expected_png} must exist on disk",
+        )
+        self.assertGreater(
+            os.path.getsize(expected_png), 0, "Generated plot file must not be empty"
+        )
 
     def testMissingDirectoryExitsWithError(self) -> None:
         """Verifies non-existent directory causes system exit with code 1."""

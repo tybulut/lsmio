@@ -1817,10 +1817,20 @@ class SlurmAdapterTest(unittest.TestCase):
 
         # Classmethod parity
         self.assertEqual(SlurmScriptRenderer.parseWalltimeToSeconds("24:00:00"), 86400)
-        self.assertEqual(SlurmScriptRenderer.parse_walltime_to_seconds("24:00:00"), 86400)
+        self.assertEqual(
+            SlurmScriptRenderer.parse_walltime_to_seconds("24:00:00"), 86400
+        )
 
         # Invalid formats raise ValueError
-        for bad_time in ("invalid", "24:60:00", "24:00:60", "1-25:00:00", "-1:00:00", "", "00:00:00"):
+        for bad_time in (
+            "invalid",
+            "24:60:00",
+            "24:00:60",
+            "1-25:00:00",
+            "-1:00:00",
+            "",
+            "00:00:00",
+        ):
             with self.assertRaises(ValueError):
                 parseWalltimeToSeconds(bad_time)
 

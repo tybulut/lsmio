@@ -325,10 +325,18 @@ class ParseCliParserTest(unittest.TestCase):
 
     def testBackendsModeParseWithLeadingParseAndOptions(self) -> None:
         """Validates 'parse lsmio backends <scale>' with explicit options and leading command."""
-        req = parseParseArguments([
-            "parse", "lsmio", "backends", "large",
-            "--output-dir", "/tmp/reports", "--format", "json"
-        ])
+        req = parseParseArguments(
+            [
+                "parse",
+                "lsmio",
+                "backends",
+                "large",
+                "--output-dir",
+                "/tmp/reports",
+                "--format",
+                "json",
+            ]
+        )
         self.assertEqual(req.target, "lsmio")
         self.assertEqual(req.mode, "backends")
         self.assertEqual(req.scale, "large")

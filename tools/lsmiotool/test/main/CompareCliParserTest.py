@@ -313,49 +313,57 @@ class CompareCliParserTest(unittest.TestCase):
         self.assertEqual(req1_cmd, req1)
 
         # Explicit stripes and blocksize
-        req_stripes_bs = parseCompareArguments([
-            "nodes",
-            "/path/to/bench",
-            "write",
-            "16",
-            "8M",
-        ])
+        req_stripes_bs = parseCompareArguments(
+            [
+                "nodes",
+                "/path/to/bench",
+                "write",
+                "16",
+                "8M",
+            ]
+        )
         self.assertEqual(req_stripes_bs.op, "write")
         self.assertEqual(req_stripes_bs.stripes, 16)
         self.assertEqual(req_stripes_bs.blocksize, "8M")
 
         # Case normalization for op and blocksize
-        req_case = parseCompareArguments([
-            "nodes",
-            "/path/to/bench",
-            "WRITE",
-            "4",
-            "64k",
-        ])
+        req_case = parseCompareArguments(
+            [
+                "nodes",
+                "/path/to/bench",
+                "WRITE",
+                "4",
+                "64k",
+            ]
+        )
         self.assertEqual(req_case.op, "write")
         self.assertEqual(req_case.blocksize, "64K")
 
         # With --output-dir
-        req_out = parseCompareArguments([
-            "nodes",
-            "/path/to/bench",
-            "read",
-            "--output-dir",
-            "/tmp/plots",
-        ])
+        req_out = parseCompareArguments(
+            [
+                "nodes",
+                "/path/to/bench",
+                "read",
+                "--output-dir",
+                "/tmp/plots",
+            ]
+        )
         self.assertEqual(req_out.output_dir, "/tmp/plots")
         self.assertEqual(req_out.outputDir, "/tmp/plots")
 
         # Full options permutation
-        req_full = parseCompareArguments([
-            "nodes",
-            "/path/to/bench",
-            "read",
-            "16",
-            "8M",
-            "--output-dir",
-            "/tmp/plots",
-        ])
+        req_full = parseCompareArguments(
+            [
+                "nodes",
+                "/path/to/bench",
+                "read",
+                "16",
+                "8M",
+                "--output-dir",
+                "/tmp/plots",
+            ]
+        )
         self.assertEqual(req_full.folder, "/path/to/bench")
         self.assertEqual(req_full.op, "read")
         self.assertEqual(req_full.stripes, 16)
@@ -389,37 +397,43 @@ class CompareCliParserTest(unittest.TestCase):
         self.assertEqual(req_both.op, "both")
 
         # Positional stripes and blocksize
-        req_s_bs = parseCompareArguments([
-            "variants",
-            "/path/to/archive",
-            "read",
-            "16",
-            "64K",
-        ])
+        req_s_bs = parseCompareArguments(
+            [
+                "variants",
+                "/path/to/archive",
+                "read",
+                "16",
+                "64K",
+            ]
+        )
         self.assertEqual(req_s_bs.stripes, 16)
         self.assertEqual(req_s_bs.blocksize, "64K")
 
         # With --all and --output-dir
-        req_all_out = parseCompareArguments([
-            "variants",
-            "/path/to/archive",
-            "read",
-            "16",
-            "8M",
-            "--all",
-            "--output-dir",
-            "/tmp/plots",
-        ])
+        req_all_out = parseCompareArguments(
+            [
+                "variants",
+                "/path/to/archive",
+                "read",
+                "16",
+                "8M",
+                "--all",
+                "--output-dir",
+                "/tmp/plots",
+            ]
+        )
         self.assertTrue(req_all_out.all)
         self.assertEqual(req_all_out.output_dir, "/tmp/plots")
 
         # Compatibility function parseCompareArchiveArguments
-        req_compat = parseCompareArchiveArguments([
-            "/path/to/archive",
-            "read",
-            "16",
-            "--all",
-        ])
+        req_compat = parseCompareArchiveArguments(
+            [
+                "/path/to/archive",
+                "read",
+                "16",
+                "--all",
+            ]
+        )
         self.assertIsInstance(req_compat, CompareVariantsRequest)
         self.assertEqual(req_compat.archive_folder, "/path/to/archive")
         self.assertEqual(req_compat.op, "read")
@@ -469,7 +483,9 @@ class CompareCliParserTest(unittest.TestCase):
 
         # Option flag placed before submode
         with self.assertRaises(CompareCliParseError) as ctx_opt_sub:
-            parseCompareArguments(["--output-dir", "/tmp", "nodes", "/path/to/bench", "read"])
+            parseCompareArguments(
+                ["--output-dir", "/tmp", "nodes", "/path/to/bench", "read"]
+            )
         self.assertIn("Invalid submode '--output-dir'", str(ctx_opt_sub.exception))
 
         with self.assertRaises(CompareCliParseError) as ctx_all_first:
@@ -481,26 +497,37 @@ class CompareCliParserTest(unittest.TestCase):
         # Missing folder
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes"])
-        self.assertIn("Missing required positional argument: <folder>", str(ctx.exception))
+        self.assertIn(
+            "Missing required positional argument: <folder>", str(ctx.exception)
+        )
 
         # Option placed before folder
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "--output-dir", "/tmp", "/path", "read"])
-        self.assertIn("Unexpected option '--output-dir' placed before positional argument <folder>", str(ctx.exception))
+        self.assertIn(
+            "Unexpected option '--output-dir' placed before positional argument <folder>",
+            str(ctx.exception),
+        )
 
         # Missing operation
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench"])
-        self.assertIn("Missing required positional argument: <read|write>", str(ctx.exception))
+        self.assertIn(
+            "Missing required positional argument: <read|write>", str(ctx.exception)
+        )
 
         # Invalid operation (both is rejected in nodes mode)
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "both"])
-        self.assertIn("Invalid operation: 'both'. Must be 'read' or 'write'", str(ctx.exception))
+        self.assertIn(
+            "Invalid operation: 'both'. Must be 'read' or 'write'", str(ctx.exception)
+        )
 
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "delete"])
-        self.assertIn("Invalid operation: 'delete'. Must be 'read' or 'write'", str(ctx.exception))
+        self.assertIn(
+            "Invalid operation: 'delete'. Must be 'read' or 'write'", str(ctx.exception)
+        )
 
         # Invalid stripes
         with self.assertRaises(CompareCliParseError) as ctx:
@@ -519,7 +546,9 @@ class CompareCliParserTest(unittest.TestCase):
         # Rejection of --all option under nodes mode
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "read", "--all"])
-        self.assertIn("Option '--all' is only valid for 'variants' submode", str(ctx.exception))
+        self.assertIn(
+            "Option '--all' is only valid for 'variants' submode", str(ctx.exception)
+        )
 
         # Prohibited --all=val and --output-dir=val syntax
         with self.assertRaises(CompareCliParseError) as ctx:
@@ -527,7 +556,9 @@ class CompareCliParserTest(unittest.TestCase):
         self.assertIn("Prohibit '--all=value' syntax", str(ctx.exception))
 
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--output-dir=/tmp/plots"])
+            parseCompareArguments(
+                ["nodes", "/path/to/bench", "read", "--output-dir=/tmp/plots"]
+            )
         self.assertIn("Prohibit '--output-dir=value' syntax", str(ctx.exception))
 
         # Missing or option-like value after --output-dir
@@ -536,24 +567,33 @@ class CompareCliParserTest(unittest.TestCase):
         self.assertIn("Missing value after '--output-dir' option.", str(ctx.exception))
 
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--output-dir", "--other"])
-        self.assertIn("Missing valid value after '--output-dir' option, got option-like token: '--other'", str(ctx.exception))
+            parseCompareArguments(
+                ["nodes", "/path/to/bench", "read", "--output-dir", "--other"]
+            )
+        self.assertIn(
+            "Missing valid value after '--output-dir' option, got option-like token: '--other'",
+            str(ctx.exception),
+        )
 
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--output-dir", ""])
+            parseCompareArguments(
+                ["nodes", "/path/to/bench", "read", "--output-dir", ""]
+            )
         self.assertIn("Output directory path cannot be empty.", str(ctx.exception))
 
         # Duplicate options
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments([
-                "nodes",
-                "/path/to/bench",
-                "read",
-                "--output-dir",
-                "/a",
-                "--output-dir",
-                "/b",
-            ])
+            parseCompareArguments(
+                [
+                    "nodes",
+                    "/path/to/bench",
+                    "read",
+                    "--output-dir",
+                    "/a",
+                    "--output-dir",
+                    "/b",
+                ]
+            )
         self.assertIn("Duplicate '--output-dir' option specified.", str(ctx.exception))
 
         # Unknown options
@@ -563,26 +603,34 @@ class CompareCliParserTest(unittest.TestCase):
 
         # Unexpected extra positional arguments
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments([
-                "nodes",
-                "/path/to/bench",
-                "read",
-                "4",
-                "1M",
-                "extra",
-            ])
-        self.assertIn("Unexpected extra positional argument: 'extra'", str(ctx.exception))
+            parseCompareArguments(
+                [
+                    "nodes",
+                    "/path/to/bench",
+                    "read",
+                    "4",
+                    "1M",
+                    "extra",
+                ]
+            )
+        self.assertIn(
+            "Unexpected extra positional argument: 'extra'", str(ctx.exception)
+        )
 
         # Unexpected token before compare
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments([
-                "unexpected",
-                "compare",
-                "nodes",
-                "/path/to/bench",
-                "read",
-            ])
-        self.assertIn("Unexpected token before 'compare': 'unexpected'", str(ctx.exception))
+            parseCompareArguments(
+                [
+                    "unexpected",
+                    "compare",
+                    "nodes",
+                    "/path/to/bench",
+                    "read",
+                ]
+            )
+        self.assertIn(
+            "Unexpected token before 'compare': 'unexpected'", str(ctx.exception)
+        )
 
         # Invalid argv types
         with self.assertRaises(CompareCliParseError):
@@ -599,12 +647,17 @@ class CompareCliParserTest(unittest.TestCase):
         # Missing archive folder
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["variants"])
-        self.assertIn("Missing required positional argument: <archive_folder>", str(ctx.exception))
+        self.assertIn(
+            "Missing required positional argument: <archive_folder>", str(ctx.exception)
+        )
 
         # Option placed before archive folder
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["variants", "--all", "/path/to/archive"])
-        self.assertIn("Unexpected option '--all' placed before positional argument <archive_folder>", str(ctx.exception))
+        self.assertIn(
+            "Unexpected option '--all' placed before positional argument <archive_folder>",
+            str(ctx.exception),
+        )
 
         # Invalid operation
         with self.assertRaises(CompareCliParseError) as ctx:
@@ -632,8 +685,13 @@ class CompareCliParserTest(unittest.TestCase):
         self.assertIn("Missing value after '--output-dir' option.", str(ctx.exception))
 
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "--output-dir", "--all"])
-        self.assertIn("Missing valid value after '--output-dir' option, got option-like token: '--all'", str(ctx.exception))
+            parseCompareArguments(
+                ["variants", "/path/to/archive", "--output-dir", "--all"]
+            )
+        self.assertIn(
+            "Missing valid value after '--output-dir' option, got option-like token: '--all'",
+            str(ctx.exception),
+        )
 
         # Duplicate options
         with self.assertRaises(CompareCliParseError) as ctx:
@@ -647,15 +705,19 @@ class CompareCliParserTest(unittest.TestCase):
 
         # Unexpected extra positional arguments
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments([
-                "variants",
-                "/path/to/archive",
-                "read",
-                "4",
-                "1M",
-                "extra",
-            ])
-        self.assertIn("Unexpected extra positional argument: 'extra'", str(ctx.exception))
+            parseCompareArguments(
+                [
+                    "variants",
+                    "/path/to/archive",
+                    "read",
+                    "4",
+                    "1M",
+                    "extra",
+                ]
+            )
+        self.assertIn(
+            "Unexpected extra positional argument: 'extra'", str(ctx.exception)
+        )
 
     def testVariantReverseResolutionTruthTable(self) -> None:
         """Exhaustively validates all 10 canonical rows of the Reverse-Resolution Truth Table."""

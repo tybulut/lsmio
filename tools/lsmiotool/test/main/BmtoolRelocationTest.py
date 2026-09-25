@@ -111,9 +111,7 @@ class BmtoolRelocationTest(unittest.TestCase):
         self.assertEqual(f_result.returncode, 1)
 
         # 3. Verify target tools directory exists and stale file was removed via --delete
-        f_mirrored_bmtool = os.path.join(
-            self.m_fake_work, "tools", "bmtool", "bmtool"
-        )
+        f_mirrored_bmtool = os.path.join(self.m_fake_work, "tools", "bmtool", "bmtool")
         self.assertTrue(os.path.isfile(f_mirrored_bmtool))
         self.assertFalse(
             os.path.isfile(f_stale_file),

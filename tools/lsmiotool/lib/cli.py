@@ -344,7 +344,10 @@ class RunCliParser:
         f_variants: Tuple[Optional[str], ...] = (None,)
         f_variant_name: Optional[str] = None
 
-        if f_benchmark == "lsmio" and f_post_run_tokens[1].strip().lower() == "backends":
+        if (
+            f_benchmark == "lsmio"
+            and f_post_run_tokens[1].strip().lower() == "backends"
+        ):
             f_mode = "backends"
             if len(f_post_run_tokens) < 3:
                 raise RunCliParseError(
@@ -366,7 +369,9 @@ class RunCliParser:
             if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                 f_backends_raw = f_trailing_tokens[0].strip()
                 f_trailing_tokens = f_trailing_tokens[1:]
-                parsed_b = [b.strip().lower() for b in f_backends_raw.split(",") if b.strip()]
+                parsed_b = [
+                    b.strip().lower() for b in f_backends_raw.split(",") if b.strip()
+                ]
                 if not parsed_b:
                     raise RunCliParseError("Backends specification cannot be empty.")
                 f_backends = tuple(parsed_b)
@@ -406,7 +411,9 @@ class RunCliParser:
                 if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                     f_variant_tok = f_trailing_tokens[0]
                     f_trailing_tokens = f_trailing_tokens[1:]
-                    raw_tokens = [t.strip() for t in f_variant_tok.split(",") if t.strip()]
+                    raw_tokens = [
+                        t.strip() for t in f_variant_tok.split(",") if t.strip()
+                    ]
                     if not raw_tokens:
                         raise RunCliParseError("Variant specification cannot be empty.")
 
@@ -472,14 +479,18 @@ class RunCliParser:
                 f_idx += 2
             elif f_tok == "--archive":
                 if f_archive is False:
-                    raise RunCliParseError("Cannot specify both '--archive' and '--no-archive'.")
+                    raise RunCliParseError(
+                        "Cannot specify both '--archive' and '--no-archive'."
+                    )
                 if f_archive is True:
                     raise RunCliParseError("Duplicate '--archive' option specified.")
                 f_archive = True
                 f_idx += 1
             elif f_tok == "--no-archive":
                 if f_archive is True:
-                    raise RunCliParseError("Cannot specify both '--archive' and '--no-archive'.")
+                    raise RunCliParseError(
+                        "Cannot specify both '--archive' and '--no-archive'."
+                    )
                 if f_archive is False:
                     raise RunCliParseError("Duplicate '--no-archive' option specified.")
                 f_archive = False
@@ -491,7 +502,9 @@ class RunCliParser:
                 f_idx += 1
             elif f_tok in ("--out-dir", "--output-dir", "--dest"):
                 if f_out_dir is not None:
-                    raise RunCliParseError(f"Duplicate destination option specified: {f_tok!r}.")
+                    raise RunCliParseError(
+                        f"Duplicate destination option specified: {f_tok!r}."
+                    )
                 if f_idx + 1 >= len(f_trailing_tokens):
                     raise RunCliParseError(f"Missing value after {f_tok!r} option.")
                 f_val = f_trailing_tokens[f_idx + 1]
@@ -500,7 +513,9 @@ class RunCliParser:
                         f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise RunCliParseError(f"Destination path after {f_tok!r} cannot be empty.")
+                    raise RunCliParseError(
+                        f"Destination path after {f_tok!r} cannot be empty."
+                    )
                 # Absolute paths are normalised here; relative paths stay verbatim and
                 # are resolved against the benchmark root by archive.resolveArchiveDest,
                 # matching bmtool/include/archive-dest.in.sh.
@@ -513,7 +528,9 @@ class RunCliParser:
                 f_idx += 2
             elif f_tok in ("--time", "--walltime", "--wallhour"):
                 if f_wallhour is not None or f_walltime is not None:
-                    raise RunCliParseError(f"Duplicate walltime option specified: {f_tok!r}.")
+                    raise RunCliParseError(
+                        f"Duplicate walltime option specified: {f_tok!r}."
+                    )
                 if f_idx + 1 >= len(f_trailing_tokens):
                     raise RunCliParseError(f"Missing value after {f_tok!r} option.")
                 f_val = f_trailing_tokens[f_idx + 1]
@@ -522,14 +539,18 @@ class RunCliParser:
                         f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise RunCliParseError(f"Walltime value after {f_tok!r} cannot be empty.")
+                    raise RunCliParseError(
+                        f"Walltime value after {f_tok!r} cannot be empty."
+                    )
                 f_val_str = f_val.strip()
                 import re
 
                 if re.match(r"^\d+$", f_val_str):
                     f_h = int(f_val_str)
                     if f_h <= 0:
-                        raise RunCliParseError(f"--time value must be greater than 0, got: {f_h}")
+                        raise RunCliParseError(
+                            f"--time value must be greater than 0, got: {f_h}"
+                        )
                     f_wallhour = max(1, min(48, f_h))
                 elif re.match(r"^\d+:\d{2}:\d{2}$", f_val_str):
                     f_walltime = f_val_str
@@ -570,7 +591,9 @@ class RunCliParser:
                     "--versioned is supported exclusively for 'lsmio variants'."
                 )
             if f_archive is False:
-                raise RunCliParseError("Cannot specify '--no-archive' with '--versioned'.")
+                raise RunCliParseError(
+                    "Cannot specify '--no-archive' with '--versioned'."
+                )
             f_archive = True
 
         return RunRequest(
@@ -939,9 +962,7 @@ class ArchiveCliParser:
 
         # Separate pre-'archive' and post-'archive' tokens if 'archive' is present
         f_archive_indices: List[int] = [
-            f_idx
-            for f_idx, f_tok in enumerate(f_tokens)
-            if f_tok.lower() == "archive"
+            f_idx for f_idx, f_tok in enumerate(f_tokens) if f_tok.lower() == "archive"
         ]
 
         if f_archive_indices:
@@ -976,9 +997,7 @@ class ArchiveCliParser:
             )
 
         if len(f_post_archive_tokens) < 2:
-            raise ArchiveCliParseError(
-                "Missing required positional argument: <scale>"
-            )
+            raise ArchiveCliParseError("Missing required positional argument: <scale>")
 
         # Validate scale (positional 1)
         f_scale_tok = f_post_archive_tokens[1]
@@ -1020,22 +1039,16 @@ class ArchiveCliParser:
             f_tok = f_trailing_tokens[f_idx]
             if f_tok == "--dest":
                 if f_dest_seen:
-                    raise ArchiveCliParseError(
-                        "Duplicate '--dest' option specified."
-                    )
+                    raise ArchiveCliParseError("Duplicate '--dest' option specified.")
                 if f_idx + 1 >= len(f_trailing_tokens):
-                    raise ArchiveCliParseError(
-                        "Missing value after '--dest' option."
-                    )
+                    raise ArchiveCliParseError("Missing value after '--dest' option.")
                 f_val = f_trailing_tokens[f_idx + 1]
                 if f_val.startswith("-"):
                     raise ArchiveCliParseError(
                         f"Missing valid value after '--dest' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise ArchiveCliParseError(
-                        "Destination path cannot be empty."
-                    )
+                    raise ArchiveCliParseError("Destination path cannot be empty.")
                 f_dest_path = f_val.strip()
                 f_dest_seen = True
                 f_idx += 2
@@ -1080,16 +1093,12 @@ class CompareNodesRequest:
         f_output_dir: Optional[str] = None,
     ) -> None:
         if not isinstance(f_folder, str) or not f_folder.strip():
-            raise ValueError(
-                f"folder must be a non-empty string, got: {f_folder!r}"
-            )
+            raise ValueError(f"folder must be a non-empty string, got: {f_folder!r}")
         if not isinstance(f_op, str) or not f_op.strip():
             raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
         f_norm_op = f_op.strip().lower()
         if f_norm_op not in ("read", "write"):
-            raise ValueError(
-                f"op must be one of ('read', 'write'), got: {f_op!r}"
-            )
+            raise ValueError(f"op must be one of ('read', 'write'), got: {f_op!r}")
         if (
             isinstance(f_stripes, bool)
             or not isinstance(f_stripes, int)
@@ -1124,9 +1133,7 @@ class CompareNodesRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -1194,13 +1201,15 @@ class CompareNodesRequest:
         return False
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_folder,
-            self.m_op,
-            self.m_stripes,
-            self.m_blocksize,
-            self.m_output_dir,
-        ))
+        return hash(
+            (
+                self.m_folder,
+                self.m_op,
+                self.m_stripes,
+                self.m_blocksize,
+                self.m_output_dir,
+            )
+        )
 
 
 class CompareVariantsRequest:
@@ -1273,9 +1282,7 @@ class CompareVariantsRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -1358,14 +1365,16 @@ class CompareVariantsRequest:
         return False
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_archive_folder,
-            self.m_op,
-            self.m_stripes,
-            self.m_blocksize,
-            self.m_all,
-            self.m_output_dir,
-        ))
+        return hash(
+            (
+                self.m_archive_folder,
+                self.m_op,
+                self.m_stripes,
+                self.m_blocksize,
+                self.m_all,
+                self.m_output_dir,
+            )
+        )
 
 
 # Backward compatibility alias for existing test imports and internal callers
@@ -1485,9 +1494,7 @@ class CompareCliParser:
                 )
 
         if not f_tokens:
-            raise CompareCliParseError(
-                "Missing required positional argument: <folder>"
-            )
+            raise CompareCliParseError("Missing required positional argument: <folder>")
 
         f_folder_tok = f_tokens[0]
         if f_folder_tok.startswith("-"):
@@ -1574,9 +1581,7 @@ class CompareCliParser:
                         f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise CompareCliParseError(
-                        "Output directory path cannot be empty."
-                    )
+                    raise CompareCliParseError("Output directory path cannot be empty.")
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2
@@ -1613,9 +1618,7 @@ class CompareCliParser:
 
         f_archive_folder = f_archive_folder_tok.strip()
         if not f_archive_folder:
-            raise CompareCliParseError(
-                "Archive folder path cannot be empty."
-            )
+            raise CompareCliParseError("Archive folder path cannot be empty.")
 
         f_op: str = "both"
         f_stripes: int = 4
@@ -1676,9 +1679,7 @@ class CompareCliParser:
             f_tok = f_remaining_tokens[f_rem_idx]
             if f_tok == "--all":
                 if f_all_seen:
-                    raise CompareCliParseError(
-                        "Duplicate '--all' option specified."
-                    )
+                    raise CompareCliParseError("Duplicate '--all' option specified.")
                 f_all = True
                 f_all_seen = True
                 f_rem_idx += 1
@@ -1697,9 +1698,7 @@ class CompareCliParser:
                         f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise CompareCliParseError(
-                        "Output directory path cannot be empty."
-                    )
+                    raise CompareCliParseError("Output directory path cannot be empty.")
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2

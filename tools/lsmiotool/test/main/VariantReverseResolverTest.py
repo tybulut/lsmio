@@ -186,7 +186,9 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertIsNone(VariantReverseResolver.resolve("output-native"))
         self.assertIsNone(VariantReverseResolver.resolve("outputs_native"))
         self.assertIsNone(VariantReverseResolver.resolve("archive"))
-        self.assertIsNone(VariantReverseResolver.resolve("outputs-native-footer:badrole"))
+        self.assertIsNone(
+            VariantReverseResolver.resolve("outputs-native-footer:badrole")
+        )
         self.assertIsNone(VariantReverseResolver.resolve("outputs-native-footer::run"))
 
     def testVariantResolutionResultNamedTuple(self) -> None:
@@ -218,7 +220,9 @@ class VariantReverseResolverTest(unittest.TestCase):
 
     def testVersionedRunAndBaseResolution(self) -> None:
         """Validates reverse resolution and formatting of versioned directories."""
-        r_run = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d:run")
+        r_run = VariantReverseResolver.resolve(
+            "outputs-native-version-main-a1b2c3d:run"
+        )
         self.assertIsNotNone(r_run)
         self.assertEqual(r_run.backend, "native")
         self.assertEqual(r_run.variant, "version-main-a1b2c3d")
@@ -226,7 +230,9 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertIsNone(r_run.collision)
         self.assertEqual(r_run.display_label, "main (a1b2c3d)")
 
-        r_base = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d:base")
+        r_base = VariantReverseResolver.resolve(
+            "outputs-native-version-main-a1b2c3d:base"
+        )
         self.assertIsNotNone(r_base)
         self.assertEqual(r_base.backend, "native")
         self.assertEqual(r_base.variant, "version-main-a1b2c3d")
@@ -236,7 +242,9 @@ class VariantReverseResolverTest(unittest.TestCase):
 
     def testVersionedBranchWithSanitizedSpecialCharacters(self) -> None:
         """Validates that sanitized branches with internal hyphens format correctly."""
-        r = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfix-1-a1b2c3d:run")
+        r = VariantReverseResolver.resolve(
+            "outputs-native-version-tybulut-bugfix-1-a1b2c3d:run"
+        )
         self.assertIsNotNone(r)
         self.assertEqual(r.variant, "version-tybulut-bugfix-1-a1b2c3d")
         self.assertEqual(r.display_label, "tybulut-bugfix-1 (a1b2c3d)")
@@ -256,7 +264,9 @@ class VariantReverseResolverTest(unittest.TestCase):
 
     def testVersionedWithVariant(self) -> None:
         """Validates reverse resolution and formatting of versioned directories with variants (Variation B.1)."""
-        r_run = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfixes-437400d-legacy:run")
+        r_run = VariantReverseResolver.resolve(
+            "outputs-native-version-tybulut-bugfixes-437400d-legacy:run"
+        )
         self.assertIsNotNone(r_run)
         self.assertEqual(r_run.backend, "native")
         self.assertEqual(r_run.variant, "version-tybulut-bugfixes-437400d-legacy")
@@ -264,7 +274,9 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertIsNone(r_run.collision)
         self.assertEqual(r_run.display_label, "tybulut-bugfixes (437400d) [legacy]")
 
-        r_base = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfixes-437400d-legacy:base")
+        r_base = VariantReverseResolver.resolve(
+            "outputs-native-version-tybulut-bugfixes-437400d-legacy:base"
+        )
         self.assertIsNotNone(r_base)
         self.assertEqual(r_base.backend, "native")
         self.assertEqual(r_base.variant, "version-tybulut-bugfixes-437400d-legacy")
@@ -272,21 +284,29 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertIsNone(r_base.collision)
         self.assertEqual(r_base.display_label, "tybulut-bugfixes (437400d) [legacy]")
 
-        r_footer_pread = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d-footer-pread:run")
+        r_footer_pread = VariantReverseResolver.resolve(
+            "outputs-native-version-main-a1b2c3d-footer-pread:run"
+        )
         self.assertIsNotNone(r_footer_pread)
         self.assertEqual(r_footer_pread.display_label, "main (a1b2c3d) [footer-pread]")
 
-        r_non_native = VariantReverseResolver.resolve("outputs-rocksdb-version-main-a1b2c3d-legacy:run")
+        r_non_native = VariantReverseResolver.resolve(
+            "outputs-rocksdb-version-main-a1b2c3d-legacy:run"
+        )
         self.assertIsNotNone(r_non_native)
         self.assertEqual(r_non_native.display_label, "rocksdb-main (a1b2c3d) [legacy]")
 
-        r_digit_var = VariantReverseResolver.resolve("outputs-native-version-main-a1b2c3d-pool-8")
+        r_digit_var = VariantReverseResolver.resolve(
+            "outputs-native-version-main-a1b2c3d-pool-8"
+        )
         self.assertIsNotNone(r_digit_var)
         self.assertEqual(r_digit_var.display_label, "main (a1b2c3d) [pool-8]")
 
     def testVersionedWithVariantCollision(self) -> None:
         """Validates that collision suffixes on versioned runs with variants append cleanly."""
-        r = VariantReverseResolver.resolve("outputs-native-version-tybulut-bugfixes-437400d-legacy:run-1")
+        r = VariantReverseResolver.resolve(
+            "outputs-native-version-tybulut-bugfixes-437400d-legacy:run-1"
+        )
         self.assertIsNotNone(r)
         self.assertEqual(r.collision, "1")
         self.assertEqual(r.display_label, "tybulut-bugfixes (437400d) [legacy]-1")
@@ -316,7 +336,9 @@ class VariantReverseResolverTest(unittest.TestCase):
         self.assertEqual(r4.variant, "manoff-pool-8")
         self.assertIsNone(r4.collision)
 
-        r5 = VariantReverseResolver.resolve("outputs-native-footer-pread-manoff-pool-8:run-2")
+        r5 = VariantReverseResolver.resolve(
+            "outputs-native-footer-pread-manoff-pool-8:run-2"
+        )
         self.assertIsNotNone(r5)
         self.assertEqual(r5.variant, "footer-pread-manoff-pool-8")
         self.assertEqual(r5.role, "run")
@@ -327,9 +349,27 @@ class VariantReverseResolverTest(unittest.TestCase):
         """Validates reverse resolution of streamlined variants based on new engine defaults."""
         cases = [
             ("outputs-native-mmap-btree", "native", "mmap-btree", None, "mmap-btree"),
-            ("outputs-native-mmap-vsort:run", "native", "mmap-vsort", "run", "mmap-vsort"),
-            ("outputs-native-prealloc-vsort:run-1", "native", "prealloc-vsort", "run", "prealloc-vsort-1"),
-            ("outputs-native-pool-8-mmap", "native", "pool-8-mmap", None, "pool-8-mmap"),
+            (
+                "outputs-native-mmap-vsort:run",
+                "native",
+                "mmap-vsort",
+                "run",
+                "mmap-vsort",
+            ),
+            (
+                "outputs-native-prealloc-vsort:run-1",
+                "native",
+                "prealloc-vsort",
+                "run",
+                "prealloc-vsort-1",
+            ),
+            (
+                "outputs-native-pool-8-mmap",
+                "native",
+                "pool-8-mmap",
+                None,
+                "pool-8-mmap",
+            ),
             ("outputs-native-legacy", "native", "legacy", None, "legacy"),
             ("outputs-native-no-pread", "native", "no-pread", None, "no-pread"),
         ]
@@ -344,4 +384,3 @@ class VariantReverseResolverTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -45,7 +45,9 @@ class ArchiveEnginePairTest(unittest.TestCase):
         """Asserts that on clean directory, resolvePairTargetDirectories returns synchronized unsuffixed paths."""
         with tempfile.TemporaryDirectory() as temp_dir:
             arm_id = "native-footer"
-            run_target, base_target = ArchiveEngine.resolvePairTargetDirectories(temp_dir, arm_id)
+            run_target, base_target = ArchiveEngine.resolvePairTargetDirectories(
+                temp_dir, arm_id
+            )
 
             expected_run = os.path.join(temp_dir, "outputs-native-footer:run")
             expected_base = os.path.join(temp_dir, "outputs-native-footer:base")
@@ -177,15 +179,21 @@ class ArchiveEnginePairTest(unittest.TestCase):
                     f_arm_id="native-footer",
                 )
 
-                mock_agg_cls.assert_called_once_with(os.path.abspath(source_dir), f_scale="variants")
-                mock_agg.generateReports.assert_called_once_with(f_out_dir=os.path.abspath(source_dir))
+                mock_agg_cls.assert_called_once_with(
+                    os.path.abspath(source_dir), f_scale="variants"
+                )
+                mock_agg.generateReports.assert_called_once_with(
+                    f_out_dir=os.path.abspath(source_dir)
+                )
                 self.assertTrue(os.path.exists(target))
 
     def testVersionedArmIdPairResolution(self) -> None:
         """Validates that versioned arm IDs resolve to symmetrical :run and :base targets."""
         with tempfile.TemporaryDirectory() as temp_dir:
             arm_id = "native-version-main-a1b2c3d"
-            run_tgt, base_tgt = ArchiveEngine.resolvePairTargetDirectories(temp_dir, arm_id)
+            run_tgt, base_tgt = ArchiveEngine.resolvePairTargetDirectories(
+                temp_dir, arm_id
+            )
             self.assertEqual(run_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:run"))
             self.assertEqual(base_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:base"))
 
@@ -193,7 +201,9 @@ class ArchiveEnginePairTest(unittest.TestCase):
         """Validates that versioned arm IDs with variant suffix resolve symmetrically."""
         with tempfile.TemporaryDirectory() as temp_dir:
             arm_id = "native-version-tybulut-bugfixes-437400d-legacy"
-            run_tgt, base_tgt = ArchiveEngine.resolvePairTargetDirectories(temp_dir, arm_id)
+            run_tgt, base_tgt = ArchiveEngine.resolvePairTargetDirectories(
+                temp_dir, arm_id
+            )
             self.assertEqual(run_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:run"))
             self.assertEqual(base_tgt, os.path.join(temp_dir, f"outputs-{arm_id}:base"))
 
@@ -211,4 +221,3 @@ class ArchiveEnginePairTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -426,9 +426,7 @@ class InstalledSmoke(unittest.TestCase):
         from lsmiotool.lib.run import RunPlanner, RunRequest
         from lsmiotool.lib.site import EnvironmentResolver
 
-        f_test_dir = os.path.realpath(
-            os.path.join(self.m_work_dir, "test_valid_alloc")
-        )
+        f_test_dir = os.path.realpath(os.path.join(self.m_work_dir, "test_valid_alloc"))
         shutil.rmtree(f_test_dir, ignore_errors=True)
         os.makedirs(f_test_dir, exist_ok=True)
 

@@ -48,7 +48,12 @@ class VariantCatalogueTest(unittest.TestCase):
         "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
         "footer-btree": (
             "footer-btree",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-memtable", "btree"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+            ),
         ),
         "map": ("map", ("--lsmio-no-autotune", "--lsmio-memtable", "map")),
         "vsort": ("vsort", ("--lsmio-no-autotune", "--lsmio-memtable", "vector-sort")),
@@ -62,11 +67,22 @@ class VariantCatalogueTest(unittest.TestCase):
             "footer-manoff",
             ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-manual-offset"),
         ),
-        "wbuf-512m": ("wbuf-512m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912")),
-        "wbuf-32m": ("wbuf-32m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432")),
+        "wbuf-512m": (
+            "wbuf-512m",
+            ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912"),
+        ),
+        "wbuf-32m": (
+            "wbuf-32m",
+            ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432"),
+        ),
         "footer-wbuf-512m": (
             "footer-wbuf-512m",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "536870912"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-wbuffer",
+                "536870912",
+            ),
         ),
         "footer-btree-prealloc": (
             "footer-btree-prealloc",
@@ -84,7 +100,12 @@ class VariantCatalogueTest(unittest.TestCase):
         "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
         "footer-mmap": (
             "footer-mmap",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap", "--lsmio-no-pread"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
         ),
         "footer-pread": (
             "footer-pread",
@@ -94,7 +115,10 @@ class VariantCatalogueTest(unittest.TestCase):
         "sync": ("sync", ("--lsmio-no-autotune", "--sync")),
         "pool-8": ("pool-8", ("--lsmio-no-autotune", "--lsmio-pool", "8")),
         "flush": ("flush", ("--lsmio-no-autotune", "--lsmio-always-flush")),
-        "batch-2048": ("batch-2048", ("--lsmio-no-autotune", "--lsmio-batch-size", "2048")),
+        "batch-2048": (
+            "batch-2048",
+            ("--lsmio-no-autotune", "--lsmio-batch-size", "2048"),
+        ),
         "manoff-prealloc": (
             "manoff-prealloc",
             ("--lsmio-no-autotune", "--lsmio-manual-offset", "--lsmio-prealloc"),
@@ -111,7 +135,12 @@ class VariantCatalogueTest(unittest.TestCase):
         ),
         "footer-wbuf-32m": (
             "footer-wbuf-32m",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "33554432"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-wbuffer",
+                "33554432",
+            ),
         ),
         "footer-pool-8": (
             "footer-pool-8",
@@ -533,8 +562,16 @@ class VariantCatalogueTest(unittest.TestCase):
             "pool-8-mmap",
         ):
             rec = VariantCatalogue.resolve(key)
-            self.assertIn("--lsmio-no-pread", rec.flags, f"Variant '{key}' must include '--lsmio-no-pread'")
-            self.assertIn("--lsmio-mmap", rec.flags, f"Variant '{key}' must include '--lsmio-mmap'")
+            self.assertIn(
+                "--lsmio-no-pread",
+                rec.flags,
+                f"Variant '{key}' must include '--lsmio-no-pread'",
+            )
+            self.assertIn(
+                "--lsmio-mmap",
+                rec.flags,
+                f"Variant '{key}' must include '--lsmio-mmap'",
+            )
 
     def testFlushVariantExactFlag(self) -> None:
         """Assert INV-ARCH-4: 'flush' maps strictly to '--lsmio-always-flush'."""

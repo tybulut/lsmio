@@ -300,9 +300,7 @@ class ArchiveTest(unittest.TestCase):
 
             # Case 1: Target does not exist
             t0 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
-            self.assertEqual(
-                t0, os.path.join(temp_dir, "outputs-native-footer-btree")
-            )
+            self.assertEqual(t0, os.path.join(temp_dir, "outputs-native-footer-btree"))
 
             # Case 2: Base target exists -> suffix -1
             os.makedirs(t0)
@@ -365,13 +363,9 @@ class ArchiveTest(unittest.TestCase):
                 f_dest_root=dest_root,
                 f_arm_id="native-footer",
             )
-            expected_target_2 = os.path.join(
-                dest_root, "outputs-native-footer-1"
-            )
+            expected_target_2 = os.path.join(dest_root, "outputs-native-footer-1")
             self.assertEqual(target_2, expected_target_2)
-            self.assertTrue(
-                os.path.isfile(os.path.join(target_2, "rank-1.db"))
-            )
+            self.assertTrue(os.path.isfile(os.path.join(target_2, "rank-1.db")))
             self.assertEqual(os.listdir(source_dir), [])
 
             # Failure modes: non-existent source directory raises ArchiveError
@@ -427,9 +421,7 @@ class ArchiveTest(unittest.TestCase):
             # Verify target directory created with payload
             expected_target = os.path.join(dest_root, "outputs-native-footer")
             self.assertTrue(os.path.isdir(expected_target))
-            self.assertTrue(
-                os.path.isfile(os.path.join(expected_target, "output.log"))
-            )
+            self.assertTrue(os.path.isfile(os.path.join(expected_target, "output.log")))
 
             # Verify source directory cleanly recreated
             self.assertTrue(os.path.isdir(source_dir))
@@ -445,9 +437,7 @@ class ArchiveTest(unittest.TestCase):
             )
             ret_code2 = main_inst2.run()
             self.assertEqual(ret_code2, 0)
-            expected_target2 = os.path.join(
-                dest_root, "outputs-native-footer-1"
-            )
+            expected_target2 = os.path.join(dest_root, "outputs-native-footer-1")
             self.assertTrue(os.path.isdir(expected_target2))
             self.assertEqual(os.listdir(source_dir), [])
 
@@ -505,12 +495,16 @@ class ArchiveDestResolverTest(unittest.TestCase):
         )
         # Root-relative shorthand resolves against the benchmark root
         self.assertEqual(
-            resolveArchiveDest("/bm", f_scale="small", f_explicit="/lsmio-archive/custom"),
+            resolveArchiveDest(
+                "/bm", f_scale="small", f_explicit="/lsmio-archive/custom"
+            ),
             "/bm/lsmio-archive/custom",
         )
         # A similarly-named absolute path is NOT relocated (path-component match)
         self.assertEqual(
-            resolveArchiveDest("/bm", f_scale="small", f_explicit="/lsmio-archive-other"),
+            resolveArchiveDest(
+                "/bm", f_scale="small", f_explicit="/lsmio-archive-other"
+            ),
             "/lsmio-archive-other",
         )
         # Relative paths resolve against the benchmark root, as bmtool does

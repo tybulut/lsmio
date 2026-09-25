@@ -359,7 +359,9 @@ class RunPlanTest(unittest.TestCase):
             f_req_archer2_backends, self.m_archer2_profile
         )
         self.assertEqual(f_plan_archer2_backends.scheduled_points[0].qos, "standard")
-        self.assertEqual(f_plan_archer2_backends.scheduled_points[-1].walltime, "48:00:00")
+        self.assertEqual(
+            f_plan_archer2_backends.scheduled_points[-1].walltime, "48:00:00"
+        )
         self.assertEqual(f_plan_archer2_backends.scheduled_points[-1].qos, "long")
 
         # PBS (Isambard): small shape -> fixed "06:00:00", queue arm, pmem 8G, pvmem 8G, chunks=nodes, ncpus=1
@@ -586,7 +588,9 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(RunPlanner.SCALE_ALIASES.get("baseline"), "variants")
         f_baseline_points = RunPlanner.SCALE_MATRICES["variants"]
         self.assertEqual(len(f_baseline_points), 1)
-        self.assertEqual(f_baseline_points, (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),))
+        self.assertEqual(
+            f_baseline_points, (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),)
+        )
         self.assertEqual(f_baseline_points[0].tasks, 8)
         self.assertEqual(f_baseline_points[0].ppn, 1)
         self.assertEqual(f_baseline_points[0].nodes, 8)
@@ -631,7 +635,9 @@ class RunPlanTest(unittest.TestCase):
 
     def testManifestDeserializationLegacyWithoutVariant(self) -> None:
         """Tasks 2.4.2 (INV-ARCH-9): Asserts manifest deserialization succeeds when variant is omitted."""
-        f_plan = RunPlanner.createPlan(RunRequest("lsmio", "local"), self.m_viking_profile)
+        f_plan = RunPlanner.createPlan(
+            RunRequest("lsmio", "local"), self.m_viking_profile
+        )
         f_json_str = ManifestSerializer.serialize(f_plan)
         self.assertNotIn('"variant"', f_json_str)
 
@@ -648,38 +654,56 @@ class RunPlanTest(unittest.TestCase):
     def testWalltimeScalingAndOverride(self) -> None:
         """Asserts walltime scales at 120 min/run + 2h headroom, and explicit overrides are respected."""
         # 1. Single variant: total_runs = 2 -> 2 + 2*2 = 6 hours (06:00:00)
-        f_req_1 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",))
+        f_req_1 = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer",)
+        )
         f_plan_1 = RunPlanner.createPlan(f_req_1, self.m_viking_profile)
         self.assertEqual(f_plan_1.scheduled_points[0].walltime, "06:00:00")
 
         # 2. Three variants: total_runs = 4 -> 2 + 4*2 = 10 hours (10:00:00)
-        f_req_3 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap"))
+        f_req_3 = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap")
+        )
         f_plan_3 = RunPlanner.createPlan(f_req_3, self.m_viking_profile)
         self.assertEqual(f_plan_3.scheduled_points[0].walltime, "10:00:00")
 
         # 3. Five variants: total_runs = 6 -> 2 + 6*2 = 14 hours (14:00:00)
-        f_req_5 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap", "autotune", "manoff"))
+        f_req_5 = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_variants=("footer", "btree", "mmap", "autotune", "manoff"),
+        )
         f_plan_5 = RunPlanner.createPlan(f_req_5, self.m_viking_profile)
         self.assertEqual(f_plan_5.scheduled_points[0].walltime, "14:00:00")
 
         # 4. Large variant count clamped to 48 hours ceiling: 24 variants -> total_runs = 25 -> 2 + 25*2 = 52 -> 48h (48:00:00)
         f_vars_24 = tuple(f"var_{i}" for i in range(24))
-        f_req_24 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=f_vars_24)
+        f_req_24 = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=f_vars_24
+        )
         f_plan_24 = RunPlanner.createPlan(f_req_24, self.m_viking_profile)
         self.assertEqual(f_plan_24.scheduled_points[0].walltime, "48:00:00")
 
         # 5. Explicit wallhour override
-        f_req_override = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=12)
+        f_req_override = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=12
+        )
         f_plan_override = RunPlanner.createPlan(f_req_override, self.m_viking_profile)
         self.assertEqual(f_plan_override.scheduled_points[0].walltime, "12:00:00")
 
         # 6. Explicit wallhour override clamped to 48 hours
-        f_req_override_clamp = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=60)
-        f_plan_override_clamp = RunPlanner.createPlan(f_req_override_clamp, self.m_viking_profile)
+        f_req_override_clamp = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=60
+        )
+        f_plan_override_clamp = RunPlanner.createPlan(
+            f_req_override_clamp, self.m_viking_profile
+        )
         self.assertEqual(f_plan_override_clamp.scheduled_points[0].walltime, "48:00:00")
 
         # 7. Explicit walltime string override
-        f_req_hms = RunRequest(f_target="lsmio", f_scale="baseline", f_walltime="05:30:00")
+        f_req_hms = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_walltime="05:30:00"
+        )
         f_plan_hms = RunPlanner.createPlan(f_req_hms, self.m_viking_profile)
         self.assertEqual(f_plan_hms.scheduled_points[0].walltime, "05:30:00")
 
@@ -799,21 +823,25 @@ class RunPlanTest(unittest.TestCase):
                     RunRequest("lsmio", "custom", f_walltime="25:00:00"),
                     self.m_archer2_profile,
                 )
-            self.assertIn("exceeds maximum allowed 64 nodes for long QoS", str(ctx.exception))
+            self.assertIn(
+                "exceeds maximum allowed 64 nodes for long QoS", str(ctx.exception)
+            )
 
     def testNonArcher2ProfileKeepsConfiguredQosAt48h(self) -> None:
         """Verify non-ARCHER2 Slurm profile (Viking) with 48h walltime keeps its configured QoS (T2)."""
         # Viking has qos: null in environments.json
         f_req_viking_48h = RunRequest("lsmio", "local", f_walltime="48:00:00")
-        f_plan_viking_48h = RunPlanner.createPlan(f_req_viking_48h, self.m_viking_profile)
+        f_plan_viking_48h = RunPlanner.createPlan(
+            f_req_viking_48h, self.m_viking_profile
+        )
         self.assertEqual(f_plan_viking_48h.scheduled_points[0].walltime, "48:00:00")
         self.assertIsNone(f_plan_viking_48h.scheduled_points[0].qos)
 
         # Viking with wallhour=48
         f_req_viking_wh48 = RunRequest("lsmio", "small", f_wallhour=48)
-        f_plan_viking_wh48 = RunPlanner.createPlan(f_req_viking_wh48, self.m_viking_profile)
+        f_plan_viking_wh48 = RunPlanner.createPlan(
+            f_req_viking_wh48, self.m_viking_profile
+        )
         for sp in f_plan_viking_wh48.scheduled_points:
             self.assertEqual(sp.walltime, "48:00:00")
             self.assertIsNone(sp.qos)
-
-

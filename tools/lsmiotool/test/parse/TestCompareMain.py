@@ -100,9 +100,7 @@ class TestCompareMain(TestCase):
         self.assertEqual(cm_cli_nodes.submode, "nodes")
         self.assertIsInstance(cm_cli_nodes.m_delegate, main.CompareNodesMain)
 
-        cm_cli_var = main.CompareMain(
-            ["variants", "/tmp/archive2", "read", "4", "1M"]
-        )
+        cm_cli_var = main.CompareMain(["variants", "/tmp/archive2", "read", "4", "1M"])
         self.assertEqual(cm_cli_var.submode, "variants")
         self.assertIsInstance(cm_cli_var.m_delegate, main.CompareVariantsMain)
 

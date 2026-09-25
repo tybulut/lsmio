@@ -53,6 +53,7 @@ from lsmiotool.lib.main import (
     RunMain,
 )
 
+
 class ProfileSchemaTest(unittest.TestCase):
     """Unit tests for environments.json schema and profile.py validation."""
 

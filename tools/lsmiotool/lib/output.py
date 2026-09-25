@@ -496,7 +496,10 @@ class LsmioAggOutput(IorAggOutput):
             f_scale: Optional benchmark scale (e.g. 'variants'; 'baseline' is the
                 deprecated spelling of the same scale)
         """
-        if f_scale is not None and str(f_scale).strip().lower() in ("variants", "baseline"):
+        if f_scale is not None and str(f_scale).strip().lower() in (
+            "variants",
+            "baseline",
+        ):
             self._node_counts = ["8"]
         super().__init__(f_output_dir)
 

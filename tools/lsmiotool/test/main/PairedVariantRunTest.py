@@ -54,8 +54,18 @@ class PairedVariantRunTest(unittest.TestCase):
             display_label="footer-1",
             run_dir="/tmp/archive/outputs-native-footer:run-1",
             base_dir="/tmp/archive/outputs-native-footer:base-1",
-            run_metadata={"backend": "native", "variant": "footer", "role": "run", "collision": "1"},
-            base_metadata={"backend": "native", "variant": "footer", "role": "base", "collision": "1"},
+            run_metadata={
+                "backend": "native",
+                "variant": "footer",
+                "role": "run",
+                "collision": "1",
+            },
+            base_metadata={
+                "backend": "native",
+                "variant": "footer",
+                "role": "base",
+                "collision": "1",
+            },
         )
 
         self.assertEqual(pair.backend, "native")
@@ -202,7 +212,10 @@ class PairedVariantRunTest(unittest.TestCase):
             )
 
             self.assertTrue(os.path.isfile(chart_path))
-            self.assertIn("compare-variants-delta-archive-read-4-1M.png", os.path.basename(chart_path))
+            self.assertIn(
+                "compare-variants-delta-archive-read-4-1M.png",
+                os.path.basename(chart_path),
+            )
             self.assertGreater(os.path.getsize(chart_path), 0)
 
 

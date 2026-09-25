@@ -449,14 +449,18 @@ class RunRequest:
                 f"scale must be a non-empty string, got: {f_scale!r}"
             )
         if not isinstance(f_mode, str) or not f_mode.strip():
-            raise PlanValidationError(f"mode must be a non-empty string, got: {f_mode!r}")
+            raise PlanValidationError(
+                f"mode must be a non-empty string, got: {f_mode!r}"
+            )
         m_mode = f_mode.strip().lower()
 
         if f_backends is not None:
             if not isinstance(f_backends, (list, tuple)):
                 raise PlanValidationError("backends must be a sequence of strings")
             m_backends: Optional[Tuple[str, ...]] = tuple(
-                b.strip().lower() for b in f_backends if isinstance(b, str) and b.strip()
+                b.strip().lower()
+                for b in f_backends
+                if isinstance(b, str) and b.strip()
             )
             if not m_backends and m_mode == "backends":
                 m_backends = ("adios2", "native", "rocksdb")
@@ -595,7 +599,9 @@ class RunRequest:
         """Computed archive action: explicit archive override if set, else True if any variant is requested."""
         if self.m_archive is not None:
             return self.m_archive
-        if any(v is not None and v not in ("", "default", "base") for v in self.m_variants):
+        if any(
+            v is not None and v not in ("", "default", "base") for v in self.m_variants
+        ):
             return True
         return len(self.m_variants) > 1
 
@@ -644,7 +650,9 @@ class RunRequest:
             f_dict["backends"] = list(self.m_backends)
         if self.variant is not None:
             f_dict["variant"] = self.variant
-        if self.m_variants and (len(self.m_variants) > 1 or self.m_variants != (self.variant,)):
+        if self.m_variants and (
+            len(self.m_variants) > 1 or self.m_variants != (self.variant,)
+        ):
             f_dict["variants"] = list(self.m_variants)
         if self.m_archive is not None:
             f_dict["archive"] = self.m_archive
@@ -1529,7 +1537,10 @@ class RunPlanner:
                 getattr(f_request, "mode", "standard") == "backends"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
             ):
-                n_backends = len(getattr(f_request, "backends", None) or ("adios2", "native", "rocksdb"))
+                n_backends = len(
+                    getattr(f_request, "backends", None)
+                    or ("adios2", "native", "rocksdb")
+                )
                 time_per_backend = max(1, f_sp.nodes // 3)
                 calc_hours = 2 + (n_backends * time_per_backend)
                 f_wallhour = max(1, min(48, calc_hours))
@@ -1540,7 +1551,11 @@ class RunPlanner:
                 and f_resource_policy.walltime_policy == "slurm_nodes"
                 and getattr(f_request, "versioned", False)
             ):
-                var_cnt = sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
+                var_cnt = sum(
+                    1
+                    for v in f_request.variants
+                    if v not in (None, "", "default", "base")
+                )
                 total_runs = (1 + var_cnt) if var_cnt > 0 else 2
                 calculated_hours = 2 + (total_runs * 2)
                 f_wallhour = max(4, min(48, calculated_hours))
@@ -1549,10 +1564,16 @@ class RunPlanner:
                 f_scale == "variants"
                 and f_target == "lsmio"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
-                and any(v not in (None, "", "default", "base") for v in f_request.variants)
+                and any(
+                    v not in (None, "", "default", "base") for v in f_request.variants
+                )
             ):
                 # 120 min per run (maximum safety margin for 64K workloads) + 2 hours base headroom
-                total_runs = 1 + sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
+                total_runs = 1 + sum(
+                    1
+                    for v in f_request.variants
+                    if v not in (None, "", "default", "base")
+                )
                 calculated_hours = 2 + (total_runs * 2)
                 f_wallhour = max(4, min(48, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
@@ -2173,7 +2194,9 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 f"Missing keys in request: {sorted(f_missing_req)}"
             )
-        f_extra_req = f_req_keys - (cls.REQUIRED_REQUEST_KEYS | cls.OPTIONAL_REQUEST_KEYS)
+        f_extra_req = f_req_keys - (
+            cls.REQUIRED_REQUEST_KEYS | cls.OPTIONAL_REQUEST_KEYS
+        )
         if f_extra_req:
             raise ManifestValidationError(
                 f"Unexpected extra keys in request: {sorted(f_extra_req)}"
@@ -4240,7 +4263,9 @@ class RunOrchestrator:
             object.__setattr__(self, "m_views", ())
 
             # Purge legacy LSM_DIR_OBASE on job start to avoid ghost files from earlier aborted runs
-            if "LSM_DIR_OBASE" in os.environ and os.path.isdir(os.environ["LSM_DIR_OBASE"]):
+            if "LSM_DIR_OBASE" in os.environ and os.path.isdir(
+                os.environ["LSM_DIR_OBASE"]
+            ):
                 for f_entry in os.listdir(os.environ["LSM_DIR_OBASE"]):
                     f_entry_path = os.path.join(os.environ["LSM_DIR_OBASE"], f_entry)
                     if os.path.isdir(f_entry_path):
@@ -4254,12 +4279,20 @@ class RunOrchestrator:
             for f_cur_variant in f_request.variants:
                 f_clean_setup = f_request.setup or "NATIVE-M"
                 f_arm_id = ArchiveEngine.resolveArmId(f_clean_setup, f_cur_variant)
-                f_target_dir = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}")
-                f_target_dir_run = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}:run")
+                f_target_dir = os.path.join(
+                    os.path.abspath(f_dest_root), f"outputs-{f_arm_id}"
+                )
+                f_target_dir_run = os.path.join(
+                    os.path.abspath(f_dest_root), f"outputs-{f_arm_id}:run"
+                )
 
                 # Resumption check (INV-MULTI-3, INV-PAIR-7)
-                if f_request.resume and (os.path.isdir(f_target_dir) or os.path.isdir(f_target_dir_run)):
-                    f_var_label = f_cur_variant if f_cur_variant is not None else "default"
+                if f_request.resume and (
+                    os.path.isdir(f_target_dir) or os.path.isdir(f_target_dir_run)
+                ):
+                    f_var_label = (
+                        f_cur_variant if f_cur_variant is not None else "default"
+                    )
                     f_msg = f"[RESUME] Skipping variant {f_var_label!r}"
                     if f_eff_reporter is not None:
                         try:
@@ -4314,7 +4347,9 @@ class RunOrchestrator:
                 try:
                     f_artifact_store.allocateRun(f_plan)
                 except ArtifactError as f_err:
-                    raise OrchestrationError(f"Failed to allocate run: {f_err}") from f_err
+                    raise OrchestrationError(
+                        f"Failed to allocate run: {f_err}"
+                    ) from f_err
 
                 if f_eff_reporter is not None:
                     try:
@@ -4353,7 +4388,12 @@ class RunOrchestrator:
 
                 # Fail-fast check
                 if (
-                    f_view.state in (OverallRunState.FAILED, OverallRunState.CANCELLED, OverallRunState.INTERRUPTED)
+                    f_view.state
+                    in (
+                        OverallRunState.FAILED,
+                        OverallRunState.CANCELLED,
+                        OverallRunState.INTERRUPTED,
+                    )
                     or self.exitCode != 0
                 ):
                     object.__setattr__(self, "m_views", tuple(f_executed_views))
@@ -4362,7 +4402,9 @@ class RunOrchestrator:
                 # Auto-archiving
                 if f_request.effective_archive:
                     f_source_dir = None
-                    if "LSM_DIR_OBASE" in os.environ and os.path.isdir(os.environ["LSM_DIR_OBASE"]):
+                    if "LSM_DIR_OBASE" in os.environ and os.path.isdir(
+                        os.environ["LSM_DIR_OBASE"]
+                    ):
                         f_source_dir = os.environ["LSM_DIR_OBASE"]
                     elif (
                         hasattr(f_artifact_store, "layout")
@@ -4370,12 +4412,19 @@ class RunOrchestrator:
                         and os.path.isdir(f_artifact_store.layout.runRoot)
                     ):
                         f_source_dir = f_artifact_store.layout.runRoot
-                    elif hasattr(f_artifact_store, "run_root") and os.path.isdir(f_artifact_store.run_root):
+                    elif hasattr(f_artifact_store, "run_root") and os.path.isdir(
+                        f_artifact_store.run_root
+                    ):
                         f_source_dir = f_artifact_store.run_root
                     else:
                         f_source_dir = os.path.join(f_benchmark_root, "outputs")
 
-                    f_role = "run" if f_cur_variant not in ("", "default", "base") and f_cur_variant is not None else None
+                    f_role = (
+                        "run"
+                        if f_cur_variant not in ("", "default", "base")
+                        and f_cur_variant is not None
+                        else None
+                    )
                     ArchiveEngine.executeArchive(
                         f_source_dir=f_source_dir,
                         f_dest_root=f_dest_root,

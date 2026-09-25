@@ -55,22 +55,16 @@ class ArchiveRequest:
         f_dest: Optional[str] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
-            raise ArchiveError(
-                f"target must be a non-empty string, got: {f_target!r}"
-            )
+            raise ArchiveError(f"target must be a non-empty string, got: {f_target!r}")
         if not isinstance(f_scale, str) or not f_scale.strip():
-            raise ArchiveError(
-                f"scale must be a non-empty string, got: {f_scale!r}"
-            )
+            raise ArchiveError(f"scale must be a non-empty string, got: {f_scale!r}")
         if f_variant is not None and (
             not isinstance(f_variant, str) or not f_variant.strip()
         ):
             raise ArchiveError(
                 f"variant must be a non-empty string or None, got: {f_variant!r}"
             )
-        if f_dest is not None and (
-            not isinstance(f_dest, str) or not f_dest.strip()
-        ):
+        if f_dest is not None and (not isinstance(f_dest, str) or not f_dest.strip()):
             raise ArchiveError(
                 f"dest must be a non-empty string or None, got: {f_dest!r}"
             )
@@ -85,9 +79,7 @@ class ArchiveRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -186,7 +178,11 @@ def resolveArchiveDest(
         f_norm_scale = "variants"
 
     if f_norm_mode == "backends":
-        return os.path.join(f_root, "backends", f_norm_scale) if f_norm_scale else os.path.join(f_root, "backends")
+        return (
+            os.path.join(f_root, "backends", f_norm_scale)
+            if f_norm_scale
+            else os.path.join(f_root, "backends")
+        )
     if f_norm_scale == "variants":
         return os.path.join(f_root, "variants")
     return os.path.join(f_root, "baseline")
@@ -222,7 +218,9 @@ class ArchiveEngine:
     ) -> Tuple[str, str]:
         """Atomically resolves synchronized target paths for paired (:run, :base) archives."""
         if not f_dest_dir or not str(f_dest_dir).strip():
-            raise ArchiveError(f"dest_dir must be a non-empty path, got: {f_dest_dir!r}")
+            raise ArchiveError(
+                f"dest_dir must be a non-empty path, got: {f_dest_dir!r}"
+            )
         if not isinstance(f_arm_id, str) or not f_arm_id.strip():
             raise ArchiveError(f"arm_id must be a non-empty string, got: {f_arm_id!r}")
 
@@ -234,8 +232,9 @@ class ArchiveEngine:
             return (str(run_base), str(base_base))
 
         suffix = 1
-        while (dest_root / f"outputs-{f_arm_id}:run-{suffix}").exists() or \
-              (dest_root / f"outputs-{f_arm_id}:base-{suffix}").exists():
+        while (dest_root / f"outputs-{f_arm_id}:run-{suffix}").exists() or (
+            dest_root / f"outputs-{f_arm_id}:base-{suffix}"
+        ).exists():
             suffix += 1
 
         return (
@@ -252,7 +251,9 @@ class ArchiveEngine:
     ) -> str:
         """Calculates collision-free archive destination path, returning str (INV-PAIR-8)."""
         if not f_dest_dir or not str(f_dest_dir).strip():
-            raise ArchiveError(f"dest_dir must be a non-empty path, got: {f_dest_dir!r}")
+            raise ArchiveError(
+                f"dest_dir must be a non-empty path, got: {f_dest_dir!r}"
+            )
         dest_root = Path(os.path.abspath(str(f_dest_dir)))
         if f_role:
             base_name = f"outputs-{f_arm_id}:{f_role}"
@@ -277,7 +278,9 @@ class ArchiveEngine:
     ) -> str:
         """Atomically moves f_source_dir to collision-free target, returning str (INV-PAIR-8)."""
         if not f_source_dir or not str(f_source_dir).strip():
-            raise ArchiveError(f"source_dir must be a non-empty path, got: {f_source_dir!r}")
+            raise ArchiveError(
+                f"source_dir must be a non-empty path, got: {f_source_dir!r}"
+            )
         abs_source = Path(os.path.abspath(str(f_source_dir)))
         if not abs_source.exists():
             raise ArchiveError(f"Active output directory does not exist: {abs_source}")
@@ -306,7 +309,9 @@ class ArchiveEngine:
         try:
             shutil.move(str(abs_source), str(target_path))
         except Exception as err:
-            raise ArchiveError(f"Failed to move {abs_source} to {target_path}: {err}") from err
+            raise ArchiveError(
+                f"Failed to move {abs_source} to {target_path}: {err}"
+            ) from err
 
         try:
             abs_source.mkdir(parents=True, exist_ok=True)
@@ -328,10 +333,14 @@ class ArchiveEngine:
     ) -> str:
         """Copies staged baseline output to destination archive, returning str path (INV-PAIR-8)."""
         if not f_source_dir or not str(f_source_dir).strip():
-            raise ArchiveError(f"source_dir must be a non-empty path, got: {f_source_dir!r}")
+            raise ArchiveError(
+                f"source_dir must be a non-empty path, got: {f_source_dir!r}"
+            )
         abs_source = Path(os.path.abspath(str(f_source_dir)))
         if not abs_source.exists():
-            raise ArchiveError(f"Staged baseline directory does not exist: {abs_source}")
+            raise ArchiveError(
+                f"Staged baseline directory does not exist: {abs_source}"
+            )
         if not abs_source.is_dir():
             raise ArchiveError(f"Staged baseline path is not a directory: {abs_source}")
 
@@ -357,7 +366,9 @@ class ArchiveEngine:
         try:
             shutil.copytree(str(abs_source), str(target_path))
         except Exception as err:
-            raise ArchiveError(f"Failed to replicate {abs_source} to {target_path}: {err}") from err
+            raise ArchiveError(
+                f"Failed to replicate {abs_source} to {target_path}: {err}"
+            ) from err
         return str(target_path)
 
     @classmethod
@@ -369,7 +380,9 @@ class ArchiveEngine:
         f_arm_id: str,
     ) -> Tuple[str, str]:
         """Atomically archives paired variant run (:run) and staged baseline (:base)."""
-        target_run, target_base = cls.resolvePairTargetDirectories(f_dest_root, f_arm_id)
+        target_run, target_base = cls.resolvePairTargetDirectories(
+            f_dest_root, f_arm_id
+        )
         cls.executeArchive(
             f_source_dir=f_run_source_dir,
             f_dest_root=f_dest_root,

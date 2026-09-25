@@ -2815,7 +2815,9 @@ class RunOrchestratorTest(unittest.TestCase):
         f_fake_runner.m_on_submit_callback = on_submit
         f_fake_runner.m_submit_job_ids = ["9001", "9002"]
 
-        f_req = RunRequest("lsmio", "baseline", f_variants=["footer", "manoff"], f_archive=False)
+        f_req = RunRequest(
+            "lsmio", "baseline", f_variants=["footer", "manoff"], f_archive=False
+        )
         f_view = f_orch.execute(
             f_req,
             f_site=self.m_viking_profile,
@@ -2865,7 +2867,9 @@ class RunOrchestratorTest(unittest.TestCase):
             self.assertEqual(len(f_fake_runner.m_submit_calls), 0)
             self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
             self.assertEqual(f_orch.exitCode, 0)
-            f_resume_logs = [l for l in f_reporter.lines if "[RESUME] Skipping variant 'footer'" in l]
+            f_resume_logs = [
+                l for l in f_reporter.lines if "[RESUME] Skipping variant 'footer'" in l
+            ]
             self.assertTrue(len(f_resume_logs) > 0)
 
     def testAutoArchiveMultiVariant(self) -> None:
@@ -2895,8 +2899,15 @@ class RunOrchestratorTest(unittest.TestCase):
             f_fake_runner.m_on_submit_callback = on_submit
             f_fake_runner.m_submit_job_ids = ["9101"]
 
-            with patch("lsmiotool.lib.archive.ArchiveEngine.executeArchive") as f_mock_archive:
-                f_req = RunRequest("lsmio", "baseline", f_variants=["footer", "manoff"], f_out_dir=f_tmpdir)
+            with patch(
+                "lsmiotool.lib.archive.ArchiveEngine.executeArchive"
+            ) as f_mock_archive:
+                f_req = RunRequest(
+                    "lsmio",
+                    "baseline",
+                    f_variants=["footer", "manoff"],
+                    f_out_dir=f_tmpdir,
+                )
                 f_view = f_orch.execute(
                     f_req,
                     f_site=self.m_viking_profile,
@@ -2929,4 +2940,3 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(len(f_fake_runner.m_submit_calls), 1)
         self.assertEqual(len(f_orch.views), 1)
         self.assertNotEqual(f_orch.exitCode, 0)
-
