@@ -1145,6 +1145,40 @@ class SlurmAdapterTest(unittest.TestCase):
         self.assertEqual(f_lines_archer2[15], f"#SBATCH --error={self.m_error_path}")
         self.assertEqual(f_lines_archer2[16], "set -euo pipefail")
 
+        # 3b. Archer2 with explicit f_qos="long" or point.qos="long"
+        f_script_archer2_long = SlurmScriptRenderer.render(
+            f_point=self.m_small_point,
+            f_profile=self.m_archer2_profile,
+            f_worker_executable=self.m_worker_path,
+            f_manifest_path=self.m_manifest_path,
+            f_job_name=self.m_job_name,
+            f_output_path=self.m_output_path,
+            f_error_path=self.m_error_path,
+            f_account=self.m_account,
+            f_mail_user=self.m_mail_user,
+            f_mail_mode=SlurmMailMode.END_FAIL,
+            f_walltime="48:00:00",
+            f_qos="long",
+        )
+        self.assertIn("#SBATCH --qos=long", f_script_archer2_long)
+        self.assertNotIn("#SBATCH --qos=standard", f_script_archer2_long)
+
+        # 3c. Archer2 with point having qos="long"
+        class PointWithQos:
+            tasks = 1
+            nodes = 1
+            ppn = 1
+            qos = "long"
+
+        f_dirs_pt_long = SlurmScriptRenderer.renderDirectives(
+            f_point=PointWithQos(),
+            f_profile=self.m_archer2_profile,
+            f_job_name=self.m_job_name,
+            f_output_path=self.m_output_path,
+            f_error_path=self.m_error_path,
+        )
+        self.assertIn("#SBATCH --qos=long", f_dirs_pt_long)
+
     def testRejectsPbsRawAndInjectedMailModes(self) -> None:
         """Asserts rejection of PbsMailMode, raw strings, cross-backend, or injected mail values."""
         # 1. PbsMailMode passed to Slurm renderer
@@ -1753,6 +1787,42 @@ class SlurmAdapterTest(unittest.TestCase):
 
             with self.assertRaises(SchedulerError):
                 f_adapter.cancelAndConfirm("123456", f_poll_interval=f_bad_val)
+
+    def testParseWalltimeToSeconds(self) -> None:
+        """Verify SlurmScriptRenderer.parseWalltimeToSeconds across all formats and rejections (S4)."""
+        from lsmiotool.lib.scheduler import parseWalltimeToSeconds
+
+        # Standard HH:MM:SS
+        self.assertEqual(parseWalltimeToSeconds("24:00:00"), 86400)
+        self.assertEqual(parseWalltimeToSeconds("24:30:00"), 88200)
+        self.assertEqual(parseWalltimeToSeconds("25:00:00"), 90000)
+        self.assertEqual(parseWalltimeToSeconds("96:00:00"), 345600)
+
+        # Days D-HH:MM:SS
+        self.assertEqual(parseWalltimeToSeconds("1-00:00:00"), 86400)
+        self.assertEqual(parseWalltimeToSeconds("1-01:00:00"), 90000)
+        self.assertEqual(parseWalltimeToSeconds("4-00:00:00"), 345600)
+
+        # Days D-HH:MM
+        self.assertEqual(parseWalltimeToSeconds("1-00:30"), 88200)
+        self.assertEqual(parseWalltimeToSeconds("0-12:00"), 43200)
+
+        # Days D-HH
+        self.assertEqual(parseWalltimeToSeconds("1-00"), 86400)
+        self.assertEqual(parseWalltimeToSeconds("2-00"), 172800)
+
+        # Minutes MM:SS and MM
+        self.assertEqual(parseWalltimeToSeconds("30:00"), 1800)
+        self.assertEqual(parseWalltimeToSeconds("45"), 2700)
+
+        # Classmethod parity
+        self.assertEqual(SlurmScriptRenderer.parseWalltimeToSeconds("24:00:00"), 86400)
+        self.assertEqual(SlurmScriptRenderer.parse_walltime_to_seconds("24:00:00"), 86400)
+
+        # Invalid formats raise ValueError
+        for bad_time in ("invalid", "24:60:00", "24:00:60", "1-25:00:00", "-1:00:00", "", "00:00:00"):
+            with self.assertRaises(ValueError):
+                parseWalltimeToSeconds(bad_time)
 
 
 if __name__ == "__main__":

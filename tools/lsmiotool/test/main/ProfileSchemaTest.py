@@ -52,39 +52,6 @@ from lsmiotool.lib.main import (
     TestMain,
     RunMain,
 )
-import lsmiotool.test.main.LoaderTest as loader_test_mod
-
-
-def _patchedTestAllPreexistingModulesAndTestsRemainPresentExactlyOnce(
-    self: unittest.TestCase,
-) -> None:
-    import lsmiotool.test as test_package
-    from lsmiotool.test.main.LoaderTest import _PREEXISTING_MODULE_NAMES, _testIds
-
-    current_modules = tuple(
-        module
-        for module in test_package.lsmiotool_tests
-        if module.__name__ in _PREEXISTING_MODULE_NAMES
-    )
-    preexisting_test_ids = _testIds(test_package._buildTestSuite(current_modules))
-    all_test_ids = _testIds(test_package.suite())
-
-    self.assertEqual(
-        tuple(module.__name__ for module in current_modules),
-        _PREEXISTING_MODULE_NAMES,
-    )
-    self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
-    self.assertEqual(len(preexisting_test_ids), 77)
-    self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-    self.assertTrue(len(all_test_ids) >= 84)
-    self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
-    self.assertTrue(set(preexisting_test_ids).issubset(set(all_test_ids)))
-
-
-loader_test_mod.LoaderTest.testAllPreexistingModulesAndTestsRemainPresentExactlyOnce = (
-    _patchedTestAllPreexistingModulesAndTestsRemainPresentExactlyOnce
-)
-
 
 class ProfileSchemaTest(unittest.TestCase):
     """Unit tests for environments.json schema and profile.py validation."""

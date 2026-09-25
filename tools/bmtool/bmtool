@@ -107,6 +107,38 @@ if [ -z "$BM_SCRIPT" -o -z "$BM_DIRNAME" ]; then
   fatal_error "Failed to determine the script environment"
 fi
 
+# ARCHER2 auto-sync: compute nodes cannot mount /home. If running from /home on ARCHER2,
+# automatically mirror tools to /work and re-exec with original arguments so batch scripts
+# and compute node allocations operate cleanly on the /work filesystem.
+if [ -z "${BM_RELOCATED:-}" ] && [ "${1:-}" = "run" ]; then
+  if groups 2>/dev/null | grep -qw archer2; then
+    _should_relocate=0
+    case "$BM_DIRNAME" in
+      /home*|/home2*) _should_relocate=1 ;;
+    esac
+    if [ -n "${BM_HOME_PREFIXES:-}" ]; then
+      _old_ifs=$IFS; IFS=:; set -f
+      for _pref in ${BM_HOME_PREFIXES:-}; do
+        [ -n "$_pref" ] || continue
+        case "$BM_DIRNAME" in "$_pref"*) _should_relocate=1 ;; esac
+      done
+      set +f; IFS=$_old_ifs
+    fi
+    if [ "$_should_relocate" -eq 1 ]; then
+      : "${ARCHER2_WORK_ROOT:=/work/e281/e281/${USER:-$(id -un)}}"
+      _work_tools="$ARCHER2_WORK_ROOT/tools"
+      _src_tools="$(realpath "$BM_DIRNAME/..")"
+      echo "[bmtool] ARCHER2 notice: compute nodes cannot access /home."
+      echo "[bmtool] Auto-syncing tools to $_work_tools..."
+      mkdir -p "$_work_tools"
+      rsync -a --delete "$_src_tools/" "$_work_tools/" --exclude="*.log" --exclude="*.err"
+      echo "[bmtool] Handing off execution to $_work_tools/bmtool/bmtool..."
+      export BM_RELOCATED=1
+      exec "$_work_tools/bmtool/bmtool" "$@"
+    fi
+  fi
+fi
+
 . $BM_DIRNAME/jobs/lsmio-variants.in.sh
 
 # Early help intercept: exit 0 before SB_EMAIL / SB_ACCOUNT validation (INV-MULTI-7)

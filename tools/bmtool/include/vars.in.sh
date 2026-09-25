@@ -22,7 +22,9 @@ elif hostname | grep -qw viking2; then
   HPC_ENV="viking2"
 elif groups | grep -qw archer2; then
   HPC_ENV="archer2"
-  export PROJECT_DIR=/work/e281/e281/$USER/usr
+  : "${ARCHER2_WORK_ROOT:=/work/e281/e281/${USER:-$(id -un)}}"
+  export ARCHER2_WORK_ROOT
+  export PROJECT_DIR="$ARCHER2_WORK_ROOT/usr"
 elif hostname | grep -qE '^xci|^nid'; then
   HPC_ENV="isambard"
   HPC_MANAGER="pbs"
@@ -49,8 +51,10 @@ elif [ "$HPC_ENV" = "viking2" ]; then
   export LUSTRE_HDD_PATH=/mnt/scratch/users/$USER
   export LUSTRE_SSD_PATH=/mnt/scratch/users/$USER
 elif [ "$HPC_ENV" = "archer2" ]; then
-  export LUSTRE_HDD_PATH=/work/e281/e281/$USER
-  export LUSTRE_SSD_PATH=/scratch-nvme/e281/e281/$USER
+  : "${ARCHER2_WORK_ROOT:=/work/e281/e281/${USER:-$(id -un)}}"
+  export ARCHER2_WORK_ROOT
+  export LUSTRE_HDD_PATH="$ARCHER2_WORK_ROOT"
+  export LUSTRE_SSD_PATH="/scratch-nvme/e281/e281/${USER:-$(id -un)}"
 else
   unknown_hpc_environment
 fi

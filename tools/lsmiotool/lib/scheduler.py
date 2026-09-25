@@ -1495,6 +1495,80 @@ class SchedulerAdapter:
         )
 
 
+def parseWalltimeToSeconds(f_time_str: str) -> int:
+    """
+    Parse a Slurm walltime string into total seconds.
+    Supported Slurm formats:
+      - MM
+      - MM:SS
+      - HH:MM:SS
+      - D-HH
+      - D-HH:MM
+      - D-HH:MM:SS
+    Raises ValueError if format is invalid, components are negative or non-numeric,
+    or minutes/seconds/hours are out of range.
+    """
+    if not isinstance(f_time_str, str) or not f_time_str.strip():
+        raise ValueError(f"Walltime must be a non-empty string, got: {f_time_str!r}")
+
+    f_s = f_time_str.strip()
+    days = 0
+    if "-" in f_s:
+        day_parts = f_s.split("-", 1)
+        if not day_parts[0].isdigit():
+            raise ValueError(f"Invalid days component in walltime: {f_time_str!r}")
+        days = int(day_parts[0])
+        f_s = day_parts[1]
+
+    time_parts = f_s.split(":")
+    for p in time_parts:
+        if not p.isdigit() or len(p) == 0:
+            raise ValueError(f"Non-numeric component in walltime: {f_time_str!r}")
+
+    int_parts = [int(p) for p in time_parts]
+    if len(int_parts) == 1:
+        if "-" in f_time_str:
+            hours = int_parts[0]
+            minutes = 0
+            seconds = 0
+            if hours >= 24:
+                raise ValueError(f"Hours must be < 24 in D-HH format: {f_time_str!r}")
+        else:
+            hours = 0
+            minutes = int_parts[0]
+            seconds = 0
+    elif len(int_parts) == 2:
+        if "-" in f_time_str:
+            hours = int_parts[0]
+            minutes = int_parts[1]
+            seconds = 0
+            if hours >= 24:
+                raise ValueError(f"Hours must be < 24 in D-HH:MM format: {f_time_str!r}")
+            if minutes >= 60:
+                raise ValueError(f"Minutes must be < 60 in walltime: {f_time_str!r}")
+        else:
+            hours = 0
+            minutes = int_parts[0]
+            seconds = int_parts[1]
+            if seconds >= 60:
+                raise ValueError(f"Seconds must be < 60 in walltime: {f_time_str!r}")
+    elif len(int_parts) == 3:
+        hours = int_parts[0]
+        minutes = int_parts[1]
+        seconds = int_parts[2]
+        if "-" in f_time_str and hours >= 24:
+            raise ValueError(f"Hours must be < 24 in D-HH:MM:SS format: {f_time_str!r}")
+        if minutes >= 60 or seconds >= 60:
+            raise ValueError(f"Minutes and seconds must be < 60 in walltime: {f_time_str!r}")
+    else:
+        raise ValueError(f"Invalid walltime format (too many segments): {f_time_str!r}")
+
+    total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds
+    if total_seconds <= 0:
+        raise ValueError(f"Walltime must be strictly positive, got: {f_time_str!r}")
+    return total_seconds
+
+
 # -------------------------------------------------------------------------
 # Slurm Script Renderer
 # -------------------------------------------------------------------------
@@ -1526,6 +1600,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
 
     __slots__ = ()
 
+    parseWalltimeToSeconds = staticmethod(parseWalltimeToSeconds)
+    parse_walltime_to_seconds = staticmethod(parseWalltimeToSeconds)
+
     @classmethod
     def computeWalltime(cls, f_nodes: int) -> str:
         """Compute walltime string HH:MM:SS based on Slurm node formula: 2 + nodes // 3 hours."""
@@ -1550,6 +1627,7 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
         f_mail_user: Optional[str] = None,
         f_mail_mode: Optional[Union[SlurmMailMode, Any]] = SlurmMailMode.END_FAIL,
         f_walltime: Optional[str] = None,
+        f_qos: Optional[str] = None,
     ) -> List[str]:
         """Render Slurm #SBATCH directives in exact prescribed order."""
         if f_point is None:
@@ -1660,9 +1738,19 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
                     f_res_policy.partition, "partition"
                 )
                 f_directives.append(f"#SBATCH --partition={f_part}")
-            if getattr(f_res_policy, "qos", None) is not None:
-                f_qos = cls.validateQueueOrPartition(f_res_policy.qos, "qos")
-                f_directives.append(f"#SBATCH --qos={f_qos}")
+
+        # Resolve QoS: explicit parameter > point.qos > resource policy qos
+        f_effective_qos = f_qos
+        if f_effective_qos is None and hasattr(f_point, "qos") and f_point.qos is not None:
+            f_effective_qos = f_point.qos
+        elif f_effective_qos is None and f_res_policy is not None and getattr(f_res_policy, "qos", None) is not None:
+            f_effective_qos = f_res_policy.qos
+
+        if f_effective_qos is not None:
+            f_valid_qos = cls.validateQueueOrPartition(f_effective_qos, "qos")
+            f_directives.append(f"#SBATCH --qos={f_valid_qos}")
+
+        if f_res_policy is not None:
             if getattr(f_res_policy, "memory", None) is not None:
                 _checkNoControlChars(f_res_policy.memory, "memory")
                 _checkNoDirectiveInjection(f_res_policy.memory, "memory")
@@ -1696,6 +1784,7 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
             Union[WorkerExecutableValidator, Callable[[str], str]]
         ] = None,
         f_point_id: Optional[Any] = None,
+        f_qos: Optional[str] = None,
     ) -> str:
         """Render complete structured Slurm script from discrete parameters."""
         f_dirs = cls.renderDirectives(
@@ -1708,6 +1797,7 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
             f_mail_user=f_mail_user,
             f_mail_mode=f_mail_mode,
             f_walltime=f_walltime,
+            f_qos=f_qos,
         )
         f_resolved_point_id = (
             f_point_id
@@ -1749,6 +1839,9 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
             f_mail_user=f_spec.mail_user,
             f_mail_mode=f_spec.mail_mode or SlurmMailMode.END_FAIL,
             f_walltime=getattr(f_spec.resources, "walltime", None)
+            if f_spec.resources
+            else None,
+            f_qos=getattr(f_spec.resources, "qos", None)
             if f_spec.resources
             else None,
         )

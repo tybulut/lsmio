@@ -110,6 +110,12 @@ batch_run() {
     # On ARCHER2, standard QoS allows up to 24h; >24h requires qos=long (up to 96h).
     if [ "$HPC_ENV" = "archer2" ]; then
       if [ "$wallhour" -gt 24 ]; then
+        if [ "$wallhour" -gt 96 ]; then
+          fatal_error "Walltime ${wallhour}h exceeds maximum 96 hours for ARCHER2 long QoS"
+        fi
+        if [ "$nodes" -gt 64 ]; then
+          fatal_error "Nodes ($nodes) exceeds maximum 64 nodes for ARCHER2 long QoS"
+        fi
         SBATCH_EXTRA="--partition=standard --qos=long"
       else
         SBATCH_EXTRA="--partition=standard --qos=standard"

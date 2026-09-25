@@ -61,6 +61,57 @@ _LEGACY_PREFIX_MODULE_NAMES = (
     "lsmiotool.test.parse.TestParseLegacyMain",
 )
 
+_SUBSEQUENT_MODULE_NAMES = (
+    "lsmiotool.test.main.AllocationControllerTest",
+    "lsmiotool.test.main.ArchiveEnginePairTest",
+    "lsmiotool.test.main.ArchiveTest",
+    "lsmiotool.test.main.ArtifactStoreTest",
+    "lsmiotool.test.main.BmtoolRelocationTest",
+    "lsmiotool.test.main.CompareArchiveCliParserTest",
+    "lsmiotool.test.main.CompareCliParserTest",
+    "lsmiotool.test.main.CompareNodesTest",
+    "lsmiotool.test.main.CoverageContractTest",
+    "lsmiotool.test.main.DeltaBarPlotTest",
+    "lsmiotool.test.main.DispatchTest",
+    "lsmiotool.test.main.EndToEndRunTest",
+    "lsmiotool.test.main.EvidenceStoreTest",
+    "lsmiotool.test.main.InstalledLayoutTest",
+    "lsmiotool.test.main.InterruptionTest",
+    "lsmiotool.test.main.IorAdapterTest",
+    "lsmiotool.test.main.LauncherTest",
+    "lsmiotool.test.main.LmpAdapterTest",
+    "lsmiotool.test.main.LoaderTest",
+    "lsmiotool.test.main.LsmioAdapterTest",
+    "lsmiotool.test.main.LsmioSixCombinationIntegrationTest",
+    "lsmiotool.test.main.LustreConfiguratorTest",
+    "lsmiotool.test.main.ManifestTest",
+    "lsmiotool.test.main.ModuleAuthorityTest",
+    "lsmiotool.test.main.ModuleRendererTest",
+    "lsmiotool.test.main.PairedVariantRunTest",
+    "lsmiotool.test.main.ParseCliParserTest",
+    "lsmiotool.test.main.ParseMainTest",
+    "lsmiotool.test.main.PbsAdapterTest",
+    "lsmiotool.test.main.PbsRendererTest",
+    "lsmiotool.test.main.ProcessRunnerTest",
+    "lsmiotool.test.main.ProfileSchemaTest",
+    "lsmiotool.test.main.RankWorkerTest",
+    "lsmiotool.test.main.ResourceLocatorTest",
+    "lsmiotool.test.main.RunCliParserTest",
+    "lsmiotool.test.main.RunOrchestratorTest",
+    "lsmiotool.test.main.RunPlanTest",
+    "lsmiotool.test.main.SchedulerRendererTest",
+    "lsmiotool.test.main.SiteResolverTest",
+    "lsmiotool.test.main.SlurmAdapterTest",
+    "lsmiotool.test.main.StateReconcilerTest",
+    "lsmiotool.test.main.VariantCatalogueTest",
+    "lsmiotool.test.main.VariantReverseResolverTest",
+    "lsmiotool.test.main.VersionTest",
+    "lsmiotool.test.main.WorkerEntryTest",
+    "lsmiotool.test.parse.CompareArchiveMainTest",
+    "lsmiotool.test.parse.LsmioAggOutputTest",
+    "lsmiotool.test.parse.RunParseTest",
+)
+
 
 def _moduleInfo(f_name, f_is_package=False):
     return pkgutil.ModuleInfo(None, f_name, f_is_package)
@@ -214,10 +265,15 @@ class LoaderTest(unittest.TestCase):
         current_modules = tuple(
             module
             for module in test_package.lsmiotool_tests
-            if module.__name__ != "lsmiotool.test.main.LoaderTest"
+            if module.__name__ not in _SUBSEQUENT_MODULE_NAMES
         )
         preexisting_test_ids = _testIds(test_package._buildTestSuite(current_modules))
         all_test_ids = _testIds(test_package.suite())
+        added_test_ids = {
+            test_id
+            for test_id in all_test_ids
+            if any(test_id.startswith(f"{name}.") for name in _SUBSEQUENT_MODULE_NAMES)
+        }
 
         self.assertEqual(
             tuple(module.__name__ for module in current_modules),
@@ -226,13 +282,18 @@ class LoaderTest(unittest.TestCase):
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
         self.assertEqual(len(preexisting_test_ids), 77)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 85)
+        self.assertEqual(len(all_test_ids), 714)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),
-            set(all_test_ids)
-            - {test_id for test_id in all_test_ids if ".LoaderTest." in test_id},
+            set(all_test_ids) - added_test_ids,
         )
+        discovered_subsequent_modules = tuple(
+            module.__name__
+            for module in test_package.lsmiotool_tests
+            if module.__name__ in _SUBSEQUENT_MODULE_NAMES
+        )
+        self.assertEqual(discovered_subsequent_modules, _SUBSEQUENT_MODULE_NAMES)
 
     def testOrdinaryDiscoveryExcludesCtestInstalledSmoke(self) -> None:
         self.assertNotIn(

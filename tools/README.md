@@ -346,7 +346,8 @@ Before allocating a run root or interacting with the scheduler:
 - Typed mail mode directive: `#SBATCH --mail-type=END,FAIL`
 - Task distribution directive: `#SBATCH --distribution=cyclic:cyclic`
 - Viking / Viking2 memory directive: `#SBATCH --mem=8gb`
-- Archer2 partition & QoS directives: `#SBATCH -p standard`, `#SBATCH --qos=standard` (no memory directive)
+- Archer2 partition & QoS directives: `#SBATCH -p standard`, dynamic `#SBATCH --qos=standard` (walltime $\le 24\text{h}$) or `#SBATCH --qos=long` (walltime $> 24\text{h}$, up to $96\text{h}$, $\le 64$ nodes, 16 queued job limit) (no memory directive).
+- Archer2 `/work` filesystem & symlink rules: On ARCHER2, compute nodes cannot mount `/home`. Binaries install to `$ARCHER2_WORK_ROOT/usr` (via the `~/src/usr -> /work/...` symlink). If `bmtool` is invoked from `/home`, it automatically mirrors `tools/` to `$ARCHER2_WORK_ROOT/tools` (using `rsync -a --delete`), re-executes the `/work` copy preserving all CLI arguments, and submits batch jobs with `--chdir` targeting the `/work` tool directory to guarantee compute node accessibility.
 - Standard directives for job name, ntasks, nodes, ntasks-per-node, output, error, account, and mail-user.
 
 ---

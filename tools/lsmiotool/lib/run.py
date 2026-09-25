@@ -1586,6 +1586,34 @@ class RunPlanner:
                     f_pvmem=f_resource_policy.pvmem,
                 )
             elif f_profile.scheduler == SchedulerKind.SLURM:
+                from lsmiotool.lib.scheduler import parseWalltimeToSeconds
+
+                f_point_qos = f_resource_policy.qos
+                if f_walltime:
+                    try:
+                        f_walltime_sec = parseWalltimeToSeconds(f_walltime)
+                    except ValueError as f_err:
+                        raise PlanValidationError(
+                            f"Invalid walltime '{f_walltime}': {f_err}"
+                        ) from f_err
+
+                    # Data-driven QoS promotion: if configured qos is 'standard' and walltime exceeds 24h (86400s),
+                    # promote to 'long'.
+                    if f_point_qos == "standard" and f_walltime_sec > 86400:
+                        f_point_qos = "long"
+
+                    # Validate long QoS limits: walltime <= 96h, nodes <= 64
+                    # (Note: long QoS on ARCHER2 has a 16-queued-job limit vs 64 for standard)
+                    if f_point_qos == "long":
+                        if f_walltime_sec > 96 * 3600:
+                            raise PlanValidationError(
+                                f"Walltime '{f_walltime}' ({f_walltime_sec}s) exceeds maximum allowed 96 hours for long QoS"
+                            )
+                        if f_sp.nodes > 64:
+                            raise PlanValidationError(
+                                f"Scale point with {f_sp.nodes} nodes exceeds maximum allowed 64 nodes for long QoS"
+                            )
+
                 f_res = ScheduledPointResources(
                     f_walltime=f_walltime,
                     f_select_chunks=None,
@@ -1597,7 +1625,7 @@ class RunPlanner:
                     else None,
                     f_queue=f_resource_policy.queue,
                     f_partition=f_resource_policy.partition,
-                    f_qos=f_resource_policy.qos,
+                    f_qos=f_point_qos,
                     f_pmem=f_resource_policy.pmem,
                     f_pvmem=f_resource_policy.pvmem,
                 )
@@ -4717,6 +4745,7 @@ class RunOrchestrator:
                         f_mail_user=f_validated_email,
                         f_mail_mode=f_mail_mode_val,
                         f_walltime=f_point_res.walltime,
+                        f_qos=f_point_res.qos,
                     )
                 elif f_profile.scheduler == SchedulerKind.PBS:
                     f_mail_mode_val = PbsMailMode.ABE if f_point_res.mail_mode else None
