@@ -357,6 +357,8 @@ class ArchiveTest(unittest.TestCase):
             test_file_2 = os.path.join(source_dir, "rank-1.db")
             with open(test_file_2, "w") as f:
                 f.write("second payload")
+            # bmtool's clean-finish marker is dropped, not archived
+            open(os.path.join(source_dir, ".bm-job-ok"), "w").close()
 
             target_2 = ArchiveEngine.executeArchive(
                 f_source_dir=source_dir,
@@ -366,12 +368,26 @@ class ArchiveTest(unittest.TestCase):
             expected_target_2 = os.path.join(dest_root, "outputs-native-footer-1")
             self.assertEqual(target_2, expected_target_2)
             self.assertTrue(os.path.isfile(os.path.join(target_2, "rank-1.db")))
+            self.assertEqual(os.listdir(target_2), ["rank-1.db"])
             self.assertEqual(os.listdir(source_dir), [])
 
             # Failure modes: non-existent source directory raises ArchiveError
-            with self.assertRaises(ArchiveError):
+            with self.assertRaises(ArchiveError) as f_raised:
                 ArchiveEngine.executeArchive(
                     f_source_dir=os.path.join(temp_root, "nonexistent"),
+                    f_dest_root=dest_root,
+                    f_arm_id="native",
+                )
+            self.assertNotIn("outputs-failed", str(f_raised.exception))
+
+            # A failed bmtool job moved its outputs to a sibling outputs-failed: say so
+            f_failed_root = os.path.join(temp_root, "failed-job")
+            os.makedirs(os.path.join(f_failed_root, "outputs-failed"))
+            with self.assertRaisesRegex(
+                ArchiveError, r"failed benchmark job leaves its outputs in .*outputs-failed"
+            ):
+                ArchiveEngine.executeArchive(
+                    f_source_dir=os.path.join(f_failed_root, "outputs"),
                     f_dest_root=dest_root,
                     f_arm_id="native",
                 )

@@ -542,6 +542,8 @@ if [ "$BM_CMD" = "run" ]; then
       export BM_WALLHOUR_OVERRIDE
       export BM_VERSIONED
 
+      # run_baseline_job returns wait_for_completion's status, which is always 0, so the
+      # "|| fatal_error" below never fires on a failed job; see jobs/submission.in.sh
       if [ "$BM_VERSIONED" = "yes" ]; then
         export BM_PAIRED_RUN="yes"
         export DO_ARCHIVE="yes"
@@ -566,9 +568,21 @@ if [ "$BM_CMD" = "run" ]; then
         else
           DO_ARCHIVE="no"
         fi
+        # jobs/batch.in.sh writes this marker only when the job finishes cleanly. Without it
+        # the job failed (outputs moved to outputs-failed), was killed by Slurm (time limit,
+        # scancel, node failure) before it could move its partial outputs, or never ran.
+        # Removed before submitting, so a marker from an earlier run cannot count for this one
+        _bm_job_ok="$BM_PATH/lsmio/outputs/.bm-job-ok"
+        rm -f "$_bm_job_ok"
         echo "=== Submitting standalone baseline job ==="
         run_baseline_job "$BM_TYPE" || fatal_error "Baseline job failed during execution"
         if [ "$DO_ARCHIVE" = "yes" ]; then
+          if [ ! -f "$_bm_job_ok" ]; then
+            echo "ERROR: the benchmark job did not finish cleanly; nothing archived. See the job's logs, and $BM_PATH/lsmio/outputs-failed" >&2
+            echo "Any outputs left in $BM_PATH/lsmio/outputs are partial: do not archive them (bmtool archive); delete them before rerunning" >&2
+            exit 1
+          fi
+          rm -f "$_bm_job_ok"
           echo "=== Auto-archiving standalone baseline ==="
           . $BM_DIRNAME/include/archive.in.sh
         fi

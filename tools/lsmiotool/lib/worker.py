@@ -49,6 +49,19 @@ from lsmiotool.lib.cli import (
 from lsmiotool.lib.run import Combination
 
 
+# Open MPI session directory for Slurm launches. MPI_Init creates a per-node session directory
+# under /tmp by default; a full /tmp on one node fails MPI_Init there. Use RAM-backed /dev/shm
+# instead. Its files are small, but they include the shared-memory backing files, so they count
+# as RAM, and a killed rank's leftovers stay until the site cleans /dev/shm. Open MPI 4.x reads
+# orte_tmpdir_base, also under direct srun launch. The prte_ name is for Open MPI 5.x, where it
+# is likely a no-op under direct srun (the session directory then comes from Slurm's PMIx
+# server). Other MPI libraries ignore both.
+OMPI_TMPDIR_ENV: Mapping[str, str] = {
+    "OMPI_MCA_orte_tmpdir_base": "/dev/shm",
+    "PRTE_MCA_prte_tmpdir_base": "/dev/shm",
+}
+
+
 class WorkerError(Exception):
     """Base exception for all worker and process operations."""
 
@@ -1140,8 +1153,12 @@ class Launcher:
     Invariants:
     - Builds direct execution argv for shared benchmark workloads and rank workers.
     - Slurm (SchedulerKind.SLURM):
-        ['srun', '--export=ALL', '-n', str(point.tasks), '-N', str(point.nodes)]
+        ['srun', '--export=ALL', '--kill-on-bad-exit=1', '-n', str(point.tasks), '-N', str(point.nodes)]
         Appends ['-p', partition] if site profile defines a partition (e.g. Archer2 '-p standard').
+        --kill-on-bad-exit ends the step when one rank fails; otherwise the surviving ranks
+        block in MPI until the allocation's time limit.
+        The launch environment points the Open MPI session directory at /dev/shm (see
+        OMPI_TMPDIR_ENV) unless the caller's environment already sets it.
     - PBS (SchedulerKind.PBS):
         ['aprun', '-n', str(point.tasks), '-N', str(point.ppn)]
     - Direct / Fake (SchedulerKind.FAKE / SchedulerKind.DIRECT):
@@ -1531,7 +1548,7 @@ class Launcher:
             f_command: BenchmarkCommand, sequence of tokens, or non-empty string.
 
         Returns:
-            List of argument strings (e.g. ['srun', '--export=ALL', '-n', '8', '-N', '8', 'ior', ...]).
+            List of argument strings (e.g. ['srun', '--export=ALL', '--kill-on-bad-exit=1', '-n', '8', '-N', '8', 'ior', ...]).
 
         Raises:
             LauncherError: If argument construction or validation fails.
@@ -1546,6 +1563,7 @@ class Launcher:
             f_argv: List[str] = [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 str(f_tasks),
                 "-N",
@@ -1622,6 +1640,7 @@ class Launcher:
             f_argv: List[str] = [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 str(f_tasks),
                 "-N",
@@ -1650,6 +1669,29 @@ class Launcher:
             raise LauncherError(f"Unsupported scheduler kind: {f_scheduler}")
 
     build_rank_worker_argv = buildRankWorkerArgv
+
+    @classmethod
+    def _launchEnvironment(
+        cls,
+        f_profile: Any,
+        f_point: Any,
+        f_env: Optional[Mapping[str, str]],
+    ) -> Optional[Mapping[str, str]]:
+        """Return the launch environment: for Slurm, f_env (or os.environ) plus OMPI_TMPDIR_ENV.
+
+        A variable already set to a non-empty value is kept. Other schedulers get f_env unchanged.
+        """
+        from lsmiotool.lib.site import SchedulerKind
+
+        f_scheduler, _ = cls._resolveSchedulerAndPartition(f_profile, f_point)
+        if f_scheduler != SchedulerKind.SLURM:
+            return f_env
+
+        f_out: Dict[str, str] = dict(os.environ if f_env is None else f_env)
+        for f_key, f_val in OMPI_TMPDIR_ENV.items():
+            if not f_out.get(f_key):
+                f_out[f_key] = f_val
+        return f_out
 
     @classmethod
     def launchShared(
@@ -1707,6 +1749,7 @@ class Launcher:
                 or f_kwargs.get("environment")
                 or f_kwargs.get("f_environment")
             )
+        f_env = cls._launchEnvironment(f_profile, f_point, f_env)
 
         if f_log_path is None:
             f_log_path = (
@@ -1800,6 +1843,7 @@ class Launcher:
                 or f_kwargs.get("environment")
                 or f_kwargs.get("f_environment")
             )
+        f_env = cls._launchEnvironment(f_profile, f_point, f_env)
         if f_log_path is None:
             f_log_path = (
                 f_kwargs.get("log_path") or f_kwargs.get("log") or f_kwargs.get("f_log")

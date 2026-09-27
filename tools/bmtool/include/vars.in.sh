@@ -1,5 +1,7 @@
 ### BASE
-export DS=`date +"%F"`
+# Inside a job, BM_JOB_DS (set by jobs/batch.in.sh) keeps one date for every step and rank,
+# even after midnight, so a run's outputs stay in one date directory
+export DS=${BM_JOB_DS:-`date +"%F"`}
 
 unknown_hpc_environment() {
   echo "############################################"

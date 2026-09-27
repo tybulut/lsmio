@@ -1,6 +1,11 @@
 #
 
+# One date for the whole job: vars.in.sh takes DS from BM_JOB_DS, and srun --export=ALL
+# passes it to every rank. Unset first, so a value from the submitting shell is not reused
+unset BM_JOB_DS
 . $BM_DIRNAME/include/vars.in.sh
+BM_JOB_DS="$DS"
+export BM_JOB_DS
 . $BM_DIRNAME/include/dirs-vars.in.sh
 . $BM_DIRNAME/include/dirs-cleanup.in.sh
 
@@ -14,11 +19,15 @@ if [ "$BM_TYPE" = "ior" ]; then
 elif [ "$BM_TYPE" = "lsmio" ]; then
   JOB_BIN="$BM_DIRNAME/jobs/lsmio-benchmark.sh"
   . $BM_DIRNAME/jobs/lsmio-vars.in.sh
-  if [ -n "$BM_NUM_TASKS" ] && [ "$BM_SCALE" != "variants" ]; then
-    rm -rf "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" && mkdir -p "$LSM_DIR_OBASE"
+  if [ -n "$LSM_DIR_IDX" ] && [ "$BM_SCALE" != "variants" ]; then
+    rm -rf "${LSM_DIR_OBASE}/${LSM_DIR_IDX}" && mkdir -p "$LSM_DIR_OBASE"
   else
     rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
   fi
+  # Written only when this job finishes cleanly (plain branch below); bmtool's --archive
+  # step checks it, since it cannot see whether the job failed, timed out or was cancelled
+  BM_JOB_OK_MARKER="$LSM_DIR_OBASE/.bm-job-ok"
+  rm -f "$BM_JOB_OK_MARKER"
   . $BM_DIRNAME/jobs/lsmio-setup.in.sh
   . $BM_DIRNAME/jobs/lsmio-variants.in.sh
 elif [ "$BM_TYPE" = "lmp" ]; then
@@ -43,7 +52,40 @@ if [ "$BM_TYPE" = "lsmio" ]; then
   . $BM_DIRNAME/jobs/lsmio-variants.in.sh
 fi
 
+# Failed steps: BM_MATRIX_FAILED counts them in the last run_matrix_workload call;
+# BM_JOB_FAILED stays 1 once any step failed, and the job then exits 1 at the end
+BM_JOB_FAILED=0
+
+# Move a failed run's live outputs (SRC) out of the archive and the parsers' reach to
+# $BM_PATH/<ior|lmp|lsmio>/outputs-failed/NAME[-k]: --resume then reruns it, and the
+# partial logs stay available for troubleshooting
+bm_keep_failed_outputs() {
+  _kf_src="$1"
+  _kf_dest="$BM_PATH/$BM_TYPE/outputs-failed/$2"
+  # An empty run index would name the whole outputs tree, other runs included
+  case "$_kf_src" in
+    */) fatal_error "Cannot locate the failed run's outputs (empty run index): $_kf_src" ;;
+  esac
+  if [ -e "$_kf_dest" ]; then
+    _kf_k=1
+    while [ -e "${_kf_dest}-${_kf_k}" ]; do
+      _kf_k=$(( _kf_k + 1 ))
+    done
+    _kf_dest="${_kf_dest}-${_kf_k}"
+  fi
+  echo "WARNING: $BM_MATRIX_FAILED benchmark step(s) failed; keeping this run out of the reports and archive" >&2
+  if [ -d "$_kf_src" ]; then
+    # Left in place, the failed logs would be parsed or archived with the next successful run
+    mkdir -p "$(dirname "$_kf_dest")" && mv -- "$_kf_src" "$_kf_dest" \
+      || fatal_error "Cannot move failed outputs $_kf_src to $_kf_dest"
+    echo "WARNING: failed outputs kept in $_kf_dest" >&2
+  else
+    echo "WARNING: no outputs found at $_kf_src" >&2
+  fi
+}
+
 run_matrix_workload() {
+  BM_MATRIX_FAILED=0
   for rf in 4 16; do
     for bs in 1M 64K 8M; do
       if [ "$BM_TYPE" = "lmp" ]; then
@@ -64,6 +106,12 @@ run_matrix_workload() {
       else
         unknown_hpc_environment
       fi
+      _rmw_rc=$?
+      if [ "$_rmw_rc" -ne 0 ]; then
+        echo "WARNING: benchmark step c$rf/b$bs failed with exit code $_rmw_rc" >&2
+        BM_MATRIX_FAILED=$(( BM_MATRIX_FAILED + 1 ))
+        BM_JOB_FAILED=1
+      fi
 
       sleep 3
 
@@ -71,6 +119,7 @@ run_matrix_workload() {
       rm -rf -- "${DIRS_BM_BASE:?DIRS_BM_BASE is unset or empty}/c$rf/b$bs"/*
     done
   done
+  [ "$BM_MATRIX_FAILED" -eq 0 ]
 }
 
 if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
@@ -157,13 +206,18 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
     run_matrix_workload
 
     # 3. Stage Completed Task Outputs into Approach 2 Partitioned Archive
-    mkdir -p "${BM_ARCHIVE_DEST}/outputs-${ARM_ID}"
-    rm -rf "$TARGET_NODE_DIR"
-    if [ -d "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" ]; then
-      if cp -Rp "${LSM_DIR_OBASE}/${BM_NUM_TASKS}" "$TARGET_NODE_DIR"; then
-        rm -rf "${LSM_DIR_OBASE}/${BM_NUM_TASKS}"
-      else
-        echo "WARNING: Failed to copy ${LSM_DIR_OBASE}/${BM_NUM_TASKS} to $TARGET_NODE_DIR; preserving live directory" >&2
+    #    (a backend with any failed step stays out of it, so --resume reruns it)
+    if [ "$BM_MATRIX_FAILED" -ne 0 ]; then
+      bm_keep_failed_outputs "${LSM_DIR_OBASE}/${LSM_DIR_IDX}" "outputs-${ARM_ID}/${_node_idx}"
+    else
+      mkdir -p "${BM_ARCHIVE_DEST}/outputs-${ARM_ID}"
+      rm -rf "$TARGET_NODE_DIR"
+      if [ -d "${LSM_DIR_OBASE}/${LSM_DIR_IDX}" ]; then
+        if cp -Rp "${LSM_DIR_OBASE}/${LSM_DIR_IDX}" "$TARGET_NODE_DIR"; then
+          rm -rf "${LSM_DIR_OBASE}/${LSM_DIR_IDX}"
+        else
+          echo "WARNING: Failed to copy ${LSM_DIR_OBASE}/${LSM_DIR_IDX} to $TARGET_NODE_DIR; preserving live directory" >&2
+        fi
       fi
     fi
 
@@ -187,7 +241,11 @@ elif [ "$BM_VERSIONED" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   . $BM_DIRNAME/include/dirs-cleanup.in.sh
   rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
   . $BM_DIRNAME/jobs/lsmio-setup.in.sh
-  run_matrix_workload
+  if ! run_matrix_workload; then
+    # Every variant is compared against this baseline: stop rather than archive bad pairs
+    bm_keep_failed_outputs "$LSM_DIR_OBASE" "outputs-baseline-$DS"
+    fatal_error "Baseline run failed; nothing archived"
+  fi
 
   if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
     . $BM_DIRNAME/parse/lsmio-parse.sh
@@ -231,7 +289,13 @@ elif [ "$BM_VERSIONED" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
       export BM_VARIANT
       . $BM_DIRNAME/include/dirs-cleanup.in.sh
       . $BM_DIRNAME/jobs/lsmio-setup.in.sh
-      run_matrix_workload
+      if ! run_matrix_workload; then
+        # Neither role is archived, so --resume reruns this variant
+        bm_keep_failed_outputs "$LSM_DIR_OBASE" "outputs-${ARM_ID}:run"
+        mkdir -p "$LSM_DIR_OBASE"
+        . $BM_DIRNAME/include/dirs-cleanup.in.sh
+        continue
+      fi
 
       if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
         . $BM_DIRNAME/parse/lsmio-parse.sh
@@ -269,32 +333,36 @@ elif [ "$BM_VERSIONED" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
     export BM_VARIANT
     . $BM_DIRNAME/include/dirs-cleanup.in.sh
     . $BM_DIRNAME/jobs/lsmio-setup.in.sh
-    run_matrix_workload
+    if ! run_matrix_workload; then
+      # Neither role is archived, so a rerun repeats this pair
+      bm_keep_failed_outputs "$LSM_DIR_OBASE" "outputs-${ARM_ID}:run"
+      mkdir -p "$LSM_DIR_OBASE"
+    else
+      if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+        . $BM_DIRNAME/parse/lsmio-parse.sh
+      fi
 
-    if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
-      . $BM_DIRNAME/parse/lsmio-parse.sh
+      PAIR_SUFFIX=""
+      BASE_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
+      BASE_BASE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:base"
+      if [ -e "$BASE_RUN" ] || [ -e "$BASE_BASE" ]; then
+        k=1
+        while [ -e "${BASE_RUN}-${k}" ] || [ -e "${BASE_BASE}-${k}" ]; do
+          k=$(( k + 1 ))
+        done
+        PAIR_SUFFIX="-$k"
+      fi
+
+      BM_ROLE="run" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
+
+      # -----------------------------------------------------------------------
+      # Phase 3: Restore & Archive Golden Reference (Role :base)
+      # -----------------------------------------------------------------------
+      echo "=== [Intra-Allocation] Step 3: Archiving Reference Baseline (Role: base) ==="
+      rm -rf "$LSM_DIR_OBASE"
+      cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
+      BM_ROLE="base" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
     fi
-
-    PAIR_SUFFIX=""
-    BASE_RUN="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:run"
-    BASE_BASE="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}:base"
-    if [ -e "$BASE_RUN" ] || [ -e "$BASE_BASE" ]; then
-      k=1
-      while [ -e "${BASE_RUN}-${k}" ] || [ -e "${BASE_BASE}-${k}" ]; do
-        k=$(( k + 1 ))
-      done
-      PAIR_SUFFIX="-$k"
-    fi
-
-    BM_ROLE="run" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
-
-    # -------------------------------------------------------------------------
-    # Phase 3: Restore & Archive Golden Reference (Role :base)
-    # -------------------------------------------------------------------------
-    echo "=== [Intra-Allocation] Step 3: Archiving Reference Baseline (Role: base) ==="
-    rm -rf "$LSM_DIR_OBASE"
-    cp -Rp "$STAGING_BASE" "$LSM_DIR_OBASE"
-    BM_ROLE="base" ARM_ID="$ARM_ID" BM_PAIR_SUFFIX="$PAIR_SUFFIX" . $BM_DIRNAME/include/archive.in.sh
 
     rm -rf "$STAGING_BASE"
     . $BM_DIRNAME/include/dirs-cleanup.in.sh
@@ -307,7 +375,11 @@ elif [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   . $BM_DIRNAME/include/dirs-cleanup.in.sh
   rm -rf "$LSM_DIR_OBASE" && mkdir -p "$LSM_DIR_OBASE"
   . $BM_DIRNAME/jobs/lsmio-setup.in.sh
-  run_matrix_workload
+  if ! run_matrix_workload; then
+    # Every variant is compared against this baseline: stop rather than archive bad pairs
+    bm_keep_failed_outputs "$LSM_DIR_OBASE" "outputs-baseline-$DS"
+    fatal_error "Baseline run failed; nothing archived"
+  fi
 
   # Aggregate metrics and generate lsm-report.csv prior to staging
   if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
@@ -337,7 +409,12 @@ elif [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
     BM_VARIANT="$_v"
     export BM_VARIANT
     . $BM_DIRNAME/jobs/lsmio-setup.in.sh
-    run_matrix_workload
+    if ! run_matrix_workload; then
+      # Neither role is archived, so --resume reruns this variant
+      bm_keep_failed_outputs "$LSM_DIR_OBASE" "outputs-${ARM_ID}:run"
+      mkdir -p "$LSM_DIR_OBASE"
+      continue
+    fi
 
     # Aggregate metrics and generate lsm-report.csv prior to archiving variant run
     if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
@@ -364,10 +441,44 @@ elif [ "$BM_PAIRED_RUN" = "yes" ] && [ "$BM_TYPE" = "lsmio" ]; then
   rm -rf "$STAGING_BASE"
   . $BM_DIRNAME/include/dirs-cleanup.in.sh
 else
-  run_matrix_workload
-  if [ "$BM_TYPE" = "lsmio" ] && [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
-    . $BM_DIRNAME/parse/lsmio-parse.sh
+  if run_matrix_workload; then
+    if [ "$BM_TYPE" = "lsmio" ]; then
+      if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+        . $BM_DIRNAME/parse/lsmio-parse.sh
+      fi
+      # Only bmtool's standalone variants --archive step reads it
+      if [ "$BM_SCALE" = "variants" ]; then
+        : > "$BM_JOB_OK_MARKER"
+      fi
+    fi
+  elif [ "$BM_TYPE" = "lsmio" ]; then
+    # bmtool may archive $LSM_DIR_OBASE after this job (--archive) without seeing its exit
+    # status, so move the failed run out first
+    if [ "$BM_SCALE" = "variants" ]; then
+      # $LSM_DIR_OBASE holds only this run, so there is no report to make. Not recreated,
+      # so archive.in.sh stops on it
+      bm_keep_failed_outputs "$LSM_DIR_OBASE" "outputs-variants-$DS"
+    else
+      # Scaling runs share $LSM_DIR_OBASE across concurrencies: move this one only, then
+      # rebuild the report so it no longer lists the moved run
+      bm_keep_failed_outputs "${LSM_DIR_OBASE}/${LSM_DIR_IDX}" "outputs-${LSM_DIR_IDX}-$DS"
+      if [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
+        . $BM_DIRNAME/parse/lsmio-parse.sh
+      fi
+    fi
+  elif [ "$BM_TYPE" = "ior" ]; then
+    # Keep the failed run out of ior-parse.sh's reach. Only this run's date directory:
+    # the index directory also holds earlier runs
+    bm_keep_failed_outputs "$IOR_DIR_OUTPUT" "outputs-${IOR_DIR_IDX}-$DS"
+  elif [ "$BM_TYPE" = "lmp" ]; then
+    bm_keep_failed_outputs "$LMP_DIR_OUTPUT" "outputs-${LMP_DIR_IDX}-$DS"
   fi
+fi
+
+# Report failed steps to Slurm/PBS (job state FAILED, failure mail) instead of a clean exit
+if [ "$BM_JOB_FAILED" -ne 0 ]; then
+  echo "ERROR: one or more benchmark steps failed; see the WARNING lines above" >&2
+  exit 1
 fi
 
 

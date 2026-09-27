@@ -92,6 +92,12 @@ def batch_job_orchestration(
         os.makedirs(lsm_outputs, exist_ok=True)
     rf_list: List[int] = [16, 4]
     bs_list: List[str] = ["8M", "1M", "64K"]
+    # Failed steps, as in batch.in.sh: run the rest, then fail the whole orchestration
+    failed_steps: List[str] = []
+    # One date for every step, as in batch.in.sh: the benchmark scripts' vars.in.sh takes DS
+    # from BM_JOB_DS, so a run crossing midnight stays in one date directory
+    step_env: Dict[str, str] = dict(os.environ)
+    step_env["BM_JOB_DS"] = time.strftime("%Y-%m-%d")
     for rf in rf_list:
         for bs in bs_list:
             if bm_type == "lmp":
@@ -105,19 +111,21 @@ def batch_job_orchestration(
                 lmp_reaxff = os.path.join(bm_path, "lmp-reaxff")
                 shutil.copytree(lmp_reaxff, lmp_outputs)
             if hpc_manager == HpcManager.SLURM:
-                subprocess.run(
+                result = subprocess.run(
                     [
                         "srun",
+                        "--export=ALL",
+                        "--kill-on-bad-exit=1",
                         f"{bm_path}/jobs/{bm_type}-benchmark.sh",
                         str(rf),
                         bs,
-                        "--export=ALL",
-                    ]
+                    ],
+                    env=step_env,
                 )
             elif hpc_manager == HpcManager.PBS:
                 num_tasks = os.environ.get("BM_NUM_TASKS", "1")
                 num_cores = os.environ.get("BM_NUM_CORES", "1")
-                subprocess.run(
+                result = subprocess.run(
                     [
                         "aprun",
                         "-n",
@@ -127,19 +135,25 @@ def batch_job_orchestration(
                         f"{bm_path}/jobs/{bm_type}-benchmark.sh",
                         str(rf),
                         bs,
-                    ]
+                    ],
+                    env=step_env,
                 )
             elif hpc_manager == HpcManager.DEV:
-                subprocess.run(
+                result = subprocess.run(
                     [
                         f"{bm_path}/jobs/{bm_type}-benchmark.sh",
                         str(rf),
                         bs,
-                    ]
+                    ],
+                    env=step_env,
                 )
             else:
                 raise RuntimeError(f"Unknown HPC manager: {hpc_manager}")
+            if result.returncode != 0:
+                failed_steps.append(f"c{rf}/b{bs} (exit code {result.returncode})")
             time.sleep(3)
+    if failed_steps:
+        raise RuntimeError(f"Benchmark steps failed: {', '.join(failed_steps)}")
 
 
 class JobScriptGenerator(debuggable.DebuggableObject):

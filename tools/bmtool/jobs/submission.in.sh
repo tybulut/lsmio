@@ -146,6 +146,8 @@ batch_run() {
   fi
 }
 
+# Waits until the user has no queued or running jobs. It always returns 0: it does not report
+# whether the job failed (batch.in.sh keeps failed outputs out of the archive itself).
 wait_for_completion() {
   set +x
   while [ 1 ];

@@ -105,8 +105,11 @@ elif [ "$BM_SCALE" = "large" ]; then
 elif [ "$BM_SCALE" = "variants" ]; then
   generate_aggregates $BM_SCALE
   generate_report
+elif [ "$BM_SCALE" = "local" ]; then
+  generate_aggregates $BM_SCALE
+  generate_report
 else
-  fatal_error "Please pass either bake, small, large, or variants for lsmio parsing."
+  fatal_error "Please pass either local, bake, small, large, or variants for lsmio parsing."
 fi
 
 

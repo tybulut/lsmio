@@ -19,7 +19,7 @@ fi
 bm_resolve_archive_dest
 
 # Task 4.2.3: Active output directory check
-[ -d "$LSM_DIR_OBASE" ] || fatal_error "Active output directory does not exist: $LSM_DIR_OBASE"
+[ -d "$LSM_DIR_OBASE" ] || fatal_error "Active output directory does not exist: $LSM_DIR_OBASE (a failed benchmark job leaves its outputs in $LSM_DIR/outputs-failed)"
 
 # Task 4.2.3b: Ensure output directory has aggregated reports before archiving
 if [ "${BM_TYPE:-lsmio}" = "lsmio" ] && [ ! -f "${LSM_DIR_OBASE}/lsm-report.csv" ] && [ -f "$BM_DIRNAME/parse/lsmio-parse.sh" ]; then
@@ -72,6 +72,8 @@ fi
 
 # Task 4.2.6: Move-on-archive execution (INV-5, Constraints C7, C9)
 mkdir -p "$BM_ARCHIVE_DEST" || fatal_error "Failed to create archive destination directory: $BM_ARCHIVE_DEST"
+# jobs/batch.in.sh's clean-finish marker is job bookkeeping, not part of the results
+rm -f "$LSM_DIR_OBASE/.bm-job-ok"
 mv -- "$LSM_DIR_OBASE" "$ARCHIVE_TARGET"
 [ ! -e "$LSM_DIR_OBASE" ] || fatal_error "Failed to move $LSM_DIR_OBASE"
 mkdir -p "$LSM_DIR_OBASE" || fatal_error "Failed to recreate active output directory: $LSM_DIR_OBASE"

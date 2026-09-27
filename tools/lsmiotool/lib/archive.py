@@ -283,7 +283,12 @@ class ArchiveEngine:
             )
         abs_source = Path(os.path.abspath(str(f_source_dir)))
         if not abs_source.exists():
-            raise ArchiveError(f"Active output directory does not exist: {abs_source}")
+            f_msg = f"Active output directory does not exist: {abs_source}"
+            # bmtool's batch job moves a failed run's outputs there instead of leaving them
+            f_failed_dir = abs_source.parent / "outputs-failed"
+            if f_failed_dir.is_dir():
+                f_msg += f" (a failed benchmark job leaves its outputs in {f_failed_dir})"
+            raise ArchiveError(f_msg)
         if not abs_source.is_dir():
             raise ArchiveError(f"Active output path is not a directory: {abs_source}")
 
@@ -306,6 +311,11 @@ class ArchiveEngine:
                 pass
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        # bmtool's clean-finish marker (jobs/batch.in.sh) is job bookkeeping, not results
+        try:
+            (abs_source / ".bm-job-ok").unlink()
+        except FileNotFoundError:
+            pass
         try:
             shutil.move(str(abs_source), str(target_path))
         except Exception as err:
