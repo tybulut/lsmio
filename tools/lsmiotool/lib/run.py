@@ -403,6 +403,8 @@ class RunRequest:
     __slots__ = (
         "m_target",
         "m_scale",
+        "m_mode",
+        "m_backends",
         "m_ssd",
         "m_setup",
         "m_variants",
@@ -419,6 +421,8 @@ class RunRequest:
         self,
         f_target: str,
         f_scale: str,
+        f_mode: str = "standard",
+        f_backends: Optional[Sequence[str]] = None,
         f_ssd: bool = False,
         f_setup: Optional[str] = None,
         f_variant: Optional[str] = None,
@@ -430,6 +434,12 @@ class RunRequest:
         f_walltime: Optional[str] = None,
         f_versioned: bool = False,
     ) -> None:
+        if isinstance(f_mode, bool):
+            f_ssd = f_mode
+            f_setup = f_backends if isinstance(f_backends, str) else None
+            f_mode = "standard"
+            f_backends = None
+
         if not isinstance(f_target, str) or not f_target.strip():
             raise PlanValidationError(
                 f"target must be a non-empty string, got: {f_target!r}"
@@ -438,6 +448,27 @@ class RunRequest:
             raise PlanValidationError(
                 f"scale must be a non-empty string, got: {f_scale!r}"
             )
+        if not isinstance(f_mode, str) or not f_mode.strip():
+            raise PlanValidationError(
+                f"mode must be a non-empty string, got: {f_mode!r}"
+            )
+        m_mode = f_mode.strip().lower()
+
+        if f_backends is not None:
+            if not isinstance(f_backends, (list, tuple)):
+                raise PlanValidationError("backends must be a sequence of strings")
+            m_backends: Optional[Tuple[str, ...]] = tuple(
+                b.strip().lower()
+                for b in f_backends
+                if isinstance(b, str) and b.strip()
+            )
+            if not m_backends and m_mode == "backends":
+                m_backends = ("adios2", "native", "rocksdb")
+        elif m_mode == "backends":
+            m_backends = ("adios2", "native", "rocksdb")
+        else:
+            m_backends = None
+
         if not isinstance(f_ssd, bool):
             raise PlanValidationError(f"ssd must be a boolean, got: {f_ssd!r}")
         if f_setup is not None and (
@@ -496,6 +527,8 @@ class RunRequest:
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
+        super().__setattr__("m_mode", m_mode)
+        super().__setattr__("m_backends", m_backends)
         super().__setattr__("m_ssd", f_ssd)
         super().__setattr__("m_setup", f_setup.strip().upper() if f_setup else None)
         super().__setattr__("m_variants", m_variants)
@@ -528,6 +561,14 @@ class RunRequest:
         return self.m_scale
 
     @property
+    def mode(self) -> str:
+        return self.m_mode
+
+    @property
+    def backends(self) -> Optional[Tuple[str, ...]]:
+        return self.m_backends
+
+    @property
     def ssd(self) -> bool:
         return self.m_ssd
 
@@ -558,7 +599,9 @@ class RunRequest:
         """Computed archive action: explicit archive override if set, else True if any variant is requested."""
         if self.m_archive is not None:
             return self.m_archive
-        if any(v is not None and v not in ("", "default", "base") for v in self.m_variants):
+        if any(
+            v is not None and v not in ("", "default", "base") for v in self.m_variants
+        ):
             return True
         return len(self.m_variants) > 1
 
@@ -601,9 +644,15 @@ class RunRequest:
             "ssd": self.m_ssd,
             "setup": self.m_setup,
         }
+        if self.m_mode != "standard":
+            f_dict["mode"] = self.m_mode
+        if self.m_backends:
+            f_dict["backends"] = list(self.m_backends)
         if self.variant is not None:
             f_dict["variant"] = self.variant
-        if self.m_variants and (len(self.m_variants) > 1 or self.m_variants != (self.variant,)):
+        if self.m_variants and (
+            len(self.m_variants) > 1 or self.m_variants != (self.variant,)
+        ):
             f_dict["variants"] = list(self.m_variants)
         if self.m_archive is not None:
             f_dict["archive"] = self.m_archive
@@ -623,6 +672,8 @@ class RunRequest:
         return (
             f"RunRequest(target={self.m_target!r}, "
             f"scale={self.m_scale!r}, "
+            f"mode={self.m_mode!r}, "
+            f"backends={self.m_backends!r}, "
             f"ssd={self.m_ssd!r}, "
             f"setup={self.m_setup!r}, "
             f"variant={self.variant!r}, "
@@ -640,6 +691,8 @@ class RunRequest:
             return (
                 self.m_target == f_other.m_target
                 and self.m_scale == f_other.m_scale
+                and self.m_mode == f_other.m_mode
+                and self.m_backends == f_other.m_backends
                 and self.m_ssd == f_other.m_ssd
                 and self.m_setup == f_other.m_setup
                 and self.m_variants == f_other.m_variants
@@ -1320,6 +1373,9 @@ class RunPlanner:
         ),
     )
 
+    # Deprecated spelling retained so older manifests and scripts keep working
+    SCALE_ALIASES: Dict[str, str] = {"baseline": "variants"}
+
     SCALE_MATRICES: Dict[str, Tuple[ScalePoint, ...]] = {
         "local": (ScalePoint(f_tasks=1, f_ppn=1, f_nodes=1),),
         "bake": (
@@ -1349,7 +1405,7 @@ class RunPlanner:
             ScalePoint(f_tasks=192, f_ppn=4, f_nodes=48),
             ScalePoint(f_tasks=256, f_ppn=4, f_nodes=64),
         ),
-        "baseline": (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),),
+        "variants": (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),),
     }
 
     DEFAULT_SETUPS: Dict[str, str] = {
@@ -1427,6 +1483,7 @@ class RunPlanner:
             )
 
         f_scale = f_request.scale.strip().lower()
+        f_scale = cls.SCALE_ALIASES.get(f_scale, f_scale)
         if f_scale not in cls.SCALE_MATRICES:
             raise PlanValidationError(
                 f"Unknown scale '{f_request.scale}'. Allowed: {sorted(cls.SCALE_MATRICES.keys())}"
@@ -1470,31 +1527,53 @@ class RunPlanner:
         # 5. ScheduledPointResources calculation
         f_scheduled_points: List[ScheduledPointResources] = []
         for f_sp in f_scale_points:
-            # Walltime calculation (INV-PAIR-1)
+            # Walltime calculation (INV-BACKEND-2, INV-PAIR-1)
             if f_request.wallhour is not None:
                 f_wallhour = max(1, min(48, f_request.wallhour))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_request.walltime is not None:
                 f_walltime = f_request.walltime
             elif (
-                f_scale == "baseline"
+                getattr(f_request, "mode", "standard") == "backends"
+                and f_resource_policy.walltime_policy == "slurm_nodes"
+            ):
+                n_backends = len(
+                    getattr(f_request, "backends", None)
+                    or ("adios2", "native", "rocksdb")
+                )
+                time_per_backend = max(1, f_sp.nodes // 3)
+                calc_hours = 2 + (n_backends * time_per_backend)
+                f_wallhour = max(1, min(48, calc_hours))
+                f_walltime = f"{f_wallhour:02d}:00:00"
+            elif (
+                f_scale == "variants"
                 and f_target == "lsmio"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
                 and getattr(f_request, "versioned", False)
             ):
-                var_cnt = sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
+                var_cnt = sum(
+                    1
+                    for v in f_request.variants
+                    if v not in (None, "", "default", "base")
+                )
                 total_runs = (1 + var_cnt) if var_cnt > 0 else 2
                 calculated_hours = 2 + (total_runs * 2)
                 f_wallhour = max(4, min(48, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
-                f_scale == "baseline"
+                f_scale == "variants"
                 and f_target == "lsmio"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
-                and any(v not in (None, "", "default", "base") for v in f_request.variants)
+                and any(
+                    v not in (None, "", "default", "base") for v in f_request.variants
+                )
             ):
                 # 120 min per run (maximum safety margin for 64K workloads) + 2 hours base headroom
-                total_runs = 1 + sum(1 for v in f_request.variants if v not in (None, "", "default", "base"))
+                total_runs = 1 + sum(
+                    1
+                    for v in f_request.variants
+                    if v not in (None, "", "default", "base")
+                )
                 calculated_hours = 2 + (total_runs * 2)
                 f_wallhour = max(4, min(48, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
@@ -1528,6 +1607,34 @@ class RunPlanner:
                     f_pvmem=f_resource_policy.pvmem,
                 )
             elif f_profile.scheduler == SchedulerKind.SLURM:
+                from lsmiotool.lib.scheduler import parseWalltimeToSeconds
+
+                f_point_qos = f_resource_policy.qos
+                if f_walltime:
+                    try:
+                        f_walltime_sec = parseWalltimeToSeconds(f_walltime)
+                    except ValueError as f_err:
+                        raise PlanValidationError(
+                            f"Invalid walltime '{f_walltime}': {f_err}"
+                        ) from f_err
+
+                    # Data-driven QoS promotion: if configured qos is 'standard' and walltime exceeds 24h (86400s),
+                    # promote to 'long'.
+                    if f_point_qos == "standard" and f_walltime_sec > 86400:
+                        f_point_qos = "long"
+
+                    # Validate long QoS limits: walltime <= 96h, nodes <= 64
+                    # (Note: long QoS on ARCHER2 has a 16-queued-job limit vs 64 for standard)
+                    if f_point_qos == "long":
+                        if f_walltime_sec > 96 * 3600:
+                            raise PlanValidationError(
+                                f"Walltime '{f_walltime}' ({f_walltime_sec}s) exceeds maximum allowed 96 hours for long QoS"
+                            )
+                        if f_sp.nodes > 64:
+                            raise PlanValidationError(
+                                f"Scale point with {f_sp.nodes} nodes exceeds maximum allowed 64 nodes for long QoS"
+                            )
+
                 f_res = ScheduledPointResources(
                     f_walltime=f_walltime,
                     f_select_chunks=None,
@@ -1539,7 +1646,7 @@ class RunPlanner:
                     else None,
                     f_queue=f_resource_policy.queue,
                     f_partition=f_resource_policy.partition,
-                    f_qos=f_resource_policy.qos,
+                    f_qos=f_point_qos,
                     f_pmem=f_resource_policy.pmem,
                     f_pvmem=f_resource_policy.pvmem,
                 )
@@ -1615,6 +1722,8 @@ class RunPlanner:
         f_normalized_request = RunRequest(
             f_target=f_target,
             f_scale=f_scale,
+            f_mode=getattr(f_request, "mode", "standard"),
+            f_backends=getattr(f_request, "backends", None),
             f_ssd=f_request.ssd,
             f_setup=f_norm_setup,
             f_variant=f_request.variant,
@@ -1622,6 +1731,9 @@ class RunPlanner:
             f_archive=f_request.archive,
             f_resume=f_request.resume,
             f_out_dir=f_request.out_dir,
+            f_wallhour=f_request.wallhour,
+            f_walltime=f_request.walltime,
+            f_versioned=f_request.versioned,
         )
 
         if f_target == "lmp":
@@ -2082,7 +2194,9 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 f"Missing keys in request: {sorted(f_missing_req)}"
             )
-        f_extra_req = f_req_keys - (cls.REQUIRED_REQUEST_KEYS | cls.OPTIONAL_REQUEST_KEYS)
+        f_extra_req = f_req_keys - (
+            cls.REQUIRED_REQUEST_KEYS | cls.OPTIONAL_REQUEST_KEYS
+        )
         if f_extra_req:
             raise ManifestValidationError(
                 f"Unexpected extra keys in request: {sorted(f_extra_req)}"
@@ -3936,6 +4050,7 @@ class RunOrchestrator:
                 )
 
             f_scale = f_request.scale.strip().lower()
+            f_scale = RunPlanner.SCALE_ALIASES.get(f_scale, f_scale)
             if f_scale not in RunPlanner.SCALE_MATRICES:
                 raise PreflightError(
                     f"Unknown scale '{f_request.scale}'. Allowed: {sorted(RunPlanner.SCALE_MATRICES.keys())}"
@@ -4128,11 +4243,18 @@ class RunOrchestrator:
                 if f_environ is not None
                 else (f_environment if f_environment is not None else self.m_environ)
             )
-            f_dest_root = (
+            from lsmiotool.lib.archive import resolveArchiveDest
+
+            f_explicit_dest = (
                 f_request.out_dir
                 or (f_eff_environ and f_eff_environ.get("BM_ARCHIVE_DEST"))
                 or os.environ.get("BM_ARCHIVE_DEST")
-                or os.path.join(f_benchmark_root, "lsmio-archive")
+            )
+            f_dest_root = resolveArchiveDest(
+                f_benchmark_root,
+                f_mode=getattr(f_request, "mode", None),
+                f_scale=getattr(f_request, "scale", None),
+                f_explicit=f_explicit_dest,
             )
 
             f_planner_obj = self.m_planner or RunPlanner
@@ -4141,7 +4263,9 @@ class RunOrchestrator:
             object.__setattr__(self, "m_views", ())
 
             # Purge legacy LSM_DIR_OBASE on job start to avoid ghost files from earlier aborted runs
-            if "LSM_DIR_OBASE" in os.environ and os.path.isdir(os.environ["LSM_DIR_OBASE"]):
+            if "LSM_DIR_OBASE" in os.environ and os.path.isdir(
+                os.environ["LSM_DIR_OBASE"]
+            ):
                 for f_entry in os.listdir(os.environ["LSM_DIR_OBASE"]):
                     f_entry_path = os.path.join(os.environ["LSM_DIR_OBASE"], f_entry)
                     if os.path.isdir(f_entry_path):
@@ -4155,12 +4279,20 @@ class RunOrchestrator:
             for f_cur_variant in f_request.variants:
                 f_clean_setup = f_request.setup or "NATIVE-M"
                 f_arm_id = ArchiveEngine.resolveArmId(f_clean_setup, f_cur_variant)
-                f_target_dir = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}")
-                f_target_dir_run = os.path.join(os.path.abspath(f_dest_root), f"outputs-{f_arm_id}:run")
+                f_target_dir = os.path.join(
+                    os.path.abspath(f_dest_root), f"outputs-{f_arm_id}"
+                )
+                f_target_dir_run = os.path.join(
+                    os.path.abspath(f_dest_root), f"outputs-{f_arm_id}:run"
+                )
 
                 # Resumption check (INV-MULTI-3, INV-PAIR-7)
-                if f_request.resume and (os.path.isdir(f_target_dir) or os.path.isdir(f_target_dir_run)):
-                    f_var_label = f_cur_variant if f_cur_variant is not None else "default"
+                if f_request.resume and (
+                    os.path.isdir(f_target_dir) or os.path.isdir(f_target_dir_run)
+                ):
+                    f_var_label = (
+                        f_cur_variant if f_cur_variant is not None else "default"
+                    )
                     f_msg = f"[RESUME] Skipping variant {f_var_label!r}"
                     if f_eff_reporter is not None:
                         try:
@@ -4215,7 +4347,9 @@ class RunOrchestrator:
                 try:
                     f_artifact_store.allocateRun(f_plan)
                 except ArtifactError as f_err:
-                    raise OrchestrationError(f"Failed to allocate run: {f_err}") from f_err
+                    raise OrchestrationError(
+                        f"Failed to allocate run: {f_err}"
+                    ) from f_err
 
                 if f_eff_reporter is not None:
                     try:
@@ -4254,7 +4388,12 @@ class RunOrchestrator:
 
                 # Fail-fast check
                 if (
-                    f_view.state in (OverallRunState.FAILED, OverallRunState.CANCELLED, OverallRunState.INTERRUPTED)
+                    f_view.state
+                    in (
+                        OverallRunState.FAILED,
+                        OverallRunState.CANCELLED,
+                        OverallRunState.INTERRUPTED,
+                    )
                     or self.exitCode != 0
                 ):
                     object.__setattr__(self, "m_views", tuple(f_executed_views))
@@ -4263,7 +4402,9 @@ class RunOrchestrator:
                 # Auto-archiving
                 if f_request.effective_archive:
                     f_source_dir = None
-                    if "LSM_DIR_OBASE" in os.environ and os.path.isdir(os.environ["LSM_DIR_OBASE"]):
+                    if "LSM_DIR_OBASE" in os.environ and os.path.isdir(
+                        os.environ["LSM_DIR_OBASE"]
+                    ):
                         f_source_dir = os.environ["LSM_DIR_OBASE"]
                     elif (
                         hasattr(f_artifact_store, "layout")
@@ -4271,12 +4412,19 @@ class RunOrchestrator:
                         and os.path.isdir(f_artifact_store.layout.runRoot)
                     ):
                         f_source_dir = f_artifact_store.layout.runRoot
-                    elif hasattr(f_artifact_store, "run_root") and os.path.isdir(f_artifact_store.run_root):
+                    elif hasattr(f_artifact_store, "run_root") and os.path.isdir(
+                        f_artifact_store.run_root
+                    ):
                         f_source_dir = f_artifact_store.run_root
                     else:
                         f_source_dir = os.path.join(f_benchmark_root, "outputs")
 
-                    f_role = "run" if f_cur_variant not in ("", "default", "base") and f_cur_variant is not None else None
+                    f_role = (
+                        "run"
+                        if f_cur_variant not in ("", "default", "base")
+                        and f_cur_variant is not None
+                        else None
+                    )
                     ArchiveEngine.executeArchive(
                         f_source_dir=f_source_dir,
                         f_dest_root=f_dest_root,
@@ -4646,6 +4794,7 @@ class RunOrchestrator:
                         f_mail_user=f_validated_email,
                         f_mail_mode=f_mail_mode_val,
                         f_walltime=f_point_res.walltime,
+                        f_qos=f_point_res.qos,
                     )
                 elif f_profile.scheduler == SchedulerKind.PBS:
                     f_mail_mode_val = PbsMailMode.ABE if f_point_res.mail_mode else None

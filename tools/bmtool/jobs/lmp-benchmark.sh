@@ -5,6 +5,7 @@ BM_SETUP="LSMIO"
 #BM_SETUP="FS"
 
 . $BM_DIRNAME/include/vars.in.sh
+. $BM_DIRNAME/include/run-tee.in.sh
 . $BM_DIRNAME/jobs/job-all.in.sh
 
 . $BM_DIRNAME/include/dirs-vars.in.sh
@@ -72,20 +73,19 @@ LOG_FILE="$LMP_DIR_OUTPUT/out-lmp-${INFIX}-$rf-$bs-${DS}-${BM_UNIQUE_UID}.txt"
 cd $DIRS_BM_BASE/c$rf/b$bs/lmp-reaxff
 
 if [ "$BM_SETUP" = "LSMIO" ]; then
-  $SB_BIN/lmp  -in in.reaxc.hns \
+  run_tee "$LOG_FILE" $SB_BIN/lmp  -in in.reaxc.hns \
     -v x $REP -v y $REP -v z $REP \
-    -lsmio-buf-size-mb $LSMIO_BUF_MB \
-    2>&1 | tee $LOG_FILE
+    -lsmio-buf-size-mb $LSMIO_BUF_MB
 elif [ "$BM_SETUP" = "LSMIO-MMAP" ]; then
-  $SB_BIN/lmp  -in in.reaxc.hns \
+  run_tee "$LOG_FILE" $SB_BIN/lmp  -in in.reaxc.hns \
     -v x $REP -v y $REP -v z $REP \
     -lsmio-mmap \
-    -lsmio-buf-size-mb $LSMIO_BUF_MB \
-    2>&1 | tee $LOG_FILE
+    -lsmio-buf-size-mb $LSMIO_BUF_MB
 elif [ "$BM_SETUP" = "FS" ]; then
-  $SB_BIN/lmp  -in in.reaxc.hns \
+  run_tee "$LOG_FILE" $SB_BIN/lmp  -in in.reaxc.hns \
     -v x $REP -v y $REP -v z $REP \
-    -lsmio-fallback \
-    2>&1 | tee $LOG_FILE
+    -lsmio-fallback
 fi
+# The benchmark's own status (run_tee), so srun --kill-on-bad-exit sees a failed rank
+exit $?
 

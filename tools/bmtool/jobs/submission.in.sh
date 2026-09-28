@@ -17,8 +17,9 @@ batch_run() {
 
   nodes=`echo "$concurrency / $pernode" | bc`
   export BM_NUM_TASKS=$concurrency
+  export BM_NUM_NODES=$nodes
 
-  # Dynamic Walltime Scaling & Explicit Override (INV-PAIR-1)
+  # Dynamic Walltime Scaling & Explicit Override (INV-BACKEND-2, INV-PAIR-1)
   if [ -n "$BM_WALLHOUR_OVERRIDE" ] || [ -n "$BM_WALLHOUR" ]; then
     _user_hours="${BM_WALLHOUR_OVERRIDE:-$BM_WALLHOUR}"
     if [ "$_user_hours" -lt 1 ]; then
@@ -28,7 +29,27 @@ batch_run() {
     else
       wallhour=$_user_hours
     fi
-  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
+  elif [ "$BM_MODE" = "backends" ]; then
+    _bcnt=0
+    _brem="$BM_BACKENDS"
+    while [ -n "$_brem" ]; do
+      case "$_brem" in
+        *,*) _bcnt=$(( _bcnt + 1 )); _brem="${_brem#*,}" ;;
+        *) _bcnt=$(( _bcnt + 1 )); _brem="" ;;
+      esac
+    done
+    [ "$_bcnt" -gt 0 ] || _bcnt=1
+    time_per_backend=$(( nodes / 3 ))
+    [ "$time_per_backend" -gt 0 ] || time_per_backend=1
+    calculated_hours=$(( 2 + _bcnt * time_per_backend ))
+    if [ "$calculated_hours" -lt 1 ]; then
+      wallhour=1
+    elif [ "$calculated_hours" -gt 48 ]; then
+      wallhour=48
+    else
+      wallhour=$calculated_hours
+    fi
+  elif [ "$BM_SCALE" = "variants" ] && [ "$BM_TYPE" = "lsmio" ] && [ "$BM_VERSIONED" = "yes" ]; then
     if [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ] && [ "$EXPANDED_VARIANTS" != "base" ]; then
       if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
         _cnt=0
@@ -55,7 +76,7 @@ batch_run() {
     else
       wallhour=$calculated_hours
     fi
-  elif [ "$BM_SCALE" = "baseline" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
+  elif [ "$BM_SCALE" = "variants" ] && [ "$BM_TYPE" = "lsmio" ] && [ -n "$EXPANDED_VARIANTS" ] && [ "$EXPANDED_VARIANTS" != "default" ]; then
     if [ -z "$VAR_COUNT" ] || [ "$VAR_COUNT" -le 0 ]; then
       _cnt=0
       _r="$EXPANDED_VARIANTS"
@@ -79,24 +100,37 @@ batch_run() {
       wallhour=$calculated_hours
     fi
   else
-    wallhour=`echo "2 + ($nodes / 3)" | bc`
+    wallhour=$(( 2 + nodes / 3 ))
+    [ "$wallhour" -gt 0 ] || wallhour=1
   fi
 
   if [ "$QSUBMIT" = "sbatch" ]; then
     # ARCHER2's standard partition allocates whole nodes and rejects --mem;
     # other Slurm sites need an explicit per-job memory request.
+    # On ARCHER2, standard QoS allows up to 24h; >24h requires qos=long (up to 96h).
     if [ "$HPC_ENV" = "archer2" ]; then
-      SBATCH_EXTRA="--partition=standard --qos=standard"
+      if [ "$wallhour" -gt 24 ]; then
+        if [ "$wallhour" -gt 96 ]; then
+          fatal_error "Walltime ${wallhour}h exceeds maximum 96 hours for ARCHER2 long QoS"
+        fi
+        if [ "$nodes" -gt 64 ]; then
+          fatal_error "Nodes ($nodes) exceeds maximum 64 nodes for ARCHER2 long QoS"
+        fi
+        SBATCH_EXTRA="--partition=standard --qos=long"
+      else
+        SBATCH_EXTRA="--partition=standard --qos=standard"
+      fi
     else
       SBATCH_EXTRA="--mem=8gb"
     fi
     sbatch \
       $SBATCH_EXTRA \
+      --chdir="$BM_DIRNAME" \
       --export=ALL \
       --ntasks=$concurrency \
       --nodes=$nodes \
       --job-name=LSMIO-SM-$BM_TYPE-$concurrency \
-      --time=$wallhour:00:00 \
+      --time=$(printf "%02d:00:00" "$wallhour") \
       --account="$SB_ACCOUNT" \
       --mail-user="$SB_EMAIL" \
       ${job_script}.sbatch
@@ -106,12 +140,14 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED,BM_MODE,BM_BACKENDS,BM_NUM_NODES \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi
 }
 
+# Waits until the user has no queued or running jobs. It always returns 0: it does not report
+# whether the job failed (batch.in.sh keeps failed outputs out of the archive itself).
 wait_for_completion() {
   set +x
   while [ 1 ];

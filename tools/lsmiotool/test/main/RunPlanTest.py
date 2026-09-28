@@ -32,6 +32,7 @@ import copy
 import json
 import os
 import unittest
+from unittest.mock import patch
 
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import (
@@ -352,6 +353,17 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(f_plan_archer2.scheduled_points[0].qos, "standard")
         self.assertIsNone(f_plan_archer2.scheduled_points[0].mem)
 
+        # Slurm (Archer2): dynamic long QoS when walltime exceeds 24 hours
+        f_req_archer2_backends = RunRequest("lsmio", "small", f_mode="backends")
+        f_plan_archer2_backends = RunPlanner.createPlan(
+            f_req_archer2_backends, self.m_archer2_profile
+        )
+        self.assertEqual(f_plan_archer2_backends.scheduled_points[0].qos, "standard")
+        self.assertEqual(
+            f_plan_archer2_backends.scheduled_points[-1].walltime, "48:00:00"
+        )
+        self.assertEqual(f_plan_archer2_backends.scheduled_points[-1].qos, "long")
+
         # PBS (Isambard): small shape -> fixed "06:00:00", queue arm, pmem 8G, pvmem 8G, chunks=nodes, ncpus=1
         f_plan_isambard_small = RunPlanner.createPlan(
             f_req_local, self.m_isambard_profile
@@ -572,10 +584,13 @@ class RunPlanTest(unittest.TestCase):
 
     def testBaselineScalePointTopology(self) -> None:
         """Tasks 2.4.1 (INV-ARCH-1): Asserts baseline scale matrix has single point ScalePoint(8, 1, 8)."""
-        self.assertIn("baseline", RunPlanner.SCALE_MATRICES)
-        f_baseline_points = RunPlanner.SCALE_MATRICES["baseline"]
+        self.assertIn("variants", RunPlanner.SCALE_MATRICES)
+        self.assertEqual(RunPlanner.SCALE_ALIASES.get("baseline"), "variants")
+        f_baseline_points = RunPlanner.SCALE_MATRICES["variants"]
         self.assertEqual(len(f_baseline_points), 1)
-        self.assertEqual(f_baseline_points, (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),))
+        self.assertEqual(
+            f_baseline_points, (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),)
+        )
         self.assertEqual(f_baseline_points[0].tasks, 8)
         self.assertEqual(f_baseline_points[0].ppn, 1)
         self.assertEqual(f_baseline_points[0].nodes, 8)
@@ -620,7 +635,9 @@ class RunPlanTest(unittest.TestCase):
 
     def testManifestDeserializationLegacyWithoutVariant(self) -> None:
         """Tasks 2.4.2 (INV-ARCH-9): Asserts manifest deserialization succeeds when variant is omitted."""
-        f_plan = RunPlanner.createPlan(RunRequest("lsmio", "local"), self.m_viking_profile)
+        f_plan = RunPlanner.createPlan(
+            RunRequest("lsmio", "local"), self.m_viking_profile
+        )
         f_json_str = ManifestSerializer.serialize(f_plan)
         self.assertNotIn('"variant"', f_json_str)
 
@@ -637,39 +654,194 @@ class RunPlanTest(unittest.TestCase):
     def testWalltimeScalingAndOverride(self) -> None:
         """Asserts walltime scales at 120 min/run + 2h headroom, and explicit overrides are respected."""
         # 1. Single variant: total_runs = 2 -> 2 + 2*2 = 6 hours (06:00:00)
-        f_req_1 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",))
+        f_req_1 = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer",)
+        )
         f_plan_1 = RunPlanner.createPlan(f_req_1, self.m_viking_profile)
         self.assertEqual(f_plan_1.scheduled_points[0].walltime, "06:00:00")
 
         # 2. Three variants: total_runs = 4 -> 2 + 4*2 = 10 hours (10:00:00)
-        f_req_3 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap"))
+        f_req_3 = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap")
+        )
         f_plan_3 = RunPlanner.createPlan(f_req_3, self.m_viking_profile)
         self.assertEqual(f_plan_3.scheduled_points[0].walltime, "10:00:00")
 
         # 3. Five variants: total_runs = 6 -> 2 + 6*2 = 14 hours (14:00:00)
-        f_req_5 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer", "btree", "mmap", "autotune", "manoff"))
+        f_req_5 = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_variants=("footer", "btree", "mmap", "autotune", "manoff"),
+        )
         f_plan_5 = RunPlanner.createPlan(f_req_5, self.m_viking_profile)
         self.assertEqual(f_plan_5.scheduled_points[0].walltime, "14:00:00")
 
         # 4. Large variant count clamped to 48 hours ceiling: 24 variants -> total_runs = 25 -> 2 + 25*2 = 52 -> 48h (48:00:00)
         f_vars_24 = tuple(f"var_{i}" for i in range(24))
-        f_req_24 = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=f_vars_24)
+        f_req_24 = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=f_vars_24
+        )
         f_plan_24 = RunPlanner.createPlan(f_req_24, self.m_viking_profile)
         self.assertEqual(f_plan_24.scheduled_points[0].walltime, "48:00:00")
 
         # 5. Explicit wallhour override
-        f_req_override = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=12)
+        f_req_override = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=12
+        )
         f_plan_override = RunPlanner.createPlan(f_req_override, self.m_viking_profile)
         self.assertEqual(f_plan_override.scheduled_points[0].walltime, "12:00:00")
 
         # 6. Explicit wallhour override clamped to 48 hours
-        f_req_override_clamp = RunRequest(f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=60)
-        f_plan_override_clamp = RunPlanner.createPlan(f_req_override_clamp, self.m_viking_profile)
+        f_req_override_clamp = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_variants=("footer",), f_wallhour=60
+        )
+        f_plan_override_clamp = RunPlanner.createPlan(
+            f_req_override_clamp, self.m_viking_profile
+        )
         self.assertEqual(f_plan_override_clamp.scheduled_points[0].walltime, "48:00:00")
 
         # 7. Explicit walltime string override
-        f_req_hms = RunRequest(f_target="lsmio", f_scale="baseline", f_walltime="05:30:00")
+        f_req_hms = RunRequest(
+            f_target="lsmio", f_scale="baseline", f_walltime="05:30:00"
+        )
         f_plan_hms = RunPlanner.createPlan(f_req_hms, self.m_viking_profile)
         self.assertEqual(f_plan_hms.scheduled_points[0].walltime, "05:30:00")
 
+    def testBackendsModeWalltimeScalingAndOverride(self) -> None:
+        """Asserts backends mode walltime formula (INV-BACKEND-2) scales deterministically and respects overrides."""
+        # 1. Scale 'bake' (nodes: 1, 2, 4, 8) with default 3 backends:
+        # nodes 1, 2, 4: max(1, nodes//3) = 1 -> 2 + 3*1 = 5 hours ('05:00:00')
+        # node 8: max(1, 8//3) = 2 -> 2 + 3*2 = 8 hours ('08:00:00')
+        f_req_bake = RunRequest(
+            f_target="lsmio",
+            f_scale="bake",
+            f_mode="backends",
+            f_backends=("adios2", "native", "rocksdb"),
+        )
+        f_plan_bake = RunPlanner.createPlan(f_req_bake, self.m_viking_profile)
+        self.assertEqual(f_plan_bake.scheduled_points[0].walltime, "05:00:00")  # node 1
+        self.assertEqual(f_plan_bake.scheduled_points[1].walltime, "05:00:00")  # node 2
+        self.assertEqual(f_plan_bake.scheduled_points[2].walltime, "05:00:00")  # node 4
+        self.assertEqual(f_plan_bake.scheduled_points[3].walltime, "08:00:00")  # node 8
 
+        # 2. Custom 2 backends on bake:
+        # node 8: max(1, 8//3) = 2 -> 2 + 2*2 = 6 hours ('06:00:00')
+        f_req_2b = RunRequest(
+            f_target="lsmio",
+            f_scale="bake",
+            f_mode="backends",
+            f_backends=("adios2", "native"),
+        )
+        f_plan_2b = RunPlanner.createPlan(f_req_2b, self.m_viking_profile)
+        self.assertEqual(f_plan_2b.scheduled_points[3].walltime, "06:00:00")
+
+        # 3. High node count clamping to 48 hours: node 48 -> 2 + 3*16 = 50 -> clamped to 48 ('48:00:00')
+        f_req_small = RunRequest(
+            f_target="lsmio",
+            f_scale="small",
+            f_mode="backends",
+        )
+        f_plan_small = RunPlanner.createPlan(f_req_small, self.m_viking_profile)
+        # Point index 8 is 48 nodes in small scale
+        self.assertEqual(f_plan_small.scale_points[8].nodes, 48)
+        self.assertEqual(f_plan_small.scheduled_points[8].walltime, "48:00:00")
+
+        # 4. Explicit user override takes precedence
+        f_req_override = RunRequest(
+            f_target="lsmio",
+            f_scale="bake",
+            f_mode="backends",
+            f_wallhour=15,
+        )
+        f_plan_override = RunPlanner.createPlan(f_req_override, self.m_viking_profile)
+        for sp in f_plan_override.scheduled_points:
+            self.assertEqual(sp.walltime, "15:00:00")
+
+    def testSlurmQosPromotionBoundariesAndLimits(self) -> None:
+        """Verify exact QoS promotion boundaries, Slurm time format handling, and limit enforcement (T1, S4, S5)."""
+        # 1. Exact boundary 24:00:00 -> standard
+        f_req_24h = RunRequest("lsmio", "local", f_walltime="24:00:00")
+        f_plan_24h = RunPlanner.createPlan(f_req_24h, self.m_archer2_profile)
+        self.assertEqual(f_plan_24h.scheduled_points[0].qos, "standard")
+
+        # 2. Boundary 24:30:00 -> long (would be rejected by standard QoS)
+        f_req_24_5h = RunRequest("lsmio", "local", f_walltime="24:30:00")
+        f_plan_24_5h = RunPlanner.createPlan(f_req_24_5h, self.m_archer2_profile)
+        self.assertEqual(f_plan_24_5h.scheduled_points[0].qos, "long")
+
+        # 3. Boundary 25:00:00 -> long
+        f_req_25h = RunRequest("lsmio", "local", f_walltime="25:00:00")
+        f_plan_25h = RunPlanner.createPlan(f_req_25h, self.m_archer2_profile)
+        self.assertEqual(f_plan_25h.scheduled_points[0].qos, "long")
+
+        # 4. Slurm day format: 1-00:00:00 (24h) -> standard
+        f_req_day_24h = RunRequest("lsmio", "local", f_walltime="1-00:00:00")
+        f_plan_day_24h = RunPlanner.createPlan(f_req_day_24h, self.m_archer2_profile)
+        self.assertEqual(f_plan_day_24h.scheduled_points[0].qos, "standard")
+
+        # 5. Slurm day format: 1-01:00:00 (25h) -> long
+        f_req_day_25h = RunRequest("lsmio", "local", f_walltime="1-01:00:00")
+        f_plan_day_25h = RunPlanner.createPlan(f_req_day_25h, self.m_archer2_profile)
+        self.assertEqual(f_plan_day_25h.scheduled_points[0].qos, "long")
+
+        # 6. Slurm day format: D-HH:MM (e.g. 1-00:30 = 24.5h) -> long
+        f_req_day_dhm = RunRequest("lsmio", "local", f_walltime="1-00:30")
+        f_plan_day_dhm = RunPlanner.createPlan(f_req_day_dhm, self.m_archer2_profile)
+        self.assertEqual(f_plan_day_dhm.scheduled_points[0].qos, "long")
+
+        # 7. Long QoS max limit 96h (4-00:00:00 / 96:00:00) -> valid long
+        f_req_96h = RunRequest("lsmio", "local", f_walltime="96:00:00")
+        f_plan_96h = RunPlanner.createPlan(f_req_96h, self.m_archer2_profile)
+        self.assertEqual(f_plan_96h.scheduled_points[0].qos, "long")
+
+        f_req_4d = RunRequest("lsmio", "local", f_walltime="4-00:00:00")
+        f_plan_4d = RunPlanner.createPlan(f_req_4d, self.m_archer2_profile)
+        self.assertEqual(f_plan_4d.scheduled_points[0].qos, "long")
+
+        # 8. Exceeding 96h for long QoS -> PlanValidationError
+        f_req_97h = RunRequest("lsmio", "local", f_walltime="97:00:00")
+        with self.assertRaises(PlanValidationError):
+            RunPlanner.createPlan(f_req_97h, self.m_archer2_profile)
+
+        f_req_4d_1h = RunRequest("lsmio", "local", f_walltime="4-01:00:00")
+        with self.assertRaises(PlanValidationError):
+            RunPlanner.createPlan(f_req_4d_1h, self.m_archer2_profile)
+
+        # 9. Invalid/unparseable walltime inputs -> PlanValidationError
+        for bad_walltime in ("invalid", "24:60:00", "1-25:00:00", "-1:00:00", ""):
+            with self.assertRaises(PlanValidationError):
+                RunPlanner.createPlan(
+                    RunRequest("lsmio", "local", f_walltime=bad_walltime),
+                    self.m_archer2_profile,
+                )
+
+        # 10. Long QoS node count limit: nodes > 64 raises PlanValidationError (S5)
+        f_point_65 = ScalePoint(f_tasks=65, f_ppn=1, f_nodes=65)
+        with patch.dict(RunPlanner.SCALE_MATRICES, {"custom": (f_point_65,)}):
+            with self.assertRaises(PlanValidationError) as ctx:
+                RunPlanner.createPlan(
+                    RunRequest("lsmio", "custom", f_walltime="25:00:00"),
+                    self.m_archer2_profile,
+                )
+            self.assertIn(
+                "exceeds maximum allowed 64 nodes for long QoS", str(ctx.exception)
+            )
+
+    def testNonArcher2ProfileKeepsConfiguredQosAt48h(self) -> None:
+        """Verify non-ARCHER2 Slurm profile (Viking) with 48h walltime keeps its configured QoS (T2)."""
+        # Viking has qos: null in environments.json
+        f_req_viking_48h = RunRequest("lsmio", "local", f_walltime="48:00:00")
+        f_plan_viking_48h = RunPlanner.createPlan(
+            f_req_viking_48h, self.m_viking_profile
+        )
+        self.assertEqual(f_plan_viking_48h.scheduled_points[0].walltime, "48:00:00")
+        self.assertIsNone(f_plan_viking_48h.scheduled_points[0].qos)
+
+        # Viking with wallhour=48
+        f_req_viking_wh48 = RunRequest("lsmio", "small", f_wallhour=48)
+        f_plan_viking_wh48 = RunPlanner.createPlan(
+            f_req_viking_wh48, self.m_viking_profile
+        )
+        for sp in f_plan_viking_wh48.scheduled_points:
+            self.assertEqual(sp.walltime, "48:00:00")
+            self.assertIsNone(sp.qos)

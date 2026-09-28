@@ -5,7 +5,9 @@ find_package(MPI REQUIRED GLOBAL)
 find_package(Threads REQUIRED GLOBAL)
 
 # ADIOS2
-find_package(ADIOS2 QUIET GLOBAL)
+# 2.11 or newer (ADIOS2 declares AnyNewerVersion): 2.9.2 segfaults in BP5 reads once a step
+# holds ~2 GiB of string values. An older install is ignored and v2.11.0 is fetched below.
+find_package(ADIOS2 2.11 QUIET GLOBAL)
 if (ADIOS2_FOUND)
   if (TARGET adios2::cxx11 AND NOT TARGET adios2::cxx)
     add_library(adios2::cxx ALIAS adios2::cxx11)
@@ -32,13 +34,14 @@ if (NOT ADIOS2_FOUND AND NOT TARGET ADIOS2)
   FetchContent_Declare(
     ADIOS2
     GIT_REPOSITORY https://github.com/ornladios/ADIOS2.git
-    GIT_TAG        v2.9.2
+    GIT_TAG        v2.11.0
     GIT_PROGRESS   TRUE
   )
 
-  # ADIOS2 v2.9.2 declares a cmake_minimum_required below 3.5, which CMake 4+
-  # refuses to configure. Relax the policy floor via a persisted cache entry so
-  # its add_subdirectory (inside FetchContent_MakeAvailable) configures anyway.
+  # CMake 4+ refuses to configure a project whose cmake_minimum_required is below 3.5
+  # (ADIOS2 v2.9.2 did; third-party code bundled with it may still). Relax the
+  # policy floor via a persisted cache entry so its add_subdirectory (inside
+  # FetchContent_MakeAvailable) configures anyway.
   # A normal variable does not reliably reach the FetchContent subdirectory
   # scope; older CMake ignores this. Mirrors cmake/PackageTLX.cmake and the
   # -DCMAKE_POLICY_VERSION_MINIMUM=3.5 in doc/dependencies/21-build-adios2.sh.

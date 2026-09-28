@@ -161,7 +161,12 @@ class VariantCatalogue:
         "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
         "footer-btree": (
             "footer-btree",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-memtable", "btree"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-memtable",
+                "btree",
+            ),
         ),
         "map": ("map", ("--lsmio-no-autotune", "--lsmio-memtable", "map")),
         "vsort": ("vsort", ("--lsmio-no-autotune", "--lsmio-memtable", "vector-sort")),
@@ -175,11 +180,22 @@ class VariantCatalogue:
             "footer-manoff",
             ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-manual-offset"),
         ),
-        "wbuf-512m": ("wbuf-512m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912")),
-        "wbuf-32m": ("wbuf-32m", ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432")),
+        "wbuf-512m": (
+            "wbuf-512m",
+            ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912"),
+        ),
+        "wbuf-32m": (
+            "wbuf-32m",
+            ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432"),
+        ),
         "footer-wbuf-512m": (
             "footer-wbuf-512m",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "536870912"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-wbuffer",
+                "536870912",
+            ),
         ),
         "footer-btree-prealloc": (
             "footer-btree-prealloc",
@@ -197,7 +213,12 @@ class VariantCatalogue:
         "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
         "footer-mmap": (
             "footer-mmap",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-mmap", "--lsmio-no-pread"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
         ),
         "footer-pread": (
             "footer-pread",
@@ -208,7 +229,10 @@ class VariantCatalogue:
         "pool-8": ("pool-8", ("--lsmio-no-autotune", "--lsmio-pool", "8")),
         # INV-ARCH-4: exact CLI11 spelling --lsmio-always-flush
         "flush": ("flush", ("--lsmio-no-autotune", "--lsmio-always-flush")),
-        "batch-2048": ("batch-2048", ("--lsmio-no-autotune", "--lsmio-batch-size", "2048")),
+        "batch-2048": (
+            "batch-2048",
+            ("--lsmio-no-autotune", "--lsmio-batch-size", "2048"),
+        ),
         "manoff-prealloc": (
             "manoff-prealloc",
             ("--lsmio-no-autotune", "--lsmio-manual-offset", "--lsmio-prealloc"),
@@ -225,7 +249,12 @@ class VariantCatalogue:
         ),
         "footer-wbuf-32m": (
             "footer-wbuf-32m",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-wbuffer", "33554432"),
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-footer-index",
+                "--lsmio-wbuffer",
+                "33554432",
+            ),
         ),
         "footer-pool-8": (
             "footer-pool-8",
@@ -636,10 +665,10 @@ class VariantCatalogue:
             return VariantRecord(stripped, spec_tokens, spec_flags)
 
         if stripped.startswith("version-"):
-            payload = stripped[len("version-"):]
+            payload = stripped[len("version-") :]
             for cand_var in sorted(cls.supportedVariants(), key=len, reverse=True):
                 if payload.endswith(f"-{cand_var}"):
-                    prefix = payload[:-len(cand_var) - 1]
+                    prefix = payload[: -len(cand_var) - 1]
                     if "-" in prefix:
                         spec = cls._VARIANT_SPECS[cand_var]
                         return VariantRecord(stripped, stripped, spec[1])
@@ -727,11 +756,13 @@ class VariantReverseResolver:
     ) -> str:
         """Formats canonical display label based on backend, variant, and collision suffix."""
         if f_variant.startswith("version-"):
-            payload = f_variant[len("version-"):]
+            payload = f_variant[len("version-") :]
             sub_variant = None
-            for cand_var in sorted(VariantCatalogue.supportedVariants(), key=len, reverse=True):
+            for cand_var in sorted(
+                VariantCatalogue.supportedVariants(), key=len, reverse=True
+            ):
                 if payload.endswith(f"-{cand_var}"):
-                    prefix = payload[:-len(cand_var) - 1]
+                    prefix = payload[: -len(cand_var) - 1]
                     if "-" in prefix:
                         sub_variant = cand_var
                         payload = prefix
@@ -798,10 +829,10 @@ class VariantReverseResolver:
                 variant = combined_candidate
                 collision = None
             elif variant.startswith("version-"):
-                sub_cand = combined_candidate[len("version-"):]
+                sub_cand = combined_candidate[len("version-") :]
                 for v in VariantCatalogue.supportedVariants():
                     if sub_cand.endswith(f"-{v}"):
-                        prefix = sub_cand[:-len(v) - 1]
+                        prefix = sub_cand[: -len(v) - 1]
                         if "-" in prefix:
                             variant = combined_candidate
                             collision = None

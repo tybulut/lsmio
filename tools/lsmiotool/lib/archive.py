@@ -55,22 +55,16 @@ class ArchiveRequest:
         f_dest: Optional[str] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
-            raise ArchiveError(
-                f"target must be a non-empty string, got: {f_target!r}"
-            )
+            raise ArchiveError(f"target must be a non-empty string, got: {f_target!r}")
         if not isinstance(f_scale, str) or not f_scale.strip():
-            raise ArchiveError(
-                f"scale must be a non-empty string, got: {f_scale!r}"
-            )
+            raise ArchiveError(f"scale must be a non-empty string, got: {f_scale!r}")
         if f_variant is not None and (
             not isinstance(f_variant, str) or not f_variant.strip()
         ):
             raise ArchiveError(
                 f"variant must be a non-empty string or None, got: {f_variant!r}"
             )
-        if f_dest is not None and (
-            not isinstance(f_dest, str) or not f_dest.strip()
-        ):
+        if f_dest is not None and (not isinstance(f_dest, str) or not f_dest.strip()):
             raise ArchiveError(
                 f"dest must be a non-empty string or None, got: {f_dest!r}"
             )
@@ -85,9 +79,7 @@ class ArchiveRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -144,6 +136,58 @@ class ArchiveRequest:
         return hash((self.m_target, self.m_scale, self.m_variant, self.m_dest))
 
 
+def resolveArchiveDest(
+    f_benchmark_root: str,
+    f_mode: Optional[str] = None,
+    f_scale: Optional[str] = None,
+    f_explicit: Optional[str] = None,
+) -> str:
+    """Resolve the archive destination root, mirroring bmtool/include/archive-dest.in.sh.
+
+    Layout (three destinations under <benchmark_root>/lsmio-archive):
+        backends/<scale>  multi-backend intra-allocation runs (mode 'backends')
+        variants          variant matrix runs (scale 'variants')
+        baseline          plain scaling runs (local, bake, small, large)
+
+    Args:
+        f_benchmark_root: Benchmark root ($BM_PATH equivalent).
+        f_mode: Launch mode ('backends' or 'standard'); None means standard.
+        f_scale: Scale token ('variants' or a plain scale); 'baseline' is the
+            deprecated spelling of 'variants'.
+        f_explicit: Explicit destination from --dest / --out-dir or BM_ARCHIVE_DEST.
+            Absolute paths are used as given, except a path starting with
+            '/lsmio-archive' which is treated as benchmark-root relative;
+            relative paths resolve against the benchmark root.
+
+    Returns:
+        Absolute archive destination root.
+    """
+    f_root = os.path.join(f_benchmark_root, "lsmio-archive")
+
+    f_val = str(f_explicit).strip() if f_explicit else ""
+    if f_val:
+        if f_val == "/lsmio-archive" or f_val.startswith("/lsmio-archive/"):
+            return os.path.join(f_benchmark_root, f_val.lstrip("/"))
+        if os.path.isabs(f_val):
+            return f_val
+        return os.path.join(f_benchmark_root, f_val)
+
+    f_norm_mode = (f_mode or "standard").strip().lower()
+    f_norm_scale = (f_scale or "").strip().lower()
+    if f_norm_scale == "baseline":
+        f_norm_scale = "variants"
+
+    if f_norm_mode == "backends":
+        return (
+            os.path.join(f_root, "backends", f_norm_scale)
+            if f_norm_scale
+            else os.path.join(f_root, "backends")
+        )
+    if f_norm_scale == "variants":
+        return os.path.join(f_root, "variants")
+    return os.path.join(f_root, "baseline")
+
+
 class ArchiveEngine:
     """Core engine executing move-on-archive semantics with collision avoidance."""
 
@@ -174,7 +218,9 @@ class ArchiveEngine:
     ) -> Tuple[str, str]:
         """Atomically resolves synchronized target paths for paired (:run, :base) archives."""
         if not f_dest_dir or not str(f_dest_dir).strip():
-            raise ArchiveError(f"dest_dir must be a non-empty path, got: {f_dest_dir!r}")
+            raise ArchiveError(
+                f"dest_dir must be a non-empty path, got: {f_dest_dir!r}"
+            )
         if not isinstance(f_arm_id, str) or not f_arm_id.strip():
             raise ArchiveError(f"arm_id must be a non-empty string, got: {f_arm_id!r}")
 
@@ -186,8 +232,9 @@ class ArchiveEngine:
             return (str(run_base), str(base_base))
 
         suffix = 1
-        while (dest_root / f"outputs-{f_arm_id}:run-{suffix}").exists() or \
-              (dest_root / f"outputs-{f_arm_id}:base-{suffix}").exists():
+        while (dest_root / f"outputs-{f_arm_id}:run-{suffix}").exists() or (
+            dest_root / f"outputs-{f_arm_id}:base-{suffix}"
+        ).exists():
             suffix += 1
 
         return (
@@ -204,7 +251,9 @@ class ArchiveEngine:
     ) -> str:
         """Calculates collision-free archive destination path, returning str (INV-PAIR-8)."""
         if not f_dest_dir or not str(f_dest_dir).strip():
-            raise ArchiveError(f"dest_dir must be a non-empty path, got: {f_dest_dir!r}")
+            raise ArchiveError(
+                f"dest_dir must be a non-empty path, got: {f_dest_dir!r}"
+            )
         dest_root = Path(os.path.abspath(str(f_dest_dir)))
         if f_role:
             base_name = f"outputs-{f_arm_id}:{f_role}"
@@ -229,10 +278,17 @@ class ArchiveEngine:
     ) -> str:
         """Atomically moves f_source_dir to collision-free target, returning str (INV-PAIR-8)."""
         if not f_source_dir or not str(f_source_dir).strip():
-            raise ArchiveError(f"source_dir must be a non-empty path, got: {f_source_dir!r}")
+            raise ArchiveError(
+                f"source_dir must be a non-empty path, got: {f_source_dir!r}"
+            )
         abs_source = Path(os.path.abspath(str(f_source_dir)))
         if not abs_source.exists():
-            raise ArchiveError(f"Active output directory does not exist: {abs_source}")
+            f_msg = f"Active output directory does not exist: {abs_source}"
+            # bmtool's batch job moves a failed run's outputs there instead of leaving them
+            f_failed_dir = abs_source.parent / "outputs-failed"
+            if f_failed_dir.is_dir():
+                f_msg += f" (a failed benchmark job leaves its outputs in {f_failed_dir})"
+            raise ArchiveError(f_msg)
         if not abs_source.is_dir():
             raise ArchiveError(f"Active output path is not a directory: {abs_source}")
 
@@ -249,16 +305,23 @@ class ArchiveEngine:
                 if any(abs_source.glob("*/*/out-*.txt*")):
                     from lsmiotool.lib.output import LsmioAggOutput
 
-                    agg = LsmioAggOutput(str(abs_source), f_scale="baseline")
+                    agg = LsmioAggOutput(str(abs_source), f_scale="variants")
                     agg.generateReports(f_out_dir=str(abs_source))
             except Exception:
                 pass
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        # bmtool's clean-finish marker (jobs/batch.in.sh) is job bookkeeping, not results
+        try:
+            (abs_source / ".bm-job-ok").unlink()
+        except FileNotFoundError:
+            pass
         try:
             shutil.move(str(abs_source), str(target_path))
         except Exception as err:
-            raise ArchiveError(f"Failed to move {abs_source} to {target_path}: {err}") from err
+            raise ArchiveError(
+                f"Failed to move {abs_source} to {target_path}: {err}"
+            ) from err
 
         try:
             abs_source.mkdir(parents=True, exist_ok=True)
@@ -280,10 +343,14 @@ class ArchiveEngine:
     ) -> str:
         """Copies staged baseline output to destination archive, returning str path (INV-PAIR-8)."""
         if not f_source_dir or not str(f_source_dir).strip():
-            raise ArchiveError(f"source_dir must be a non-empty path, got: {f_source_dir!r}")
+            raise ArchiveError(
+                f"source_dir must be a non-empty path, got: {f_source_dir!r}"
+            )
         abs_source = Path(os.path.abspath(str(f_source_dir)))
         if not abs_source.exists():
-            raise ArchiveError(f"Staged baseline directory does not exist: {abs_source}")
+            raise ArchiveError(
+                f"Staged baseline directory does not exist: {abs_source}"
+            )
         if not abs_source.is_dir():
             raise ArchiveError(f"Staged baseline path is not a directory: {abs_source}")
 
@@ -300,7 +367,7 @@ class ArchiveEngine:
                 if any(abs_source.glob("*/*/out-*.txt*")):
                     from lsmiotool.lib.output import LsmioAggOutput
 
-                    agg = LsmioAggOutput(str(abs_source), f_scale="baseline")
+                    agg = LsmioAggOutput(str(abs_source), f_scale="variants")
                     agg.generateReports(f_out_dir=str(abs_source))
             except Exception:
                 pass
@@ -309,7 +376,9 @@ class ArchiveEngine:
         try:
             shutil.copytree(str(abs_source), str(target_path))
         except Exception as err:
-            raise ArchiveError(f"Failed to replicate {abs_source} to {target_path}: {err}") from err
+            raise ArchiveError(
+                f"Failed to replicate {abs_source} to {target_path}: {err}"
+            ) from err
         return str(target_path)
 
     @classmethod
@@ -321,7 +390,9 @@ class ArchiveEngine:
         f_arm_id: str,
     ) -> Tuple[str, str]:
         """Atomically archives paired variant run (:run) and staged baseline (:base)."""
-        target_run, target_base = cls.resolvePairTargetDirectories(f_dest_root, f_arm_id)
+        target_run, target_base = cls.resolvePairTargetDirectories(
+            f_dest_root, f_arm_id
+        )
         cls.executeArchive(
             f_source_dir=f_run_source_dir,
             f_dest_root=f_dest_root,

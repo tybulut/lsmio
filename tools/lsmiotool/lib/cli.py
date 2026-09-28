@@ -49,7 +49,7 @@ common cmds:
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -68,26 +68,30 @@ ARCHIVE_HELP_TEXT = """Usage:
 
 Arguments:
   <benchmark>   Supported benchmarks: lsmio
-  <scale>       Supported scales: local, bake, small, large, baseline
-  <variant>     Optional variant configuration for 'lsmio baseline'
-                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio baseline'.
+  <scale>       Supported scales: local, bake, small, large, variants
+                ('baseline' is accepted as the deprecated spelling of 'variants')
+  <variant>     Optional variant configuration for 'lsmio variants'
+                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio variants'.
 
 Options:
-  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive).
+  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
 """
 
 RUN_HELP_TEXT = """Usage:
   lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned]
+  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
-  <scale>       Supported scales: local, bake, small, large, baseline
+  <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
+  <backends>    Optional comma-separated list of backends to run (default: adios2,native,rocksdb).
+                Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
                 or 'all' for all registered matrix variants.
-                Only supported for 'lsmio baseline'.
+                Only supported for 'lsmio variants'.
 
 Options:
   --ssd         Use SSD storage class (default: HDD).
@@ -99,7 +103,7 @@ Options:
   --no-archive  Disable automatic post-run archiving after variant execution.
   --resume      Skip variant execution if target archive directory (outputs-<arm_id>) already exists.
   --out-dir <path>
-                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive).
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
@@ -113,9 +117,11 @@ Global Options (preserved for legacy compatibility):
 
 PARSE_HELP_TEXT = """Usage:
   lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
+  lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>]
 
 Arguments:
   <target>      Target run root path, manifest file path, or benchmark name (ior, lsmio, lmp).
+  <scale>       Supported scales for backends mode: local, bake, small, large.
 
 Options:
   --output-dir <dir>
@@ -208,8 +214,9 @@ class RunCliParser:
 
     Positional Arguments:
         <benchmark>: Required. One of: ior, lsmio, lmp.
-        <scale>: Required. One of: local, bake, small, large, baseline.
-        <variant>: Optional. Supported exclusively for 'lsmio baseline'.
+        <scale>: Required. One of: local, bake, small, large, variants
+            ('baseline' is the deprecated spelling of 'variants').
+        <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
         --ssd: Storage class SSD (default HDD)
@@ -221,7 +228,9 @@ class RunCliParser:
     """
 
     VALID_BENCHMARKS = frozenset({"ior", "lsmio", "lmp"})
-    VALID_SCALES = frozenset({"local", "bake", "small", "large", "baseline"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
+    # Deprecated spelling retained so existing scripts keep working
+    SCALE_ALIASES = {"baseline": "variants"}
 
     @classmethod
     def parse(
@@ -329,41 +338,82 @@ class RunCliParser:
         if len(f_post_run_tokens) < 2:
             raise RunCliParseError("Missing required positional argument: <scale>")
 
-        # Validate scale (positional 1)
-        f_scale_tok = f_post_run_tokens[1]
-        if f_scale_tok.startswith("-"):
-            if f_scale_tok == "--setup":
+        # Check for 'backends' mode syntax: lsmiotool run lsmio backends <scale> [<backends>]
+        f_mode: str = "standard"
+        f_backends: Optional[Tuple[str, ...]] = None
+        f_variants: Tuple[Optional[str], ...] = (None,)
+        f_variant_name: Optional[str] = None
+
+        if (
+            f_benchmark == "lsmio"
+            and f_post_run_tokens[1].strip().lower() == "backends"
+        ):
+            f_mode = "backends"
+            if len(f_post_run_tokens) < 3:
                 raise RunCliParseError(
-                    "Prohibit '--setup' placed between positional arguments."
+                    "Missing required positional argument: <scale> for 'run lsmio backends'"
                 )
-            elif f_scale_tok == "--ssd":
+            f_scale_tok = f_post_run_tokens[2]
+            if f_scale_tok.startswith("-"):
                 raise RunCliParseError(
-                    "Prohibit '--ssd' placed between positional arguments."
+                    f"Unexpected option {f_scale_tok!r} placed before scale in 'run lsmio backends'."
                 )
-            else:
+            f_scale = f_scale_tok.strip().lower()
+            valid_backend_scales = frozenset({"local", "bake", "small", "large"})
+            if f_scale not in valid_backend_scales:
                 raise RunCliParseError(
-                    f"Unexpected option {f_scale_tok!r} placed between positional arguments."
+                    f"Invalid scale for backends mode: {f_scale_tok!r}. Must be one of: {sorted(valid_backend_scales)}"
                 )
 
-        f_scale = f_scale_tok.strip().lower()
-        if f_scale not in cls.VALID_SCALES:
-            raise RunCliParseError(
-                f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
-            )
+            f_trailing_tokens = f_post_run_tokens[3:]
+            if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                f_backends_raw = f_trailing_tokens[0].strip()
+                f_trailing_tokens = f_trailing_tokens[1:]
+                parsed_b = [
+                    b.strip().lower() for b in f_backends_raw.split(",") if b.strip()
+                ]
+                if not parsed_b:
+                    raise RunCliParseError("Backends specification cannot be empty.")
+                f_backends = tuple(parsed_b)
+            else:
+                f_backends = ("adios2", "native", "rocksdb")
+        else:
+            # Validate scale (positional 1)
+            f_scale_tok = f_post_run_tokens[1]
+            if f_scale_tok.startswith("-"):
+                if f_scale_tok == "--setup":
+                    raise RunCliParseError(
+                        "Prohibit '--setup' placed between positional arguments."
+                    )
+                elif f_scale_tok == "--ssd":
+                    raise RunCliParseError(
+                        "Prohibit '--ssd' placed between positional arguments."
+                    )
+                else:
+                    raise RunCliParseError(
+                        f"Unexpected option {f_scale_tok!r} placed between positional arguments."
+                    )
+
+            f_scale = f_scale_tok.strip().lower()
+            f_scale = cls.SCALE_ALIASES.get(f_scale, f_scale)
+            if f_scale not in cls.VALID_SCALES:
+                raise RunCliParseError(
+                    f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
+                )
+
+            f_trailing_tokens = f_post_run_tokens[2:]
 
         # Parse trailing options and optional positional variant
         from lsmiotool.lib.variants import VariantCatalogue
 
-        f_trailing_tokens = f_post_run_tokens[2:]
-        f_variants: Tuple[Optional[str], ...] = (None,)
-        f_variant_name: Optional[str] = None
-
-        if f_scale == "baseline":
+        if f_scale == "variants":
             if f_benchmark == "lsmio":
                 if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                     f_variant_tok = f_trailing_tokens[0]
                     f_trailing_tokens = f_trailing_tokens[1:]
-                    raw_tokens = [t.strip() for t in f_variant_tok.split(",") if t.strip()]
+                    raw_tokens = [
+                        t.strip() for t in f_variant_tok.split(",") if t.strip()
+                    ]
                     if not raw_tokens:
                         raise RunCliParseError("Variant specification cannot be empty.")
 
@@ -429,14 +479,18 @@ class RunCliParser:
                 f_idx += 2
             elif f_tok == "--archive":
                 if f_archive is False:
-                    raise RunCliParseError("Cannot specify both '--archive' and '--no-archive'.")
+                    raise RunCliParseError(
+                        "Cannot specify both '--archive' and '--no-archive'."
+                    )
                 if f_archive is True:
                     raise RunCliParseError("Duplicate '--archive' option specified.")
                 f_archive = True
                 f_idx += 1
             elif f_tok == "--no-archive":
                 if f_archive is True:
-                    raise RunCliParseError("Cannot specify both '--archive' and '--no-archive'.")
+                    raise RunCliParseError(
+                        "Cannot specify both '--archive' and '--no-archive'."
+                    )
                 if f_archive is False:
                     raise RunCliParseError("Duplicate '--no-archive' option specified.")
                 f_archive = False
@@ -448,7 +502,9 @@ class RunCliParser:
                 f_idx += 1
             elif f_tok in ("--out-dir", "--output-dir", "--dest"):
                 if f_out_dir is not None:
-                    raise RunCliParseError(f"Duplicate destination option specified: {f_tok!r}.")
+                    raise RunCliParseError(
+                        f"Duplicate destination option specified: {f_tok!r}."
+                    )
                 if f_idx + 1 >= len(f_trailing_tokens):
                     raise RunCliParseError(f"Missing value after {f_tok!r} option.")
                 f_val = f_trailing_tokens[f_idx + 1]
@@ -457,12 +513,24 @@ class RunCliParser:
                         f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise RunCliParseError(f"Destination path after {f_tok!r} cannot be empty.")
-                f_out_dir = str(Path(f_val.strip()).resolve())
+                    raise RunCliParseError(
+                        f"Destination path after {f_tok!r} cannot be empty."
+                    )
+                # Absolute paths are normalised here; relative paths stay verbatim and
+                # are resolved against the benchmark root by archive.resolveArchiveDest,
+                # matching bmtool/include/archive-dest.in.sh.
+                f_dest_val = f_val.strip()
+                f_out_dir = (
+                    str(Path(f_dest_val).resolve())
+                    if os.path.isabs(f_dest_val)
+                    else f_dest_val
+                )
                 f_idx += 2
             elif f_tok in ("--time", "--walltime", "--wallhour"):
                 if f_wallhour is not None or f_walltime is not None:
-                    raise RunCliParseError(f"Duplicate walltime option specified: {f_tok!r}.")
+                    raise RunCliParseError(
+                        f"Duplicate walltime option specified: {f_tok!r}."
+                    )
                 if f_idx + 1 >= len(f_trailing_tokens):
                     raise RunCliParseError(f"Missing value after {f_tok!r} option.")
                 f_val = f_trailing_tokens[f_idx + 1]
@@ -471,14 +539,18 @@ class RunCliParser:
                         f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise RunCliParseError(f"Walltime value after {f_tok!r} cannot be empty.")
+                    raise RunCliParseError(
+                        f"Walltime value after {f_tok!r} cannot be empty."
+                    )
                 f_val_str = f_val.strip()
                 import re
 
                 if re.match(r"^\d+$", f_val_str):
                     f_h = int(f_val_str)
                     if f_h <= 0:
-                        raise RunCliParseError(f"--time value must be greater than 0, got: {f_h}")
+                        raise RunCliParseError(
+                            f"--time value must be greater than 0, got: {f_h}"
+                        )
                     f_wallhour = max(1, min(48, f_h))
                 elif re.match(r"^\d+:\d{2}:\d{2}$", f_val_str):
                     f_walltime = f_val_str
@@ -514,17 +586,21 @@ class RunCliParser:
                 )
 
         if f_versioned:
-            if f_scale != "baseline" or f_benchmark != "lsmio":
+            if f_scale != "variants" or f_benchmark != "lsmio":
                 raise RunCliParseError(
-                    "--versioned is supported exclusively for 'lsmio baseline'."
+                    "--versioned is supported exclusively for 'lsmio variants'."
                 )
             if f_archive is False:
-                raise RunCliParseError("Cannot specify '--no-archive' with '--versioned'.")
+                raise RunCliParseError(
+                    "Cannot specify '--no-archive' with '--versioned'."
+                )
             f_archive = True
 
         return RunRequest(
             f_target=f_benchmark,
             f_scale=f_scale,
+            f_mode=f_mode,
+            f_backends=f_backends,
             f_ssd=f_is_ssd,
             f_setup=f_setup_name,
             f_variant=f_variant_name,
@@ -549,16 +625,31 @@ def parseRunArguments(
 class ParseRequest:
     """Immutable parsed and validated parse request."""
 
-    __slots__ = ("m_target", "m_output_dir", "m_format", "_frozen")
+    __slots__ = ("m_target", "m_mode", "m_scale", "m_output_dir", "m_format", "_frozen")
 
     def __init__(
         self,
         f_target: str,
         f_output_dir: Optional[str] = None,
         f_format: str = "csv",
+        f_mode: str = "standard",
+        f_scale: Optional[str] = None,
     ) -> None:
+        if f_output_dir in ("standard", "backends") and f_scale is None:
+            f_mode = f_output_dir
+            f_scale = f_format if f_format not in ("csv", "json") else None
+            f_output_dir = None
+            f_format = "csv"
         if not isinstance(f_target, str) or not f_target.strip():
             raise ValueError(f"target must be a non-empty string, got: {f_target!r}")
+        if not isinstance(f_mode, str) or not f_mode.strip():
+            raise ValueError(f"mode must be a non-empty string, got: {f_mode!r}")
+        if f_scale is not None and (
+            not isinstance(f_scale, str) or not f_scale.strip()
+        ):
+            raise ValueError(
+                f"scale must be a non-empty string or None, got: {f_scale!r}"
+            )
         if f_output_dir is not None and (
             not isinstance(f_output_dir, str) or not f_output_dir.strip()
         ):
@@ -572,6 +663,11 @@ class ParseRequest:
             raise ValueError(f"format must be 'csv' or 'json', got: {f_format!r}")
 
         super().__setattr__("m_target", f_target.strip())
+        super().__setattr__("m_mode", f_mode.strip().lower())
+        super().__setattr__(
+            "m_scale",
+            f_scale.strip().lower() if f_scale is not None else None,
+        )
         super().__setattr__(
             "m_output_dir",
             f_output_dir.strip() if f_output_dir is not None else None,
@@ -596,6 +692,14 @@ class ParseRequest:
         return self.m_target
 
     @property
+    def mode(self) -> str:
+        return self.m_mode
+
+    @property
+    def scale(self) -> Optional[str]:
+        return self.m_scale
+
+    @property
     def output_dir(self) -> Optional[str]:
         return self.m_output_dir
 
@@ -608,15 +712,22 @@ class ParseRequest:
         return self.m_format
 
     def toDict(self) -> Dict[str, Any]:
-        return {
+        f_dict: Dict[str, Any] = {
             "target": self.m_target,
             "output_dir": self.m_output_dir,
             "format": self.m_format,
         }
+        if self.m_mode != "standard":
+            f_dict["mode"] = self.m_mode
+        if self.m_scale is not None:
+            f_dict["scale"] = self.m_scale
+        return f_dict
 
     def __repr__(self) -> str:
         return (
             f"ParseRequest(target={self.m_target!r}, "
+            f"mode={self.m_mode!r}, "
+            f"scale={self.m_scale!r}, "
             f"output_dir={self.m_output_dir!r}, "
             f"format={self.m_format!r})"
         )
@@ -625,6 +736,8 @@ class ParseRequest:
         if isinstance(f_other, ParseRequest):
             return (
                 self.m_target == f_other.m_target
+                and self.m_mode == f_other.m_mode
+                and self.m_scale == f_other.m_scale
                 and self.m_output_dir == f_other.m_output_dir
                 and self.m_format == f_other.m_format
             )
@@ -698,6 +811,28 @@ class ParseCliParser:
             raise ParseCliParseError("Target cannot be empty.")
 
         f_remaining_tokens = f_tokens_copy[1:]
+        f_mode: str = "standard"
+        f_scale: Optional[str] = None
+
+        if (
+            f_target.lower() == "lsmio"
+            and f_remaining_tokens
+            and f_remaining_tokens[0].lower() == "backends"
+        ):
+            f_mode = "backends"
+            f_remaining_tokens.pop(0)
+            if not f_remaining_tokens or f_remaining_tokens[0].startswith("-"):
+                raise ParseCliParseError(
+                    "Missing required positional argument: <scale> for 'parse lsmio backends'"
+                )
+            f_scale_tok = f_remaining_tokens.pop(0).strip().lower()
+            valid_scales = frozenset({"local", "bake", "small", "large"})
+            if f_scale_tok not in valid_scales:
+                raise ParseCliParseError(
+                    f"Invalid scale for backends parse: {f_scale_tok!r}. Must be one of: {sorted(valid_scales)}"
+                )
+            f_scale = f_scale_tok
+
         f_output_dir: Optional[str] = None
         f_format: str = "csv"
         f_format_seen: bool = False
@@ -750,6 +885,8 @@ class ParseCliParser:
 
         return ParseRequest(
             f_target=f_target,
+            f_mode=f_mode,
+            f_scale=f_scale,
             f_output_dir=f_output_dir,
             f_format=f_format,
         )
@@ -768,16 +905,19 @@ class ArchiveCliParser:
 
     Positional Arguments:
         <benchmark>: Required. Must be 'lsmio'.
-        <scale>: Required. One of: local, bake, small, large, baseline.
-        <variant>: Optional. Supported exclusively for 'lsmio baseline'.
+        <scale>: Required. One of: local, bake, small, large, variants
+            ('baseline' is the deprecated spelling of 'variants').
+        <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
-        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive).
+        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
     """
 
     VALID_BENCHMARKS = frozenset({"lsmio"})
-    VALID_SCALES = frozenset({"local", "bake", "small", "large", "baseline"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
+    # Deprecated spelling retained so existing scripts keep working
+    SCALE_ALIASES = {"baseline": "variants"}
 
     @classmethod
     def parse(
@@ -794,7 +934,7 @@ class ArchiveCliParser:
 
         Raises:
             ArchiveCliParseError: If syntax, arity, flags, or values are invalid.
-            UnknownVariantError: If variant is invalid for baseline scale.
+            UnknownVariantError: If variant is invalid for variants scale.
         """
         if f_argv is None or isinstance(f_argv, (str, bytes)):
             raise ArchiveCliParseError(
@@ -822,9 +962,7 @@ class ArchiveCliParser:
 
         # Separate pre-'archive' and post-'archive' tokens if 'archive' is present
         f_archive_indices: List[int] = [
-            f_idx
-            for f_idx, f_tok in enumerate(f_tokens)
-            if f_tok.lower() == "archive"
+            f_idx for f_idx, f_tok in enumerate(f_tokens) if f_tok.lower() == "archive"
         ]
 
         if f_archive_indices:
@@ -859,9 +997,7 @@ class ArchiveCliParser:
             )
 
         if len(f_post_archive_tokens) < 2:
-            raise ArchiveCliParseError(
-                "Missing required positional argument: <scale>"
-            )
+            raise ArchiveCliParseError("Missing required positional argument: <scale>")
 
         # Validate scale (positional 1)
         f_scale_tok = f_post_archive_tokens[1]
@@ -871,6 +1007,7 @@ class ArchiveCliParser:
             )
 
         f_scale = f_scale_tok.strip().lower()
+        f_scale = cls.SCALE_ALIASES.get(f_scale, f_scale)
         if f_scale not in cls.VALID_SCALES:
             raise ArchiveCliParseError(
                 f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
@@ -882,7 +1019,7 @@ class ArchiveCliParser:
         f_trailing_tokens = f_post_archive_tokens[2:]
         f_variant_name: Optional[str] = None
 
-        if f_scale == "baseline":
+        if f_scale == "variants":
             if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
                 f_variant_tok = f_trailing_tokens[0]
                 f_trailing_tokens = f_trailing_tokens[1:]
@@ -902,22 +1039,16 @@ class ArchiveCliParser:
             f_tok = f_trailing_tokens[f_idx]
             if f_tok == "--dest":
                 if f_dest_seen:
-                    raise ArchiveCliParseError(
-                        "Duplicate '--dest' option specified."
-                    )
+                    raise ArchiveCliParseError("Duplicate '--dest' option specified.")
                 if f_idx + 1 >= len(f_trailing_tokens):
-                    raise ArchiveCliParseError(
-                        "Missing value after '--dest' option."
-                    )
+                    raise ArchiveCliParseError("Missing value after '--dest' option.")
                 f_val = f_trailing_tokens[f_idx + 1]
                 if f_val.startswith("-"):
                     raise ArchiveCliParseError(
                         f"Missing valid value after '--dest' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise ArchiveCliParseError(
-                        "Destination path cannot be empty."
-                    )
+                    raise ArchiveCliParseError("Destination path cannot be empty.")
                 f_dest_path = f_val.strip()
                 f_dest_seen = True
                 f_idx += 2
@@ -962,16 +1093,12 @@ class CompareNodesRequest:
         f_output_dir: Optional[str] = None,
     ) -> None:
         if not isinstance(f_folder, str) or not f_folder.strip():
-            raise ValueError(
-                f"folder must be a non-empty string, got: {f_folder!r}"
-            )
+            raise ValueError(f"folder must be a non-empty string, got: {f_folder!r}")
         if not isinstance(f_op, str) or not f_op.strip():
             raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
         f_norm_op = f_op.strip().lower()
         if f_norm_op not in ("read", "write"):
-            raise ValueError(
-                f"op must be one of ('read', 'write'), got: {f_op!r}"
-            )
+            raise ValueError(f"op must be one of ('read', 'write'), got: {f_op!r}")
         if (
             isinstance(f_stripes, bool)
             or not isinstance(f_stripes, int)
@@ -1006,9 +1133,7 @@ class CompareNodesRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -1076,13 +1201,15 @@ class CompareNodesRequest:
         return False
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_folder,
-            self.m_op,
-            self.m_stripes,
-            self.m_blocksize,
-            self.m_output_dir,
-        ))
+        return hash(
+            (
+                self.m_folder,
+                self.m_op,
+                self.m_stripes,
+                self.m_blocksize,
+                self.m_output_dir,
+            )
+        )
 
 
 class CompareVariantsRequest:
@@ -1155,9 +1282,7 @@ class CompareVariantsRequest:
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
         if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot modify immutable {self.__class__.__name__}"
-            )
+            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
         super().__setattr__(f_key, f_value)
 
     def __delattr__(self, f_key: str) -> None:
@@ -1240,14 +1365,16 @@ class CompareVariantsRequest:
         return False
 
     def __hash__(self) -> int:
-        return hash((
-            self.m_archive_folder,
-            self.m_op,
-            self.m_stripes,
-            self.m_blocksize,
-            self.m_all,
-            self.m_output_dir,
-        ))
+        return hash(
+            (
+                self.m_archive_folder,
+                self.m_op,
+                self.m_stripes,
+                self.m_blocksize,
+                self.m_all,
+                self.m_output_dir,
+            )
+        )
 
 
 # Backward compatibility alias for existing test imports and internal callers
@@ -1367,9 +1494,7 @@ class CompareCliParser:
                 )
 
         if not f_tokens:
-            raise CompareCliParseError(
-                "Missing required positional argument: <folder>"
-            )
+            raise CompareCliParseError("Missing required positional argument: <folder>")
 
         f_folder_tok = f_tokens[0]
         if f_folder_tok.startswith("-"):
@@ -1456,9 +1581,7 @@ class CompareCliParser:
                         f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise CompareCliParseError(
-                        "Output directory path cannot be empty."
-                    )
+                    raise CompareCliParseError("Output directory path cannot be empty.")
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2
@@ -1495,9 +1618,7 @@ class CompareCliParser:
 
         f_archive_folder = f_archive_folder_tok.strip()
         if not f_archive_folder:
-            raise CompareCliParseError(
-                "Archive folder path cannot be empty."
-            )
+            raise CompareCliParseError("Archive folder path cannot be empty.")
 
         f_op: str = "both"
         f_stripes: int = 4
@@ -1558,9 +1679,7 @@ class CompareCliParser:
             f_tok = f_remaining_tokens[f_rem_idx]
             if f_tok == "--all":
                 if f_all_seen:
-                    raise CompareCliParseError(
-                        "Duplicate '--all' option specified."
-                    )
+                    raise CompareCliParseError("Duplicate '--all' option specified.")
                 f_all = True
                 f_all_seen = True
                 f_rem_idx += 1
@@ -1579,9 +1698,7 @@ class CompareCliParser:
                         f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
                     )
                 if not f_val.strip():
-                    raise CompareCliParseError(
-                        "Output directory path cannot be empty."
-                    )
+                    raise CompareCliParseError("Output directory path cannot be empty.")
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2

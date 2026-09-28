@@ -137,7 +137,9 @@ class CompareArchiveMainTest(TestCase):
         with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
             ret = cm.run()
             self.assertEqual(ret, 3)
-            self.assertIn(f"Archive folder not found: {non_existent}", mock_stderr.getvalue())
+            self.assertIn(
+                f"Archive folder not found: {non_existent}", mock_stderr.getvalue()
+            )
 
     def testEmptyOrNoVariantArchiveReturnsExitCode1(self) -> None:
         """Test that archive folder with no outputs-* subdirectories returns exit code 1."""
@@ -150,7 +152,9 @@ class CompareArchiveMainTest(TestCase):
         with patch("lsmiotool.lib.log.Console.warning") as mock_warn:
             ret = cm.run()
             self.assertEqual(ret, 1)
-            mock_warn.assert_called_with("No valid benchmark runs found in archive folder")
+            mock_warn.assert_called_with(
+                "No valid benchmark runs found in archive folder"
+            )
 
     def testParseOnDemandTriggeredWhenCsvMissing(self) -> None:
         """Test parse-on-demand is triggered when lsm-report.csv is missing."""
@@ -218,9 +222,14 @@ class CompareArchiveMainTest(TestCase):
                 )
                 ret = cm.run()
                 self.assertEqual(ret, 0)
-                warning_messages = [str(call[0][0]) for call in mock_warn.call_args_list]
+                warning_messages = [
+                    str(call[0][0]) for call in mock_warn.call_args_list
+                ]
                 self.assertTrue(
-                    any("Failed to generate report for" in msg and "corrupted" in msg for msg in warning_messages)
+                    any(
+                        "Failed to generate report for" in msg and "corrupted" in msg
+                        for msg in warning_messages
+                    )
                 )
                 expected_chart = os.path.join(
                     out_dir, "compare-variants-archive_corrupted-read-4-1M.png"
@@ -290,8 +299,12 @@ class CompareArchiveMainTest(TestCase):
         ret = cm.run()
         self.assertEqual(ret, 0)
 
-        read_chart = os.path.join(out_dir, "compare-variants-archive_both-read-4-1M.png")
-        write_chart = os.path.join(out_dir, "compare-variants-archive_both-write-4-1M.png")
+        read_chart = os.path.join(
+            out_dir, "compare-variants-archive_both-read-4-1M.png"
+        )
+        write_chart = os.path.join(
+            out_dir, "compare-variants-archive_both-write-4-1M.png"
+        )
         self.assertTrue(os.path.exists(read_chart), "Read chart must exist")
         self.assertTrue(os.path.exists(write_chart), "Write chart must exist")
         self.assertGreater(os.path.getsize(read_chart), 0)
@@ -338,7 +351,9 @@ class CompareArchiveMainTest(TestCase):
 
     def testEndToEndAgainstSyntheticDataset(self) -> None:
         """Integration test against synthetic viking2 dataset if present."""
-        dataset_path = "/home/sbulut/src/bulut/lsmio-data/synthetic/viking2/lsmio-2026-08-04"
+        dataset_path = (
+            "/home/sbulut/src/bulut/lsmio-data/synthetic/viking2/lsmio-2026-08-04"
+        )
         if not os.path.isdir(dataset_path):
             self.skipTest(f"Synthetic dataset {dataset_path} not found")
 
@@ -353,8 +368,12 @@ class CompareArchiveMainTest(TestCase):
         ret = cm.run()
         self.assertEqual(ret, 0)
 
-        read_png = os.path.join(out_dir, "compare-variants-lsmio-2026-08-04-read-4-1M.png")
-        write_png = os.path.join(out_dir, "compare-variants-lsmio-2026-08-04-write-4-1M.png")
+        read_png = os.path.join(
+            out_dir, "compare-variants-lsmio-2026-08-04-read-4-1M.png"
+        )
+        write_png = os.path.join(
+            out_dir, "compare-variants-lsmio-2026-08-04-write-4-1M.png"
+        )
         self.assertTrue(os.path.exists(read_png), f"{read_png} must exist")
         self.assertTrue(os.path.exists(write_png), f"{write_png} must exist")
         self.assertGreater(os.path.getsize(read_png), 0)
@@ -402,7 +421,9 @@ class CompareArchiveMainTest(TestCase):
         os.makedirs(base_btree, exist_ok=True)
 
         _writeSyntheticCsv(os.path.join(run_footer, "lsm-report.csv"), f_multiplier=1.2)
-        _writeSyntheticCsv(os.path.join(base_footer, "lsm-report.csv"), f_multiplier=1.0)
+        _writeSyntheticCsv(
+            os.path.join(base_footer, "lsm-report.csv"), f_multiplier=1.0
+        )
         _writeSyntheticCsv(os.path.join(run_btree, "lsm-report.csv"), f_multiplier=0.85)
         _writeSyntheticCsv(os.path.join(base_btree, "lsm-report.csv"), f_multiplier=1.0)
 
@@ -418,11 +439,19 @@ class CompareArchiveMainTest(TestCase):
         ret = cm.run()
         self.assertEqual(ret, 0)
 
-        read_chart = os.path.join(out_dir, "compare-variants-delta-archive_paired-read-4-1M.png")
-        write_chart = os.path.join(out_dir, "compare-variants-delta-archive_paired-write-4-1M.png")
+        read_chart = os.path.join(
+            out_dir, "compare-variants-delta-archive_paired-read-4-1M.png"
+        )
+        write_chart = os.path.join(
+            out_dir, "compare-variants-delta-archive_paired-write-4-1M.png"
+        )
 
-        self.assertTrue(os.path.exists(read_chart), f"Delta read chart {read_chart} must exist")
-        self.assertTrue(os.path.exists(write_chart), f"Delta write chart {write_chart} must exist")
+        self.assertTrue(
+            os.path.exists(read_chart), f"Delta read chart {read_chart} must exist"
+        )
+        self.assertTrue(
+            os.path.exists(write_chart), f"Delta write chart {write_chart} must exist"
+        )
         self.assertGreater(os.path.getsize(read_chart), 0)
         self.assertGreater(os.path.getsize(write_chart), 0)
 
@@ -436,7 +465,9 @@ class CompareArchiveMainTest(TestCase):
         os.makedirs(base_footer, exist_ok=True)
 
         _writeSyntheticCsv(os.path.join(run_footer, "lsm-report.csv"), f_multiplier=1.1)
-        _writeSyntheticCsv(os.path.join(base_footer, "lsm-report.csv"), f_multiplier=1.0)
+        _writeSyntheticCsv(
+            os.path.join(base_footer, "lsm-report.csv"), f_multiplier=1.0
+        )
 
         out_dir = os.path.join(self.m_temp_dir.name, "plots_paired_all")
 
@@ -465,7 +496,8 @@ class CompareArchiveMainTest(TestCase):
         ]
         for op, stripes, bs in permutations:
             chart = os.path.join(
-                out_dir, f"compare-variants-delta-archive_paired_all-{op}-{stripes}-{bs}.png"
+                out_dir,
+                f"compare-variants-delta-archive_paired_all-{op}-{stripes}-{bs}.png",
             )
             self.assertTrue(os.path.exists(chart), f"Delta chart {chart} must exist")
             self.assertGreater(os.path.getsize(chart), 0)
@@ -481,7 +513,6 @@ class CompareArchiveMainTest(TestCase):
         with patch("lsmiotool.lib.log.Console.warning") as mock_warn:
             ret = cm.run()
             self.assertEqual(ret, 1)
-
 
     def testCompareVariantsMainAlias(self) -> None:
         """Test CompareVariantsMain is identical to CompareArchiveMain alias."""

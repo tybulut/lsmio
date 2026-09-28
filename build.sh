@@ -33,14 +33,33 @@ INSTALL_TAG=""
 DO_COVERAGE=false
 
 detect_num_cores() {
+  # 1. macOS physical cores
+  if command -v sysctl >/dev/null 2>&1; then
+    local phys_cpu
+    phys_cpu=$(sysctl -n hw.physicalcpu 2>/dev/null)
+    if [ -n "$phys_cpu" ] && [ "$phys_cpu" -gt 0 ] 2>/dev/null; then
+      echo "$phys_cpu"
+      return
+    fi
+  fi
+
+  # 2. Linux physical cores (excluding hyper-threads)
+  if command -v lscpu >/dev/null 2>&1; then
+    local phys_cores
+    phys_cores=$(lscpu -p=Core,Socket 2>/dev/null | grep -v '^#' | sort -u | wc -l)
+    if [ -n "$phys_cores" ] && [ "$phys_cores" -gt 0 ] 2>/dev/null; then
+      echo "$phys_cores"
+      return
+    fi
+  fi
+
+  # 3. Fallback to logical processors
   if command -v nproc >/dev/null 2>&1; then
-    nproc 2>/dev/null || echo 0
-  elif command -v sysctl >/dev/null 2>&1; then
-    sysctl -n hw.logicalcpu 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0
+    nproc 2>/dev/null || echo 4
   elif command -v getconf >/dev/null 2>&1; then
-    getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0
+    getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4
   else
-    echo 0
+    echo 4
   fi
 }
 
@@ -81,7 +100,7 @@ detect_optimal_jobs() {
 
   # 2. Memory budget: reserve 4 GiB floor for OS/services, allocate ~1.5 GiB per compiler/linker job
   if [ "$total_ram_gb" -gt 4 ]; then
-    ram_jobs=$(( (total_ram_gb - 4) * 2 / 3 ))
+    ram_jobs=$(( (total_ram_gb - 4) * 4 / 5 ))
     [ "$ram_jobs" -lt 1 ] && ram_jobs=1
   elif [ "$total_ram_gb" -gt 0 ]; then
     ram_jobs=1
@@ -248,11 +267,13 @@ else
   log "Build directory: $ROOT_DIR/$BUILD_DIR (in-tree)"
 fi
 
+INSTALL_PREFIX="${PREFIX:-${PROJECT_DIR:-$HOME/src/usr}}"
+
 log "Configuring a $BUILD_TYPE build (cmake, coverage: $DO_COVERAGE)"
 cmake -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
   -DBUILD_SHARED_LIBS=On \
-  -DCMAKE_INSTALL_PREFIX:PATH="${PREFIX:-$HOME/src/usr}" \
+  -DCMAKE_INSTALL_PREFIX:PATH="$INSTALL_PREFIX" \
   -DLSMIO_ENABLE_COVERAGE=$DO_COVERAGE
 
 pushd "$BUILD_DIR" > /dev/null || exit 1
@@ -307,7 +328,14 @@ fi
 CTEST_FAILED=0
 if [ "$DO_TEST" = true ]; then
   if [ "$DO_COVERAGE" = true ]; then
-    export LLVM_PROFILE_FILE="coverage-%p.profraw"
+    # Clang builds only (GCC uses gcov .gcda files, merged in place). %4m merges
+    # profiles online into a pool of 4 files per binary instead of one file
+    # per test process; the coverage-*.profraw glob below still matches them.
+    # Start from empty pools: %4m merges into existing files, and the runtime
+    # silently refuses to merge into a pool written by an incompatible build.
+    find . -name "coverage-*.profraw" -delete
+    rm -f coverage.profdata
+    export LLVM_PROFILE_FILE="coverage-%4m.profraw"
   fi
   log "Running all tests (ctest -j$JOBS)"
   ctest -j$JOBS || CTEST_FAILED=1
@@ -324,10 +352,9 @@ if [ "$DO_PTEST" = true ]; then
 fi
 
 if [ "$DO_INSTALL" = true ]; then
-  log "Installing to ${PREFIX:-$HOME/src/usr} (make install)"
+  log "Installing to ${INSTALL_PREFIX} (make install)"
   make install || exit 1
   if [ -n "$INSTALL_TAG" ]; then
-    INSTALL_PREFIX="${PREFIX:-$HOME/src/usr}"
     INSTALL_BIN_DIR="${INSTALL_PREFIX}/bin"
     for bm in bm_native bm_rocksdb bm_leveldb bm_manager bm_adios; do
       if [ -f "${INSTALL_BIN_DIR}/${bm}" ]; then

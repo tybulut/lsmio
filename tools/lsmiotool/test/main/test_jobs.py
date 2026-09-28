@@ -71,6 +71,7 @@ class TestBatchJobOrchestration(unittest.TestCase):
         mock_makedirs: Mock,
         mock_setup: Mock,
     ) -> None:
+        mock_run.return_value.returncode = 0
         jobs.batch_job_orchestration("lmp", "/tmp", env.HpcManager.SLURM, "ds")
         mock_run.assert_called()
         self.assertTrue(mock_copytree.called)
@@ -80,6 +81,18 @@ class TestBatchJobOrchestration(unittest.TestCase):
 
         # Test lsmio batch orchestration
         jobs.batch_job_orchestration("lsmio", "/tmp", env.HpcManager.SLURM, "ds")
+        # srun options come before the script, so srun (not the script) receives them
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            [
+                "srun",
+                "--export=ALL",
+                "--kill-on-bad-exit=1",
+                "/tmp/jobs/lsmio-benchmark.sh",
+                "4",
+                "64K",
+            ],
+        )
 
     @patch("lsmiotool.lib.jobs.setup_job_environment_and_dirs", return_value={})
     @patch("subprocess.run")
@@ -87,9 +100,28 @@ class TestBatchJobOrchestration(unittest.TestCase):
     def test_batch_job_orchestration_pbs(
         self, mock_sleep: Mock, mock_run: Mock, mock_setup: Mock
     ) -> None:
+        mock_run.return_value.returncode = 0
         jobs.batch_job_orchestration("ior", "/tmp", env.HpcManager.PBS, "ds")
         mock_run.assert_called()
         self.assertTrue(mock_sleep.called)
+
+    @patch("lsmiotool.lib.jobs.setup_job_environment_and_dirs", return_value={})
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    def test_batch_job_orchestration_failed_step(
+        self, mock_sleep: Mock, mock_run: Mock, mock_setup: Mock
+    ) -> None:
+        # One failed step: the remaining steps still run, then the orchestration fails
+        mock_run.side_effect = [
+            Mock(returncode=3 if i == 1 else 0) for i in range(6)
+        ]
+        with self.assertRaisesRegex(RuntimeError, r"c16/b1M \(exit code 3\)"):
+            jobs.batch_job_orchestration("ior", "/tmp", env.HpcManager.PBS, "ds")
+        self.assertEqual(mock_run.call_count, 6)
+        # Every step gets the same job date (BM_JOB_DS), as batch.in.sh pins it
+        f_dates = {f_call.kwargs["env"]["BM_JOB_DS"] for f_call in mock_run.call_args_list}
+        self.assertEqual(len(f_dates), 1)
+        self.assertRegex(f_dates.pop(), r"^\d{4}-\d{2}-\d{2}$")
 
     def test_batch_job_orchestration_unknown_manager(self) -> None:
         with self.assertRaises(RuntimeError):

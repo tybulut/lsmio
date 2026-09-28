@@ -315,29 +315,41 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(f_req.ssd)
         self.assertEqual(f_req.setup, "BASE")
 
+    def testVariantsScaleTokenAndLegacyAlias(self) -> None:
+        """Asserts 'variants' is the canonical scale token and 'baseline' still aliases to it."""
+        f_req = parseRunArguments(["lsmio", "variants"])
+        self.assertEqual(f_req.scale, "variants")
+
+        f_req_variant = parseRunArguments(["lsmio", "variants", "footer"])
+        self.assertEqual(f_req_variant.scale, "variants")
+        self.assertEqual(f_req_variant.variant, "footer")
+
+        f_req_legacy = parseRunArguments(["lsmio", "baseline"])
+        self.assertEqual(f_req_legacy.scale, f_req.scale)
+
     def testBaselineScaleWithoutVariant(self) -> None:
         """Tasks 2.3.1: Asserts baseline scale parsing without variant key."""
         f_req = parseRunArguments(["lsmio", "baseline"])
         self.assertEqual(f_req.target, "lsmio")
-        self.assertEqual(f_req.scale, "baseline")
+        self.assertEqual(f_req.scale, "variants")
         self.assertIsNone(f_req.variant)
         self.assertFalse(f_req.ssd)
         self.assertIsNone(f_req.setup)
 
         f_req_cmd = parseRunArguments(["run", "lsmio", "baseline"])
         self.assertEqual(f_req_cmd.target, "lsmio")
-        self.assertEqual(f_req_cmd.scale, "baseline")
+        self.assertEqual(f_req_cmd.scale, "variants")
         self.assertIsNone(f_req_cmd.variant)
 
         f_req_ssd = parseRunArguments(["lsmio", "baseline", "--ssd"])
         self.assertEqual(f_req_ssd.target, "lsmio")
-        self.assertEqual(f_req_ssd.scale, "baseline")
+        self.assertEqual(f_req_ssd.scale, "variants")
         self.assertIsNone(f_req_ssd.variant)
         self.assertTrue(f_req_ssd.ssd)
 
         f_req_setup = parseRunArguments(["lsmio", "baseline", "--setup", "native-m"])
         self.assertEqual(f_req_setup.target, "lsmio")
-        self.assertEqual(f_req_setup.scale, "baseline")
+        self.assertEqual(f_req_setup.scale, "variants")
         self.assertIsNone(f_req_setup.variant)
         self.assertEqual(f_req_setup.setup, "NATIVE-M")
 
@@ -345,18 +357,18 @@ class RunCliParserTest(unittest.TestCase):
         """Tasks 2.3.2: Asserts baseline scale parsing with positional variant key."""
         f_req1 = parseRunArguments(["lsmio", "baseline", "footer-btree"])
         self.assertEqual(f_req1.target, "lsmio")
-        self.assertEqual(f_req1.scale, "baseline")
+        self.assertEqual(f_req1.scale, "variants")
         self.assertEqual(f_req1.variant, "footer-btree")
         self.assertFalse(f_req1.ssd)
 
         f_req2 = parseRunArguments(["run", "lsmio", "baseline", "footer"])
         self.assertEqual(f_req2.target, "lsmio")
-        self.assertEqual(f_req2.scale, "baseline")
+        self.assertEqual(f_req2.scale, "variants")
         self.assertEqual(f_req2.variant, "footer")
 
         f_req3 = parseRunArguments(["lsmio", "baseline", "wbuf-512m"])
         self.assertEqual(f_req3.target, "lsmio")
-        self.assertEqual(f_req3.scale, "baseline")
+        self.assertEqual(f_req3.scale, "variants")
         self.assertEqual(f_req3.variant, "wbuf-512m")
 
     def testBaselineScaleWithVariantAndOptions(self) -> None:
@@ -365,16 +377,24 @@ class RunCliParserTest(unittest.TestCase):
             ["lsmio", "baseline", "wbuf-512m", "--ssd", "--setup", "NATIVE-M"]
         )
         self.assertEqual(f_req.target, "lsmio")
-        self.assertEqual(f_req.scale, "baseline")
+        self.assertEqual(f_req.scale, "variants")
         self.assertEqual(f_req.variant, "wbuf-512m")
         self.assertTrue(f_req.ssd)
         self.assertEqual(f_req.setup, "NATIVE-M")
 
         f_req2 = parseRunArguments(
-            ["--ssd", "run", "lsmio", "baseline", "footer-prealloc", "--setup", "ROCKSDB-M"]
+            [
+                "--ssd",
+                "run",
+                "lsmio",
+                "baseline",
+                "footer-prealloc",
+                "--setup",
+                "ROCKSDB-M",
+            ]
         )
         self.assertEqual(f_req2.target, "lsmio")
-        self.assertEqual(f_req2.scale, "baseline")
+        self.assertEqual(f_req2.scale, "variants")
         self.assertEqual(f_req2.variant, "footer-prealloc")
         self.assertTrue(f_req2.ssd)
         self.assertEqual(f_req2.setup, "ROCKSDB-M")
@@ -411,23 +431,27 @@ class RunCliParserTest(unittest.TestCase):
         """Tasks 2.3.5 (INV-ARCH-3): Asserts positional variants on non-lsmio benchmarks are strictly rejected."""
         with self.assertRaises(RunCliParseError) as f_ctx_ior:
             parseRunArguments(["ior", "baseline", "footer"])
-        self.assertIn("variants are supported exclusively for 'lsmio'", str(f_ctx_ior.exception))
+        self.assertIn(
+            "variants are supported exclusively for 'lsmio'", str(f_ctx_ior.exception)
+        )
 
         with self.assertRaises(RunCliParseError) as f_ctx_lmp:
             parseRunArguments(["lmp", "baseline", "footer"])
-        self.assertIn("variants are supported exclusively for 'lsmio'", str(f_ctx_lmp.exception))
+        self.assertIn(
+            "variants are supported exclusively for 'lsmio'", str(f_ctx_lmp.exception)
+        )
 
     def testBaselineIorAndLmpAllowedWithoutVariant(self) -> None:
         """Tasks 2.3.5: Asserts baseline scale is accepted for IOR and LMP when variant is omitted."""
         f_req_ior = parseRunArguments(["ior", "baseline", "--ssd"])
         self.assertEqual(f_req_ior.target, "ior")
-        self.assertEqual(f_req_ior.scale, "baseline")
+        self.assertEqual(f_req_ior.scale, "variants")
         self.assertIsNone(f_req_ior.variant)
         self.assertTrue(f_req_ior.ssd)
 
         f_req_lmp = parseRunArguments(["lmp", "baseline", "--setup", "LSMIO"])
         self.assertEqual(f_req_lmp.target, "lmp")
-        self.assertEqual(f_req_lmp.scale, "baseline")
+        self.assertEqual(f_req_lmp.scale, "variants")
         self.assertIsNone(f_req_lmp.variant)
         self.assertEqual(f_req_lmp.setup, "LSMIO")
 
@@ -468,17 +492,26 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(f_req_arch.archive)
         self.assertTrue(f_req_arch.effective_archive)
 
-        f_req_no_arch = parseRunArguments(["lsmio", "baseline", "footer,manoff", "--no-archive"])
+        f_req_no_arch = parseRunArguments(
+            ["lsmio", "baseline", "footer,manoff", "--no-archive"]
+        )
         self.assertFalse(f_req_no_arch.archive)
         self.assertFalse(f_req_no_arch.effective_archive)
 
         with self.assertRaises(RunCliParseError) as f_ctx_conflict:
-            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--no-archive"])
-        self.assertIn("Cannot specify both '--archive' and '--no-archive'", str(f_ctx_conflict.exception))
+            parseRunArguments(
+                ["lsmio", "baseline", "footer", "--archive", "--no-archive"]
+            )
+        self.assertIn(
+            "Cannot specify both '--archive' and '--no-archive'",
+            str(f_ctx_conflict.exception),
+        )
 
         with self.assertRaises(RunCliParseError) as f_ctx_dup:
             parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--archive"])
-        self.assertIn("Duplicate '--archive' option specified", str(f_ctx_dup.exception))
+        self.assertIn(
+            "Duplicate '--archive' option specified", str(f_ctx_dup.exception)
+        )
 
     def testResumeOptionFlag(self) -> None:
         """Task 2.5.4: Asserts --resume flag sets resume=True and rejects duplicates."""
@@ -493,12 +526,16 @@ class RunCliParserTest(unittest.TestCase):
         """Task 2.5.5: Asserts --out-dir, --output-dir, and --dest aliases populate out_dir."""
         f_expected = str(Path("/tmp/my-lsmio-archive").resolve())
         for f_flag in ("--out-dir", "--output-dir", "--dest"):
-            f_req = parseRunArguments(["lsmio", "baseline", "footer", f_flag, "/tmp/my-lsmio-archive"])
+            f_req = parseRunArguments(
+                ["lsmio", "baseline", "footer", f_flag, "/tmp/my-lsmio-archive"]
+            )
             self.assertEqual(f_req.out_dir, f_expected)
 
         with self.assertRaises(RunCliParseError) as f_ctx_missing:
             parseRunArguments(["lsmio", "baseline", "footer", "--out-dir"])
-        self.assertIn("Missing value after '--out-dir' option", str(f_ctx_missing.exception))
+        self.assertIn(
+            "Missing value after '--out-dir' option", str(f_ctx_missing.exception)
+        )
 
     def testOutDirEqualsSyntaxRejected(self) -> None:
         """Task 2.5.6: Asserts syntax with '=' delimiter is rejected for all destination and archive flags."""
@@ -513,6 +550,7 @@ class RunCliParserTest(unittest.TestCase):
     def testRunHelpDisplaysMultiVariantAndOptions(self) -> None:
         """Task 2.5.7: Asserts --help text contains multi-variant and options documentation."""
         from lsmiotool.lib.cli import LSMIOTOOL_HELP, RUN_HELP_TEXT
+
         self.assertIn("--archive", RUN_HELP_TEXT)
         self.assertIn("--no-archive", RUN_HELP_TEXT)
         self.assertIn("--resume", RUN_HELP_TEXT)
@@ -526,12 +564,16 @@ class RunCliParserTest(unittest.TestCase):
             self.assertEqual(f_req.wallhour, 8)
             self.assertEqual(f_req.walltime, "08:00:00")
 
-        f_req_hms = parseRunArguments(["lsmio", "baseline", "footer", "--time", "06:30:00"])
+        f_req_hms = parseRunArguments(
+            ["lsmio", "baseline", "footer", "--time", "06:30:00"]
+        )
         self.assertEqual(f_req_hms.walltime, "06:30:00")
 
         # Duplicate detection
         with self.assertRaises(RunCliParseError) as f_ctx_dup:
-            parseRunArguments(["lsmio", "baseline", "footer", "--time", "4", "--wallhour", "8"])
+            parseRunArguments(
+                ["lsmio", "baseline", "footer", "--time", "4", "--wallhour", "8"]
+            )
         self.assertIn("Duplicate walltime option specified", str(f_ctx_dup.exception))
 
         # Equals syntax rejection
@@ -559,7 +601,7 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(req.versioned)
         self.assertTrue(req.is_versioned)
         self.assertEqual(req.target, "lsmio")
-        self.assertEqual(req.scale, "baseline")
+        self.assertEqual(req.scale, "variants")
         self.assertTrue(req.archive)
 
     def testVersionedAcceptsVariants(self) -> None:
@@ -570,7 +612,9 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(req_single.variants, ("legacy",))
         self.assertTrue(req_single.archive)
 
-        req_multi = parseRunArguments(["lsmio", "baseline", "footer,legacy", "--versioned"])
+        req_multi = parseRunArguments(
+            ["lsmio", "baseline", "footer,legacy", "--versioned"]
+        )
         self.assertTrue(req_multi.versioned)
         self.assertEqual(req_multi.variant, "footer")
         self.assertEqual(req_multi.variants, ("footer", "legacy"))
@@ -595,6 +639,93 @@ class RunCliParserTest(unittest.TestCase):
         """Validates that --no-archive with --versioned is rejected."""
         with self.assertRaises(RunCliParseError):
             parseRunArguments(["lsmio", "baseline", "--versioned", "--no-archive"])
+
+    def testBackendsModeDefaultBackends(self) -> None:
+        """Validates that 'run lsmio backends <scale>' parses with default backends and mode='backends'."""
+        req = parseRunArguments(["run", "lsmio", "backends", "small"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "small")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("adios2", "native", "rocksdb"))
+        self.assertFalse(req.ssd)
+        self.assertIsNone(req.setup)
+
+        d = req.toDict()
+        self.assertEqual(d["mode"], "backends")
+        self.assertEqual(d["backends"], ["adios2", "native", "rocksdb"])
+        self.assertEqual(d["target"], "lsmio")
+        self.assertEqual(d["scale"], "small")
+
+    def testBackendsModeCustomBackends(self) -> None:
+        """Validates that custom comma-separated backends are parsed and normalized."""
+        req = parseRunArguments(["lsmio", "backends", "large", "native,rocksdb"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "large")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("native", "rocksdb"))
+
+        d = req.toDict()
+        self.assertEqual(d["backends"], ["native", "rocksdb"])
+
+    def testBackendsModeTrailingOptions(self) -> None:
+        """Validates that trailing options like --ssd, --resume, --time, --out-dir are handled in backends mode."""
+        req = parseRunArguments(
+            [
+                "lsmio",
+                "backends",
+                "bake",
+                "adios2",
+                "--ssd",
+                "--resume",
+                "--time",
+                "12",
+                "--out-dir",
+                "/tmp/archive",
+                "--no-archive",
+            ]
+        )
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "bake")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("adios2",))
+        self.assertTrue(req.ssd)
+        self.assertTrue(req.resume)
+        self.assertEqual(req.wallhour, 12)
+        self.assertEqual(req.walltime, "12:00:00")
+        self.assertEqual(req.out_dir, str(Path("/tmp/archive").resolve()))
+        self.assertFalse(req.archive)
+
+    def testBackendsModeDefaultBackendsWithTrailingOptions(self) -> None:
+        """Validates default backends when options follow scale immediately."""
+        req = parseRunArguments(["lsmio", "backends", "local", "--ssd", "--resume"])
+        self.assertEqual(req.target, "lsmio")
+        self.assertEqual(req.scale, "local")
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("adios2", "native", "rocksdb"))
+        self.assertTrue(req.ssd)
+        self.assertTrue(req.resume)
+
+    def testBackendsModeInvalidScales(self) -> None:
+        """Validates that invalid scales, missing scale, or baseline are rejected in backends mode."""
+        # Baseline is not valid for backends mode
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "baseline"])
+
+        # Unknown scale
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "huge"])
+
+        # Missing scale
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends"])
+
+        # Option before scale
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "--ssd"])
+
+        # Empty backends specification
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "backends", "small", ",,,"])
 
 
 if __name__ == "__main__":

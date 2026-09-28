@@ -45,6 +45,7 @@ from lsmiotool.lib.site import (
     SiteProfile,
 )
 from lsmiotool.lib.worker import (
+    OMPI_TMPDIR_ENV,
     Launcher,
     LauncherError,
     ProcessExecutionError,
@@ -151,7 +152,7 @@ class LauncherTest(unittest.TestCase):
 
     def testExactSrunAndAprun(self) -> None:
         """Validates exact launcher argv structure for Slurm (Viking, Viking2), PBS (Isambard), and DEV."""
-        # 1. Viking (Slurm, ppn=1): ['srun', '--export=ALL', '-n', '8', '-N', '8', ...]
+        # 1. Viking (Slurm, ppn=1): ['srun', '--export=ALL', '--kill-on-bad-exit=1', '-n', '8', '-N', '8', ...]
         f_viking_small = Launcher.buildSharedArgv(
             self.m_viking_profile, self.m_small_point, self.m_ior_command
         )
@@ -160,6 +161,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -172,7 +174,7 @@ class LauncherTest(unittest.TestCase):
             ],
         )
 
-        # 2. Viking (Slurm, ppn=4): ['srun', '--export=ALL', '-n', '32', '-N', '8', ...]
+        # 2. Viking (Slurm, ppn=4): ['srun', '--export=ALL', '--kill-on-bad-exit=1', '-n', '32', '-N', '8', ...]
         f_viking_large = Launcher.buildSharedArgv(
             self.m_viking_profile, self.m_large_point, self.m_ior_command
         )
@@ -181,6 +183,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "32",
                 "-N",
@@ -202,6 +205,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -224,6 +228,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "32",
                 "-N",
@@ -282,6 +287,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -305,6 +311,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "32",
                 "-N",
@@ -334,6 +341,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -362,6 +370,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "32",
                 "-N",
@@ -390,6 +399,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -444,6 +454,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -596,6 +607,7 @@ class LauncherTest(unittest.TestCase):
             [
                 "srun",
                 "--export=ALL",
+                "--kill-on-bad-exit=1",
                 "-n",
                 "8",
                 "-N",
@@ -609,11 +621,11 @@ class LauncherTest(unittest.TestCase):
         )
 
         # Verify no element contains merged shell strings
-        self.assertEqual(f_invoked[6], "/usr/local/bin/my bench")
-        self.assertEqual(f_invoked[7], "--param=value with spaces")
-        self.assertEqual(f_invoked[8], "arg; rm -rf /")
-        self.assertEqual(f_invoked[9], "$(whoami)")
-        self.assertEqual(f_invoked[10], "`uname -a`")
+        self.assertEqual(f_invoked[7], "/usr/local/bin/my bench")
+        self.assertEqual(f_invoked[8], "--param=value with spaces")
+        self.assertEqual(f_invoked[9], "arg; rm -rf /")
+        self.assertEqual(f_invoked[10], "$(whoami)")
+        self.assertEqual(f_invoked[11], "`uname -a`")
 
     def testDoesNotValidateEvidence(self) -> None:
         """Verifies launcher does not perform evidence file scans or rank cardinality checks."""
@@ -844,6 +856,66 @@ class LauncherTest(unittest.TestCase):
                 "c16_b8M",
                 f_runner=f_spawn_err_runner,
             )
+
+    def testSlurmLaunchEnvironment(self) -> None:
+        """Slurm launches default the Open MPI session directory to /dev/shm; others are untouched."""
+        f_mock_runner = MockProcessRunner(f_returncode=0)
+
+        # 1. Slurm, no caller env: os.environ plus both defaults
+        with patch.dict(os.environ, {"LSMIO_ENV_PROBE": "1"}, clear=False):
+            for f_key in OMPI_TMPDIR_ENV:
+                os.environ.pop(f_key, None)
+            Launcher.launchShared(
+                self.m_viking2_profile,
+                self.m_small_point,
+                ["ior"],
+                f_runner=f_mock_runner,
+            )
+        f_env = f_mock_runner.m_invoked_kwargs[-1]["f_env"]
+        self.assertEqual(f_env["LSMIO_ENV_PROBE"], "1")
+        self.assertEqual(f_env["OMPI_MCA_orte_tmpdir_base"], "/dev/shm")
+        self.assertEqual(f_env["PRTE_MCA_prte_tmpdir_base"], "/dev/shm")
+
+        # 2. Slurm, caller env: a set value wins, an empty one is filled; the input is not mutated
+        f_caller_env = {
+            "OMPI_MCA_orte_tmpdir_base": "/scratch/ompi",
+            "PRTE_MCA_prte_tmpdir_base": "",
+        }
+        Launcher.launchRankWorkers(
+            self.m_viking2_profile,
+            self.m_small_point,
+            "/bin/w",
+            "/m.json",
+            "p0",
+            "c16_b8M",
+            f_runner=f_mock_runner,
+            f_env=f_caller_env,
+        )
+        f_env = f_mock_runner.m_invoked_kwargs[-1]["f_env"]
+        self.assertEqual(f_env["OMPI_MCA_orte_tmpdir_base"], "/scratch/ompi")
+        self.assertEqual(f_env["PRTE_MCA_prte_tmpdir_base"], "/dev/shm")
+        self.assertEqual(f_caller_env["PRTE_MCA_prte_tmpdir_base"], "")
+
+        # 3. PBS and DEV: the environment passes through unchanged (None, or the same mapping)
+        for f_profile in (self.m_isambard_profile, self.m_dev_profile):
+            Launcher.launchShared(
+                f_profile, self.m_small_point, ["ior"], f_runner=f_mock_runner
+            )
+            self.assertIsNone(f_mock_runner.m_invoked_kwargs[-1]["f_env"])
+
+            f_own_env = {"PATH": "/usr/bin"}
+            Launcher.launchRankWorkers(
+                f_profile,
+                self.m_small_point,
+                "/bin/w",
+                "/m.json",
+                "p0",
+                "c16_b8M",
+                f_runner=f_mock_runner,
+                f_env=f_own_env,
+            )
+            self.assertIs(f_mock_runner.m_invoked_kwargs[-1]["f_env"], f_own_env)
+            self.assertEqual(f_own_env, {"PATH": "/usr/bin"})
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ class ParseLegacyMain(BaseMain):
     """ParseLegacy command for processing benchmark output logs."""
 
     VALID_MODES: FrozenSet[str] = frozenset(
-        {"local", "bake", "small", "large", "baseline"}
+        {"local", "bake", "small", "large", "variants", "baseline"}
     )
 
     m_command: str
@@ -118,7 +118,7 @@ class ParseLegacyMain(BaseMain):
                 "Command to execute has to be in: " + str(allowed_commands)
             )
             sys.exit(1)
-        allowed_modes = ["local", "bake", "small", "large", "baseline"]
+        allowed_modes = ["local", "bake", "small", "large", "variants", "baseline"]
         if self.m_mode not in self.VALID_MODES:
             log.Console.error("Command mode has to be in: " + str(allowed_modes))
             sys.exit(1)
@@ -522,7 +522,9 @@ class CompareNodesMain(BaseMain):
                     out_dir = str(f_args[4])
 
             if folder is None or op is None:
-                log.Console.error("Compare nodes: Missing required folder or operation.")
+                log.Console.error(
+                    "Compare nodes: Missing required folder or operation."
+                )
                 sys.exit(1)
 
             try:
@@ -590,6 +592,22 @@ class CompareNodesMain(BaseMain):
             log.Console.error(f"Directory not found: {target_dir}")
             sys.exit(1)
 
+        canonical_backend_labels: Dict[str, str] = {
+            "outputs-adios": "adios2",
+            "outputs-adios2": "adios2",
+            "adios": "adios2",
+            "adios2": "adios2",
+            "outputs-native": "native",
+            "native": "native",
+            "outputs-rocksdb": "rocksdb",
+            "rocksdb": "rocksdb",
+        }
+        canonical_order: Dict[str, int] = {
+            "adios2": 0,
+            "native": 1,
+            "rocksdb": 2,
+        }
+
         entries = sorted(os.listdir(target_dir))
         plot_data_list: List[plot.PlotData] = []
         is_read = self.m_op == "read"
@@ -604,7 +622,20 @@ class CompareNodesMain(BaseMain):
                         is_read, self.m_stripes, self.m_bs
                     )
                     if x_series and y_series:
-                        plot_data_list.append(plot.PlotData(entry, x_series, y_series))
+                        legend_label = canonical_backend_labels.get(entry)
+                        if legend_label is None:
+                            entry_lower = entry.lower()
+                            if "adios" in entry_lower:
+                                legend_label = "adios2"
+                            elif entry_lower in ("outputs-native", "native"):
+                                legend_label = "native"
+                            elif "rocksdb" in entry_lower:
+                                legend_label = "rocksdb"
+                            else:
+                                legend_label = entry
+                        plot_data_list.append(
+                            plot.PlotData(legend_label, x_series, y_series)
+                        )
 
         if not plot_data_list:
             log.Console.warning(
@@ -612,20 +643,45 @@ class CompareNodesMain(BaseMain):
             )
             return 0
 
-        base_name = os.path.basename(target_dir.rstrip(os.sep))
-        title = f"Comparison: {base_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
-        meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
+        # Sort plot series by canonical precedence: [adios2, native, rocksdb] (INV-BACKEND-5)
+        plot_data_list.sort(
+            key=lambda p: (canonical_order.get(p.legend, 999), p.legend)
+        )
 
-        # Output directory resolution (INV-ARCH-9: fixes legacy hardcoded os.getcwd())
-        out_dir = (
+        base_name = os.path.basename(target_dir.rstrip(os.sep))
+
+        # Output directory mirroring and scale identification under Approach 2 (INV-BACKEND-4)
+        norm_target = os.path.normpath(target_dir)
+        path_parts = norm_target.split(os.sep)
+
+        base_out = (
             self.resolveDirectory(self.m_output_dir)
             if self.m_output_dir
             else os.getcwd()
         )
+        b_indices = [i for i, part in enumerate(path_parts) if part == "backends"]
+        v_indices = [i for i, part in enumerate(path_parts) if part == "variants"]
+
+        if b_indices:
+            b_idx = b_indices[-1]
+            scale_name = (
+                path_parts[b_idx + 1] if b_idx + 1 < len(path_parts) else base_name
+            )
+            out_dir = os.path.join(base_out, "backends", scale_name)
+        elif v_indices:
+            scale_name = "variants"
+            out_dir = os.path.join(base_out, "variants")
+        else:
+            scale_name = base_name
+            out_dir = base_out
+
         os.makedirs(out_dir, exist_ok=True)
+        title = f"Comparison: {scale_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
+        meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
+
         output_filename = os.path.join(
             out_dir,
-            f"compare-{base_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
+            f"compare-{scale_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
         )
         bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
         bar_plot.plot(output_filename)
@@ -662,7 +718,9 @@ class PairedVariantRun(NamedTuple):
         return cls(
             backend=str(f_data["backend"]),
             variant=str(f_data["variant"]),
-            collision=int(f_data["collision"]) if f_data.get("collision") is not None else None,
+            collision=int(f_data["collision"])
+            if f_data.get("collision") is not None
+            else None,
             display_label=str(f_data["display_label"]),
             run_dir=str(f_data["run_dir"]),
             base_dir=str(f_data["base_dir"]),
@@ -860,9 +918,9 @@ class CompareVariantsMain(BaseMain):
             from lsmiotool.lib.output import LsmioAggOutput, MissingDataError
 
             try:
-                agg = LsmioAggOutput(f_child_path, f_scale="baseline")
+                agg = LsmioAggOutput(f_child_path, f_scale="variants")
             except TypeError:
-                agg = LsmioAggOutput(f_input=f_child_path, f_scale="baseline")
+                agg = LsmioAggOutput(f_input=f_child_path, f_scale="variants")
             try:
                 agg.generateReports(f_out_dir=f_child_path)
             except TypeError:
@@ -985,10 +1043,14 @@ class CompareVariantsMain(BaseMain):
 
         paired_results: List[PairedVariantRun] = []
         for meta_run, path_run in variant_runs:
-            coll_int = int(meta_run.collision) if meta_run.collision is not None else None
+            coll_int = (
+                int(meta_run.collision) if meta_run.collision is not None else None
+            )
             base_match = twin_bases.get((meta_run.backend, meta_run.variant, coll_int))
             if base_match is None:
-                base_match = standalone_bases.get((meta_run.backend, coll_int)) or standalone_bases.get((meta_run.backend, None))
+                base_match = standalone_bases.get(
+                    (meta_run.backend, coll_int)
+                ) or standalone_bases.get((meta_run.backend, None))
             if base_match is not None:
                 meta_base, path_base = base_match
                 paired_results.append(
@@ -1004,7 +1066,9 @@ class CompareVariantsMain(BaseMain):
                     )
                 )
             else:
-                log.Console.warning(f"Orphaned variant run omitted (no matching baseline): {meta_run.raw_directory}")
+                log.Console.warning(
+                    f"Orphaned variant run omitted (no matching baseline): {meta_run.raw_directory}"
+                )
 
         return sorted(paired_results, key=lambda x: x.display_label)
 
@@ -1015,7 +1079,9 @@ class CompareVariantsMain(BaseMain):
         f_metric: str = "percent",
     ) -> float:
         if f_metric == "percent":
-            return ((f_run_bw - f_base_bw) / f_base_bw) * 100.0 if f_base_bw > 0.0 else 0.0
+            return (
+                ((f_run_bw - f_base_bw) / f_base_bw) * 100.0 if f_base_bw > 0.0 else 0.0
+            )
         return f_run_bw - f_base_bw
 
     def _generateDeltaChart(
@@ -1035,14 +1101,20 @@ class CompareVariantsMain(BaseMain):
 
         series = plot.PlotData(op.capitalize(), variants, deltas)
         archive_basename = (
-            os.path.basename(self.resolveDirectory(self.m_archive_folder).rstrip(os.sep))
+            os.path.basename(
+                self.resolveDirectory(self.m_archive_folder).rstrip(os.sep)
+            )
             if self.m_archive_folder
             else "archive"
         )
         out_dir_path = (
             self.resolveDirectory(out_dir)
             if out_dir
-            else (self.resolveDirectory(self.m_output_dir) if self.m_output_dir else os.getcwd())
+            else (
+                self.resolveDirectory(self.m_output_dir)
+                if self.m_output_dir
+                else os.getcwd()
+            )
         )
         filename = f"compare-variants-delta-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
         os.makedirs(out_dir_path, exist_ok=True)
@@ -1052,7 +1124,9 @@ class CompareVariantsMain(BaseMain):
         title = f"LSMIO Variant Delta vs Paired Baseline ({op.capitalize()}, Stripes={stripes}, BS={blocksize.upper()})"
         meta_data = plot.PlotMetaData(title, "Variant", f"Delta Bandwidth ({unit})")
 
-        chart = plot.DeltaBarPlot(meta_data, series, f_is_percentage=(metric == "percent"))
+        chart = plot.DeltaBarPlot(
+            meta_data, series, f_is_percentage=(metric == "percent")
+        )
         chart.plot(out_path)
         log.Console.info(f"Comparison delta plot saved to {out_path}")
         return out_path
@@ -1114,7 +1188,9 @@ class CompareVariantsMain(BaseMain):
                             delta = self._computeDelta(bw_run, bw_base, "percent")
                             delta_data.append((pair.display_label, delta))
                     if delta_data:
-                        self._generateDeltaChart(op, stripes, bs, delta_data, metric="percent")
+                        self._generateDeltaChart(
+                            op, stripes, bs, delta_data, metric="percent"
+                        )
                     else:
                         log.Console.warning(
                             f"No paired benchmark data found for {op}, stripes={stripes}, bs={bs}"
@@ -1617,33 +1693,31 @@ class ArchiveMain(BaseMain):
                     if self.m_runtime_layout is not None:
                         f_bm_root = getattr(
                             self.m_runtime_layout, "benchmark_root", None
-                        ) or getattr(
-                            self.m_runtime_layout, "benchmarkRoot", None
-                        )
-                    if f_bm_root and os.path.isdir(
-                        os.path.join(f_bm_root, "outputs")
-                    ):
+                        ) or getattr(self.m_runtime_layout, "benchmarkRoot", None)
+                    if f_bm_root and os.path.isdir(os.path.join(f_bm_root, "outputs")):
                         f_source_dir = os.path.join(f_bm_root, "outputs")
                     else:
                         f_source_dir = os.path.join(os.getcwd(), "outputs")
 
             # 3. Resolve destination root
-            f_dest_root = self.m_request.dest or self.m_dest_dir
-            if f_dest_root is None:
-                if "BM_ARCHIVE_DEST" in os.environ:
-                    f_dest_root = os.environ["BM_ARCHIVE_DEST"]
-                else:
-                    f_bm_root = None
-                    if self.m_runtime_layout is not None:
-                        f_bm_root = getattr(
-                            self.m_runtime_layout, "benchmark_root", None
-                        ) or getattr(
-                            self.m_runtime_layout, "benchmarkRoot", None
-                        )
-                    if f_bm_root:
-                        f_dest_root = os.path.join(f_bm_root, "lsmio-archive")
-                    else:
-                        f_dest_root = os.path.join(os.getcwd(), "lsmio-archive")
+            from lsmiotool.lib.archive import resolveArchiveDest
+
+            f_explicit_dest = (
+                self.m_request.dest
+                or self.m_dest_dir
+                or os.environ.get("BM_ARCHIVE_DEST")
+            )
+            f_bm_root = None
+            if self.m_runtime_layout is not None:
+                f_bm_root = getattr(
+                    self.m_runtime_layout, "benchmark_root", None
+                ) or getattr(self.m_runtime_layout, "benchmarkRoot", None)
+            f_dest_root = resolveArchiveDest(
+                f_bm_root or os.getcwd(),
+                f_mode=None,
+                f_scale=getattr(self.m_request, "scale", None),
+                f_explicit=f_explicit_dest,
+            )
 
             # 4. Perform atomic move-on-archive and clean recreation
             f_target_dir = ArchiveEngine.executeArchive(

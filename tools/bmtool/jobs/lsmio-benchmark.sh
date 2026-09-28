@@ -14,6 +14,7 @@
 #BM_SETUP="MANAGER"
 
 . $BM_DIRNAME/include/vars.in.sh
+. $BM_DIRNAME/include/run-tee.in.sh
 . $BM_DIRNAME/jobs/job-all.in.sh
 
 . $BM_DIRNAME/include/dirs-vars.in.sh
@@ -105,11 +106,12 @@ else
   PLUGIN_FLAG=""
 fi
 
-$SB_BIN/$BIN_NAME \
+run_tee "$LOG_FILE" $SB_BIN/$BIN_NAME \
   $MPI_FLAGS \
   $PLUGIN_FLAG \
   $BM_VARIANT_FLAGS \
   -i 10 -o "$OUT_FILE" \
-  --lsmio-ts "$bsb" --lsmio-bs "$bsb" --key-count "$sg" \
-  2>&1 | tee "$LOG_FILE"
+  --lsmio-ts "$bsb" --lsmio-bs "$bsb" --key-count "$sg"
+# The benchmark's own status (run_tee), so srun --kill-on-bad-exit sees a failed rank
+exit $?
 

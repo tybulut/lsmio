@@ -35,6 +35,7 @@ import sys
 import tempfile
 from typing import Tuple
 import unittest
+import unittest.mock
 
 from lsmiotool.lib.artifacts import ArtifactStore
 from lsmiotool.lib.cli import ParseCliParseError, ParseRequest

@@ -55,13 +55,13 @@ class ArchiveTest(unittest.TestCase):
         """Tasks 4.5.1: Asserts ArchiveRequest fields, properties, immutability, and validation."""
         req = ArchiveRequest(
             f_target="lsmio",
-            f_scale="baseline",
+            f_scale="variants",
             f_variant="footer",
             f_dest="/tmp/archive",
         )
 
         self.assertEqual(req.target, "lsmio")
-        self.assertEqual(req.scale, "baseline")
+        self.assertEqual(req.scale, "variants")
         self.assertEqual(req.variant, "footer")
         self.assertEqual(req.dest, "/tmp/archive")
 
@@ -87,7 +87,7 @@ class ArchiveTest(unittest.TestCase):
             d,
             {
                 "target": "lsmio",
-                "scale": "baseline",
+                "scale": "variants",
                 "variant": "footer",
                 "dest": "/tmp/archive",
             },
@@ -97,7 +97,7 @@ class ArchiveTest(unittest.TestCase):
         self.assertIn("ArchiveRequest", repr(req))
         req2 = ArchiveRequest(
             f_target="lsmio",
-            f_scale="baseline",
+            f_scale="variants",
             f_variant="footer",
             f_dest="/tmp/archive",
         )
@@ -130,14 +130,14 @@ class ArchiveTest(unittest.TestCase):
             ["archive", "lsmio", "baseline", "footer", "--dest", "/tmp/archive"]
         )
         self.assertEqual(req1.target, "lsmio")
-        self.assertEqual(req1.scale, "baseline")
+        self.assertEqual(req1.scale, "variants")
         self.assertEqual(req1.variant, "footer")
         self.assertEqual(req1.dest, "/tmp/archive")
 
         # 2. Without leading 'archive'
         req2 = parseArchiveArguments(["lsmio", "baseline", "footer-btree"])
         self.assertEqual(req2.target, "lsmio")
-        self.assertEqual(req2.scale, "baseline")
+        self.assertEqual(req2.scale, "variants")
         self.assertEqual(req2.variant, "footer-btree")
         self.assertIsNone(req2.dest)
 
@@ -150,7 +150,7 @@ class ArchiveTest(unittest.TestCase):
 
         # 4. Baseline scale without variant
         req5 = parseArchiveArguments(["lsmio", "baseline"])
-        self.assertEqual(req5.scale, "baseline")
+        self.assertEqual(req5.scale, "variants")
         self.assertIsNone(req5.variant)
 
         # 5. Legacy scales without variant
@@ -167,7 +167,7 @@ class ArchiveTest(unittest.TestCase):
         # 7. Case insensitivity
         req7 = parseArchiveArguments(["LSMIO", "BASELINE", "FOOTER-BTREE"])
         self.assertEqual(req7.target, "lsmio")
-        self.assertEqual(req7.scale, "baseline")
+        self.assertEqual(req7.scale, "variants")
         self.assertEqual(req7.variant, "footer-btree")
 
     def testArchiveCliParserRejections(self) -> None:
@@ -300,9 +300,7 @@ class ArchiveTest(unittest.TestCase):
 
             # Case 1: Target does not exist
             t0 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
-            self.assertEqual(
-                t0, os.path.join(temp_dir, "outputs-native-footer-btree")
-            )
+            self.assertEqual(t0, os.path.join(temp_dir, "outputs-native-footer-btree"))
 
             # Case 2: Base target exists -> suffix -1
             os.makedirs(t0)
@@ -359,25 +357,37 @@ class ArchiveTest(unittest.TestCase):
             test_file_2 = os.path.join(source_dir, "rank-1.db")
             with open(test_file_2, "w") as f:
                 f.write("second payload")
+            # bmtool's clean-finish marker is dropped, not archived
+            open(os.path.join(source_dir, ".bm-job-ok"), "w").close()
 
             target_2 = ArchiveEngine.executeArchive(
                 f_source_dir=source_dir,
                 f_dest_root=dest_root,
                 f_arm_id="native-footer",
             )
-            expected_target_2 = os.path.join(
-                dest_root, "outputs-native-footer-1"
-            )
+            expected_target_2 = os.path.join(dest_root, "outputs-native-footer-1")
             self.assertEqual(target_2, expected_target_2)
-            self.assertTrue(
-                os.path.isfile(os.path.join(target_2, "rank-1.db"))
-            )
+            self.assertTrue(os.path.isfile(os.path.join(target_2, "rank-1.db")))
+            self.assertEqual(os.listdir(target_2), ["rank-1.db"])
             self.assertEqual(os.listdir(source_dir), [])
 
             # Failure modes: non-existent source directory raises ArchiveError
-            with self.assertRaises(ArchiveError):
+            with self.assertRaises(ArchiveError) as f_raised:
                 ArchiveEngine.executeArchive(
                     f_source_dir=os.path.join(temp_root, "nonexistent"),
+                    f_dest_root=dest_root,
+                    f_arm_id="native",
+                )
+            self.assertNotIn("outputs-failed", str(f_raised.exception))
+
+            # A failed bmtool job moved its outputs to a sibling outputs-failed: say so
+            f_failed_root = os.path.join(temp_root, "failed-job")
+            os.makedirs(os.path.join(f_failed_root, "outputs-failed"))
+            with self.assertRaisesRegex(
+                ArchiveError, r"failed benchmark job leaves its outputs in .*outputs-failed"
+            ):
+                ArchiveEngine.executeArchive(
+                    f_source_dir=os.path.join(f_failed_root, "outputs"),
                     f_dest_root=dest_root,
                     f_arm_id="native",
                 )
@@ -427,9 +437,7 @@ class ArchiveTest(unittest.TestCase):
             # Verify target directory created with payload
             expected_target = os.path.join(dest_root, "outputs-native-footer")
             self.assertTrue(os.path.isdir(expected_target))
-            self.assertTrue(
-                os.path.isfile(os.path.join(expected_target, "output.log"))
-            )
+            self.assertTrue(os.path.isfile(os.path.join(expected_target, "output.log")))
 
             # Verify source directory cleanly recreated
             self.assertTrue(os.path.isdir(source_dir))
@@ -445,9 +453,7 @@ class ArchiveTest(unittest.TestCase):
             )
             ret_code2 = main_inst2.run()
             self.assertEqual(ret_code2, 0)
-            expected_target2 = os.path.join(
-                dest_root, "outputs-native-footer-1"
-            )
+            expected_target2 = os.path.join(dest_root, "outputs-native-footer-1")
             self.assertTrue(os.path.isdir(expected_target2))
             self.assertEqual(os.listdir(source_dir), [])
 
@@ -465,6 +471,81 @@ class ArchiveTest(unittest.TestCase):
         )
         ret_code = main_inst.run()
         self.assertEqual(ret_code, 1)
+
+
+class ArchiveDestResolverTest(unittest.TestCase):
+    """Asserts resolveArchiveDest mirrors bmtool/include/archive-dest.in.sh."""
+
+    def testDefaultPartitioning(self) -> None:
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="backends", f_scale="small"),
+            "/bm/lsmio-archive/backends/small",
+        )
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="standard", f_scale="variants"),
+            "/bm/lsmio-archive/variants",
+        )
+        for f_scale in ("local", "bake", "small", "large"):
+            self.assertEqual(
+                resolveArchiveDest("/bm", f_mode="standard", f_scale=f_scale),
+                "/bm/lsmio-archive/baseline",
+            )
+
+    def testDeprecatedBaselineScaleMapsToVariants(self) -> None:
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="standard", f_scale="baseline"),
+            "/bm/lsmio-archive/variants",
+        )
+
+    def testExplicitDestForms(self) -> None:
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        # Absolute paths are used as given
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="/abs/path"),
+            "/abs/path",
+        )
+        # Root-relative shorthand resolves against the benchmark root
+        self.assertEqual(
+            resolveArchiveDest(
+                "/bm", f_scale="small", f_explicit="/lsmio-archive/custom"
+            ),
+            "/bm/lsmio-archive/custom",
+        )
+        # A similarly-named absolute path is NOT relocated (path-component match)
+        self.assertEqual(
+            resolveArchiveDest(
+                "/bm", f_scale="small", f_explicit="/lsmio-archive-other"
+            ),
+            "/lsmio-archive-other",
+        )
+        # Relative paths resolve against the benchmark root, as bmtool does
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="rel/path"),
+            "/bm/rel/path",
+        )
+        # Whitespace-only values count as unset and fall through to the default
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="small", f_explicit="   "),
+            "/bm/lsmio-archive/baseline",
+        )
+
+    def testTokenNormalisation(self) -> None:
+        """Mixed-case mode/scale tokens normalise, matching the shell resolver."""
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="BACKENDS", f_scale="Small"),
+            "/bm/lsmio-archive/backends/small",
+        )
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_mode="standard", f_scale="Variants"),
+            "/bm/lsmio-archive/variants",
+        )
 
 
 if __name__ == "__main__":
