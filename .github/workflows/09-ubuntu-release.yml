@@ -9,7 +9,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    # 26.04: its libadios2 is 2.11.0 (LSMIO needs >= 2.11; 24.04 ships 2.9.2)
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
 
