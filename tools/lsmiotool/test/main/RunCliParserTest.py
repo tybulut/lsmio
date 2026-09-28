@@ -646,13 +646,13 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(req.target, "lsmio")
         self.assertEqual(req.scale, "small")
         self.assertEqual(req.mode, "backends")
-        self.assertEqual(req.backends, ("adios2", "native", "rocksdb"))
+        self.assertEqual(req.backends, ("adios2", "native", "plugin", "rocksdb"))
         self.assertFalse(req.ssd)
         self.assertIsNone(req.setup)
 
         d = req.toDict()
         self.assertEqual(d["mode"], "backends")
-        self.assertEqual(d["backends"], ["adios2", "native", "rocksdb"])
+        self.assertEqual(d["backends"], ["adios2", "native", "plugin", "rocksdb"])
         self.assertEqual(d["target"], "lsmio")
         self.assertEqual(d["scale"], "small")
 
@@ -701,7 +701,7 @@ class RunCliParserTest(unittest.TestCase):
         self.assertEqual(req.target, "lsmio")
         self.assertEqual(req.scale, "local")
         self.assertEqual(req.mode, "backends")
-        self.assertEqual(req.backends, ("adios2", "native", "rocksdb"))
+        self.assertEqual(req.backends, ("adios2", "native", "plugin", "rocksdb"))
         self.assertTrue(req.ssd)
         self.assertTrue(req.resume)
 

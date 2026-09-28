@@ -140,6 +140,33 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
   . $BM_DIRNAME/include/archive-dest.in.sh
   bm_resolve_archive_dest
 
+  # Check every backend's binary, and the LSMIO plugin library, before running
+  # any backend, so a missing one fails fast instead of after hours of runs
+  _backend_tokens="$BM_BACKENDS"
+  while [ -n "$_backend_tokens" ]; do
+    _b="${_backend_tokens%%,*}"
+    case "$_backend_tokens" in
+      *,*) _backend_tokens="${_backend_tokens#*,}" ;;
+      *) _backend_tokens="" ;;
+    esac
+    case "$_b" in
+      adios2|adios|plugin) BM_BIN_NAME="bm_adios" ;;
+      native) BM_BIN_NAME="bm_native" ;;
+      rocksdb) BM_BIN_NAME="bm_rocksdb" ;;
+      leveldb) BM_BIN_NAME="bm_leveldb" ;;
+      "") continue ;;
+      *) fatal_error "Unsupported backend for backends scaling: [$_b]" ;;
+    esac
+    if [ ! -x "$SB_BIN/$BM_BIN_NAME" ]; then
+      fatal_error "Backend binary $SB_BIN/$BM_BIN_NAME not found or not executable. Please verify build and install."
+    fi
+    # bm_adios --lsmio-plugin loads liblsmio_adios from ADIOS2_PLUGIN_PATH (include/vars.in.sh)
+    if [ "$_b" = "plugin" ] && [ ! -e "$ADIOS2_PLUGIN_PATH/liblsmio_adios.so" ] \
+      && [ ! -e "$ADIOS2_PLUGIN_PATH/liblsmio_adios.dylib" ]; then
+      fatal_error "LSMIO ADIOS2 plugin liblsmio_adios not found in ADIOS2_PLUGIN_PATH=$ADIOS2_PLUGIN_PATH. Please verify build and install."
+    fi
+  done
+
   _backend_tokens="$BM_BACKENDS"
   while [ -n "$_backend_tokens" ]; do
     case "$_backend_tokens" in
@@ -165,6 +192,12 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
         BM_BIN_NAME="bm_native"
         ARM_ID="native"
         ;;
+      plugin)
+        # ADIOS2 with the LSMIO engine plugin (bm_adios --lsmio-plugin)
+        BM_SETUP="PLUGIN-M"
+        BM_BIN_NAME="bm_adios"
+        ARM_ID="plugin"
+        ;;
       rocksdb)
         BM_SETUP="ROCKSDB-M"
         BM_BIN_NAME="bm_rocksdb"
@@ -179,10 +212,6 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
         fatal_error "Unsupported backend for backends scaling: [$_b]"
         ;;
     esac
-
-    if [ ! -x "$SB_BIN/$BM_BIN_NAME" ]; then
-      fatal_error "Backend binary $SB_BIN/$BM_BIN_NAME not found or not executable. Please verify build and install."
-    fi
 
     TARGET_NODE_DIR="${BM_ARCHIVE_DEST}/outputs-${ARM_ID}/${_node_idx}"
     if [ "$BM_RESUME" = "yes" ] && [ -d "$TARGET_NODE_DIR" ]; then

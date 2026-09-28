@@ -81,9 +81,9 @@ bmtool run lsmio variants pread,footer-pread --versioned
 - **Mandatory Archiving**: Automatically sets `--archive` to `yes` (`--no-archive` is rejected).
 
 #### Multi-Backend Intra-Allocation Scaling (`backends` mode):
-To evaluate multi-node scaling across alternative storage backends (`adios2`, `native`, `rocksdb`), `bmtool` provides the `backends` mode:
+To evaluate multi-node scaling across alternative storage backends (`adios2` (or `adios`), `native`, `plugin`, `rocksdb`, `leveldb`), `bmtool` provides the `backends` mode. The default runs `adios2,native,plugin,rocksdb`; an empty list or a backend listed twice is rejected:
 ```bash
-# Execute standard backends (adios2, native, rocksdb) on small scale:
+# Execute standard backends (adios2, native, plugin, rocksdb) on small scale:
 bmtool run lsmio backends small
 
 # Execute custom backends subset with explicit walltime and SSD root:
@@ -93,7 +93,7 @@ bmtool run lsmio backends large native,rocksdb --ssd --time 12
 bmtool parse lsmio backends small
 ```
 - **Single Cluster Reservation Per Scale Point (`INV-BACKEND-1`)**:
-  For each task/node count within `<scale>` (e.g. `small` runs $1, 2, 4, \dots, 48$ nodes; `large` runs $4, 8, \dots, 256$ tasks on $1, 2, \dots, 64$ nodes), `bmtool` dispatches exactly **one** cluster allocation. Compute execution within the batch harness iterates sequentially over `BM_BACKENDS` (`adios2` $\to$ `native` $\to$ `rocksdb`). This single-reservation binding guarantees identical physical nodes (`nid*`) and node topologies across all backends.
+  For each task/node count within `<scale>` (e.g. `small` runs $1, 2, 4, \dots, 48$ nodes; `large` runs $4, 8, \dots, 256$ tasks on $1, 2, \dots, 64$ nodes), `bmtool` dispatches exactly **one** cluster allocation. Compute execution within the batch harness iterates sequentially over `BM_BACKENDS` (`adios2` $\to$ `native` $\to$ `plugin` $\to$ `rocksdb`). This single-reservation binding guarantees identical physical nodes (`nid*`) and node topologies across all backends.
 - **Lustre OST Sanitization Lifecycle**:
   Before and after each backend run within the allocation, Lustre OST storage directories (`$DIRS_BM_BASE/c*/b*/*.db`) are sanitized via `. $BM_DIRNAME/include/dirs-cleanup.in.sh` to prevent filesystem exhaustion and cross-engine data contamination.
 - **Sibling Node Output Preservation**:
@@ -102,6 +102,7 @@ bmtool parse lsmio backends small
   Total allocation walltime scales deterministically with backend count and physical node count:
   $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{\text{nodes}}{3} \right\rfloor\right)\right)$$
   User overrides (`--time`, `--walltime`, `--wallhour`, or `BM_WALLHOUR_OVERRIDE`) take absolute precedence and are clamped to $[1, 48]$.
+  With the default four backends the formula exceeds 48 hours from 36 nodes on (e.g. 54 hours at 40 nodes), so the last backends of a large point may hit the time limit. Each backend is archived on its own, so re-running with `--resume` completes only the missing ones.
 - **Approach 2 Partitioned Archive Layout (`INV-BACKEND-3`)**:
   Runs partition their archives by mode: `backends/<scale>/` for backend scaling, `variants/` for the variant matrix, and `baseline/` for plain scaling runs, all under `$BM_PATH/lsmio-archive` (see "Approach 2 Partitioned Directory Layout" below).
 
@@ -196,9 +197,9 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
 - `backends`: Positional mode token for `lsmio` selecting Multi-Backend Intra-Allocation Scaling (`INV-BACKEND-1`).
   - Positional syntax: `lsmiotool run lsmio backends <scale> [<backends>] [options]`.
   - Supported `<scale>` values: `local`, `bake`, `small`, `large` (`variants` is rejected).
-  - Optional `[<backends>]`: Comma-separated list of backends to evaluate (defaults to `adios2,native,rocksdb`). Supported backend tokens: `adios2` (or `adios`), `native`, `rocksdb`.
-  - **Single Cluster Allocation**: Submits a single job allocation for each scale point ($K$). Backends execute sequentially within that allocation on identical physical nodes (`nid*`), ensuring fair cross-engine comparisons.
-  - **Lustre Data Sanitization**: Storage OST directories are scrubbed before and after each backend run.
+  - Optional `[<backends>]`: Comma-separated list of backends (defaults to `adios2,native,plugin,rocksdb`). Supported backend tokens: `adios2` (or `adios`), `native`, `plugin` (ADIOS2 with the LSMIO engine plugin), `rocksdb`, `leveldb`. lsmiotool uses the list for the run plan and the walltime only; it does not yet run the backends one after another like `bmtool run lsmio backends`.
+  - **Single Cluster Allocation** (bmtool only; see Multi-Backend Intra-Allocation Scaling): Submits a single job allocation for each scale point ($K$). Backends execute sequentially within that allocation on identical physical nodes (`nid*`), ensuring fair cross-engine comparisons.
+  - **Lustre Data Sanitization** (bmtool only; see Multi-Backend Intra-Allocation Scaling): Storage OST directories are scrubbed before and after each backend run.
   - **Dynamic Walltime Calculation (`INV-BACKEND-2`)**: Automatically scales allocation walltime based on backend count and node count:
     $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{K}{3} \right\rfloor\right)\right)$$
 - `<variants>`: Optional variant specification for `lsmio variants`. Supported formats:
@@ -614,9 +615,9 @@ Renders clustered grouped bar chart saved directly to `png/backends/small/compar
 
 #### Canonical Legend Mapping & Precedence Sorting (`INV-BACKEND-5`):
 When comparing multi-backend archive directories:
-- **Canonical Legend Labels**: Raw folder names (`outputs-adios`, `outputs-native`, `outputs-rocksdb`) are automatically mapped to clean canonical labels: `adios2`, `native`, and `rocksdb`.
-- **Precedence Ordering**: Series bars are strictly ordered by canonical precedence `[adios2, native, rocksdb]`.
-- **Clustered Grouped Bars**: Displays $N=3$ clustered bars per node category on the X-axis (`# of Nodes`).
+- **Canonical Legend Labels**: Raw folder names (`outputs-adios`, `outputs-native`, `outputs-plugin`, `outputs-rocksdb`, `outputs-leveldb`) are automatically mapped to clean canonical labels: `adios2`, `native`, `plugin`, `rocksdb`, and `leveldb`.
+- **Precedence Ordering**: Series bars are strictly ordered by canonical precedence `[adios2, native, plugin, rocksdb, leveldb]`.
+- **Clustered Grouped Bars**: Displays one clustered bar per backend (up to $N=5$) per node category on the X-axis (`# of Nodes`).
 - **Default Workload**: When omitted, workload parameters strictly default to 4 stripes and 1M block size (`stripes=4, bs=1M`).
 
 ---
