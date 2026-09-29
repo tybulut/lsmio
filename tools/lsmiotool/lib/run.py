@@ -463,9 +463,9 @@ class RunRequest:
                 if isinstance(b, str) and b.strip()
             )
             if not m_backends and m_mode == "backends":
-                m_backends = ("adios2", "native", "rocksdb")
+                m_backends = ("adios2", "native", "plugin", "rocksdb")
         elif m_mode == "backends":
-            m_backends = ("adios2", "native", "rocksdb")
+            m_backends = ("adios2", "native", "plugin", "rocksdb")
         else:
             m_backends = None
 
@@ -1539,7 +1539,7 @@ class RunPlanner:
             ):
                 n_backends = len(
                     getattr(f_request, "backends", None)
-                    or ("adios2", "native", "rocksdb")
+                    or ("adios2", "native", "plugin", "rocksdb")
                 )
                 time_per_backend = max(1, f_sp.nodes // 3)
                 calc_hours = 2 + (n_backends * time_per_backend)

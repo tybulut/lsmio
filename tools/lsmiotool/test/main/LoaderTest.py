@@ -66,6 +66,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.ArchiveEnginePairTest",
     "lsmiotool.test.main.ArchiveTest",
     "lsmiotool.test.main.ArtifactStoreTest",
+    "lsmiotool.test.main.BmtoolBackendsTest",
     "lsmiotool.test.main.BmtoolRelocationTest",
     "lsmiotool.test.main.BmtoolRunTeeTest",
     "lsmiotool.test.main.CompareArchiveCliParserTest",
@@ -281,9 +282,9 @@ class LoaderTest(unittest.TestCase):
             _PREEXISTING_MODULE_NAMES,
         )
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
-        self.assertEqual(len(preexisting_test_ids), 78)
+        self.assertEqual(len(preexisting_test_ids), 79)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 721)
+        self.assertEqual(len(all_test_ids), 726)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

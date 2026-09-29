@@ -155,7 +155,7 @@ class VariantCatalogue:
         "manager-",
     )
 
-    # Exhaustive mapping of all 37 non-empty variant keys to (tokens, engine_flags)
+    # Exhaustive mapping of all 60 non-empty variant keys to (tokens, engine_flags)
     _VARIANT_SPECS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
         "footer": ("footer", ("--lsmio-no-autotune", "--lsmio-footer-index")),
         "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),

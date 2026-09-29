@@ -221,6 +221,20 @@ class TestLSMIOBenchmark(unittest.TestCase):
         self.assertTrue(mock_open.called)
         self.assertEqual(result, mock_run.return_value)
 
+    @patch("subprocess.run")
+    @patch("builtins.open", create=True)
+    def test_run_plugin_passes_lsmio_plugin(self, mock_open: Mock, mock_run: Mock) -> None:
+        # PLUGIN-M runs bm_adios with the LSMIO engine plugin; ADIOS-M runs plain ADIOS2
+        mock_open.return_value.__enter__.return_value = MagicMock()
+        for setup, expected in (("PLUGIN-M", True), ("ADIOS-M", False)):
+            bench = jobs.LSMIOBenchmark(
+                bm_setup=setup, sb_bin="/bin", dirs_bm_base="/base", lsm_dir_output="/out"
+            )
+            bench.run("16", "64K")
+            cmd = mock_run.call_args.args[0]
+            self.assertEqual(cmd[0], "/bin/bm_adios")
+            self.assertEqual("--lsmio-plugin" in cmd, expected)
+
 
 class TestJobsRunner(unittest.TestCase):
     """Unit tests for JobsRunner class methods."""

@@ -1,3 +1,11 @@
-- New native LSM backend implementation
-- Python lsmiotool as the parser
-- Bmtool now supports baseline comparing different turning parameters
+- Breaking: `variants all` now runs all 61 variants; the new `most` set is the 26 canonical variants that `all` ran before
+- Breaking: benchmark archives are partitioned under `lsmio-archive/{backends/<scale>,variants,baseline}/`
+- The `baseline` scale is renamed `variants`; `baseline` still works with a deprecation warning
+- New backends mode: runs several storage backends back-to-back in one allocation (bmtool), with `plugin` (ADIOS2 with the LSMIO engine plugin, `bm_adios --lsmio-plugin`) as a new backend
+- Backends mode runs `adios2,native,plugin,rocksdb` by default in bmtool; lsmiotool uses the same default list for its plan and walltime
+- bmtool rejects unknown, duplicate or empty backend lists, and checks every backend binary and the plugin library before submitting and before running any backend
+- Plots and parsed reports include the plugin backend; plots also label and order leveldb
+- ADIOS2 v2.11.0 is now required (was v2.9.2); an older system ADIOS2 is ignored and v2.11.0 is fetched
+- Improved ARCHER2 support and fail-fast error handling in benchmarks
+- Build: lld is used by default when available (`LSMIO_USE_LLD`); CI runs on ubuntu-26.04
+- build.sh: new `itest <regex> [target]` command, optional out-of-tree build directory, quiet test runs, failure logging and symlink-safe cleaning

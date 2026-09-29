@@ -86,7 +86,8 @@ Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
   <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
-  <backends>    Optional comma-separated list of backends to run (default: adios2,native,rocksdb).
+  <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb).
+                Used for the run plan and walltime; the backends are not yet run one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
@@ -376,7 +377,7 @@ class RunCliParser:
                     raise RunCliParseError("Backends specification cannot be empty.")
                 f_backends = tuple(parsed_b)
             else:
-                f_backends = ("adios2", "native", "rocksdb")
+                f_backends = ("adios2", "native", "plugin", "rocksdb")
         else:
             # Validate scale (positional 1)
             f_scale_tok = f_post_run_tokens[1]

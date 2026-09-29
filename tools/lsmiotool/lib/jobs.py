@@ -513,6 +513,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
                 f"{self.sb_bin}/bm_adios",
                 "-m",
                 "-g",
+                "--lsmio-plugin",
                 "-i",
                 "10",
                 "-o",

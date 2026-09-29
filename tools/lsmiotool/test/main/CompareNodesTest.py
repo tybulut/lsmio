@@ -43,7 +43,7 @@ class CompareNodesTest(unittest.TestCase):
 
     Verifies:
     - Canonical legend mapping (INV-BACKEND-5).
-    - Strict canonical sorting order [adios2, native, rocksdb] (INV-BACKEND-5).
+    - Strict canonical sorting order [adios2, native, plugin, rocksdb] (INV-BACKEND-5).
     - Approach 2 mirrored output directory architecture (INV-BACKEND-4).
     - Workload parameter preservation and defaults (INV-BACKEND-5).
     - Strict Python 3.9+ type annotations (INV-BACKEND-6).
@@ -120,11 +120,17 @@ class CompareNodesTest(unittest.TestCase):
             self.assertEqual(legends, ["adios2", "native", "rocksdb"])
 
     def testCanonicalSortingOrderScrambledInput(self) -> None:
-        """Verifies plot data is sorted strictly in [adios2, native, rocksdb] order regardless of folder order."""
+        """Verifies plot data is sorted strictly in [adios2, native, plugin, rocksdb, leveldb] order regardless of folder order."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "bake")
-        # Deliberately create in reverse order: rocksdb, native, adios
+        # Deliberately create in reverse order: leveldb, rocksdb, plugin, native, adios
+        self._create_report(
+            os.path.join(target_dir, "outputs-leveldb"), 4, "1M", "read", 500.0
+        )
         self._create_report(
             os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "read", 700.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-plugin"), 4, "1M", "read", 1100.0
         )
         self._create_report(
             os.path.join(target_dir, "outputs-native"), 4, "1M", "read", 1200.0
@@ -152,11 +158,16 @@ class CompareNodesTest(unittest.TestCase):
             args, _ = mock_plot_cls.call_args
             plot_data_list: List[plot.PlotData] = list(args[1:])
             legends = [p.legend for p in plot_data_list]
-            self.assertEqual(legends, ["adios2", "native", "rocksdb"])
+            self.assertEqual(
+                legends, ["adios2", "native", "plugin", "rocksdb", "leveldb"]
+            )
 
     def testFallbackPatternMapping(self) -> None:
         """Verifies substring pattern matching for non-standard directory names containing backend keywords."""
         target_dir = os.path.join(self.m_base_path, "archive", "backends", "local")
+        self._create_report(
+            os.path.join(target_dir, "my-leveldb-run"), 4, "1M", "write", 500.0
+        )
         self._create_report(
             os.path.join(target_dir, "my-rocksdb-run"), 4, "1M", "write", 600.0
         )
@@ -165,6 +176,10 @@ class CompareNodesTest(unittest.TestCase):
         )
         self._create_report(
             os.path.join(target_dir, "native"), 4, "1M", "write", 1100.0
+        )
+        # Contains "adios" too: must map to plugin, not adios2
+        self._create_report(
+            os.path.join(target_dir, "adios2-plugin-run"), 4, "1M", "write", 1000.0
         )
 
         out_dir = os.path.join(self.m_base_path, "png")
@@ -180,7 +195,9 @@ class CompareNodesTest(unittest.TestCase):
             args, _ = mock_plot_cls.call_args
             plot_data_list: List[plot.PlotData] = list(args[1:])
             legends = [p.legend for p in plot_data_list]
-            self.assertEqual(legends, ["adios2", "native", "rocksdb"])
+            self.assertEqual(
+                legends, ["adios2", "native", "plugin", "rocksdb", "leveldb"]
+            )
 
     def testApproach2PathMirroringBackends(self) -> None:
         """Verifies Approach 2 output path mirroring under <out_dir>/backends/<scale>/."""

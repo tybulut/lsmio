@@ -599,13 +599,19 @@ class CompareNodesMain(BaseMain):
             "adios2": "adios2",
             "outputs-native": "native",
             "native": "native",
+            "outputs-plugin": "plugin",
+            "plugin": "plugin",
             "outputs-rocksdb": "rocksdb",
             "rocksdb": "rocksdb",
+            "outputs-leveldb": "leveldb",
+            "leveldb": "leveldb",
         }
         canonical_order: Dict[str, int] = {
             "adios2": 0,
             "native": 1,
-            "rocksdb": 2,
+            "plugin": 2,
+            "rocksdb": 3,
+            "leveldb": 4,
         }
 
         entries = sorted(os.listdir(target_dir))
@@ -625,12 +631,17 @@ class CompareNodesMain(BaseMain):
                         legend_label = canonical_backend_labels.get(entry)
                         if legend_label is None:
                             entry_lower = entry.lower()
-                            if "adios" in entry_lower:
+                            # "plugin" first: plugin runs are ADIOS2 too (e.g. "adios2-plugin")
+                            if "plugin" in entry_lower:
+                                legend_label = "plugin"
+                            elif "adios" in entry_lower:
                                 legend_label = "adios2"
                             elif entry_lower in ("outputs-native", "native"):
                                 legend_label = "native"
                             elif "rocksdb" in entry_lower:
                                 legend_label = "rocksdb"
+                            elif "leveldb" in entry_lower:
+                                legend_label = "leveldb"
                             else:
                                 legend_label = entry
                         plot_data_list.append(
@@ -643,7 +654,7 @@ class CompareNodesMain(BaseMain):
             )
             return 0
 
-        # Sort plot series by canonical precedence: [adios2, native, rocksdb] (INV-BACKEND-5)
+        # Sort plot series by canonical precedence: [adios2, native, plugin, rocksdb, leveldb] (INV-BACKEND-5)
         plot_data_list.sort(
             key=lambda p: (canonical_order.get(p.legend, 999), p.legend)
         )

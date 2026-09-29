@@ -73,7 +73,7 @@ generate_report() {
 if [ "$BM_MODE" = "backends" ]; then
   . $BM_DIRNAME/include/archive-dest.in.sh
   bm_resolve_archive_dest
-  _b_list="adios native rocksdb"
+  _b_list="adios native plugin rocksdb"
   if [ -n "$BM_BACKENDS" ]; then
     _b_list=$(echo "$BM_BACKENDS" | tr ',' ' ')
   fi
@@ -81,6 +81,7 @@ if [ "$BM_MODE" = "backends" ]; then
     case "$_b" in
       adios|adios2) _arm="adios" ;;
       native) _arm="native" ;;
+      plugin) _arm="plugin" ;;
       rocksdb) _arm="rocksdb" ;;
       leveldb) _arm="leveldb" ;;
       *) _arm="$_b" ;;

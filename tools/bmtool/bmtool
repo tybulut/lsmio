@@ -76,8 +76,9 @@ Variants / Backends:
     <v1>,<v2>,...   Comma-separated list (e.g. footer,manoff,autotune)
     all             Canonical sequence of all 60 matrix variants
   For 'lsmio backends <scale>':
-    omitted         Default canonical sequence: adios2,native,rocksdb
-    <b1>,<b2>,...   Comma-separated backend list (e.g. adios2,native,rocksdb)
+    omitted         Default canonical sequence: adios2,native,plugin,rocksdb
+    <b1>,<b2>,...   Comma-separated backend list (e.g. adios2,native,plugin,rocksdb)
+                    Backends: adios2 (or adios), native, plugin, rocksdb, leveldb
 
 Options:
   --ssd           Use SSD storage instead of HDD
@@ -205,7 +206,7 @@ bm_canonical_scale() {
 }
 
 BM_MODE="standard"
-BM_BACKENDS="adios2,native,rocksdb"
+BM_BACKENDS="adios2,native,plugin,rocksdb"
 BM_VARIANTS_RAW=""
 BM_VARIANT=""
 BM_ARCHIVE_DEST=""
@@ -225,7 +226,7 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
     if [ $# -ge 5 ]; then
       case "$5" in
         --*)
-          BM_BACKENDS="adios2,native,rocksdb"
+          BM_BACKENDS="adios2,native,plugin,rocksdb"
           shift 4
           ;;
         *)
@@ -234,9 +235,33 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
           ;;
       esac
     else
-      BM_BACKENDS="adios2,native,rocksdb"
+      BM_BACKENDS="adios2,native,plugin,rocksdb"
       shift 4
     fi
+    # Reject unknown, duplicate or no backends before anything is submitted
+    # (jobs/batch.in.sh maps each one; adios and adios2 are the same backend)
+    _bm_rest="$BM_BACKENDS"
+    _bm_seen=" "
+    _bm_count=0
+    while [ -n "$_bm_rest" ]; do
+      _bm_b="${_bm_rest%%,*}"
+      case "$_bm_rest" in
+        *,*) _bm_rest="${_bm_rest#*,}" ;;
+        *) _bm_rest="" ;;
+      esac
+      [ -n "$_bm_b" ] || continue
+      case "$_bm_b" in
+        adios2|adios) _bm_id="adios" ;;
+        native|plugin|rocksdb|leveldb) _bm_id="$_bm_b" ;;
+        *) fatal_error "Unknown backend: [$_bm_b]. Must be one of: adios2 (or adios), native, plugin, rocksdb, leveldb." ;;
+      esac
+      case "$_bm_seen" in
+        *" $_bm_id "*) fatal_error "Backend listed twice: [$_bm_b] in [$BM_BACKENDS]" ;;
+      esac
+      _bm_seen="$_bm_seen$_bm_id "
+      _bm_count=$(( _bm_count + 1 ))
+    done
+    [ "$_bm_count" -gt 0 ] || fatal_error "No backends given: [$BM_BACKENDS]"
   else
     JOB_SCALE="$(bm_canonical_scale "$3")"
     if [ "$JOB_SCALE" != "local" -a "$JOB_SCALE" != "bake" -a "$JOB_SCALE" != "small" -a "$JOB_SCALE" != "large" -a "$JOB_SCALE" != "variants" ]; then
@@ -487,6 +512,32 @@ export BM_WALLHOUR_OVERRIDE="$BM_WALLHOUR_OVERRIDE"
 export BM_RESUME="$BM_RESUME"
 
 . $BM_DIRNAME/include/vars.in.sh
+
+# Backends run: check every backend's binary, and the LSMIO plugin library, before
+# submitting (SB_BIN and ADIOS2_PLUGIN_PATH are the same paths the job uses)
+if [ "$PASS_CMD" = "run" ] && [ "$BM_MODE" = "backends" ]; then
+  _bm_rest="$BM_BACKENDS"
+  while [ -n "$_bm_rest" ]; do
+    _bm_b="${_bm_rest%%,*}"
+    case "$_bm_rest" in
+      *,*) _bm_rest="${_bm_rest#*,}" ;;
+      *) _bm_rest="" ;;
+    esac
+    case "$_bm_b" in
+      adios2|adios|plugin) _bm_bin="bm_adios" ;;
+      native) _bm_bin="bm_native" ;;
+      rocksdb) _bm_bin="bm_rocksdb" ;;
+      leveldb) _bm_bin="bm_leveldb" ;;
+      *) continue ;;
+    esac
+    [ -x "$SB_BIN/$_bm_bin" ] \
+      || fatal_error "Backend binary $SB_BIN/$_bm_bin not found or not executable. Please verify build and install."
+    if [ "$_bm_b" = "plugin" ] && [ ! -e "$ADIOS2_PLUGIN_PATH/liblsmio_adios.so" ] \
+      && [ ! -e "$ADIOS2_PLUGIN_PATH/liblsmio_adios.dylib" ]; then
+      fatal_error "LSMIO ADIOS2 plugin liblsmio_adios not found in ADIOS2_PLUGIN_PATH=$ADIOS2_PLUGIN_PATH. Please verify build and install."
+    fi
+  done
+fi
 
 # Resolve BM_ARCHIVE_DEST (backends/<scale>, variants, or baseline)
 . $BM_DIRNAME/include/archive-dest.in.sh

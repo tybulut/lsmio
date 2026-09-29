@@ -709,7 +709,7 @@ class RunPlanTest(unittest.TestCase):
 
     def testBackendsModeWalltimeScalingAndOverride(self) -> None:
         """Asserts backends mode walltime formula (INV-BACKEND-2) scales deterministically and respects overrides."""
-        # 1. Scale 'bake' (nodes: 1, 2, 4, 8) with default 3 backends:
+        # 1. Scale 'bake' (nodes: 1, 2, 4, 8) with 3 explicit backends:
         # nodes 1, 2, 4: max(1, nodes//3) = 1 -> 2 + 3*1 = 5 hours ('05:00:00')
         # node 8: max(1, 8//3) = 2 -> 2 + 3*2 = 8 hours ('08:00:00')
         f_req_bake = RunRequest(
@@ -735,7 +735,14 @@ class RunPlanTest(unittest.TestCase):
         f_plan_2b = RunPlanner.createPlan(f_req_2b, self.m_viking_profile)
         self.assertEqual(f_plan_2b.scheduled_points[3].walltime, "06:00:00")
 
-        # 3. High node count clamping to 48 hours: node 48 -> 2 + 3*16 = 50 -> clamped to 48 ('48:00:00')
+        # 2b. Default backends (adios2, native, plugin, rocksdb) on bake:
+        # node 1: 2 + 4*1 = 6 hours; node 8: max(1, 8//3) = 2 -> 2 + 4*2 = 10 hours
+        f_req_default = RunRequest(f_target="lsmio", f_scale="bake", f_mode="backends")
+        f_plan_default = RunPlanner.createPlan(f_req_default, self.m_viking_profile)
+        self.assertEqual(f_plan_default.scheduled_points[0].walltime, "06:00:00")
+        self.assertEqual(f_plan_default.scheduled_points[3].walltime, "10:00:00")
+
+        # 3. High node count clamping to 48 hours: node 48 -> 2 + 4*16 = 66 -> clamped to 48 ('48:00:00')
         f_req_small = RunRequest(
             f_target="lsmio",
             f_scale="small",
