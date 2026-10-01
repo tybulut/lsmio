@@ -13,11 +13,16 @@ The project uses CMake and provides a `build.sh` helper script for common tasks.
 ### Build Script (`build.sh`)
 Usage: `./build.sh [args...]`
 * `debug`: Sets `CMAKE_BUILD_TYPE` to `DEBUG`.
-* `clean`: Removes and recreates the `build/` directory.
-* `make`: Compiles the project using `make -j8`.
-* `test`: Runs tests using `ctest -j8`.
-* `install`: Installs the project to `$HOME/src/usr`.
-* `coverage`: Enables code coverage, runs tests, and generates an HTML report in `build/coverage_report/`.
+* `clean`: Cleans the build directory (preserving out-of-tree scratch build symlinks).
+* `clean-cov`: Cleans coverage profile files (`.profraw`, `.profdata`, `.gcda`, `.coverage-stamp`).
+* `make`: Compiles the project using `make -j<jobs>`.
+* `test`: Compiles and runs tests using `ctest -j<jobs>`.
+* `xtest [regex]`: Compiles and runs CTest quietly; failing output goes to a log (supports optional regex filter).
+* `itest <regex> [target]`: Compiles target and runs `ctest -R <regex>` quietly.
+* `install [tag]`: Compiles and installs the project to `$HOME/src/usr` (or with tag e.g. `install:main`).
+* `coverage`: Enables code coverage, runs full test suite, and generates terminal coverage summaries (`results`, `results-fail`, `cov-show`).
+* `fast-cov <bin> <src> [dir]`: Fast targeted coverage for a single binary and source file.
+* `cov-show <file>`: Displays line-by-line coverage and branch decisions for a specific file.
 
 ### CMake Options
 * `BUILD_SHARED_LIBS`: Build shared libraries (default: `ON`).
