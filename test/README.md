@@ -221,5 +221,5 @@ To measure test code coverage across C++ libraries and Python modules:
 ./build.sh coverage
 ```
 
-- Linux/GCC generates an HTML coverage report using `lcov` at `build/coverage_report/index.html`.
+- Linux/GCC and macOS/LLVM generate terminal coverage summaries and line-by-line inspection (`./build.sh results`, `results-fail`, `cov-show <file>`).
 - Python coverage for `lsmiotool` is generated at `build/lsmiotool-python-coverage.json`.

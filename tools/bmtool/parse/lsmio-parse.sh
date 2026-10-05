@@ -19,6 +19,10 @@ generate_aggregates() {
 
   for n in $NODES
   do
+    if [ ! -d "${LSM_DIR_OBASE}/$n" ]; then
+      echo "WARNING: Output directory '${LSM_DIR_OBASE}/$n' not found; skipping node $n" >&2
+      continue
+    fi
     #out-rocksdb-16-1M-2023-04-05-node074-0.txt
     #out-rocksdb-16-1M-2023-04-05-node074-0.txt.2
     for rf in 4 16
