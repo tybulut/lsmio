@@ -63,6 +63,22 @@ function(add_lsmio_store_test x)
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main
     PRIVATE lsmio::store_static
+  )
+
+  gtest_add_tests(TARGET ${x} TEST_LIST tests)
+  set_tests_properties(${tests} PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  )
+endfunction()
+
+function(add_lsmio_posix_test x)
+  message("Adding LSMIO POSIX testing for ${x}.cpp")
+
+  add_executable(${x} "${x}.cpp")
+  target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
+  target_link_libraries(${x}
+    PUBLIC GTest::GTest GTest::Main
     PRIVATE lsmio::posix_static
   )
 
@@ -73,7 +89,7 @@ function(add_lsmio_store_test x)
   )
 endfunction()
 
-function(add_lsmio_mpi_test x)
+function(add_lsmio_mpi_test x lib)
   message("Adding LSMIO MPI testing for ${x}.cpp")
 
   add_executable(${x}
@@ -83,8 +99,7 @@ function(add_lsmio_mpi_test x)
   target_include_directories(${x} PRIVATE ${LSMIO_INCLUDE_DIR})
   target_link_libraries(${x}
     PUBLIC GTest::GTest GTest::Main adios2::cxx_mpi MPI::MPI_CXX
-    PRIVATE lsmio::base_static
-    PRIVATE lsmio::store_static
+    PRIVATE ${lib}
   )
 
   gtest_discover_tests(
@@ -122,11 +137,11 @@ add_lsmio_store_test(test_sstable_manager)
 add_lsmio_store_test(test_file_pool)
 add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
-add_lsmio_store_test(test_posix)
+add_lsmio_posix_test(test_posix)
 
 # GTest: MPI: Base and Manager
-add_lsmio_mpi_test(test_mpi_base)
-add_lsmio_mpi_test(test_mpi_manager)
+add_lsmio_mpi_test(test_mpi_base lsmio::base_static)
+add_lsmio_mpi_test(test_mpi_manager lsmio::store_static)
 
 # GTest: Adios and Plugin
 add_executable(test_adios test_adios.cpp test_plugin.cpp)

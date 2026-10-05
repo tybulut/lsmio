@@ -188,9 +188,13 @@ TEST_F(SSTableManagerTest, PreallocAndFooterIndex) {
     gConfigLSMIO.preAllocate = true;
     gConfigLSMIO.footerIndex = true;
 
-    // The fixture manager was built without preallocation; recreate it with a
-    // real preallocation size so the .sst is ftruncated large and the flush
-    // must trim it back for the footer magic to land at physical EOF.
+    // The fixture manager was built without preallocation; shut it down and
+    // recreate it with a real preallocation size so the .sst is ftruncated large
+    // and the flush must trim it back for the footer magic to land at physical EOF.
+    mgr.reset();
+    std::filesystem::remove_all(dbPath);
+    std::filesystem::create_directories(dbPath);
+
     constexpr size_t pre_alloc_bytes = 64 * 1024;
     mgr = std::make_unique<SSTableManager>(dbPath, 10, pre_alloc_bytes);
     {
@@ -464,6 +468,10 @@ TEST_F(SSTableManagerTest, PreallocManualOffsetAndFooterIndex) {
     gConfigLSMIO.preAllocate = true;
     gConfigLSMIO.manualOffset = true;
     gConfigLSMIO.footerIndex = true;
+
+    mgr.reset();
+    std::filesystem::remove_all(dbPath);
+    std::filesystem::create_directories(dbPath);
 
     constexpr size_t pre_alloc_bytes = 128 * 1024;
     mgr = std::make_unique<SSTableManager>(dbPath, 4, pre_alloc_bytes);
