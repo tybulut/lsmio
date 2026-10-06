@@ -427,3 +427,48 @@ TEST_F(NativeStoreExtendedTest, ConcurrentPreallocMidStreamRotation) {
 
     CleanDir(dbPath);
 }
+
+TEST_F(NativeStoreExtendedTest, UnconsumedRvalueOnRejectedMutation) {
+    // Case 1 (Read-Only Store):
+    std::string dbPath1 = "test_native_rej_ro";
+    CleanDir(dbPath1);
+    {
+        LSMIOStoreNative store(dbPath1, true, /*f_read_only=*/true);
+        std::string payload = "preserve_me_ro";
+        std::string original = payload;
+        bool ret = store.put("key", std::move(payload));
+        EXPECT_FALSE(ret);
+        EXPECT_EQ(payload, original);
+    }
+    CleanDir(dbPath1);
+
+    // Case 2 (Oversized Key):
+    std::string dbPath2 = "test_native_rej_key";
+    CleanDir(dbPath2);
+    {
+        gConfigLSMIO.maxKeyLen = 256;
+        LSMIOStoreNative store(dbPath2, true);
+        std::string oversize_key(gConfigLSMIO.maxKeyLen + 1, 'k');
+        std::string payload = "preserve_me_key";
+        std::string original = payload;
+        bool ret = store.put(oversize_key, std::move(payload));
+        EXPECT_FALSE(ret);
+        EXPECT_EQ(payload, original);
+    }
+    CleanDir(dbPath2);
+
+    // Case 3 (Oversized Value):
+    std::string dbPath3 = "test_native_rej_val";
+    CleanDir(dbPath3);
+    {
+        gConfigLSMIO.writeBufferSize = 2 * 1024 * 1024;
+        gConfigLSMIO.maxKeyLen = 256;
+        LSMIOStoreNative store(dbPath3, true);
+        std::string oversize_val(gConfigLSMIO.getMaxValueLen() + 1, 'v');
+        std::string original = oversize_val;
+        bool ret = store.put("key", std::move(oversize_val));
+        EXPECT_FALSE(ret);
+        EXPECT_EQ(oversize_val, original);
+    }
+    CleanDir(dbPath3);
+}

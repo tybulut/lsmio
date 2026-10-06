@@ -41,7 +41,7 @@ class BMRocksdb : public BMBase {
         return _lc->get(key, value);
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
     }
 

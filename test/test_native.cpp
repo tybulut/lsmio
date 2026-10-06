@@ -159,6 +159,20 @@ TEST(lsmioNative, Deferred) {  // Changed from lsmioRocksDB
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
+TEST(lsmioNative, TombstoneDelIntegrity) {
+    std::string dbName = "test-native-del-integrity.db";
+    std::string dbPath = TEST_DIR_NATIVE.empty() ? dbName : TEST_DIR_NATIVE + "/" + dbName;
+    {
+        lsmio::LSMIOStoreNative store(dbPath, true);
+        bool put_ret = store.put("del_key", "initial_val");
+        EXPECT_TRUE(put_ret);
+        bool del_ret = store.del("del_key");
+        EXPECT_TRUE(del_ret);
+        std::string val;
+        EXPECT_FALSE(store.get("del_key", &val));
+    }
+}
+
 int main(int argc, char** argv) {
     lsmio::initLSMIODebug(argv[0]);
     ::testing::InitGoogleTest(&argc, argv);

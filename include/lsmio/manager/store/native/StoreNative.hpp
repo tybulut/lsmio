@@ -94,8 +94,10 @@ class LSMIOStoreNative : public LSMIOStore {
     // LSMIOStore Overrides
     bool startBatch() override;
     bool stopBatch() override;
-    bool _batchMutation(MutationType f_m_type, const std::string f_key, const std::string f_value,
-                        bool f_flush) override;
+    bool _batchMutation(MutationType f_m_type, const std::string& f_key,
+                        const std::string& f_value, bool f_flush) override;
+    bool _batchMutation(MutationType f_m_type, const std::string& f_key,
+                        std::string&& f_value, bool f_flush) override;
     bool dbCleanup() override;
 
   public:

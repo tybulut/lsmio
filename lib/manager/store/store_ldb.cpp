@@ -148,8 +148,8 @@ bool LSMIOStoreLDB::getPrefix(const std::string key,
     return s.ok();
 }
 
-bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
-                                   const std::string value, bool flush) {
+bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key,
+                                   const std::string& value, bool flush) {
     leveldb::Status s;
     bool retValue;
     std::string origValue, finalValue;
@@ -204,6 +204,11 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
     }
 
     return retValue;
+}
+
+bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key,
+                                   std::string&& value, bool flush) {
+    return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
 }
 
 bool LSMIOStoreLDB::startBatch() {

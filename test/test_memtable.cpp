@@ -30,7 +30,10 @@
 
 #include <gtest/gtest.h>
 
+#include <lsmio/manager/store/native/MemtableOrdered.hpp>
 #include <lsmio/manager/store/native/MemtableVectorNoSort.hpp>
+#include <lsmio/manager/store/native/MemtableVectorSort.hpp>
+#include <tlx/container/btree_map.hpp>
 
 using namespace lsmio;
 
@@ -100,4 +103,87 @@ TEST(MemtableTest, SizeTracking) {
     // Previous entry remains in vector logic, so size accumulates
     // "k" (1) + "v2" (2) = 3. Total 5.
     EXPECT_EQ(m.sizeBytes(), 5);
+}
+
+TEST(MemtableTest, MemtableVectorNoSort_MoveAdd) {
+    std::string k = "vec_ns_k";
+    std::string v = "vec_ns_val";
+    const std::string exp_v = v;
+    const size_t exp_bytes = k.size() + v.size();
+    MemtableVectorNoSort m;
+    m.add(k, std::move(v));
+    std::string out;
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes);
+}
+
+TEST(MemtableTest, MemtableVectorSort_MoveAddAndOverwrite) {
+    std::string k = "vec_s_k";
+    std::string v = "vec_s_val";
+    const std::string exp_v = v;
+    const size_t exp_bytes = k.size() + v.size();
+    MemtableVectorSort m;
+    m.add(k, std::move(v));
+    std::string out;
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes);
+
+    // Overwrite:
+    std::string v2 = "longer_vec_s_val";
+    const std::string exp_v2 = v2;
+    const size_t exp_bytes2 = k.size() + v2.size();
+    m.add(k, std::move(v2));
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v2);
+    EXPECT_EQ(m.count(), 1);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes2);
+}
+
+TEST(MemtableTest, MemtableOrderedMap_MoveAddAndOverwrite) {
+    MemtableOrdered<std::map<std::string, std::string>> m;
+    std::string k = "map_k";
+    std::string v = "map_val";
+    const std::string exp_v = v;
+    const size_t exp_bytes = k.size() + v.size();
+    m.add(k, std::move(v));
+    std::string out;
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes);
+
+    // Overwrite:
+    std::string v2 = "new_map_val_longer";
+    const std::string exp_v2 = v2;
+    const size_t exp_bytes2 = k.size() + v2.size();
+    m.add(k, std::move(v2));
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v2);
+    EXPECT_EQ(m.count(), 1);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes2);
+}
+
+TEST(MemtableTest, MemtableOrderedBTree_MoveAddAndOverwrite) {
+    MemtableOrdered<tlx::btree_map<std::string, std::string>> m;
+    // Insert path:
+    std::string k = "btree_k";
+    std::string v = "btree_val";
+    const std::string exp_v = v;
+    const size_t exp_bytes = k.size() + v.size();
+    m.add(k, std::move(v));
+    std::string out;
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes);
+
+    // Overwrite path:
+    std::string v2 = "btree_val_updated_longer";
+    const std::string exp_v2 = v2;
+    const size_t exp_bytes2 = k.size() + v2.size();
+    m.add(k, std::move(v2));
+    EXPECT_TRUE(m.get(k, out));
+    EXPECT_EQ(out, exp_v2);
+    EXPECT_EQ(m.count(), 1);
+    EXPECT_EQ(m.sizeBytes(), exp_bytes2);
 }

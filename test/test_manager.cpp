@@ -212,6 +212,38 @@ TEST(lsmioManager, ReOpen_Read) {
     std::filesystem::remove_all(dbPath);
 }
 
+TEST(lsmioManager, CounterAccountingRvalueAndRawBuffers) {
+    std::string dbName = "test-mgr-counters.db";
+    std::string dbPath = TEST_DIR_MGR.empty() ? dbName : TEST_DIR_MGR + "/" + dbName;
+    std::filesystem::remove_all(dbPath);
+    {
+        lsmio::LSMIOManager lm(dbName, TEST_DIR_MGR);
+        lm.resetCounters();
+        uint64_t wb = 0, rb = 0, wo = 0, ro = 0;
+
+        // Rvalue put:
+        lm.put("k1", std::string(100, 'x'), true);
+        lm.getCounters(wb, rb, wo, ro);
+        EXPECT_EQ(wb, 100);
+        EXPECT_EQ(wo, 1);
+
+        // Raw buffer char* put:
+        const char buf[50] = {0};
+        lm.put("k2", buf, 50);
+        lm.getCounters(wb, rb, wo, ro);
+        EXPECT_EQ(wb, 150);
+        EXPECT_EQ(wo, 2);
+
+        // Raw buffer void* put:
+        int arr[10] = {0};
+        lm.put("k3", arr, sizeof(int), 10);
+        lm.getCounters(wb, rb, wo, ro);
+        EXPECT_EQ(wb, 150 + sizeof(int) * 10);
+        EXPECT_EQ(wo, 3);
+    }
+    std::filesystem::remove_all(dbPath);
+}
+
 int main(int argc, char **argv) {
     lsmio::initLSMIODebug(argv[0]);
     ::testing::InitGoogleTest(&argc, argv);

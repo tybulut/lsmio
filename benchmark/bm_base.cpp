@@ -97,7 +97,7 @@ int BMBase::benchWrite(long long *duration) {
         std::string key(_keyPrefix + fmt::format("{:06}", pRandomKeyIndex[count]));
         std::string value(std::to_string(count) + "::" + valSuffix);
 
-        success &= doWrite(key, value);
+        success &= doWrite(key, std::move(value));
         if (success == false) {
             break;
         }

@@ -41,8 +41,12 @@ class BMNative : public BMBase {
         return _lc->get(key, value);
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
+    }
+
+    bool doWrite(const std::string& key, std::string&& value) override {
+        return _lc->put(key, std::move(value), lsmio::gConfigLSMIO.alwaysFlush);
     }
 
     virtual int writePrepare(bool opt) {

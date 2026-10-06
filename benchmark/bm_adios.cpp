@@ -54,12 +54,12 @@ class BMAdios : public BMBase {
         return true;
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         adios2::Variable<std::string> varKey = _io.DefineVariable<std::string>(key);
         if (lsmio::gConfigLSMIO.alwaysFlush) {
             _writer.Put(varKey, value, adios2::Mode::Sync);
         } else {
-            _writer.Put(varKey, &value);  // deferred
+            _writer.Put(varKey, &value);
         }
         return true;
     }
