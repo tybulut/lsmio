@@ -49,7 +49,7 @@ common cmds:
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -79,8 +79,8 @@ Options:
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned]
-  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast]
+  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
@@ -111,6 +111,7 @@ Options:
                 Explicit job walltime limit in hours (aliases: --walltime, --wallhour, clamped to [1, 48]).
                 Overrides default dynamic scaling (2 + total_runs * 2 hours, granting 120 minutes per matrix run + 2 hours safety headroom).
   --versioned   Execute versioned comparison run against reference baseline.
+  --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
@@ -449,6 +450,7 @@ class RunCliParser:
         f_wallhour: Optional[int] = None
         f_walltime: Optional[str] = None
         f_versioned: bool = False
+        f_fast: bool = False
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -463,6 +465,11 @@ class RunCliParser:
                 if f_versioned:
                     raise RunCliParseError("Duplicate '--versioned' option specified.")
                 f_versioned = True
+                f_idx += 1
+            elif f_tok == "--fast":
+                if f_fast:
+                    raise RunCliParseError("Duplicate '--fast' option specified.")
+                f_fast = True
                 f_idx += 1
             elif f_tok == "--setup":
                 if f_setup_name is not None:
@@ -573,6 +580,7 @@ class RunCliParser:
                     "--walltime=",
                     "--wallhour=",
                     "--versioned=",
+                    "--fast=",
                 )
             ):
                 flag_name = f_tok.split("=")[0]
@@ -612,6 +620,7 @@ class RunCliParser:
             f_wallhour=f_wallhour,
             f_walltime=f_walltime,
             f_versioned=f_versioned,
+            f_fast=f_fast,
         )
 
 

@@ -414,6 +414,7 @@ class RunRequest:
         "m_wallhour",
         "m_walltime",
         "m_versioned",
+        "m_fast",
         "_frozen",
     )
 
@@ -433,6 +434,7 @@ class RunRequest:
         f_wallhour: Optional[int] = None,
         f_walltime: Optional[str] = None,
         f_versioned: bool = False,
+        f_fast: bool = False,
     ) -> None:
         if isinstance(f_mode, bool):
             f_ssd = f_mode
@@ -524,6 +526,8 @@ class RunRequest:
                 raise PlanValidationError(
                     f"walltime must be a non-empty string, got: {f_walltime!r}"
                 )
+        if not isinstance(f_fast, bool):
+            raise PlanValidationError(f"fast must be a boolean, got: {f_fast!r}")
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
@@ -538,6 +542,7 @@ class RunRequest:
         super().__setattr__("m_wallhour", f_wallhour)
         super().__setattr__("m_walltime", f_walltime.strip() if f_walltime else None)
         super().__setattr__("m_versioned", bool(f_versioned))
+        super().__setattr__("m_fast", bool(f_fast))
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -637,6 +642,14 @@ class RunRequest:
     def is_versioned(self) -> bool:
         return self.m_versioned
 
+    @property
+    def fast(self) -> bool:
+        return self.m_fast
+
+    @property
+    def is_fast(self) -> bool:
+        return self.m_fast
+
     def toDict(self) -> Dict[str, Any]:
         f_dict: Dict[str, Any] = {
             "target": self.m_target,
@@ -666,6 +679,8 @@ class RunRequest:
             f_dict["walltime"] = self.m_walltime
         if self.m_versioned:
             f_dict["versioned"] = True
+        if self.m_fast:
+            f_dict["fast"] = True
         return f_dict
 
     def __repr__(self) -> str:
@@ -683,7 +698,8 @@ class RunRequest:
             f"out_dir={self.m_out_dir!r}, "
             f"wallhour={self.m_wallhour!r}, "
             f"walltime={self.m_walltime!r}, "
-            f"versioned={self.m_versioned!r})"
+            f"versioned={self.m_versioned!r}, "
+            f"fast={self.m_fast!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -702,6 +718,7 @@ class RunRequest:
                 and self.m_wallhour == f_other.m_wallhour
                 and self.m_walltime == f_other.m_walltime
                 and self.m_versioned == f_other.m_versioned
+                and self.m_fast == f_other.m_fast
             )
         return False
 
@@ -1525,14 +1542,23 @@ class RunPlanner:
         f_scale_points = cls.SCALE_MATRICES[f_scale]
 
         # 5. ScheduledPointResources calculation
+        from lsmiotool.lib.scheduler import parseWalltimeToSeconds
+
         f_scheduled_points: List[ScheduledPointResources] = []
         for f_sp in f_scale_points:
             # Walltime calculation (INV-BACKEND-2, INV-PAIR-1)
             if f_request.wallhour is not None:
-                f_wallhour = max(1, min(48, f_request.wallhour))
+                max_hours = 23 if f_request.fast else 48
+                f_wallhour = max(1, min(max_hours, f_request.wallhour))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_request.walltime is not None:
                 f_walltime = f_request.walltime
+                if f_request.fast:
+                    wall_sec = parseWalltimeToSeconds(f_walltime)
+                    if wall_sec > 82800:
+                        f_walltime = "23:00:00"
+                    elif wall_sec < 3600:
+                        f_walltime = "01:00:00"
             elif (
                 getattr(f_request, "mode", "standard") == "backends"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
@@ -1543,7 +1569,12 @@ class RunPlanner:
                 )
                 time_per_backend = max(1, f_sp.nodes // 3)
                 calc_hours = 2 + (n_backends * time_per_backend)
-                f_wallhour = max(1, min(48, calc_hours))
+                if f_request.fast:
+                    calc_hours = calc_hours // 2
+                    max_hours = 23
+                else:
+                    max_hours = 48
+                f_wallhour = max(1, min(max_hours, calc_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
                 f_scale == "variants"
@@ -1558,7 +1589,14 @@ class RunPlanner:
                 )
                 total_runs = (1 + var_cnt) if var_cnt > 0 else 2
                 calculated_hours = 2 + (total_runs * 2)
-                f_wallhour = max(4, min(48, calculated_hours))
+                if f_request.fast:
+                    calculated_hours = calculated_hours // 2
+                    min_hours = 2
+                    max_hours = 23
+                else:
+                    min_hours = 4
+                    max_hours = 48
+                f_wallhour = max(min_hours, min(max_hours, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif (
                 f_scale == "variants"
@@ -1575,10 +1613,21 @@ class RunPlanner:
                     if v not in (None, "", "default", "base")
                 )
                 calculated_hours = 2 + (total_runs * 2)
-                f_wallhour = max(4, min(48, calculated_hours))
+                if f_request.fast:
+                    calculated_hours = calculated_hours // 2
+                    min_hours = 2
+                    max_hours = 23
+                else:
+                    min_hours = 4
+                    max_hours = 48
+                f_wallhour = max(min_hours, min(max_hours, calculated_hours))
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_resource_policy.walltime_policy == "slurm_nodes":
-                f_wallhour = 2 + (f_sp.nodes // 3)
+                raw_hours = 2 + (f_sp.nodes // 3)
+                if f_request.fast:
+                    f_wallhour = max(1, min(23, raw_hours // 2))
+                else:
+                    f_wallhour = raw_hours
                 f_walltime = f"{f_wallhour:02d}:00:00"
             elif f_resource_policy.walltime_policy == "fixed_06:00:00":
                 f_walltime = "06:00:00"
@@ -1607,8 +1656,6 @@ class RunPlanner:
                     f_pvmem=f_resource_policy.pvmem,
                 )
             elif f_profile.scheduler == SchedulerKind.SLURM:
-                from lsmiotool.lib.scheduler import parseWalltimeToSeconds
-
                 f_point_qos = f_resource_policy.qos
                 if f_walltime:
                     try:
@@ -1734,6 +1781,7 @@ class RunPlanner:
             f_wallhour=f_request.wallhour,
             f_walltime=f_request.walltime,
             f_versioned=f_request.versioned,
+            f_fast=f_request.fast,
         )
 
         if f_target == "lmp":
@@ -1992,7 +2040,7 @@ class ManifestSerializer:
 
     REQUIRED_REQUEST_KEYS: Set[str] = {"target", "scale", "ssd", "setup"}
     OPTIONAL_REQUEST_KEYS: FrozenSet[str] = frozenset(
-        {"variant", "variants", "archive", "resume", "out_dir"}
+        {"variant", "variants", "archive", "resume", "out_dir", "fast"}
     )
     REQUIRED_PLAN_KEYS: Set[str] = {
         "target",
@@ -2216,6 +2264,9 @@ class ManifestSerializer:
         f_archive_raw = f_req_raw.get("archive")
         f_resume_raw = f_req_raw.get("resume", False)
         f_out_dir_raw = f_req_raw.get("out_dir")
+        f_fast_raw = f_req_raw.get("fast", False)
+        if f_fast_raw is not None and not isinstance(f_fast_raw, bool):
+            raise ManifestValidationError("request.fast must be a boolean")
 
         try:
             f_request = RunRequest(
@@ -2228,6 +2279,7 @@ class ManifestSerializer:
                 f_archive=f_archive_raw,
                 f_resume=f_resume_raw,
                 f_out_dir=f_out_dir_raw,
+                f_fast=bool(f_fast_raw),
             )
         except Exception as f_err:
             raise ManifestValidationError(f"Invalid request record: {f_err}")
@@ -4319,6 +4371,7 @@ class RunOrchestrator:
                     f_variant=f_cur_variant,
                     f_wallhour=f_request.wallhour,
                     f_walltime=f_request.walltime,
+                    f_fast=f_request.fast,
                 )
 
                 try:

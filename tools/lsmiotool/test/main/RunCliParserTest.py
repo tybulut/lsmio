@@ -556,6 +556,49 @@ class RunCliParserTest(unittest.TestCase):
         self.assertIn("--resume", RUN_HELP_TEXT)
         self.assertIn("--out-dir", RUN_HELP_TEXT)
         self.assertIn("--time", RUN_HELP_TEXT)
+        self.assertIn("--fast", RUN_HELP_TEXT)
+
+    def testFastOptionParsing(self) -> None:
+        """Asserts --fast option parses correctly, defaults to False, and sets fast / is_fast."""
+        req_default = parseRunArguments(["lsmio", "small"])
+        self.assertFalse(req_default.fast)
+        self.assertFalse(req_default.is_fast)
+
+        req_fast = parseRunArguments(["lsmio", "small", "--fast"])
+        self.assertTrue(req_fast.fast)
+        self.assertTrue(req_fast.is_fast)
+
+        req_ior = parseRunArguments(["ior", "bake", "--fast"])
+        self.assertTrue(req_ior.fast)
+
+        req_lmp = parseRunArguments(["lmp", "local", "--fast"])
+        self.assertTrue(req_lmp.fast)
+
+        req_backends = parseRunArguments(["lsmio", "backends", "small", "--fast"])
+        self.assertTrue(req_backends.fast)
+
+        req_variants = parseRunArguments(["lsmio", "variants", "most", "--fast"])
+        self.assertTrue(req_variants.fast)
+
+    def testFastOptionDuplicateRejection(self) -> None:
+        """Asserts duplicate --fast option raises RunCliParseError."""
+        with self.assertRaises(RunCliParseError) as ctx:
+            parseRunArguments(["lsmio", "small", "--fast", "--fast"])
+        self.assertIn("Duplicate '--fast' option specified", str(ctx.exception))
+
+        with self.assertRaises(RunCliParseError) as ctx_be:
+            parseRunArguments(["lsmio", "backends", "small", "--fast", "--fast"])
+        self.assertIn("Duplicate '--fast' option specified", str(ctx_be.exception))
+
+    def testFastOptionSyntaxRejection(self) -> None:
+        """Asserts equals-syntax like --fast=true raises RunCliParseError."""
+        with self.assertRaises(RunCliParseError) as ctx:
+            parseRunArguments(["lsmio", "small", "--fast=true"])
+        self.assertIn("is not supported", str(ctx.exception))
+
+        with self.assertRaises(RunCliParseError) as ctx_yes:
+            parseRunArguments(["lsmio", "small", "--fast=yes"])
+        self.assertIn("is not supported", str(ctx_yes.exception))
 
     def testTimeOptionFlags(self) -> None:
         """Asserts --time, --walltime, and --wallhour aliases parse integer and HH:MM:SS values."""

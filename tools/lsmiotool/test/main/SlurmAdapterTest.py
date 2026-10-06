@@ -1258,6 +1258,32 @@ class SlurmAdapterTest(unittest.TestCase):
         with self.assertRaises(SchedulerScriptError):
             SlurmScriptRenderer.computeWalltime("8")  # type: ignore
 
+    def testComputeWalltimeFastScaling(self) -> None:
+        """Asserts computeWalltime with f_fast=True halves walltime, clamps min 1h, and caps at 23h."""
+        f_expected_fast_walltimes = {
+            1: "01:00:00",
+            2: "01:00:00",
+            3: "01:00:00",
+            4: "01:00:00",
+            8: "02:00:00",
+            16: "03:00:00",
+            24: "05:00:00",
+            32: "06:00:00",
+            40: "07:00:00",
+            48: "09:00:00",
+            64: "11:00:00",
+            128: "22:00:00",
+            192: "23:00:00",
+            256: "23:00:00",
+        }
+        for f_nodes, f_exp in f_expected_fast_walltimes.items():
+            self.assertEqual(
+                SlurmScriptRenderer.computeWalltime(f_nodes, f_fast=True),
+                f_exp,
+                msg=f"Fast walltime calculation failed for nodes: {f_nodes}",
+            )
+
+
     def testDirectiveAdversaries(self) -> None:
         """Tests prevention of directive injection in job name, account, mail user, and paths."""
         # 1. Job name injection

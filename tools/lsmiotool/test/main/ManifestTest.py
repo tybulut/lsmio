@@ -924,3 +924,26 @@ class ManifestTest(unittest.TestCase):
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestSerializer.deserialize(f_d)
         self.assertIn("match", str(f_ctx.exception))
+
+    def testFastOptionManifestSerializationRoundTrip(self) -> None:
+        """Asserts RunPlan with fast=True serializes fast in request and round-trips byte-stably."""
+        f_req = RunRequest("lsmio", "local", f_fast=True)
+        f_plan = RunPlanner.createPlan(
+            f_request=f_req,
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-fast-test",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        f_json_str = ManifestSerializer.serialize(f_plan)
+        f_dict = json.loads(f_json_str)
+        self.assertIn("fast", f_dict["request"])
+        self.assertTrue(f_dict["request"]["fast"])
+
+        f_doc = ManifestSerializer.deserialize(f_json_str)
+        self.assertTrue(f_doc.request.fast)
+        f_reconstructed = f_doc.toRunPlan()
+        self.assertTrue(f_reconstructed.request.fast)
+        self.assertEqual(f_reconstructed, f_plan)
+        self.assertEqual(ManifestSerializer.serialize(f_reconstructed), f_json_str)
+

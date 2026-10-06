@@ -22,10 +22,12 @@ batch_run() {
   # Dynamic Walltime Scaling & Explicit Override (INV-BACKEND-2, INV-PAIR-1)
   if [ -n "$BM_WALLHOUR_OVERRIDE" ] || [ -n "$BM_WALLHOUR" ]; then
     _user_hours="${BM_WALLHOUR_OVERRIDE:-$BM_WALLHOUR}"
+    _max_hours=48
+    [ "$BM_FAST" = "yes" ] && _max_hours=23
     if [ "$_user_hours" -lt 1 ]; then
       wallhour=1
-    elif [ "$_user_hours" -gt 48 ]; then
-      wallhour=48
+    elif [ "$_user_hours" -gt "$_max_hours" ]; then
+      wallhour=$_max_hours
     else
       wallhour=$_user_hours
     fi
@@ -42,10 +44,16 @@ batch_run() {
     time_per_backend=$(( nodes / 3 ))
     [ "$time_per_backend" -gt 0 ] || time_per_backend=1
     calculated_hours=$(( 2 + _bcnt * time_per_backend ))
+    if [ "$BM_FAST" = "yes" ]; then
+      calculated_hours=$(( calculated_hours / 2 ))
+      _max_hours=23
+    else
+      _max_hours=48
+    fi
     if [ "$calculated_hours" -lt 1 ]; then
       wallhour=1
-    elif [ "$calculated_hours" -gt 48 ]; then
-      wallhour=48
+    elif [ "$calculated_hours" -gt "$_max_hours" ]; then
+      wallhour=$_max_hours
     else
       wallhour=$calculated_hours
     fi
@@ -69,10 +77,18 @@ batch_run() {
     fi
     # 120 min per baseline run (maximum safety margin for 64K workloads) + 2 hours base headroom
     calculated_hours=$(( 2 + total_runs * 2 ))
-    if [ "$calculated_hours" -lt 4 ]; then
-      wallhour=4
-    elif [ "$calculated_hours" -gt 48 ]; then
-      wallhour=48
+    if [ "$BM_FAST" = "yes" ]; then
+      calculated_hours=$(( calculated_hours / 2 ))
+      _min_hours=2
+      _max_hours=23
+    else
+      _min_hours=4
+      _max_hours=48
+    fi
+    if [ "$calculated_hours" -lt "$_min_hours" ]; then
+      wallhour=$_min_hours
+    elif [ "$calculated_hours" -gt "$_max_hours" ]; then
+      wallhour=$_max_hours
     else
       wallhour=$calculated_hours
     fi
@@ -92,16 +108,30 @@ batch_run() {
     fi
     # 120 min per run (maximum safety margin for 64K workloads) + 2 hours base headroom
     calculated_hours=$(( 2 + total_runs * 2 ))
-    if [ "$calculated_hours" -lt 4 ]; then
-      wallhour=4
-    elif [ "$calculated_hours" -gt 48 ]; then
-      wallhour=48
+    if [ "$BM_FAST" = "yes" ]; then
+      calculated_hours=$(( calculated_hours / 2 ))
+      _min_hours=2
+      _max_hours=23
+    else
+      _min_hours=4
+      _max_hours=48
+    fi
+    if [ "$calculated_hours" -lt "$_min_hours" ]; then
+      wallhour=$_min_hours
+    elif [ "$calculated_hours" -gt "$_max_hours" ]; then
+      wallhour=$_max_hours
     else
       wallhour=$calculated_hours
     fi
   else
-    wallhour=$(( 2 + nodes / 3 ))
-    [ "$wallhour" -gt 0 ] || wallhour=1
+    if [ "$BM_FAST" = "yes" ]; then
+      wallhour=$(( (2 + nodes / 3) / 2 ))
+      [ "$wallhour" -gt 23 ] && wallhour=23
+      [ "$wallhour" -lt 1 ] && wallhour=1
+    else
+      wallhour=$(( 2 + nodes / 3 ))
+      [ "$wallhour" -gt 0 ] || wallhour=1
+    fi
   fi
 
   if [ "$QSUBMIT" = "sbatch" ]; then
@@ -140,7 +170,7 @@ batch_run() {
 
     cd $BM_DIRNAME
     qsub \
-      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED,BM_MODE,BM_BACKENDS,BM_NUM_NODES \
+      -v BM_SCRIPT,BM_DIRNAME,BM_CMD,BM_TYPE,BM_SCALE,BM_SSD,BM_NUM_TASKS,BM_NUM_CORES,BM_VARIANT,BM_SETUP,BM_PAIRED_RUN,EXPANDED_VARIANTS,DO_ARCHIVE,BM_RESUME,BM_ARCHIVE_DEST,VAR_COUNT,BM_WALLHOUR_OVERRIDE,BM_VERSIONED,BM_MODE,BM_BACKENDS,BM_NUM_NODES,BM_FAST \
       -l select=$concurrency:mem=32GB \
       ${job_script}.pbs
   fi

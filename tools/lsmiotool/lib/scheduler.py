@@ -1608,13 +1608,16 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
     parse_walltime_to_seconds = staticmethod(parseWalltimeToSeconds)
 
     @classmethod
-    def computeWalltime(cls, f_nodes: int) -> str:
-        """Compute walltime string HH:MM:SS based on Slurm node formula: 2 + nodes // 3 hours."""
+    def computeWalltime(cls, f_nodes: int, f_fast: bool = False) -> str:
+        """Compute walltime string HH:MM:SS based on Slurm node formula: 2 + nodes // 3 hours (halved and capped at 23 if f_fast)."""
         if not isinstance(f_nodes, int) or f_nodes <= 0:
             raise SchedulerScriptError(
                 f"Nodes must be a positive integer, got: {f_nodes!r}"
             )
-        f_hours = 2 + (f_nodes // 3)
+        if f_fast:
+            f_hours = max(1, min(23, (2 + (f_nodes // 3)) // 2))
+        else:
+            f_hours = 2 + (f_nodes // 3)
         return f"{f_hours:02d}:00:00"
 
     compute_walltime = computeWalltime
