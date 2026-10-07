@@ -994,11 +994,11 @@ print("LAZY_IMPORT_OK")
         self.assertIn("#PBS -l pmem=8G", f_readme)
         self.assertIn("#PBS -l pvmem=8G", f_readme)
 
-        # 6. Slurm directives: --mail-type=END,FAIL, cyclic:cyclic, mem=8gb
+        # 6. Slurm directives: --mail-type=END,FAIL, cyclic:cyclic, mem=16gb
         self.assertIn("#SBATCH --mail-type=END,FAIL", f_readme)
         self.assertIn("#SBATCH --time=", f_readme)
         self.assertIn("#SBATCH --distribution=cyclic:cyclic", f_readme)
-        self.assertIn("#SBATCH --mem=8gb", f_readme)
+        self.assertIn("#SBATCH --mem=16gb", f_readme)
 
         # 7. Configured certification state
         self.assertIn("configured", f_readme)

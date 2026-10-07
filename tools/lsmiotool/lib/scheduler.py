@@ -1595,7 +1595,7 @@ class SlurmScriptRenderer(SchedulerScriptRenderer):
     9. #SBATCH --mail-user=<mail_user> (if configured / passed)
     10. #SBATCH --mail-type=END,FAIL (enforcing SlurmMailMode.END_FAIL)
     11. Site resource:
-        - Viking / Viking2: #SBATCH --mem=8gb
+        - Viking / Viking2: #SBATCH --mem=16gb
         - Archer2: #SBATCH --partition=standard, #SBATCH --qos=standard (NO mem directive)
     12. #SBATCH --output=<output_path>
     13. #SBATCH --error=<error_path>

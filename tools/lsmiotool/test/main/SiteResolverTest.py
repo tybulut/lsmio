@@ -436,7 +436,7 @@ class SiteResolverTest(unittest.TestCase):
             self.assertIsNone(f_pol.memory)
             self.assertEqual(f_pol.walltime_policy, "slurm_nodes")
 
-        # Viking / Viking2 shapes: memory 8gb, partition None, qos None
+        # Viking / Viking2 shapes: memory 16gb, partition None, qos None
         for f_vk in ("VIKING", "VIKING2"):
             f_vk_prof = EnvironmentResolver.resolveProfile(
                 f_vk,
@@ -446,7 +446,7 @@ class SiteResolverTest(unittest.TestCase):
             )
             for f_shp in ("small", "large"):
                 f_pol = f_vk_prof.getResourcePolicy(f_shp)
-                self.assertEqual(f_pol.memory, "8gb")
+                self.assertEqual(f_pol.memory, "16gb")
                 self.assertIsNone(f_pol.partition)
                 self.assertIsNone(f_pol.qos)
                 self.assertEqual(f_pol.walltime_policy, "slurm_nodes")

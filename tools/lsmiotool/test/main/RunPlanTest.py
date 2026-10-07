@@ -338,7 +338,7 @@ class RunPlanTest(unittest.TestCase):
         f_req_local = RunRequest("ior", "local")
         f_plan_viking_local = RunPlanner.createPlan(f_req_local, self.m_viking_profile)
         self.assertEqual(f_plan_viking_local.scheduled_points[0].walltime, "02:00:00")
-        self.assertEqual(f_plan_viking_local.scheduled_points[0].mem, "8gb")
+        self.assertEqual(f_plan_viking_local.scheduled_points[0].mem, "16gb")
         self.assertEqual(f_plan_viking_local.scheduled_points[0].mail_mode, "END,FAIL")
         self.assertIsNone(f_plan_viking_local.scheduled_points[0].select_chunks)
 
@@ -604,7 +604,7 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(len(f_plan.scheduled_points), 1)
         # Viking slurm_nodes walltime policy for 8 nodes: 2 + (8 // 3) = 4 hours -> '04:00:00'
         self.assertEqual(f_plan.scheduled_points[0].walltime, "04:00:00")
-        self.assertEqual(f_plan.scheduled_points[0].mem, "8gb")
+        self.assertEqual(f_plan.scheduled_points[0].mem, "16gb")
 
         # Also verify under PBS scheduler profile (Isambard small shape: fixed 06:00:00, ncpus=1, pmem=8G)
         f_plan_isambard = RunPlanner.createPlan(f_req, self.m_isambard_profile)

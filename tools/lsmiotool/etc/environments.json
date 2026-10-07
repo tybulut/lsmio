@@ -140,7 +140,7 @@
             "queue": null,
             "partition": null,
             "qos": null,
-            "memory": "8gb",
+            "memory": "16gb",
             "mail_mode": "END,FAIL",
             "pmem": null,
             "pvmem": null
@@ -150,7 +150,7 @@
             "queue": null,
             "partition": null,
             "qos": null,
-            "memory": "8gb",
+            "memory": "16gb",
             "mail_mode": "END,FAIL",
             "pmem": null,
             "pvmem": null
@@ -219,7 +219,7 @@
             "queue": null,
             "partition": null,
             "qos": null,
-            "memory": "8gb",
+            "memory": "16gb",
             "mail_mode": "END,FAIL",
             "pmem": null,
             "pvmem": null
@@ -229,7 +229,7 @@
             "queue": null,
             "partition": null,
             "qos": null,
-            "memory": "8gb",
+            "memory": "16gb",
             "mail_mode": "END,FAIL",
             "pmem": null,
             "pvmem": null

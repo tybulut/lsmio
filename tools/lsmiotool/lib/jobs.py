@@ -196,7 +196,7 @@ class JobScriptGenerator(debuggable.DebuggableObject):
     @staticmethod
     def generate_sbatch_script(
         mail_type: str = "END,FAIL",
-        mem: str = "8gb",
+        mem: str = "16gb",
         ntasks_per_node: int = 4,
         ntasks_per_socket: int = 2,
         ntasks_per_core: int = 1,
@@ -603,7 +603,7 @@ class JobsRunner(debuggable.DebuggableObject):
             raise RuntimeError(f"Unknown HPC manager: '{self.hpc_manager}'")
         sbh = [
             "#SBATCH --mail-type=END,FAIL",
-            "#SBATCH --mem=8gb",
+            "#SBATCH --mem=16gb",
             "#SBATCH --distribution=cyclic:cyclic",
             "#SBATCH --output=logs/sbatch-lsmio-%j.log",
             "#SBATCH --error=logs/sbatch-lsmio-%j.err",

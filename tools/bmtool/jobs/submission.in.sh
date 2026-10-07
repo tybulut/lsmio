@@ -151,7 +151,7 @@ batch_run() {
         SBATCH_EXTRA="--partition=standard --qos=standard"
       fi
     else
-      SBATCH_EXTRA="--mem=8gb"
+      SBATCH_EXTRA="--mem=16gb"
     fi
     sbatch \
       $SBATCH_EXTRA \
