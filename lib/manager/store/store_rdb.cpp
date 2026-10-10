@@ -203,8 +203,8 @@ bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key,
     return retValue;
 }
 
-bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key,
-                                   std::string&& value, bool flush) {
+bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key, std::string&& value,
+                                   bool flush) {
     return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
 }
 

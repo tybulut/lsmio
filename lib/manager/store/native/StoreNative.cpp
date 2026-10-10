@@ -161,7 +161,9 @@ void LSMIOStoreNative::close() {
     // Taking the mutex here orders the flag before that check or after the
     // thread is waiting; without it the notify can arrive between the two, be
     // lost, and leave join() below waiting forever.
-    { std::lock_guard<std::mutex> lock(m_state_mutex); }
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+    }
     m_flush_cv.notify_one();  // Wake up the flush thread
     if (m_flush_thread.joinable()) {
         m_flush_thread.join();

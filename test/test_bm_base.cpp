@@ -51,7 +51,7 @@ class MockBM : public BMBase {
 
     using BMBase::doWrite;
 
-    bool doWrite(const std::string& key, const std::string& value) override {
+    bool doWrite(const std::string &key, const std::string &value) override {
         if (failWrite) {
             writeFailureCount++;
             return false;

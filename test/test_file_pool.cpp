@@ -202,19 +202,21 @@ TEST_F(FilePoolTest, ConcurrentAcquiresNoDataLoss) {
 // or scheduler speed on whatever machine runs this suite.
 TEST_F(FilePoolTest, FallbackTriggersUnderRealStarvation) {
     std::atomic<bool> release_worker{false};
-    lsmio::FilePool pool(
-        test_dir, "L0-", ".sst", /*f_pool_size=*/1, /*f_start_id=*/900, /*f_pre_allocation_size=*/0,
-        /*f_acquire_timeout=*/std::chrono::milliseconds(30), [&release_worker]() {
-            while (!release_worker.load(std::memory_order_acquire)) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        });
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", /*f_pool_size=*/1, /*f_start_id=*/900,
+                         /*f_pre_allocation_size=*/0,
+                         /*f_acquire_timeout=*/std::chrono::milliseconds(30), [&release_worker]() {
+                             while (!release_worker.load(std::memory_order_acquire)) {
+                                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                             }
+                         });
 
     // RAII guard guarantees worker unblocks before ~FilePool() joins it,
     // even if an assertion failure or exception aborts the test early.
     struct WorkerReleaseGuard {
         std::atomic<bool>& flag;
-        ~WorkerReleaseGuard() { flag.store(true, std::memory_order_release); }
+        ~WorkerReleaseGuard() {
+            flag.store(true, std::memory_order_release);
+        }
     } guard{release_worker};
 
     const int num_threads = 8;

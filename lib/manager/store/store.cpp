@@ -98,8 +98,8 @@ bool LSMIOStore::del(const std::string& key, bool flush) {
     return _batchMutation(MutationType::Del, key, "", flush);
 }
 
-bool LSMIOStore::_batchMutation(MutationType mType, const std::string& key,
-                                std::string&& value, bool flush) {
+bool LSMIOStore::_batchMutation(MutationType mType, const std::string& key, std::string&& value,
+                                bool flush) {
     return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
 }
 
