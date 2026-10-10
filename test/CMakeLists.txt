@@ -114,6 +114,8 @@ function(add_lsmio_mpi_test x lib)
     CMD_WRAPPER ${mpi_cmd} ${test_parameters}
     PROPERTIES
       TIMEOUT 30
+      # Each test runs ${mpi_processes} ranks: count them against ctest -j
+      PROCESSORS ${mpi_processes}
       ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
     DISCOVERY_TIMEOUT 30
   )
@@ -183,6 +185,7 @@ gtest_discover_tests(
   PROPERTIES
     ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
     TIMEOUT 30
+    PROCESSORS ${mpi_processes}
   DISCOVERY_TIMEOUT 30
 )
 

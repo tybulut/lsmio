@@ -302,8 +302,9 @@ class ProcessRunnerTest(unittest.TestCase):
         )
         f_argv = [sys.executable, "-c", f_hung_script]
 
+        # Long enough for the child to start and print under a loaded parallel ctest run
         f_start = time.monotonic()
-        f_result = self.m_runner.run(f_argv, f_timeout=0.2)
+        f_result = self.m_runner.run(f_argv, f_timeout=0.5)
         f_wall_elapsed = time.monotonic() - f_start
 
         self.assertTrue(f_result.timed_out)
@@ -314,7 +315,7 @@ class ProcessRunnerTest(unittest.TestCase):
         # Bounded in wall elapsed time (significantly less than the 60-second sleep)
         self.assertLess(f_wall_elapsed, 5.0)
         self.assertLess(f_result.elapsed_seconds, 5.0)
-        self.assertGreaterEqual(f_result.elapsed_seconds, 0.15)
+        self.assertGreaterEqual(f_result.elapsed_seconds, 0.45)
         self.assertIn("STARTED", f_result.stdout)
 
     def testCustomEnvironmentAndCwd(self) -> None:
