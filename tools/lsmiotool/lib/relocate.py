@@ -172,9 +172,7 @@ def planRelocation(
         ) from f_err
 
 
-def _planSource(
-    f_worker: str, f_tools: str
-) -> Tuple[List[Tuple[str, str]], str]:
+def _planSource(f_worker: str, f_tools: str) -> Tuple[List[Tuple[str, str]], str]:
     f_layout = ResourceLocator.forSource(f_worker)
     f_package_root = f_layout.package_root
     if os.path.dirname(f_worker) != f_package_root:
@@ -230,7 +228,10 @@ def _planInstalled(
             f_unique.append(f_d)
 
     f_pairs = [
-        (f_d, os.path.normpath(os.path.join(f_pkg_dest, os.path.relpath(f_d, f_common))))
+        (
+            f_d,
+            os.path.normpath(os.path.join(f_pkg_dest, os.path.relpath(f_d, f_common))),
+        )
         for f_d in f_unique
     ]
     f_new_worker = os.path.normpath(
@@ -250,7 +251,9 @@ def _defaultRunner(f_argv: List[str]) -> subprocess.CompletedProcess:
 
 
 def _checkRunnerResult(f_argv: Sequence[str], f_result: Any) -> None:
-    f_code = f_result if isinstance(f_result, int) else getattr(f_result, "returncode", 0)
+    f_code = (
+        f_result if isinstance(f_result, int) else getattr(f_result, "returncode", 0)
+    )
     if f_code:
         f_stderr = getattr(f_result, "stderr", "") or ""
         raise RelocationError(
@@ -290,7 +293,8 @@ def relocateForSite(
     f_worker_abs = _checkPathToken(f_worker_executable, "worker executable")
     f_worker_real = os.path.realpath(f_worker_abs)
     if not (
-        isUnderHomePrefix(f_worker_real, f_env) or isUnderHomePrefix(f_worker_abs, f_env)
+        isUnderHomePrefix(f_worker_real, f_env)
+        or isUnderHomePrefix(f_worker_abs, f_env)
     ):
         return f_worker_executable
 

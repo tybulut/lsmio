@@ -146,7 +146,9 @@ def resolveArmGroup(
         f_arms: List[RunArm] = []
         for f_backend in getattr(f_request, "backends", None) or ():
             if f_backend not in BACKEND_ARMS:
-                raise ArmError(f"Unsupported backend for backends scaling: [{f_backend}]")
+                raise ArmError(
+                    f"Unsupported backend for backends scaling: [{f_backend}]"
+                )
             f_b_setup, f_b_arm = BACKEND_ARMS[f_backend]
             f_arms.append(RunArm(f_backend, f_b_setup, None, f_b_arm, None))
         if not f_arms:
@@ -199,15 +201,27 @@ def resolveArmGroup(
         if f_real:
             f_base = RunArm("baseline", f_setup, None, None, "base")
             f_runs = [
-                RunArm(f_v, f_setup, f_v, ArchiveEngine.resolveArmId(f_setup, f_v), "run")
+                RunArm(
+                    f_v, f_setup, f_v, ArchiveEngine.resolveArmId(f_setup, f_v), "run"
+                )
                 for f_v in f_real
             ]
-            return ArmGroup("paired", tuple([f_base] + f_runs), f_archive_flag is not False)
+            return ArmGroup(
+                "paired", tuple([f_base] + f_runs), f_archive_flag is not False
+            )
 
         # Standalone baseline: archived only on request
         return ArmGroup(
             "single",
-            (RunArm("default", f_setup, None, ArchiveEngine.resolveArmId(f_setup, None), None),),
+            (
+                RunArm(
+                    "default",
+                    f_setup,
+                    None,
+                    ArchiveEngine.resolveArmId(f_setup, None),
+                    None,
+                ),
+            ),
             f_archive_flag is True,
         )
 

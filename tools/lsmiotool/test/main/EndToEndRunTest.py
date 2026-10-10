@@ -2066,9 +2066,7 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(f_view_err.point_states[0].state, PointRunState.INDETERMINATE)
         # Each timed-out query is retried after one poll interval (no busy loop)
         # until the UNKNOWN budget is spent
-        self.assertEqual(
-            f_sleep_records, [8.0] * RunOrchestrator.UNKNOWN_POLL_LIMIT
-        )
+        self.assertEqual(f_sleep_records, [8.0] * RunOrchestrator.UNKNOWN_POLL_LIMIT)
 
     def testEndToEndConflictAndCorruptObservations(self) -> None:
         """Chunk 018: End-to-end validation of corrupt observations, missing accounting, conflicting handles, cancel causality, and repeated observations."""

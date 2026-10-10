@@ -355,9 +355,7 @@ class CompareNodesTest(unittest.TestCase):
             self.assertIn("8M", meta_data.title)
             self.assertIn("READ", meta_data.title)
 
-            expected_file = os.path.join(
-                out_dir, "compare-large-read-16-8M.png"
-            )
+            expected_file = os.path.join(out_dir, "compare-large-read-16-8M.png")
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
     def testEndToEndPlotFileGeneration(self) -> None:
@@ -385,9 +383,7 @@ class CompareNodesTest(unittest.TestCase):
         exit_code = cnm.run()
         self.assertEqual(exit_code, 0)
 
-        expected_png = os.path.join(
-            out_dir, "compare-bake-write-4-1M.png"
-        )
+        expected_png = os.path.join(out_dir, "compare-bake-write-4-1M.png")
         self.assertTrue(
             os.path.isfile(expected_png),
             f"Generated plot {expected_png} must exist on disk",

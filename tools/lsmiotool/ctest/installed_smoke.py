@@ -552,9 +552,7 @@ class InstalledSmoke(unittest.TestCase):
             f"Unrelated CWD was mutated: {os.listdir(f_unrelated_cwd)}",
         )
         f_home_entries = [
-            f_entry
-            for f_entry in os.listdir(f_unrelated_home)
-            if f_entry != "Library"
+            f_entry for f_entry in os.listdir(f_unrelated_home) if f_entry != "Library"
         ]
         self.assertEqual(
             f_home_entries,

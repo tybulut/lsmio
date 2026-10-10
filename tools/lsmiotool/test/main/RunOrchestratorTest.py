@@ -2853,9 +2853,13 @@ class RunOrchestratorTest(unittest.TestCase):
                 for f_idx, f_sp in enumerate(f_run["plan"].scale_points):
                     # Prepared for this job (the worker would run it) and not yet run
                     f_point_dir = f_run["store"].layout.pointDir(f_sp, f_idx)
-                    if os.path.isdir(f_point_dir) and f_ev.readControllerResult(
-                        f_sp, f_run["plan"].combinations[0], f_ordinal=f_idx
-                    ) is None:
+                    if (
+                        os.path.isdir(f_point_dir)
+                        and f_ev.readControllerResult(
+                            f_sp, f_run["plan"].combinations[0], f_ordinal=f_idx
+                        )
+                        is None
+                    ):
                         self._mockWritePointResults(
                             f_ev,
                             f_sp,
@@ -3004,8 +3008,9 @@ class RunOrchestratorTest(unittest.TestCase):
                     f"outputs-{ArchiveEngine.resolveArmId('NATIVE-M', 'footer')}:run",
                 )
             )
-            with patch("lsmiotool.lib.export.exportPoint"), patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
+            with (
+                patch("lsmiotool.lib.export.exportPoint"),
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
             ):
                 f_orch.execute(
                     RunRequest(
@@ -3036,9 +3041,12 @@ class RunOrchestratorTest(unittest.TestCase):
             f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
             f_fake_runner.m_submit_job_ids = ["9101"]
 
-            with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
-            ) as f_reports:
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch(
+                    "lsmiotool.lib.export.generateReports", return_value=True
+                ) as f_reports,
+            ):
                 f_view = f_orch.execute(
                     RunRequest(
                         "lsmio",
@@ -3091,8 +3099,9 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_poll_interval=0.01,
             )
             f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
-            with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
             ):
                 f_orch.execute(
                     RunRequest(
@@ -3161,19 +3170,25 @@ class RunOrchestratorTest(unittest.TestCase):
             f_poll_interval=0.01,
         )
         f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
-        with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
-            "lsmiotool.lib.export.generateReports", return_value=True
+        with (
+            patch("lsmiotool.lib.export.exportPoint") as f_export,
+            patch("lsmiotool.lib.export.generateReports", return_value=True),
         ):
             f_orch.execute(
-                RunRequest("lsmio", "variants", f_variants=["legacy"], f_versioned=True),
+                RunRequest(
+                    "lsmio", "variants", f_variants=["legacy"], f_versioned=True
+                ),
                 f_site=self.m_viking_profile,
                 f_worker_executable=self.m_worker_path,
                 f_version_tag="b-abc1234",
             )
-        f_dest = os.path.join(self.m_viking_root_hdd, "lsmio-archive", "variants-versioned")
+        f_dest = os.path.join(
+            self.m_viking_root_hdd, "lsmio-archive", "variants-versioned"
+        )
         self.assertEqual(
             sorted(
-                os.path.dirname(f_c.kwargs["f_node_dir"]) for f_c in f_export.call_args_list
+                os.path.dirname(f_c.kwargs["f_node_dir"])
+                for f_c in f_export.call_args_list
             ),
             sorted(
                 os.path.join(f_dest, f"outputs-native-version-b-abc1234-legacy:{f_r}")
@@ -3206,7 +3221,11 @@ class RunOrchestratorTest(unittest.TestCase):
         )
         f_view = f_orch.execute(
             RunRequest(
-                "lsmio", "variants", f_variants=["legacy"], f_versioned=True, f_resume=True
+                "lsmio",
+                "variants",
+                f_variants=["legacy"],
+                f_versioned=True,
+                f_resume=True,
             ),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
@@ -3247,8 +3266,9 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_poll_interval=0.01,
             )
             f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
-            with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
             ):
                 f_orch.execute(
                     RunRequest("lsmio", "bake", f_mode="backends", f_out_dir=f_tmpdir),
@@ -3316,8 +3336,9 @@ class RunOrchestratorTest(unittest.TestCase):
             f_fake_runner.m_on_submit_callback = self._groupOnSubmit(
                 f_orch, f_missing_labels=("manoff",)
             )
-            with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
             ):
                 f_orch.execute(
                     RunRequest(
@@ -3396,8 +3417,9 @@ class RunOrchestratorTest(unittest.TestCase):
                     f_sig.trigger(signal.SIGINT)
 
             f_runner.m_on_query_callback = interrupt_second_job
-            with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
             ):
                 f_orch.execute(
                     RunRequest(
@@ -3432,15 +3454,21 @@ class RunOrchestratorTest(unittest.TestCase):
         os.chmod(f_main, 0o755)
         with tempfile.TemporaryDirectory() as f_tmpdir:
             os.makedirs(os.path.join(f_tmpdir, "outputs-native"))
-            os.makedirs(
-                os.path.join(f_tmpdir, "outputs-native-version-b-abc1234:run")
-            )
+            os.makedirs(os.path.join(f_tmpdir, "outputs-native-version-b-abc1234:run"))
             for f_req in (
                 RunRequest(
-                    "lsmio", "variants", f_archive=True, f_resume=True, f_out_dir=f_tmpdir
+                    "lsmio",
+                    "variants",
+                    f_archive=True,
+                    f_resume=True,
+                    f_out_dir=f_tmpdir,
                 ),
                 RunRequest(
-                    "lsmio", "variants", f_versioned=True, f_resume=True, f_out_dir=f_tmpdir
+                    "lsmio",
+                    "variants",
+                    f_versioned=True,
+                    f_resume=True,
+                    f_out_dir=f_tmpdir,
                 ),
             ):
                 f_runner = FakeSchedulerCommandRunner()
@@ -3450,8 +3478,9 @@ class RunOrchestratorTest(unittest.TestCase):
                     f_poll_interval=0.01,
                 )
                 f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
-                with patch("lsmiotool.lib.export.exportPoint"), patch(
-                    "lsmiotool.lib.export.generateReports", return_value=True
+                with (
+                    patch("lsmiotool.lib.export.exportPoint"),
+                    patch("lsmiotool.lib.export.generateReports", return_value=True),
                 ):
                     f_orch.execute(
                         f_req,
@@ -3471,9 +3500,11 @@ class RunOrchestratorTest(unittest.TestCase):
             f_poll_interval=0.01,
         )
         f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
-        with patch.dict(os.environ, {"BM_ARCHIVE_DEST": "/inherited/dest"}), patch(
-            "lsmiotool.lib.export.exportPoint"
-        ) as f_export, patch("lsmiotool.lib.export.generateReports", return_value=True):
+        with (
+            patch.dict(os.environ, {"BM_ARCHIVE_DEST": "/inherited/dest"}),
+            patch("lsmiotool.lib.export.exportPoint") as f_export,
+            patch("lsmiotool.lib.export.generateReports", return_value=True),
+        ):
             f_orch.execute(
                 RunRequest("lsmio", "variants", f_variants=["footer"]),
                 f_site=self.m_viking_profile,
@@ -3504,8 +3535,9 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_poll_interval=0.01,
             )
             f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
-            with patch("lsmiotool.lib.export.exportPoint", side_effect=fake_export), patch(
-                "lsmiotool.lib.export.generateReports", return_value=True
+            with (
+                patch("lsmiotool.lib.export.exportPoint", side_effect=fake_export),
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
             ):
                 f_orch.execute(
                     RunRequest(
@@ -3529,7 +3561,9 @@ class RunOrchestratorTest(unittest.TestCase):
             )
             f_archive = ArchiveMain(["lsmio", "variants", "--dest", f_tmpdir])
             self.assertIsNone(
-                f_archive._latestRunRoot(self.m_viking_profile.benchmark_roots["hdd"], None)
+                f_archive._latestRunRoot(
+                    self.m_viking_profile.benchmark_roots["hdd"], None
+                )
             )
 
     def testSubmitErrorFailsAllArms(self) -> None:

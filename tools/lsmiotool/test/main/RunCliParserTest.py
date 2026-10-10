@@ -524,7 +524,11 @@ class RunCliParserTest(unittest.TestCase):
             ["--dest", "/tmp/x"],
             ["--time", "5"],
         ):
-            for f_target, f_scale in (("lsmio", "small"), ("ior", "local"), ("lmp", "bake")):
+            for f_target, f_scale in (
+                ("lsmio", "small"),
+                ("ior", "local"),
+                ("lmp", "bake"),
+            ):
                 with self.assertRaises(RunCliParseError) as f_ctx:
                     parseRunArguments([f_target, f_scale] + f_opts, f_environ={})
                 self.assertIn("not supported", str(f_ctx.exception))

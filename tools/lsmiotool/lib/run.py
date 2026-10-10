@@ -3929,7 +3929,9 @@ class RunOrchestrator:
         )
         return "\n".join(f_lines) + "\n"
 
-    def _makeSchedulerAdapter(self, f_profile: SiteProfile, f_evidence_store: Any) -> Any:
+    def _makeSchedulerAdapter(
+        self, f_profile: SiteProfile, f_evidence_store: Any
+    ) -> Any:
         from lsmiotool.lib.scheduler import (
             PbsSchedulerAdapter,
             SchedulerAdapter,
@@ -3939,7 +3941,10 @@ class RunOrchestrator:
 
         if self.m_scheduler_adapter_factory is not None:
             return self.m_scheduler_adapter_factory(
-                f_profile, f_evidence_store, self.m_worker_validator, self.m_command_runner
+                f_profile,
+                f_evidence_store,
+                self.m_worker_validator,
+                self.m_command_runner,
             )
         if f_profile.scheduler == SchedulerKind.SLURM:
             return SlurmSchedulerAdapter(
@@ -4039,7 +4044,9 @@ class RunOrchestrator:
             "f_clock_fn",
             f_kwargs.get(
                 "f_clock_float",
-                self.m_clock_float if self.m_clock_float is not None else time.monotonic,
+                self.m_clock_float
+                if self.m_clock_float is not None
+                else time.monotonic,
             ),
         )
         return f_poll_interval, f_sleep_fn, f_clock_float
@@ -4164,7 +4171,10 @@ class RunOrchestrator:
 
                 try:
                     f_job = f_disp["adapter"].dispatchSubmission(
-                        f_point=f_sp, f_spec=f_spec, f_writer_id="control", f_ordinal=f_idx
+                        f_point=f_sp,
+                        f_spec=f_spec,
+                        f_writer_id="control",
+                        f_ordinal=f_idx,
                     )
                     f_handle = f_job.job_handle
                     if f_handle is None:
@@ -4172,7 +4182,8 @@ class RunOrchestrator:
                 except Exception as f_err:
                     # Nothing more can be submitted reliably
                     self._reportProgress(
-                        f_reporter, f"Submission failed for point {f_point_name}: {f_err}"
+                        f_reporter,
+                        f"Submission failed for point {f_point_name}: {f_err}",
                     )
                     break
 
@@ -4190,10 +4201,16 @@ class RunOrchestrator:
                 }
                 for f_c in f_included[1:]:
                     f_c["evidence"].recordSubmissionRequested(
-                        f_point=f_sp, f_writer_id="control", f_payload=f_shared, f_ordinal=f_idx
+                        f_point=f_sp,
+                        f_writer_id="control",
+                        f_payload=f_shared,
+                        f_ordinal=f_idx,
                     )
                     f_c["evidence"].recordSubmissionDispatched(
-                        f_point=f_sp, f_writer_id="control", f_payload=f_shared, f_ordinal=f_idx
+                        f_point=f_sp,
+                        f_writer_id="control",
+                        f_payload=f_shared,
+                        f_ordinal=f_idx,
                     )
                     f_c["evidence"].recordSubmissionRecorded(
                         f_point=f_sp,
@@ -4208,7 +4225,13 @@ class RunOrchestrator:
                         f_sp, f_writer="control", f_ordinal=f_idx
                     )
                     f_c["obs_seq"] = 1 + (
-                        len([f_x for f_x in os.listdir(f_obs_dir) if f_x.endswith(".json")])
+                        len(
+                            [
+                                f_x
+                                for f_x in os.listdir(f_obs_dir)
+                                if f_x.endswith(".json")
+                            ]
+                        )
                         if os.path.isdir(f_obs_dir)
                         else 0
                     )
@@ -4236,11 +4259,15 @@ class RunOrchestrator:
                             f_obs_seq=f_disp["obs_seq"],
                         )
                         for f_c in f_included[1:]:
-                            self._mirrorCancelRecords(f_disp, f_c, f_sp, f_idx, f_handle)
+                            self._mirrorCancelRecords(
+                                f_disp, f_c, f_sp, f_idx, f_handle
+                            )
                         break
 
                     f_job_state, f_exit_code = self._queryJobState(
-                        f_adapter=f_disp["adapter"], f_handle=f_handle, f_profile=f_profile
+                        f_adapter=f_disp["adapter"],
+                        f_handle=f_handle,
+                        f_profile=f_profile,
                     )
                     for f_c in f_included:
                         f_payload: Dict[str, Any] = {
@@ -4319,7 +4346,9 @@ class RunOrchestrator:
                     try:
                         f_ctx["evidence"].recordWholeRunSucceeded(
                             f_writer_id="control",
-                            f_sequence=len(f_ctx["evidence"].readControlEvents("control"))
+                            f_sequence=len(
+                                f_ctx["evidence"].readControlEvents("control")
+                            )
                             + 1,
                             f_payload={"run_id": f_ctx["plan"].run_id},
                         )
@@ -4416,7 +4445,8 @@ class RunOrchestrator:
                 f_layout = f_ctx["store"].layout
                 f_ev.recordRecord(
                     os.path.join(
-                        f_layout.pointSchedulerDir(f_sp, f_idx), "cancel_unconfirmed.json"
+                        f_layout.pointSchedulerDir(f_sp, f_idx),
+                        "cancel_unconfirmed.json",
                     ),
                     EvidenceRecord(
                         f_writer_kind=WriterKind.CONTROL,
@@ -4492,7 +4522,8 @@ class RunOrchestrator:
                     )
             except Exception as f_err:
                 self._reportProgress(
-                    f_reporter, f"WARNING: report generation failed for {f_dir}: {f_err}"
+                    f_reporter,
+                    f"WARNING: report generation failed for {f_dir}: {f_err}",
                 )
 
         if f_points is None:
@@ -5153,7 +5184,9 @@ class RunOrchestrator:
                         if f_group.kind == "backends":
                             f_done = os.path.isdir(
                                 os.path.join(
-                                    f_dest_root, f"outputs-{f_arm.arm_id}", str(f_sp.nodes)
+                                    f_dest_root,
+                                    f"outputs-{f_arm.arm_id}",
+                                    str(f_sp.nodes),
                                 )
                             )
                         else:
@@ -5222,7 +5255,9 @@ class RunOrchestrator:
                     except PlanValidationError as f_err:
                         raise PreflightError(str(f_err)) from f_err
                     except Exception as f_err:
-                        raise PreflightError(f"Plan creation failed: {f_err}") from f_err
+                        raise PreflightError(
+                            f"Plan creation failed: {f_err}"
+                        ) from f_err
                     if f_group.kind != "single":
                         # The arms share one job per point, submitted with the whole
                         # request's resources: record those, not this arm's own
@@ -5243,7 +5278,9 @@ class RunOrchestrator:
                             f_benchmark_root, f_plan.run_id
                         )
                     else:
-                        f_artifact_store = ArtifactStore(f_benchmark_root, f_plan.run_id)
+                        f_artifact_store = ArtifactStore(
+                            f_benchmark_root, f_plan.run_id
+                        )
 
                     object.__setattr__(self, "m_last_plan", f_plan)
                     object.__setattr__(self, "m_last_artifact_store", f_artifact_store)

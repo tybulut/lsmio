@@ -86,7 +86,9 @@ class CleanupForbiddenError(ArtifactError):
 STANDARD_STRIPES: Tuple[int, ...] = (4, 16)
 STANDARD_BLOCK_SIZES: Tuple[str, ...] = ("1M", "64K", "8M")
 STANDARD_COMBINATION_TUPLES: Tuple[Tuple[int, str], ...] = tuple(
-    (f_stripe, f_block) for f_stripe in STANDARD_STRIPES for f_block in STANDARD_BLOCK_SIZES
+    (f_stripe, f_block)
+    for f_stripe in STANDARD_STRIPES
+    for f_block in STANDARD_BLOCK_SIZES
 )
 
 

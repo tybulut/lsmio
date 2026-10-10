@@ -51,7 +51,9 @@ from lsmiotool.lib.worker import AllocationControllerError, AllocationGroupRunne
 
 class ArmResolutionTest(unittest.TestCase):
     def _group(self, f_request: RunRequest, f_setup: str = "NATIVE-M") -> Any:
-        return resolveArmGroup(f_request, f_setup, "/opt/usr", f_version_tag="br-1a2b3c4")
+        return resolveArmGroup(
+            f_request, f_setup, "/opt/usr", f_version_tag="br-1a2b3c4"
+        )
 
     def testStandardScaleIsSingleUnarchivedArm(self) -> None:
         f_group = self._group(RunRequest("lsmio", "small"))
@@ -112,7 +114,9 @@ class ArmResolutionTest(unittest.TestCase):
 
     def testBackends(self) -> None:
         f_group = self._group(
-            RunRequest("lsmio", "small", f_mode="backends", f_backends=["adios2", "leveldb"])
+            RunRequest(
+                "lsmio", "small", f_mode="backends", f_backends=["adios2", "leveldb"]
+            )
         )
         self.assertEqual(f_group.kind, "backends")
         self.assertTrue(f_group.archive)
@@ -137,7 +141,9 @@ class _Layout:
     def combinationName(self, f_combo: Any) -> str:
         return f"c{f_combo.stripe_count}_b{f_combo.block_size}"
 
-    def pointRankLogPath(self, f_sp: Any, f_rank: int, f_combo: str, f_ordinal: int = 0) -> str:
+    def pointRankLogPath(
+        self, f_sp: Any, f_rank: int, f_combo: str, f_ordinal: int = 0
+    ) -> str:
         return os.path.join(self.m_root, "logs", f_combo, f"rank_{f_rank}.log")
 
 
@@ -151,9 +157,13 @@ class _Evidence:
         self.m_layout = f_layout
         self.m_with = f_with_records
         # Older rank results: a Slurm node index and no host
-        self.m_payload = f_payload or (lambda f_r: {"node_rank": str(f_r), "local_rank": 0})
+        self.m_payload = f_payload or (
+            lambda f_r: {"node_rank": str(f_r), "local_rank": 0}
+        )
 
-    def readRankResult(self, f_sp: Any, f_rank: int, f_combo: Any, f_ordinal: int = 0) -> Any:
+    def readRankResult(
+        self, f_sp: Any, f_rank: int, f_combo: Any, f_ordinal: int = 0
+    ) -> Any:
         if not self.m_with:
             return None
         return SimpleNamespace(
@@ -184,7 +194,9 @@ class ExportPointTest(unittest.TestCase):
         shutil.rmtree(self.m_tmp, ignore_errors=True)
 
     def testWritesBmtoolLayoutAndReplacesNodeDir(self) -> None:
-        f_node_dir = os.path.join(self.m_tmp, "archive", "outputs-native-footer:run", "2")
+        f_node_dir = os.path.join(
+            self.m_tmp, "archive", "outputs-native-footer:run", "2"
+        )
         os.makedirs(os.path.join(f_node_dir, "stale"))
         f_n = exportPoint(
             self.m_layout,
@@ -206,7 +218,11 @@ class ExportPointTest(unittest.TestCase):
             ),
         )
         with open(
-            os.path.join(f_node_dir, "2026-10-10", "out-native-footer-16-8M-2026-10-10-node1-0.txt")
+            os.path.join(
+                f_node_dir,
+                "2026-10-10",
+                "out-native-footer-16-8M-2026-10-10-node1-0.txt",
+            )
         ) as f_f:
             self.assertEqual(f_f.read(), "write,2,1,1,1,1,10\n")
         self.assertFalse(os.path.exists(f_node_dir + ".partial"))
@@ -228,7 +244,11 @@ class ExportPointTest(unittest.TestCase):
         """Files carry the node's hostname, as bmtool's ${SLURMD_NODENAME}-${SLURM_LOCALID}."""
         self.assertEqual(
             self._exportNames(
-                lambda f_r: {"node_rank": str(f_r), "local_rank": 0, "host": f"node{97 + f_r:03d}"}
+                lambda f_r: {
+                    "node_rank": str(f_r),
+                    "local_rank": 0,
+                    "host": f"node{97 + f_r:03d}",
+                }
             ),
             [
                 "out-native-16-8M-2026-10-10-node097-0.txt",
@@ -240,7 +260,9 @@ class ExportPointTest(unittest.TestCase):
         """Without a local rank (PBS) the suffix is the global rank, bmtool's ALPS_APP_PE,
         and a hostname node_rank is used as is."""
         self.assertEqual(
-            self._exportNames(lambda f_r: {"node_rank": "nid001234", "local_rank": None}),
+            self._exportNames(
+                lambda f_r: {"node_rank": "nid001234", "local_rank": None}
+            ),
             [
                 "out-native-16-8M-2026-10-10-nid001234-0.txt",
                 "out-native-16-8M-2026-10-10-nid001234-1.txt",
@@ -286,7 +308,8 @@ class AllocationGroupRunnerTest(unittest.TestCase):
 
     def testContinueRunsEveryArm(self) -> None:
         self.assertEqual(
-            self._run(AllocationGroupRunner.POLICY_CONTINUE, [1, 0, 2]), ["m0", "m1", "m2"]
+            self._run(AllocationGroupRunner.POLICY_CONTINUE, [1, 0, 2]),
+            ["m0", "m1", "m2"],
         )
 
     def testStopAfterFailedBaseline(self) -> None:

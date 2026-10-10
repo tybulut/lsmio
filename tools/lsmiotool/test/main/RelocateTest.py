@@ -171,14 +171,10 @@ class RelocateTest(unittest.TestCase):
     def testSourceLayoutRelocatesPackageAndAssets(self) -> None:
         """Source worker mirrors tools/lsmiotool, its share/lmp-reaxff assets included, under <work>/tools."""
         f_runner = _RecordingRunner()
-        f_new = relocateForSite(
-            self.m_archer2, self.m_src_worker, self.m_env, f_runner
-        )
+        f_new = relocateForSite(self.m_archer2, self.m_src_worker, self.m_env, f_runner)
 
         f_tools = os.path.join(self.m_work, "tools")
-        self.assertEqual(
-            f_new, os.path.join(f_tools, "lsmiotool", "lsmiotool-worker")
-        )
+        self.assertEqual(f_new, os.path.join(f_tools, "lsmiotool", "lsmiotool-worker"))
         self.assertEqual(
             f_runner.m_calls,
             [
@@ -188,12 +184,8 @@ class RelocateTest(unittest.TestCase):
         self.assertTrue(os.access(f_new, os.X_OK))
         # The relocated worker resolves the same relative layout via ResourceLocator
         f_layout = ResourceLocator.forSource(f_new)
-        self.assertTrue(
-            os.path.isfile(os.path.join(f_layout.asset_root, "in.reaxc"))
-        )
-        self.assertTrue(
-            os.path.isfile(os.path.join(f_layout.package_root, "VERSION"))
-        )
+        self.assertTrue(os.path.isfile(os.path.join(f_layout.asset_root, "in.reaxc")))
+        self.assertTrue(os.path.isfile(os.path.join(f_layout.package_root, "VERSION")))
 
         # Site name strings are accepted as well
         self.assertEqual(

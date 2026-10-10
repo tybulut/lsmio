@@ -88,10 +88,10 @@ from lsmiotool.lib.worker import (
 )
 
 
-
 def _tolerant(f_cmd: str) -> str:
     """Module command as rendered: failures are logged, not fatal (bmtool parity)."""
     return f'{f_cmd} || echo "WARNING: {f_cmd} failed" >&2'
+
 
 class MockProcessRunner:
     """Mock process runner for recording command argv and returning custom responses."""
@@ -1290,7 +1290,6 @@ class SlurmAdapterTest(unittest.TestCase):
                 f_exp,
                 msg=f"Fast walltime calculation failed for nodes: {f_nodes}",
             )
-
 
     def testDirectiveAdversaries(self) -> None:
         """Tests prevention of directive injection in job name, account, mail user, and paths."""

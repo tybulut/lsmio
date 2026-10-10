@@ -104,9 +104,7 @@ def exportPoint(
                 # bmtool's suffix is SLURM_LOCALID, or ALPS_APP_PE (the global rank) on PBS
                 f_local = f_payload.get("local_rank")
                 f_local = f_rank if f_local is None else f_local
-                f_name = (
-                    f"out-{f_infix}-{f_stripe}-{f_block}-{f_date}-{f_host}-{f_local}.txt"
-                )
+                f_name = f"out-{f_infix}-{f_stripe}-{f_block}-{f_date}-{f_host}-{f_local}.txt"
                 f_dest_dir = os.path.join(f_tmp_dir, f_date)
                 os.makedirs(f_dest_dir, exist_ok=True)
                 f_dest = os.path.join(f_dest_dir, f_name)

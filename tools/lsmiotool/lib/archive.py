@@ -294,14 +294,18 @@ class ArchiveEngine:
                     indent=2,
                 )
         except OSError as f_err:
-            Console.warning(f"Cannot write {cls.RUN_MARKER_FILE} in {f_target}: {f_err}")
+            Console.warning(
+                f"Cannot write {cls.RUN_MARKER_FILE} in {f_target}: {f_err}"
+            )
 
     @classmethod
     def readArmMarker(cls, f_run_root: Union[str, Path]) -> Optional[Dict[str, Any]]:
         """The arm marker of a run root written by a multi-arm 'lsmiotool run', or None."""
         try:
             with open(
-                os.path.join(str(f_run_root), cls.ARM_MARKER_FILE), "r", encoding="utf-8"
+                os.path.join(str(f_run_root), cls.ARM_MARKER_FILE),
+                "r",
+                encoding="utf-8",
             ) as f_f:
                 f_doc = json.load(f_f)
         except (OSError, ValueError):
@@ -516,7 +520,9 @@ class ArchiveEngine:
             # bmtool's batch job moves a failed run's outputs there instead of leaving them
             f_failed_dir = abs_source.parent / "outputs-failed"
             if f_failed_dir.is_dir():
-                f_msg += f" (a failed benchmark job leaves its outputs in {f_failed_dir})"
+                f_msg += (
+                    f" (a failed benchmark job leaves its outputs in {f_failed_dir})"
+                )
             raise ArchiveError(f_msg)
         if not abs_source.is_dir():
             raise ArchiveError(f"Active output path is not a directory: {abs_source}")

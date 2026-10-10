@@ -733,8 +733,7 @@ class RunRootResolver:
 
         f_strict = not f_allow_partial
         if f_strict and (
-            not f_run_state.is_success
-            or f_run_state.state != OverallRunState.SUCCEEDED
+            not f_run_state.is_success or f_run_state.state != OverallRunState.SUCCEEDED
         ):
             raise RunRootResolutionError(
                 f"Run '{f_manifest.run_id}' did not succeed (state: {f_run_state.state.value}, diagnostics: {f_run_state.diagnostics})"
@@ -1069,9 +1068,7 @@ class RunRootResolver:
                                 f_mst.st_mode
                             ):
                                 continue
-                            if not cls._manifestMatches(
-                                f_man_path, f_target, f_scale
-                            ):
+                            if not cls._manifestMatches(f_man_path, f_target, f_scale):
                                 continue
                             f_valid_runs.append(f_run_path)
                         except OSError:
@@ -2012,9 +2009,7 @@ class LsmioReportGenerator(ReportGenerator):
             for f_combo in f_resolved_run.plan.combinations:
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
-                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
-                    f_combo.name
-                )
+                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(f_combo.name)
                 if f_combo_data is None:
                     continue  # skipped (and warned about) by extractRun
                 f_agg_lines = f_combo_data.get("bmtool_agg", {}).get("lines")
@@ -2094,9 +2089,7 @@ class LmpReportGenerator(ReportGenerator):
             ):
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
-                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
-                    f_combo.name
-                )
+                f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(f_combo.name)
                 if not f_combo_data:
                     continue
 

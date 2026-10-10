@@ -1022,4 +1022,3 @@ class RunPlanTest(unittest.TestCase):
         )
         f_plan_sub1h = RunPlanner.createPlan(f_req_sub1h, self.m_viking_profile)
         self.assertEqual(f_plan_sub1h.scheduled_points[0].walltime, "01:00:00")
-

@@ -161,9 +161,8 @@ def lmpLog(f_bws: List[float], f_extra: Optional[List[str]] = None) -> str:
     f_lines.append("Total wall time: 0:13:40")
     return "\n".join(f_lines) + "\n"
 
-AGG_HEADER = (
-    "access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration"
-)
+
+AGG_HEADER = "access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration"
 
 
 def rankLog(
@@ -315,9 +314,7 @@ class BmtoolPrimitivesTest(unittest.TestCase):
     def testAggregateWithoutSummaryLinesMatchesAwk(self) -> None:
         """A combination whose ranks never reached 'read,' prints awk's empty sums."""
         f_agg = data.LsmioBmtoolAggregate()
-        f_agg.addLines(
-            rankLog("write,10.5,1,2,3,4,10", None).split("\n")
-        )
+        f_agg.addLines(rankLog("write,10.5,1,2,3,4,10", None).split("\n"))
         self.assertEqual(f_agg.row("write"), "write,10.5,1,2,3,4,10")
         self.assertEqual(f_agg.row("read"), "read,,,,,,0")
 
@@ -379,11 +376,13 @@ class IorLmpParityTest(unittest.TestCase):
         with open(
             os.path.join(f_day, "out-hdf5-c-16-8M-2023-07-22-nid001234-0.txt"), "w"
         ) as f_f:
-            f_f.write(
-                re.sub(r"(?m)^(write|read)( .*)$", r"\1\2   ", f_text)
-            )
-        open(os.path.join(f_day, "out-base-4-64K-2023-07-22-node001-0.txt"), "w").close()
-        with open(os.path.join(f_day, ".out-base-4-1M-2023-07-22-node001-0.txt.rc"), "w") as f_f:
+            f_f.write(re.sub(r"(?m)^(write|read)( .*)$", r"\1\2   ", f_text))
+        open(
+            os.path.join(f_day, "out-base-4-64K-2023-07-22-node001-0.txt"), "w"
+        ).close()
+        with open(
+            os.path.join(f_day, ".out-base-4-1M-2023-07-22-node001-0.txt.rc"), "w"
+        ) as f_f:
             f_f.write("write 1 2 3\n")
         return f_dir
 
@@ -426,7 +425,9 @@ class IorLmpParityTest(unittest.TestCase):
 
     def testIorSingleRunDataKeepsBothStdDev(self) -> None:
         f_path = os.path.join(
-            EXAMPLE_IOR_OUTPUTS, "1", "2023-07-21",
+            EXAMPLE_IOR_OUTPUTS,
+            "1",
+            "2023-07-21",
             "out-collective-16-64K-2023-07-21-node169-0.txt.2",
         )
         f_map = data.IorSingleRunData(f_path).getMap()
@@ -461,7 +462,9 @@ class IorLmpParityTest(unittest.TestCase):
                         else None
                     )
                     f_path = os.path.join(
-                        f_dir, f_n, "2026-10-07",
+                        f_dir,
+                        f_n,
+                        "2026-10-07",
                         f"out-lmp-lsmio-{f_rf}-{f_bs}-2026-10-07-node{100 + f_rank:03d}-0.txt",
                     )
                     os.makedirs(os.path.dirname(f_path), exist_ok=True)
@@ -493,7 +496,9 @@ class IorLmpParityTest(unittest.TestCase):
         )
         output.LmpAggOutput(f_py).generateReports()
         f_bm_report = readFile(os.path.join(f_bm, data.LMP_REPORT_FILE))
-        self.assertEqual(readFile(os.path.join(f_py, data.LMP_REPORT_FILE)), f_bm_report)
+        self.assertEqual(
+            readFile(os.path.join(f_py, data.LMP_REPORT_FILE)), f_bm_report
+        )
 
         f_rows = f_bm_report.decode().splitlines()
         self.assertEqual(len(f_rows), 16)
@@ -536,7 +541,6 @@ class IorLmpParityTest(unittest.TestCase):
         self.assertTrue(data.isUsableReport(os.path.join(f_dir, data.LMP_REPORT_FILE)))
         with self.assertRaises(output.MissingDataError):
             f_agg.getMap()
-
 
 
 class LsmioAggOutputParityTest(unittest.TestCase):
@@ -870,7 +874,9 @@ class RunParseParityTest(unittest.TestCase):
             RunRootResolver.resolve(f_run_root)  # strict resolution still refuses
 
         f_out = os.path.join(self.m_temp_dir, "reports")
-        f_inst = ParseMain(f_request=parseParseArguments([f_run_root, "--output-dir", f_out]))
+        f_inst = ParseMain(
+            f_request=parseParseArguments([f_run_root, "--output-dir", f_out])
+        )
         f_stdout, f_stderr = io.StringIO(), io.StringIO()
         with patch("sys.stdout", f_stdout), patch("sys.stderr", f_stderr):
             f_code = f_inst.run()
@@ -907,7 +913,9 @@ class RunParseParityTest(unittest.TestCase):
                 if f_name.startswith("rank_") and f_name.endswith(".log"):
                     os.remove(os.path.join(f_dir, f_name))
         f_out = os.path.join(self.m_temp_dir, "reports-none")
-        f_inst = ParseMain(f_request=parseParseArguments([f_run_root, "--output-dir", f_out]))
+        f_inst = ParseMain(
+            f_request=parseParseArguments([f_run_root, "--output-dir", f_out])
+        )
         f_stderr = io.StringIO()
         with patch("sys.stdout", io.StringIO()), patch("sys.stderr", f_stderr):
             self.assertEqual(f_inst.run(), 4)
@@ -927,10 +935,14 @@ class RunParseParityTest(unittest.TestCase):
         os.makedirs(f_logs, exist_ok=True)
         for f_combo in f_plan.combinations:
             f_text = f_log_for(f_combo)
-            with open(os.path.join(f_logs, f"{f_target}_{f_combo.name}.stdout"), "w") as f_f:
+            with open(
+                os.path.join(f_logs, f"{f_target}_{f_combo.name}.stdout"), "w"
+            ) as f_f:
                 f_f.write(f_text)
             f_dst = os.path.join(
-                f_bm, "1", "2026-10-07",
+                f_bm,
+                "1",
+                "2026-10-07",
                 f"out-{f_setup.lower()}-{f_combo.stripe_count}-{f_combo.block_size}"
                 "-2026-10-07-node100-0.txt",
             )
@@ -939,7 +951,9 @@ class RunParseParityTest(unittest.TestCase):
                 f_f.write(f_text)
 
         f_out = os.path.join(self.m_temp_dir, f"out-{f_target}")
-        f_inst = ParseMain(f_request=parseParseArguments([f_run_root, "--output-dir", f_out]))
+        f_inst = ParseMain(
+            f_request=parseParseArguments([f_run_root, "--output-dir", f_out])
+        )
         f_stderr = io.StringIO()
         with patch("sys.stdout", io.StringIO()), patch("sys.stderr", f_stderr):
             self.assertEqual(f_inst.run(), 0, f_stderr.getvalue())
@@ -948,7 +962,9 @@ class RunParseParityTest(unittest.TestCase):
             data.generateBmtoolIorReport(f_bm)
         else:
             data.generateBmtoolLmpReport(f_bm)
-        return readFile(os.path.join(f_out, f_name)), readFile(os.path.join(f_bm, f_name))
+        return readFile(os.path.join(f_out, f_name)), readFile(
+            os.path.join(f_bm, f_name)
+        )
 
     def testRunParseIorReportLikeBmtool(self) -> None:
         """M14: the run parser's ior-report.csv rows are bmtool's for the same logs."""
@@ -1043,7 +1059,9 @@ class ParseArchiveModeTest(unittest.TestCase):
     def testParseBackendsRegeneratesEveryArm(self) -> None:
         f_dest = os.path.join(self.m_temp_dir, "lsmio-archive", "backends", "small")
         for f_arm in ("adios", "native"):
-            writeBmtoolLayout(os.path.join(f_dest, f"outputs-{f_arm}"), ["1", "2"], f_arm)
+            writeBmtoolLayout(
+                os.path.join(f_dest, f"outputs-{f_arm}"), ["1", "2"], f_arm
+            )
         self.assertEqual(self._run(["lsmio", "backends", "small"]), 0)
         for f_arm in ("adios", "native"):
             f_report = os.path.join(f_dest, f"outputs-{f_arm}", data.LSM_REPORT_FILE)
@@ -1068,7 +1086,9 @@ class ParseArchiveModeTest(unittest.TestCase):
             self.assertEqual(self._run(["./lsmio"]), 0)
         finally:
             os.chdir(f_orig_cwd)
-        self.assertTrue(data.isUsableReport(os.path.join(f_failed, data.LSM_REPORT_FILE)))
+        self.assertTrue(
+            data.isUsableReport(os.path.join(f_failed, data.LSM_REPORT_FILE))
+        )
 
     def testParseVariantsParsesRunsNotArchive(self) -> None:
         """Like bmtool lsmio-parse.sh, only backends mode reads the archive: 'parse lsmio
@@ -1110,8 +1130,9 @@ class ParseArchiveModeTest(unittest.TestCase):
             f_blocksize="1M",
             f_output_dir=os.path.join(self.m_temp_dir, "plots"),
         )
-        with patch("lsmiotool.lib.log.Console.warning"), patch(
-            "lsmiotool.lib.log.Console.info"
+        with (
+            patch("lsmiotool.lib.log.Console.warning"),
+            patch("lsmiotool.lib.log.Console.info"),
         ):
             self.assertEqual(f_cm.run(), 0)
         self.assertTrue(
@@ -1151,9 +1172,13 @@ class ParseLegacyBmtoolDirsTest(unittest.TestCase):
         # The old lookup (<BM_DIR>/logs/jobs) must not be used
         writeBmtoolLayout(os.path.join(self.m_root, "logs", "jobs"), ["1"])
         self.assertEqual(self._run("lsmio", "bake"), 0)
-        self.assertTrue(data.isUsableReport(os.path.join(f_outputs, data.LSM_REPORT_FILE)))
+        self.assertTrue(
+            data.isUsableReport(os.path.join(f_outputs, data.LSM_REPORT_FILE))
+        )
         self.assertFalse(
-            os.path.exists(os.path.join(self.m_root, "logs", "jobs", data.LSM_REPORT_FILE))
+            os.path.exists(
+                os.path.join(self.m_root, "logs", "jobs", data.LSM_REPORT_FILE)
+            )
         )
         with open(os.path.join(f_outputs, data.LSM_REPORT_FILE)) as f_f:
             self.assertEqual(len(f_f.read().splitlines()), 24)
@@ -1173,18 +1198,22 @@ class ParseLegacyBmtoolDirsTest(unittest.TestCase):
 
         f_lmp = os.path.join(self.m_root, "lmp", "outputs", "2", "2026-10-07")
         os.makedirs(f_lmp)
-        with open(os.path.join(f_lmp, "out-lmp-lsmio-4-1M-2026-10-07-node1-0.txt"), "w") as f_f:
+        with open(
+            os.path.join(f_lmp, "out-lmp-lsmio-4-1M-2026-10-07-node1-0.txt"), "w"
+        ) as f_f:
             f_f.write(lmpLog([10.0, 20.0]))
         self.assertEqual(self._run("lmp", "bake"), 0)
-        with open(os.path.join(self.m_root, "lmp", "outputs", data.LMP_REPORT_FILE)) as f_f:
-            self.assertEqual(
-                f_f.read(), "2,4,1M,iwrite,20.00,20.00,20.00,18.25,1,1\n"
-            )
+        with open(
+            os.path.join(self.m_root, "lmp", "outputs", data.LMP_REPORT_FILE)
+        ) as f_f:
+            self.assertEqual(f_f.read(), "2,4,1M,iwrite,20.00,20.00,20.00,18.25,1,1\n")
 
     def testBackendsArchiveMode(self) -> None:
         f_dest = os.path.join(self.m_root, "lsmio-archive", "backends", "small")
         for f_arm in ("native", "rocksdb"):
-            writeBmtoolLayout(os.path.join(f_dest, f"outputs-{f_arm}"), ["1", "2"], f_arm)
+            writeBmtoolLayout(
+                os.path.join(f_dest, f"outputs-{f_arm}"), ["1", "2"], f_arm
+            )
         self.assertEqual(self._run("lsmio", "backends", "small"), 0)
         for f_arm in ("native", "rocksdb"):
             self.assertTrue(
@@ -1197,14 +1226,18 @@ class ParseLegacyBmtoolDirsTest(unittest.TestCase):
         writeBmtoolLayout(os.path.join(f_other, "outputs-plugin"), ["1"], "plugin")
         self.assertEqual(self._run("lsmio", "backends", "small", f_other), 0)
         self.assertTrue(
-            data.isUsableReport(os.path.join(f_other, "outputs-plugin", data.LSM_REPORT_FILE))
+            data.isUsableReport(
+                os.path.join(f_other, "outputs-plugin", data.LSM_REPORT_FILE)
+            )
         )
         self.assertEqual(self._run("lsmio", "backends", "large"), 3)
 
     def testSsdUsesSsdBenchmarkRoot(self) -> None:
         from lsmiotool.lib.main import ParseLegacyMain
 
-        with patch("lsmiotool.lib.main.siteBenchmarkRoots", return_value=["/ssd/bm"]) as f_roots:
+        with patch(
+            "lsmiotool.lib.main.siteBenchmarkRoots", return_value=["/ssd/bm"]
+        ) as f_roots:
             f_inst = ParseLegacyMain("lsmio", "small", ssd=True)
             self.assertEqual(
                 f_inst._getTargetDir("lsmio", "small", True), "/ssd/bm/lsmio/outputs"

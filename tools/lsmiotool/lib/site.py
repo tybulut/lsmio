@@ -156,7 +156,9 @@ def resolveArcher2WorkRoot(f_environ: Optional[Mapping[str, str]] = None) -> str
                 "Cannot resolve ARCHER2 work root: USER is unset and the login name is unknown"
             ) from f_err
     if not f_user or "/" in f_user or f_user in (".", "..") or "\0" in f_user:
-        raise SiteResolutionError(f"Invalid user name for ARCHER2 work root: {f_user!r}")
+        raise SiteResolutionError(
+            f"Invalid user name for ARCHER2 work root: {f_user!r}"
+        )
     return os.path.join(ARCHER2_DEFAULT_WORK_ROOT_PARENT, f_user)
 
 

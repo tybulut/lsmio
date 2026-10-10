@@ -1087,7 +1087,9 @@ class RunParseTest(unittest.TestCase):
             "run-lsm-report-001", "lsmio", "local", "NATIVE-M"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
-        f_stage1_header = "access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration"
+        f_stage1_header = (
+            "access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration"
+        )
         f_extracted_lsm = {
             f_resolved_lsm.points[0].pointId: {
                 f_c.name: {

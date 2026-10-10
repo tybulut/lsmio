@@ -946,4 +946,3 @@ class ManifestTest(unittest.TestCase):
         self.assertTrue(f_reconstructed.request.fast)
         self.assertEqual(f_reconstructed, f_plan)
         self.assertEqual(ManifestSerializer.serialize(f_reconstructed), f_json_str)
-

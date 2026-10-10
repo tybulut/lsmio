@@ -847,7 +847,9 @@ class ParseCliParser:
     """
 
     VALID_FORMATS = frozenset({"csv", "json"})
-    VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants", "baseline"})
+    VALID_SCALES = frozenset(
+        {"local", "bake", "small", "large", "variants", "baseline"}
+    )
 
     @classmethod
     def parse(

@@ -298,7 +298,9 @@ class ParseLegacyMain(BaseMain):
         from lsmiotool.lib.data import isUsableReport
 
         if not isUsableReport(f_report):
-            sys.stderr.write(f"Warning: no {self.m_command} results; {f_report} not written\n")
+            sys.stderr.write(
+                f"Warning: no {self.m_command} results; {f_report} not written\n"
+            )
             return 1
         sys.stdout.write(f"{f_report}\n")
         return 0
@@ -548,7 +550,7 @@ class ParseMain(BaseMain):
         f_node_scale = f_scale
         return self._regenerateOutputDirs(
             [
-                (os.path.join(f_dest, f_arm), f"{f_arm[len('outputs-'):]} ({f_scale})")
+                (os.path.join(f_dest, f_arm), f"{f_arm[len('outputs-') :]} ({f_scale})")
                 for f_arm in f_arms
             ],
             f_node_scale,
@@ -1017,7 +1019,9 @@ class CompareNodesMain(BaseMain):
             scale_name = base_name
 
         os.makedirs(out_dir, exist_ok=True)
-        title = f"Comparison: {scale_name} ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
+        title = (
+            f"Comparison: {scale_name} ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
+        )
         meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
 
         output_filename = os.path.join(
@@ -2212,7 +2216,11 @@ class ArchiveMain(BaseMain):
                     raise ArchiveError(
                         f"Nothing to archive: {f_outputs} is missing or empty and no "
                         f"lsmiotool run of 'lsmio {f_scale}'"
-                        + (f" ({self.m_request.variant})" if self.m_request.variant else "")
+                        + (
+                            f" ({self.m_request.variant})"
+                            if self.m_request.variant
+                            else ""
+                        )
                         + f" was found under {os.path.join(f_root, 'runs')}"
                         " (a failed bmtool job leaves its outputs in "
                         f"{os.path.join(f_root, 'lsmio', 'outputs-failed')})"

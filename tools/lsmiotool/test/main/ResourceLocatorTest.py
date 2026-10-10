@@ -85,8 +85,12 @@ class ResourceLocatorTest(unittest.TestCase):
         self.assertEqual(
             f_layout1.profileFile, "/mock/repo/tools/lsmiotool/etc/environments.json"
         )
-        self.assertEqual(f_layout1.asset_root, "/mock/repo/tools/lsmiotool/share/lmp-reaxff")
-        self.assertEqual(f_layout1.assetRoot, "/mock/repo/tools/lsmiotool/share/lmp-reaxff")
+        self.assertEqual(
+            f_layout1.asset_root, "/mock/repo/tools/lsmiotool/share/lmp-reaxff"
+        )
+        self.assertEqual(
+            f_layout1.assetRoot, "/mock/repo/tools/lsmiotool/share/lmp-reaxff"
+        )
         self.assertEqual(
             f_layout1.worker_executable, "/mock/repo/tools/lsmiotool/lsmiotool-worker"
         )
@@ -368,7 +372,9 @@ class ResourceLocatorTest(unittest.TestCase):
                 f_layout.profile_file,
                 "/real/repo/tools/lsmiotool/etc/environments.json",
             )
-            self.assertEqual(f_layout.asset_root, "/real/repo/tools/lsmiotool/share/lmp-reaxff")
+            self.assertEqual(
+                f_layout.asset_root, "/real/repo/tools/lsmiotool/share/lmp-reaxff"
+            )
             self.assertEqual(
                 f_layout.worker_executable,
                 "/real/repo/tools/lsmiotool/lsmiotool-worker",

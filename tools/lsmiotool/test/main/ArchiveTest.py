@@ -388,7 +388,8 @@ class ArchiveTest(unittest.TestCase):
             f_failed_root = os.path.join(temp_root, "failed-job")
             os.makedirs(os.path.join(f_failed_root, "outputs-failed"))
             with self.assertRaisesRegex(
-                ArchiveError, r"failed benchmark job leaves its outputs in .*outputs-failed"
+                ArchiveError,
+                r"failed benchmark job leaves its outputs in .*outputs-failed",
             ):
                 ArchiveEngine.executeArchive(
                     f_source_dir=os.path.join(f_failed_root, "outputs"),
@@ -612,10 +613,12 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
             f_environ=f_environ if f_environ is not None else {},
         )
         f_stderr = io.StringIO()
-        with patch("sys.stdout", io.StringIO()), patch("sys.stderr", f_stderr), patch(
-            "lsmiotool.lib.log.Console.error"
-        ), patch("lsmiotool.lib.log.Console.info"), patch(
-            "lsmiotool.lib.log.Console.warning"
+        with (
+            patch("sys.stdout", io.StringIO()),
+            patch("sys.stderr", f_stderr),
+            patch("lsmiotool.lib.log.Console.error"),
+            patch("lsmiotool.lib.log.Console.info"),
+            patch("lsmiotool.lib.log.Console.warning"),
         ):
             return f_inst.run(), f_stderr.getvalue()
 
@@ -627,7 +630,9 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         open(os.path.join(f_outputs, ".bm-job-ok"), "w").close()
         return f_outputs
 
-    def _lsmiotoolRun(self, f_run_id: str, f_variant: Optional[str] = "autotune") -> str:
+    def _lsmiotoolRun(
+        self, f_run_id: str, f_variant: Optional[str] = "autotune"
+    ) -> str:
         """A succeeded 'lsmio variants <variant>' run root under <root>/runs."""
         from lsmiotool.test.parse.BmtoolParityTest import rankLog, rankValues
         from lsmiotool.test.parse.RunParseTest import RunParseTest
@@ -663,7 +668,9 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         with patch.dict(os.environ, {"BM_ARCHIVE_DEST": "/inherited/dest"}):
             f_code, f_err = self._archive(["lsmio", "variants"])
         self.assertEqual(f_code, 0, f_err)
-        f_target = os.path.join(self.m_root, "lsmio-archive", "variants", "outputs-native")
+        f_target = os.path.join(
+            self.m_root, "lsmio-archive", "variants", "outputs-native"
+        )
         self.assertTrue(os.path.isfile(os.path.join(f_target, "lsm-report.csv")))
         self.assertTrue(os.path.isdir(os.path.join(f_target, "8", "2026-10-07")))
         self.assertFalse(os.path.exists(os.path.join(f_target, ".bm-job-ok")))
@@ -689,7 +696,9 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(f_base, "outputs-adios-nompi")))
 
         self._bmtoolOutputs()
-        f_code, f_err = self._archive(["lsmio", "small"], f_environ={"BM_SETUP": "BOGUS"})
+        f_code, f_err = self._archive(
+            ["lsmio", "small"], f_environ={"BM_SETUP": "BOGUS"}
+        )
         self.assertEqual(f_code, 1)
         self.assertIn("BM_SETUP", f_err)
 
@@ -727,9 +736,10 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
             if f_name.startswith("agg-"):
                 os.remove(os.path.join(f_bm, "8", f_name))
         output.LsmioAggOutput(f_bm, f_scale="variants").generateReports()
-        with open(os.path.join(f_bm, data.LSM_REPORT_FILE)) as f_a, open(
-            os.path.join(f_target, data.LSM_REPORT_FILE)
-        ) as f_b:
+        with (
+            open(os.path.join(f_bm, data.LSM_REPORT_FILE)) as f_a,
+            open(os.path.join(f_target, data.LSM_REPORT_FILE)) as f_b,
+        ):
             self.assertEqual(f_a.read(), f_b.read())
 
         # Archiving the same run again is refused; another variant finds nothing
@@ -758,7 +768,9 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         self.assertEqual(f_code, 0, f_err)
         self.assertTrue(
             os.path.isdir(
-                os.path.join(self.m_root, "lsmio-archive", "variants", "outputs-native-1")
+                os.path.join(
+                    self.m_root, "lsmio-archive", "variants", "outputs-native-1"
+                )
             )
         )
         # An explicit run root must match the request

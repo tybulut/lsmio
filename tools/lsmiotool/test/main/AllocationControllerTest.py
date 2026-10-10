@@ -260,9 +260,7 @@ class AllocationControllerTest(unittest.TestCase):
         f_sp = f_doc.scale_points[0]
         # Combos 0 and 1 succeeded
         self.assertEqual(
-            f_store.readControllerResult(f_sp, "c4_b1M", f_ordinal=0).payload[
-                "status"
-            ],
+            f_store.readControllerResult(f_sp, "c4_b1M", f_ordinal=0).payload["status"],
             "success",
         )
         self.assertEqual(

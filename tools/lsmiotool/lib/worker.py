@@ -449,7 +449,9 @@ class ProcessRunner:
 
             if f_log_file is None:
                 try:
-                    f_stdout_bytes, f_stderr_bytes = f_proc.communicate(timeout=f_timeout)
+                    f_stdout_bytes, f_stderr_bytes = f_proc.communicate(
+                        timeout=f_timeout
+                    )
                 except subprocess.TimeoutExpired:
                     f_timed_out = True
                     try:
@@ -529,7 +531,6 @@ class ProcessRunner:
             f_timed_out=f_timed_out,
             f_spawn_error=None,
         )
-
 
     @staticmethod
     def _streamToLog(
@@ -2997,13 +2998,17 @@ class AllocationGroupRunner:
                 f"Unknown allocation group policy {f_policy!r}; expected one of {cls.POLICIES}"
             )
         if not f_manifest_paths:
-            raise AllocationControllerError("Allocation group needs at least one manifest")
+            raise AllocationControllerError(
+                "Allocation group needs at least one manifest"
+            )
         f_err = f_stderr if f_stderr is not None else sys.stderr
         for f_idx, f_manifest in enumerate(f_manifest_paths):
             try:
                 f_rc = int(f_run_allocation(f_manifest, f_point_id))
             except Exception as f_exc:
-                f_err.write(f"ERROR: arm allocation for '{f_manifest}' raised: {f_exc}\n")
+                f_err.write(
+                    f"ERROR: arm allocation for '{f_manifest}' raised: {f_exc}\n"
+                )
                 f_rc = 1
             if f_rc != 0:
                 f_err.write(

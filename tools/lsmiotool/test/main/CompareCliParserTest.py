@@ -433,7 +433,14 @@ class CompareCliParserTest(unittest.TestCase):
 
         # With --all and --output-dir
         req_all_out = parseCompareArguments(
-            ["variants", "/path/to/archive", "read", "--all", "--output-dir", "/tmp/plots"]
+            [
+                "variants",
+                "/path/to/archive",
+                "read",
+                "--all",
+                "--output-dir",
+                "/tmp/plots",
+            ]
         )
         self.assertTrue(req_all_out.all)
         self.assertEqual(req_all_out.op, "read")
@@ -560,7 +567,9 @@ class CompareCliParserTest(unittest.TestCase):
         # --all charts every (stripes, blocksize): explicit ones are refused
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "read", "4", "--all"])
-        self.assertIn("'--all' charts every <stripes> and <blocksize>", str(ctx.exception))
+        self.assertIn(
+            "'--all' charts every <stripes> and <blocksize>", str(ctx.exception)
+        )
 
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "--all", "--all"])

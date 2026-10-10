@@ -58,10 +58,10 @@ from lsmiotool.lib.site import (
 from lsmiotool.lib.worker import ModuleSetup
 
 
-
 def _tolerant(f_cmd: str) -> str:
     """Module command as rendered: failures are logged, not fatal (bmtool parity)."""
     return f'{f_cmd} || echo "WARNING: {f_cmd} failed" >&2'
+
 
 class PbsRendererTest(unittest.TestCase):
     """Unit test suite verifying exact Isambard PBS resource rendering and directives."""
