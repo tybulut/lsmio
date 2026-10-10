@@ -48,10 +48,12 @@ function(add_lsmio_base_test x)
     PRIVATE lsmio::base_static
   )
 
-  gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES
-    TIMEOUT 30
-    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  gtest_discover_tests(${x}
+    NO_PRETTY_VALUES
+    PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+    DISCOVERY_TIMEOUT 30
   )
 endfunction()
 
@@ -65,10 +67,12 @@ function(add_lsmio_store_test x)
     PRIVATE lsmio::store_static
   )
 
-  gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES
-    TIMEOUT 30
-    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  gtest_discover_tests(${x}
+    NO_PRETTY_VALUES
+    PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+    DISCOVERY_TIMEOUT 30
   )
 endfunction()
 
@@ -82,10 +86,12 @@ function(add_lsmio_posix_test x)
     PRIVATE lsmio::posix_static
   )
 
-  gtest_add_tests(TARGET ${x} TEST_LIST tests)
-  set_tests_properties(${tests} PROPERTIES
-    TIMEOUT 30
-    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  gtest_discover_tests(${x}
+    NO_PRETTY_VALUES
+    PROPERTIES
+      TIMEOUT 30
+      ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+    DISCOVERY_TIMEOUT 30
   )
 endfunction()
 
@@ -104,10 +110,12 @@ function(add_lsmio_mpi_test x lib)
 
   gtest_discover_tests(
     ${x}
+    NO_PRETTY_VALUES
     CMD_WRAPPER ${mpi_cmd} ${test_parameters}
     PROPERTIES
       TIMEOUT 30
       ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+    DISCOVERY_TIMEOUT 30
   )
 endfunction()
 
@@ -121,10 +129,12 @@ target_link_libraries(test_bm_base
   PUBLIC GTest::GTest GTest::Main
   PRIVATE lsmio::base_static fmt::fmt MPI::MPI_CXX CLI11::CLI11
 )
-gtest_add_tests(TARGET test_bm_base TEST_LIST test_bm_base_tests)
-set_tests_properties(${test_bm_base_tests} PROPERTIES
-  TIMEOUT 30
-  ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+gtest_discover_tests(test_bm_base
+  NO_PRETTY_VALUES
+  PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  DISCOVERY_TIMEOUT 30
 )
 
 # GTest: Manager, LevelDB and RocksDB
@@ -152,9 +162,11 @@ target_link_libraries(test_adios
 )
 gtest_discover_tests(
   test_adios
+  NO_PRETTY_VALUES
   PROPERTIES
     TIMEOUT 30
     ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  DISCOVERY_TIMEOUT 30
 )
 
 # GTest: MPI: Adios and Plugin
@@ -166,10 +178,12 @@ target_link_libraries(test_mpi_adios
 )
 gtest_discover_tests(
   test_mpi_adios
+  NO_PRETTY_VALUES
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
   PROPERTIES
     ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
     TIMEOUT 30
+  DISCOVERY_TIMEOUT 30
 )
 
 if(LSMIO_ENABLE_COVERAGE)
