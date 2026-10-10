@@ -152,13 +152,16 @@ COMPARE_HELP_TEXT = """Usage:
 
 Submodes:
   nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+  nodes <folder> [read|write] --all [--output-dir <dir>]
       Compares performance across node counts for a benchmark folder.
       Arguments:
           <folder>: Benchmark folder containing node subdirectories (e.g. 01, 02, 04, ...).
-          <read|write>: Required operation to compare ('read' or 'write').
+          <read|write>: Operation to compare ('read' or 'write'); optional with --all.
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
       Options:
+          --all: Generate charts for all 6 (stripes, blocksize) permutations, for the given
+                 operation or, without one, for both read and write (12 charts).
           --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 
   variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
@@ -1210,24 +1213,32 @@ class CompareNodesRequest:
         "m_stripes",
         "m_blocksize",
         "m_output_dir",
+        "m_all",
         "_frozen",
     )
 
     def __init__(
         self,
         f_folder: str,
-        f_op: str,
+        f_op: Optional[str] = None,
         f_stripes: int = 4,
         f_blocksize: str = "1M",
         f_output_dir: Optional[str] = None,
+        f_all: bool = False,
     ) -> None:
         if not isinstance(f_folder, str) or not f_folder.strip():
             raise ValueError(f"folder must be a non-empty string, got: {f_folder!r}")
+        if not isinstance(f_all, bool):
+            raise ValueError(f"all must be a boolean, got: {f_all!r}")
+        # With --all the operation is optional: 'both' charts read and write
+        if f_op is None and f_all:
+            f_op = "both"
         if not isinstance(f_op, str) or not f_op.strip():
             raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
         f_norm_op = f_op.strip().lower()
-        if f_norm_op not in ("read", "write"):
-            raise ValueError(f"op must be one of ('read', 'write'), got: {f_op!r}")
+        f_valid_ops = ("read", "write", "both") if f_all else ("read", "write")
+        if f_norm_op not in f_valid_ops:
+            raise ValueError(f"op must be one of {f_valid_ops}, got: {f_op!r}")
         if (
             isinstance(f_stripes, bool)
             or not isinstance(f_stripes, int)
@@ -1258,6 +1269,7 @@ class CompareNodesRequest:
             "m_output_dir",
             f_output_dir.strip() if f_output_dir is not None else None,
         )
+        super().__setattr__("m_all", f_all)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -1275,6 +1287,10 @@ class CompareNodesRequest:
     @property
     def submode(self) -> str:
         return "nodes"
+
+    @property
+    def all(self) -> bool:
+        return self.m_all
 
     @property
     def folder(self) -> str:
@@ -1308,6 +1324,7 @@ class CompareNodesRequest:
             "stripes": self.m_stripes,
             "blocksize": self.m_blocksize,
             "output_dir": self.m_output_dir,
+            "all": self.m_all,
         }
 
     def __repr__(self) -> str:
@@ -1315,7 +1332,7 @@ class CompareNodesRequest:
             f"CompareNodesRequest(folder={self.m_folder!r}, "
             f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
             f"blocksize={self.m_blocksize!r}, "
-            f"output_dir={self.m_output_dir!r})"
+            f"output_dir={self.m_output_dir!r}, all={self.m_all!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -1326,6 +1343,7 @@ class CompareNodesRequest:
                 and self.m_stripes == f_other.m_stripes
                 and self.m_blocksize == f_other.m_blocksize
                 and self.m_output_dir == f_other.m_output_dir
+                and self.m_all == f_other.m_all
             )
         return False
 
@@ -1337,6 +1355,7 @@ class CompareNodesRequest:
                 self.m_stripes,
                 self.m_blocksize,
                 self.m_output_dir,
+                self.m_all,
             )
         )
 
@@ -1515,6 +1534,7 @@ class CompareCliParser:
 
     Grammar:
         lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+        lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
         lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
     """
 
@@ -1616,12 +1636,6 @@ class CompareCliParser:
         cls,
         f_tokens: Sequence[str],
     ) -> CompareNodesRequest:
-        for f_tok in f_tokens:
-            if f_tok == "--all" or f_tok.startswith("--all="):
-                raise CompareCliParseError(
-                    "Option '--all' is only valid for 'variants' submode"
-                )
-
         if not f_tokens:
             raise CompareCliParseError("Missing required positional argument: <folder>")
 
@@ -1639,6 +1653,9 @@ class CompareCliParser:
         f_stripes: int = 4
         f_blocksize: str = "1M"
         f_output_dir: Optional[str] = None
+        f_all = f_tokens.count("--all") > 0
+        if f_tokens.count("--all") > 1:
+            raise CompareCliParseError("Duplicate '--all' option specified.")
 
         f_remaining_tokens = f_tokens[1:]
         f_pos_idx = 0
@@ -1686,9 +1703,13 @@ class CompareCliParser:
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
 
-        if f_op is None:
+        if f_op is None and not f_all:
             raise CompareCliParseError(
                 "Missing required positional argument: <read|write>"
+            )
+        if f_all and f_pos_idx > 1:
+            raise CompareCliParseError(
+                "'--all' charts every <stripes> and <blocksize>; do not give them"
             )
 
         f_output_dir_seen = False
@@ -1714,6 +1735,8 @@ class CompareCliParser:
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2
+            elif f_tok == "--all":
+                f_rem_idx += 1
             elif f_tok.startswith("-"):
                 raise CompareCliParseError(f"Unknown option: {f_tok!r}")
             else:
@@ -1727,6 +1750,7 @@ class CompareCliParser:
             f_stripes=f_stripes,
             f_blocksize=f_blocksize,
             f_output_dir=f_output_dir,
+            f_all=f_all,
         )
 
     @classmethod

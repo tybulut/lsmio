@@ -44,7 +44,7 @@ class CompareNodesTest(unittest.TestCase):
     Verifies:
     - Canonical legend mapping (INV-BACKEND-5).
     - Strict canonical sorting order [adios2, native, plugin, rocksdb] (INV-BACKEND-5).
-    - Approach 2 mirrored output directory architecture (INV-BACKEND-4).
+    - Plots written straight into the output directory, named by scale.
     - Workload parameter preservation and defaults (INV-BACKEND-5).
     - Strict Python 3.9+ type annotations (INV-BACKEND-6).
     """
@@ -199,8 +199,8 @@ class CompareNodesTest(unittest.TestCase):
                 legends, ["adios2", "native", "plugin", "rocksdb", "leveldb"]
             )
 
-    def testApproach2PathMirroringBackends(self) -> None:
-        """Verifies Approach 2 output path mirroring under <out_dir>/backends/<scale>/."""
+    def testBackendsPlotGoesStraightIntoOutputDir(self) -> None:
+        """A backends/<scale> archive's plot is <out_dir>/compare-<scale>-..., no subdirs."""
         target_dir = os.path.join(
             self.m_base_path, "lsmio-archive", "backends", "small"
         )
@@ -226,16 +226,14 @@ class CompareNodesTest(unittest.TestCase):
             exit_code = cnm.run()
             self.assertEqual(exit_code, 0)
 
-            expected_dir = os.path.join(out_dir, "backends", "small")
-            expected_file = os.path.join(expected_dir, "compare-small-write-4-1M.png")
+            expected_file = os.path.join(out_dir, "compare-small-write-4-1M.png")
 
-            self.assertTrue(
-                os.path.isdir(expected_dir), f"Directory {expected_dir} must be created"
-            )
+            self.assertTrue(os.path.isdir(out_dir))
+            self.assertFalse(os.path.exists(os.path.join(out_dir, "backends")))
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
-    def testApproach2PathMirroringVariants(self) -> None:
-        """Verifies Approach 2 output path mirroring under <out_dir>/variants/."""
+    def testVariantsPlotGoesStraightIntoOutputDir(self) -> None:
+        """A variants archive's plot is <out_dir>/compare-variants-..., no subdirs."""
         target_dir = os.path.join(self.m_base_path, "lsmio-archive", "variants")
         self._create_report(
             os.path.join(target_dir, "native-variant-a"), 4, "1M", "read"
@@ -261,12 +259,10 @@ class CompareNodesTest(unittest.TestCase):
             exit_code = cnm.run()
             self.assertEqual(exit_code, 0)
 
-            expected_dir = os.path.join(out_dir, "variants")
-            expected_file = os.path.join(expected_dir, "compare-variants-read-4-1M.png")
+            expected_file = os.path.join(out_dir, "compare-variants-read-4-1M.png")
 
-            self.assertTrue(
-                os.path.isdir(expected_dir), f"Directory {expected_dir} must be created"
-            )
+            self.assertTrue(os.path.isdir(out_dir))
+            self.assertFalse(os.path.exists(os.path.join(out_dir, "variants")))
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
     def testLegacyFlatArchivePathFallback(self) -> None:
@@ -360,7 +356,7 @@ class CompareNodesTest(unittest.TestCase):
             self.assertIn("READ", meta_data.title)
 
             expected_file = os.path.join(
-                out_dir, "backends", "large", "compare-large-read-16-8M.png"
+                out_dir, "compare-large-read-16-8M.png"
             )
             mock_plot_instance.plot.assert_called_once_with(expected_file)
 
@@ -390,7 +386,7 @@ class CompareNodesTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
 
         expected_png = os.path.join(
-            out_dir, "backends", "bake", "compare-bake-write-4-1M.png"
+            out_dir, "compare-bake-write-4-1M.png"
         )
         self.assertTrue(
             os.path.isfile(expected_png),
@@ -398,6 +394,41 @@ class CompareNodesTest(unittest.TestCase):
         )
         self.assertGreater(
             os.path.getsize(expected_png), 0, "Generated plot file must not be empty"
+        )
+
+    def testAllGeneratesEveryChart(self) -> None:
+        """--all draws one chart per (operation, stripes, blocksize): 12 without an
+        operation, 6 with one."""
+        target_dir = os.path.join(self.m_base_path, "archive", "backends", "bake")
+        for f_backend, f_bw in (("outputs-adios", 1100.0), ("outputs-native", 1400.0)):
+            f_dir = os.path.join(target_dir, f_backend)
+            os.makedirs(f_dir)
+            with open(os.path.join(f_dir, "lsm-report.csv"), "w") as f_f:
+                for f_op in ("write", "read"):
+                    for f_s in (4, 16):
+                        for f_b in ("64K", "1M", "8M"):
+                            for f_n in (1, 2):
+                                f_f.write(
+                                    f"{f_n},{f_s},{f_b},{f_op},{f_bw * f_n},1,1,1,1,10\n"
+                                )
+
+        def charts(f_op: Optional[str]) -> List[str]:
+            f_out = os.path.join(self.m_base_path, f"png-{f_op}")
+            req = CompareNodesRequest(
+                f_folder=target_dir, f_op=f_op, f_output_dir=f_out, f_all=True
+            )
+            self.assertEqual(main.CompareNodesMain(f_request=req).run(), 0)
+            return sorted(os.listdir(f_out))
+
+        f_expected = sorted(
+            f"compare-bake-{f_op}-{f_s}-{f_b}.png"
+            for f_op in ("write", "read")
+            for f_s in (4, 16)
+            for f_b in ("64K", "1M", "8M")
+        )
+        self.assertEqual(charts(None), f_expected)
+        self.assertEqual(
+            charts("write"), [f_c for f_c in f_expected if "-write-" in f_c]
         )
 
     def testMissingDirectoryExitsWithError(self) -> None:

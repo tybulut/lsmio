@@ -759,6 +759,7 @@ class CompareNodesMain(BaseMain):
     m_stripes: int
     m_bs: str
     m_output_dir: Optional[str]
+    m_all: bool
 
     def __init__(
         self,
@@ -769,6 +770,7 @@ class CompareNodesMain(BaseMain):
         f_stripes: int = 4,
         f_blocksize: str = "1M",
         f_output_dir: Optional[str] = None,
+        f_all: bool = False,
         **f_kwargs: Any,
     ) -> None:
         """Initialize CompareNodesMain.
@@ -783,6 +785,7 @@ class CompareNodesMain(BaseMain):
             f_stripes: Optional stripe count (default: 4).
             f_blocksize: Optional block size ('64K', '1M', '8M', default: '1M').
             f_output_dir: Optional output directory for generated plots.
+            f_all: Chart every (stripes, blocksize) permutation, for f_op or both operations.
             **f_kwargs: Arbitrary keyword arguments.
         """
         super().__init__()
@@ -834,7 +837,7 @@ class CompareNodesMain(BaseMain):
                 ):
                     out_dir = str(f_args[4])
 
-            if folder is None or op is None:
+            if folder is None or (op is None and not f_all):
                 log.Console.error(
                     "Compare nodes: Missing required folder or operation."
                 )
@@ -847,6 +850,7 @@ class CompareNodesMain(BaseMain):
                     f_stripes=stripes,
                     f_blocksize=bs,
                     f_output_dir=out_dir,
+                    f_all=f_all,
                 )
             except ValueError as err:
                 log.Console.error(f"Compare nodes validation error: {err}")
@@ -858,6 +862,7 @@ class CompareNodesMain(BaseMain):
         self.m_stripes = req.stripes
         self.m_bs = req.blocksize
         self.m_output_dir = req.output_dir
+        self.m_all = req.all
 
     @property
     def request(self) -> "CompareNodesRequest":
@@ -897,13 +902,27 @@ class CompareNodesMain(BaseMain):
         return os.path.abspath(expanded)
 
     def run(self) -> int:
-        """Scan benchmark subdirectories, extract data series, and generate comparison plot."""
-        from lsmiotool.lib import data, output, plot
+        """Scan benchmark subdirectories, extract data series, and generate comparison
+        plots: one, or with --all one per (operation, stripes, blocksize)."""
+        from lsmiotool.lib.cli import CompareCliParser
 
         target_dir = self.resolveDirectory(self.m_folder)
         if not os.path.isdir(target_dir):
             log.Console.error(f"Directory not found: {target_dir}")
             sys.exit(1)
+
+        if not self.m_all:
+            self._plotOne(target_dir, self.m_op, self.m_stripes, self.m_bs)
+            return 0
+        f_ops = ["write", "read"] if self.m_op == "both" else [self.m_op]
+        for f_op in f_ops:
+            for f_stripes, f_bs in CompareCliParser.WORKLOAD_PERMUTATIONS:
+                self._plotOne(target_dir, f_op, f_stripes, f_bs)
+        return 0
+
+    def _plotOne(self, target_dir: str, f_op: str, f_stripes: int, f_bs: str) -> None:
+        """Generate the comparison plot of one (operation, stripes, blocksize)."""
+        from lsmiotool.lib import data, output, plot
 
         canonical_backend_labels: Dict[str, str] = {
             "outputs-adios": "adios2",
@@ -929,7 +948,7 @@ class CompareNodesMain(BaseMain):
 
         entries = sorted(os.listdir(target_dir))
         plot_data_list: List[plot.PlotData] = []
-        is_read = self.m_op == "read"
+        is_read = f_op == "read"
 
         for entry in entries:
             child_path = os.path.join(target_dir, entry)
@@ -938,7 +957,7 @@ class CompareNodesMain(BaseMain):
                 if output.ensureLsmioReports(child_path):
                     summary_data = data.LsmioSummaryData(report_file)
                     x_series, y_series = summary_data.timeSeries(
-                        is_read, self.m_stripes, self.m_bs
+                        is_read, f_stripes, f_bs
                     )
                     if x_series and y_series:
                         legend_label = canonical_backend_labels.get(entry)
@@ -963,9 +982,9 @@ class CompareNodesMain(BaseMain):
 
         if not plot_data_list:
             log.Console.warning(
-                f"No benchmark data found in subdirectories of {target_dir} for {self.m_op}, stripes={self.m_stripes}, bs={self.m_bs}"
+                f"No benchmark data found in subdirectories of {target_dir} for {f_op}, stripes={f_stripes}, bs={f_bs}"
             )
-            return 0
+            return
 
         # Sort plot series by canonical precedence: [adios2, native, plugin, rocksdb, leveldb] (INV-BACKEND-5)
         plot_data_list.sort(
@@ -974,11 +993,12 @@ class CompareNodesMain(BaseMain):
 
         base_name = os.path.basename(target_dir.rstrip(os.sep))
 
-        # Output directory mirroring and scale identification under Approach 2 (INV-BACKEND-4)
+        # Plots go straight into --output-dir (default: cwd), as 'compare variants' does;
+        # the scale names them: backends/<scale> -> <scale>, a variants archive -> variants
         norm_target = os.path.normpath(target_dir)
         path_parts = norm_target.split(os.sep)
 
-        base_out = (
+        out_dir = (
             self.resolveDirectory(self.m_output_dir)
             if self.m_output_dir
             else os.getcwd()
@@ -991,26 +1011,22 @@ class CompareNodesMain(BaseMain):
             scale_name = (
                 path_parts[b_idx + 1] if b_idx + 1 < len(path_parts) else base_name
             )
-            out_dir = os.path.join(base_out, "backends", scale_name)
         elif v_indices:
             scale_name = "variants"
-            out_dir = os.path.join(base_out, "variants")
         else:
             scale_name = base_name
-            out_dir = base_out
 
         os.makedirs(out_dir, exist_ok=True)
-        title = f"Comparison: {scale_name} ({self.m_op.upper()} - {self.m_stripes} stripes - {self.m_bs})"
+        title = f"Comparison: {scale_name} ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
         meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
 
         output_filename = os.path.join(
             out_dir,
-            f"compare-{scale_name}-{self.m_op}-{self.m_stripes}-{self.m_bs}.png",
+            f"compare-{scale_name}-{f_op}-{f_stripes}-{f_bs}.png",
         )
         bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
         bar_plot.plot(output_filename)
         log.Console.info(f"Comparison plot saved to {output_filename}")
-        return 0
 
 
 class PairedVariantRun(NamedTuple):
