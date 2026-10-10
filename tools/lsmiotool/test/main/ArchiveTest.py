@@ -514,6 +514,26 @@ class ArchiveDestResolverTest(unittest.TestCase):
                 "/bm/lsmio-archive/baseline",
             )
 
+    def testVersionedVariantsGetTheirOwnDestination(self) -> None:
+        """--versioned runs default to variants-versioned, so 'compare variants' on the
+        variant matrix archive does not mix them in; an explicit destination still wins."""
+        from lsmiotool.lib.archive import resolveArchiveDest
+
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="variants", f_versioned=True),
+            "/bm/lsmio-archive/variants-versioned",
+        )
+        self.assertEqual(
+            resolveArchiveDest("/bm", f_scale="baseline", f_versioned=True),
+            "/bm/lsmio-archive/variants-versioned",
+        )
+        self.assertEqual(
+            resolveArchiveDest(
+                "/bm", f_scale="variants", f_explicit="/abs/v", f_versioned=True
+            ),
+            "/abs/v",
+        )
+
     def testDeprecatedBaselineScaleMapsToVariants(self) -> None:
         from lsmiotool.lib.archive import resolveArchiveDest
 

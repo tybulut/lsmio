@@ -37,9 +37,9 @@ the relocated worker path is returned for the job script instead.
 
 Layouts (lib/resources.py ResourceLocator):
 - Source: `<repo>/tools/lsmiotool/lsmiotool-worker` imports `lsmiotool.lib.*` from its own
-  package directory and reads LMP assets from `<repo>/tools/bmtool/lmp-reaxff`. The package is
-  mirrored to `<work>/tools/lsmiotool` and the assets to `<work>/tools/bmtool/lmp-reaxff`, so
-  ResourceLocator.forSource() of the relocated worker resolves the same relative layout.
+  package directory and reads LMP assets from its `share/lmp-reaxff`. The package, assets
+  included, is mirrored to `<work>/tools/lsmiotool`, so ResourceLocator.forSource() of the
+  relocated worker resolves the same relative layout.
 - Installed: `<prefix>/<libexec>/lsmio/lsmiotool-worker` reaches its python package, profile and
   assets through the REL_LIBEXEC_TO_* constants baked in at configure time. Each of those
   directories is mirrored below `<work>/tools/lsmiotool` at its path relative to their common
@@ -188,10 +188,6 @@ def _planSource(
     f_pairs: List[Tuple[str, str]] = [
         (f_package_root, os.path.join(f_tools, "lsmiotool"))
     ]
-    if os.path.isdir(f_layout.asset_root):
-        f_pairs.append(
-            (f_layout.asset_root, os.path.join(f_tools, "bmtool", "lmp-reaxff"))
-        )
     return f_pairs, os.path.join(f_tools, "lsmiotool", os.path.basename(f_worker))
 
 

@@ -198,13 +198,16 @@ def resolveArchiveDest(
     f_mode: Optional[str] = None,
     f_scale: Optional[str] = None,
     f_explicit: Optional[str] = None,
+    f_versioned: bool = False,
 ) -> str:
     """Resolve the archive destination root, mirroring bmtool/include/archive-dest.in.sh.
 
-    Layout (three destinations under <benchmark_root>/lsmio-archive):
-        backends/<scale>  multi-backend intra-allocation runs (mode 'backends')
-        variants          variant matrix runs (scale 'variants')
-        baseline          plain scaling runs (local, bake, small, large)
+    Layout (destinations under <benchmark_root>/lsmio-archive):
+        backends/<scale>   multi-backend intra-allocation runs (mode 'backends')
+        variants           variant matrix runs (scale 'variants')
+        variants-versioned --versioned variant runs; bmtool archives these to 'variants',
+                           where 'compare variants' would chart them with the matrix runs
+        baseline           plain scaling runs (local, bake, small, large)
 
     Args:
         f_benchmark_root: Benchmark root ($BM_PATH equivalent).
@@ -215,6 +218,7 @@ def resolveArchiveDest(
             Absolute paths are used as given, except a path starting with
             '/lsmio-archive' which is treated as benchmark-root relative;
             relative paths resolve against the benchmark root.
+        f_versioned: A --versioned run (scale 'variants' only).
 
     Returns:
         Absolute archive destination root.
@@ -241,7 +245,7 @@ def resolveArchiveDest(
             else os.path.join(f_root, "backends")
         )
     if f_norm_scale == "variants":
-        return os.path.join(f_root, "variants")
+        return os.path.join(f_root, "variants-versioned" if f_versioned else "variants")
     return os.path.join(f_root, "baseline")
 
 

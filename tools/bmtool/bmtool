@@ -45,6 +45,8 @@ cmds:
 
 BM_HELP_TEXT="LSMIO Benchmark Suite Orchestration CLI (bmtool)
 
+DEPRECATED: bmtool is frozen; use tools/lsmiotool/lsmiotool (see tools/bmtool/DEPRECATED.md).
+
 Usage:
   $0 <cmd> <benchmark> <scale> [<variants>] [options]
   $0 <run|parse> lsmio backends <scale> [<backends>] [options]
@@ -156,6 +158,9 @@ for _arg in "$@"; do
       ;;
   esac
 done
+
+# Deprecated: frozen as the reference lsmiotool's parity tests run against
+echo "WARNING: bmtool is deprecated; use tools/lsmiotool/lsmiotool (see tools/bmtool/DEPRECATED.md)" >&2
 
 # SBatch settings
 if [ -z "$SB_EMAIL" ]; then

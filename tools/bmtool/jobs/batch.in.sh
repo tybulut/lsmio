@@ -90,7 +90,7 @@ run_matrix_workload() {
     for bs in 1M 64K 8M; do
       if [ "$BM_TYPE" = "lmp" ]; then
         rm ~/scratch/benchmark/lmp/outputs/*
-        cp -r lmp-reaxff $DIRS_BM_BASE/c$rf/b$bs/
+        cp -r "$BM_DIRNAME/../lsmiotool/share/lmp-reaxff" $DIRS_BM_BASE/c$rf/b$bs/
       fi
 
       # --kill-on-bad-exit: one failed rank ends the step; otherwise the

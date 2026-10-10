@@ -433,33 +433,25 @@ class CompareCliParserTest(unittest.TestCase):
 
         # With --all and --output-dir
         req_all_out = parseCompareArguments(
-            [
-                "variants",
-                "/path/to/archive",
-                "read",
-                "16",
-                "8M",
-                "--all",
-                "--output-dir",
-                "/tmp/plots",
-            ]
+            ["variants", "/path/to/archive", "read", "--all", "--output-dir", "/tmp/plots"]
         )
         self.assertTrue(req_all_out.all)
+        self.assertEqual(req_all_out.op, "read")
         self.assertEqual(req_all_out.output_dir, "/tmp/plots")
 
+        # --all charts every (stripes, blocksize): explicit ones are refused, as for nodes
+        for f_extra in (["16"], ["16", "8M"]):
+            with self.assertRaises(CompareCliParseError) as ctx:
+                parseCompareArguments(
+                    ["variants", "/path/to/archive", "read"] + f_extra + ["--all"]
+                )
+            self.assertIn("'--all' charts every <stripes>", str(ctx.exception))
+
         # Compatibility function parseCompareArchiveArguments
-        req_compat = parseCompareArchiveArguments(
-            [
-                "/path/to/archive",
-                "read",
-                "16",
-                "--all",
-            ]
-        )
+        req_compat = parseCompareArchiveArguments(["/path/to/archive", "read", "--all"])
         self.assertIsInstance(req_compat, CompareVariantsRequest)
         self.assertEqual(req_compat.archive_folder, "/path/to/archive")
         self.assertEqual(req_compat.op, "read")
-        self.assertEqual(req_compat.stripes, 16)
         self.assertTrue(req_compat.all)
 
     def testParseCompareErrorsZeroAliasAndFallback(self) -> None:

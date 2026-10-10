@@ -115,7 +115,7 @@ class RelocateTest(unittest.TestCase):
         _writeFile(os.path.join(self.m_pkg, "lib", "__init__.py"))
         _writeFile(os.path.join(self.m_pkg, "VERSION"), "0.3.0\n")
         _writeFile(os.path.join(self.m_pkg, "run.log"))
-        self.m_assets = os.path.join(self.m_repo, "tools", "bmtool", "lmp-reaxff")
+        self.m_assets = os.path.join(self.m_pkg, "share", "lmp-reaxff")
         _writeFile(os.path.join(self.m_assets, "in.reaxc"))
 
     def tearDown(self) -> None:
@@ -169,7 +169,7 @@ class RelocateTest(unittest.TestCase):
         self.assertEqual(f_runner.m_calls, [])
 
     def testSourceLayoutRelocatesPackageAndAssets(self) -> None:
-        """Source worker mirrors tools/lsmiotool and tools/bmtool/lmp-reaxff under <work>/tools."""
+        """Source worker mirrors tools/lsmiotool, its share/lmp-reaxff assets included, under <work>/tools."""
         f_runner = _RecordingRunner()
         f_new = relocateForSite(
             self.m_archer2, self.m_src_worker, self.m_env, f_runner
@@ -183,9 +183,6 @@ class RelocateTest(unittest.TestCase):
             f_runner.m_calls,
             [
                 buildRsyncArgv(self.m_pkg, os.path.join(f_tools, "lsmiotool")),
-                buildRsyncArgv(
-                    self.m_assets, os.path.join(f_tools, "bmtool", "lmp-reaxff")
-                ),
             ],
         )
         self.assertTrue(os.access(f_new, os.X_OK))
@@ -258,8 +255,8 @@ class RelocateTest(unittest.TestCase):
             )
 
     def testPlanSkipsMissingAssets(self) -> None:
-        """Optional asset directories that do not exist are not mirrored."""
-        shutil.rmtree(os.path.join(self.m_repo, "tools", "bmtool"))
+        """Without its assets the source package is still the only mirrored directory."""
+        shutil.rmtree(self.m_assets)
         f_pairs, f_new = planRelocation(
             self.m_src_worker, os.path.join(self.m_work, "tools")
         )

@@ -198,6 +198,15 @@ Status: `[ ]` open, `[x]` fixed.
   versioned run (job 37416785) archived `node0-0` … `node7-0` where bmtool had `node097-0` …,
   and the real host was recorded nowhere. On PBS, where `node_rank` is the hostname, names became
   `nodenid001234-0` and every rank on a node collided on suffix 0, falling back to `-r<rank>`.
+- [ ] **M27.** A dropped login session ends `run` mid-campaign. `run` is the foreground process
+  that submits each scale point and archives each finished one, and only SIGINT/SIGTERM are
+  handled (`lib/run.py` signal coordinator); SIGHUP kills it. The running job finishes, but its
+  point is not archived and later points are not submitted; `archive` refuses multi-arm group
+  runs, and `--resume` cannot skip a partly done `variants` job. Documented workaround: tmux/screen
+  or nohup. Not "handle SIGHUP like SIGTERM": SIGTERM cancels the job (`_cancelActiveJob` ->
+  scancel), where a dropped session today lets it finish. Fix options: ignore SIGHUP and move
+  console output to a log file (nohup semantics; writes to a lost tty raise EIO), or let `archive`
+  export a finished point of a group run.
 
 ## Low
 
@@ -264,12 +273,43 @@ Status: `[ ]` open, `[x]` fixed.
 - [ ] **L32.** Final state / exit code lines. Multi-arm runs never call `reportCompletion`;
   single-arm runs report the exit code before archiving, so an archive failure prints "Exit Code:
   0" while exiting 1.
-- [ ] **L33.** Stale help text. `lib/cli.py` run help still says the backends "are not yet run one
+- [x] **L33.** Stale help text. `lib/cli.py` run help still says the backends "are not yet run one
   after another".
 - [x] **L34.** Arm manifests record the arm's own walltime, not the shared job's. In job
   37416785 the job asked for `08:00:00` (bmtool's versioned rule, 2 + 3 runs × 2h), but the
   reference manifest said `04:00:00` and the variant manifests `06:00:00`. Each arm's plan was made
   from its own sub-request.
+- [ ] **L35.** A `backends` rerun to the same destination replaces earlier results silently.
+  `lib/export.py` removes and renames each `outputs-<backend>/<nodes>` it archives, while variant
+  pairs get `-N` suffixes. Matches bmtool (`rm -rf` + `cp`), but an earlier campaign at that
+  `<nodes>` is lost without notice; documented in tools/README.md (use `--out-dir` per campaign).
+- [ ] **L36.** `--resume` never skips a `variants` run of the baseline alone or a `--versioned` run
+  without variants (`lib/run.py` resume set: only paired arms with a variant and backend points).
+  Matches bmtool, where those archive to a new `-N` suffix; documented in tools/README.md and the
+  run help. A rerun after an interruption therefore repeats the whole job.
+- [ ] **L37.** Versioned pairs archived to `lsmio-archive/variants` (by bmtool, or by lsmiotool before
+  `--versioned` defaulted to `variants-versioned`) are invisible to `--resume` of a new versioned
+  run, which reruns them into `variants-versioned/`, and they stay in `variants/` charts.
+  Documented (move the `outputs-*-version-*` dirs, or `--out-dir lsmio-archive/variants`); a
+  one-off migration helper or a resume check of both folders would remove the trap.
+- [ ] **L38.** `tools/bmtool/DEPRECATED.md` maps bmtool's `--dest=<path>` to `--out-dir` for every
+  command, but `lsmiotool archive` accepts only `--dest <path>` (`--out-dir` is "Unknown option").
+  Split the row into `run` and `archive`.
+- [ ] **L39.** `tools/bmtool/DEPRECATED.md` says the `Bmtool*Test.py` files require byte-identical
+  reports; only `test/parse/BmtoolParityTest.py` does. The other three test bmtool's own behaviour
+  (backend list check, ARCHER2 relocation, run_tee).
+- [ ] **L40.** tools/README.md's ARCHER2 paragraph (Slurm directives section) describes only bmtool's
+  relocation (rsync of all of `tools/`, `--chdir`). lsmiotool's own (`lib/relocate.py`: mirror
+  `tools/lsmiotool`, assets included, and run the relocated worker) is not described.
+- [ ] **L41.** The first `run` line of `lsmiotool --help` (`lib/cli.py` LSMIOTOOL_HELP / RUN_HELP_TEXT)
+  omits `--time`, which `variants` runs accept (plain scaling runs reject it).
+- [ ] **L42.** Stale asset paths: `lib/worker.py` falls back to `<install_prefix>/share/lmp-reaxff`
+  (the installed layout is `share/lsmio/lmp-reaxff`; reached only if `ResourceLocator.forSource`
+  raises), and `lib/jobs.py` `batch_job_orchestration` copies `<bm_path>/lmp-reaxff` (dead code,
+  only called from `test/main/test_jobs.py`).
+- [ ] **L43.** On ARCHER2 a source-mode relocation (lsmiotool, or bmtool's rsync of `tools/`) runs
+  `rsync --delete` over `<work>/tools/lsmiotool`, which removes an installed-mode mirror kept under
+  it; a queued installed-mode job could lose its worker. Predates the bmtool deprecation.
 
 ---
 

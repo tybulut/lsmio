@@ -3146,6 +3146,76 @@ class RunOrchestratorTest(unittest.TestCase):
                     )
             self.assertEqual(f_orch.exitCode, 0)
 
+    def testVersionedDefaultsToVariantsVersionedArchive(self) -> None:
+        """Without --out-dir, a --versioned run archives under lsmio-archive/variants-versioned,
+        apart from the variant matrix archive in lsmio-archive/variants."""
+        f_main = os.path.join(self.m_bin_dir, "bm_native:main")
+        with open(f_main, "w") as f_f:
+            f_f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(f_main, 0o755)
+
+        f_fake_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_fake_runner,
+            f_poll_interval=0.01,
+        )
+        f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        with patch("lsmiotool.lib.export.exportPoint") as f_export, patch(
+            "lsmiotool.lib.export.generateReports", return_value=True
+        ):
+            f_orch.execute(
+                RunRequest("lsmio", "variants", f_variants=["legacy"], f_versioned=True),
+                f_site=self.m_viking_profile,
+                f_worker_executable=self.m_worker_path,
+                f_version_tag="b-abc1234",
+            )
+        f_dest = os.path.join(self.m_viking_root_hdd, "lsmio-archive", "variants-versioned")
+        self.assertEqual(
+            sorted(
+                os.path.dirname(f_c.kwargs["f_node_dir"]) for f_c in f_export.call_args_list
+            ),
+            sorted(
+                os.path.join(f_dest, f"outputs-native-version-b-abc1234-legacy:{f_r}")
+                for f_r in ("run", "base")
+            ),
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+
+    def testVersionedResumeChecksVariantsVersioned(self) -> None:
+        """--resume of a --versioned run looks for its :run archive in the default
+        variants-versioned folder, where the run archives it."""
+        f_main = os.path.join(self.m_bin_dir, "bm_native:main")
+        with open(f_main, "w") as f_f:
+            f_f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(f_main, 0o755)
+        os.makedirs(
+            os.path.join(
+                self.m_viking_root_hdd,
+                "lsmio-archive",
+                "variants-versioned",
+                "outputs-native-version-b-abc1234-legacy:run",
+            )
+        )
+
+        f_fake_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_fake_runner,
+            f_poll_interval=0.01,
+        )
+        f_view = f_orch.execute(
+            RunRequest(
+                "lsmio", "variants", f_variants=["legacy"], f_versioned=True, f_resume=True
+            ),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+            f_version_tag="b-abc1234",
+        )
+        self.assertEqual(len(f_fake_runner.m_submit_calls), 0)
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        self.assertEqual(f_orch.exitCode, 0)
+
     def testVersionedRequiresMainBinary(self) -> None:
         """--versioned fails before submitting when bm_native:main is not installed."""
         f_fake_runner = FakeSchedulerCommandRunner()

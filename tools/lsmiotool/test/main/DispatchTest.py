@@ -657,7 +657,7 @@ print("LAZY_IMPORT_OK")
         )
         self.assertEqual(
             f_layout.asset_root,
-            str(self.m_package_root.parent / "bmtool" / "lmp-reaxff"),
+            str(self.m_package_root / "share" / "lmp-reaxff"),
         )
         self.assertEqual(
             f_layout.worker_executable, str(self.m_package_root / "lsmiotool-worker")
@@ -712,7 +712,7 @@ print("LAZY_IMPORT_OK")
                 self.assertIn("How to run", f_out)
                 self.assertIn("common cmds:", f_out)
                 self.assertIn(
-                    "run <ior|lsmio|lmp> <local|bake|small|large|baseline>", f_out
+                    "run <ior|lsmio|lmp> <local|bake|small|large|variants>", f_out
                 )
 
         # 2. -h
@@ -1059,7 +1059,7 @@ print("LAZY_IMPORT_OK")
         # Source layout paths
         self.assertIn("tools/lsmiotool/lsmiotool", f_readme)
         self.assertIn("tools/lsmiotool/lsmiotool-worker", f_readme)
-        self.assertIn("tools/bmtool/lmp-reaxff", f_readme)
+        self.assertIn("tools/lsmiotool/share/lmp-reaxff", f_readme)
 
         # State precedence & markers
         self.assertIn("WHOLE_RUN_SUCCEEDED", f_readme)
@@ -1121,7 +1121,7 @@ print("LAZY_IMPORT_OK")
         self.assertIn("tools/lsmiotool/lsmiotool", f_readme)
         self.assertIn("tools/lsmiotool/lsmiotool-worker", f_readme)
         self.assertIn("tools/lsmiotool/etc/environments.json", f_readme)
-        self.assertIn("tools/bmtool/lmp-reaxff", f_readme)
+        self.assertIn("tools/lsmiotool/share/lmp-reaxff", f_readme)
 
         # 5. Standardized printed identity lines
         self.assertIn("Run ID:", f_readme)

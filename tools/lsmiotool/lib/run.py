@@ -5094,6 +5094,7 @@ class RunOrchestrator:
                 f_mode=getattr(f_request, "mode", None),
                 f_scale=getattr(f_request, "scale", None),
                 f_explicit=f_explicit_dest,
+                f_versioned=bool(getattr(f_request, "versioned", False)),
             )
 
             f_planner_obj = self.m_planner or RunPlanner

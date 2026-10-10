@@ -51,6 +51,7 @@ common cmds:
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
   parseLegacy lsmio backends <local|bake|small|large> [<path>]
   run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast]
+  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -75,7 +76,7 @@ Arguments:
                 (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio variants'.
 
 Options:
-  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
                 Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
   --setup <name>
@@ -102,7 +103,7 @@ Arguments:
   <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
   <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb).
-                Used for the run plan and walltime; the backends are not yet run one after another.
+                Each scale point is one job running the backends one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
@@ -114,12 +115,15 @@ Options:
   --setup <name>
                 Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE-M, ROCKSDB-M, LSMIO).
                 Note: '--setup=value' syntax is strictly rejected; use '--setup <name>'.
-  --archive     Force automatic post-run archiving after each variant run.
-                (Default: enabled when multiple variants, 'most', or 'all' specified; disabled for single variant)
-  --no-archive  Disable automatic post-run archiving after variant execution.
-  --resume      Skip variant execution if target archive directory (outputs-<arm_id>) already exists.
+  --archive     Archive each scale point when its job ends. On by default for 'backends', for
+                'variants' with one or more variants and for --versioned; a 'variants' run of
+                the baseline alone is archived only with --archive.
+  --no-archive  Do not archive (not allowed with --versioned).
+  --resume      Skip a variant whose outputs-<arm>:run archive exists, or a backend's scale point
+                whose outputs-<backend>/<nodes> archive exists. A baseline-alone or a --versioned run
+                without variants always runs again.
   --out-dir <path>
-                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|variants-versioned}).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
@@ -155,13 +159,14 @@ Submodes:
   nodes <folder> [read|write] --all [--output-dir <dir>]
       Compares performance across node counts for a benchmark folder.
       Arguments:
-          <folder>: Benchmark folder containing node subdirectories (e.g. 01, 02, 04, ...).
+          <folder>: Archive folder with one outputs-<backend> directory per backend (e.g. <archive>/backends/<scale>).
           <read|write>: Operation to compare ('read' or 'write'); optional with --all.
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
       Options:
           --all: Generate charts for all 6 (stripes, blocksize) permutations, for the given
-                 operation or, without one, for both read and write (12 charts).
+                 operation or, without one, for both read and write (12 charts). Not combinable
+                 with <stripes>/<blocksize>.
           --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 
   variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
@@ -172,7 +177,8 @@ Submodes:
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
       Options:
-          --all: Generate comparison charts across all 6 (stripes, blocksize) permutations.
+          --all: Generate comparison charts across all 6 (stripes, blocksize) permutations, per
+                 operation (12 with the default 'both'). Not combinable with <stripes>/<blocksize>.
           --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 """
 
@@ -1002,7 +1008,7 @@ class ArchiveCliParser:
         <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
-        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
         --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE-M;
             for an lsmiotool run, the run's own setup).
@@ -1861,6 +1867,10 @@ class CompareCliParser:
                 raise CompareCliParseError(
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
+        if f_all and f_pos_idx > 1:
+            raise CompareCliParseError(
+                "'--all' charts every <stripes> and <blocksize>; do not give them"
+            )
 
         return CompareVariantsRequest(
             f_archive_folder=f_archive_folder,
