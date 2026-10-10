@@ -38,6 +38,7 @@ from enum import Enum
 from typing import Dict, List, Any, Optional
 from lsmiotool.lib.compat import TypedDict, Final
 from lsmiotool.lib.log import Console
+from lsmiotool.lib.site import EnvironmentResolver, resolveArcher2WorkRoot
 
 
 class HpcEnv(Enum):
@@ -76,9 +77,7 @@ class LsmioData(TypedDict):
 
 
 # Relative paths stored as a list to be concatenated later
-_REL_PROJECT_DIR: Final[List[str]] = ["src", "usr", "bin"]
-_REL_BIN_DIR: Final[List[str]] = ["src", "usr", "bin"]
-_REL_LIB_DIR: Final[List[str]] = ["src", "usr", "lib"]
+_REL_PROJECT_PREFIX: Final[List[str]] = ["src", "usr"]
 
 # OS Environment
 USER: Final[str] = os.environ["USER"]
@@ -111,18 +110,12 @@ if lsmio_env is not None:
         Console.error(UNKNOWN_HPC_ENVIRONMENT)
         exit(1)
 else:
-    # Hostname-based detection (legacy)
+    # Hostname/group detection shared with the run path (site.py): first match in bmtool's
+    # order viking, viking2, archer2 (groups), isambard; unknown hosts fall back to DEV.
     HOSTNAME: Final[str] = platform.node()
-    if HOSTNAME.startswith("xci") or HOSTNAME.startswith("nid"):
-        HPC_ENV: HpcEnv = HpcEnv.ISAMBARD
-    elif "viking2" in HOSTNAME:
-        HPC_ENV: HpcEnv = HpcEnv.VIKING2
-    elif "viking" in HOSTNAME:
-        HPC_ENV: HpcEnv = HpcEnv.VIKING
-    elif "archer2" in HOSTNAME:
-        HPC_ENV: HpcEnv = HpcEnv.ARCHER2
-    else:
-        HPC_ENV: HpcEnv = HpcEnv.DEV
+    HPC_ENV: HpcEnv = HpcEnv(
+        EnvironmentResolver.detect(f_hostname=HOSTNAME, f_env={}, f_test_mode=True)
+    )
 
 
 # Load JSON config
@@ -179,9 +172,15 @@ if HPC_ENV.value not in _env_configs:
 
 # Benchmark Environment
 DATE_STAMP: Final[str] = datetime.today().strftime("%Y-%m-%d")
-PROJECT_DIR: Final[str] = os.path.join(HOME, *_REL_PROJECT_DIR)
-BIN_DIR: Final[str] = os.path.join(HOME, *_REL_BIN_DIR)
-LIB_DIR: Final[str] = os.path.join(HOME, *_REL_LIB_DIR)
+if HPC_ENV == HpcEnv.ARCHER2:
+    # bmtool vars.in.sh: PROJECT_DIR=$ARCHER2_WORK_ROOT/usr (compute nodes cannot read /home)
+    _PROJECT_PREFIX: str = os.path.join(resolveArcher2WorkRoot(os.environ), "usr")
+else:
+    _PROJECT_PREFIX = os.path.join(HOME, *_REL_PROJECT_PREFIX)
+PROJECT_DIR: Final[str] = _PROJECT_PREFIX
+BIN_DIR: Final[str] = os.path.join(_PROJECT_PREFIX, "bin")
+LIB_DIR: Final[str] = os.path.join(_PROJECT_PREFIX, "lib")
+LIB64_DIR: Final[str] = os.path.join(_PROJECT_PREFIX, "lib64")
 
 # Use SSD path by default
 lustre_path: str = lustre_ssd_path
@@ -199,8 +198,10 @@ elif hpc_manager == HpcManager.PBS:
     BM_UNIQUE_UID = os.path.expandvars(BM_NODENAME + "-${ALPS_APP_PE}")
 
 os.environ["PATH"] += ":" + BIN_DIR
-if "LD_LIBRARY_PATH" in os.environ:
-    os.environ["LD_LIBRARY_PATH"] += ":" + LIB_DIR
-else:
-    os.environ["LD_LIBRARY_PATH"] = LIB_DIR
+# bmtool vars.in.sh: prepend $PROJECT_DIR/lib:$PROJECT_DIR/lib64 unless already present
+_ld_path: str = os.environ.get("LD_LIBRARY_PATH", "")
+if LIB_DIR not in _ld_path.split(":"):
+    os.environ["LD_LIBRARY_PATH"] = ":".join(
+        [LIB_DIR, LIB64_DIR] + ([_ld_path] if _ld_path else [])
+    )
 os.environ["ADIOS2_PLUGIN_PATH"] = LIB_DIR

@@ -71,6 +71,7 @@ from lsmiotool.lib.worker import (
     RankIdentityResolver,
     RankWorker,
     RankWorkerError,
+    rankHostName,
 )
 
 
@@ -248,6 +249,14 @@ class RankWorkerTest(unittest.TestCase):
         self.assertEqual(f_id3.global_rank, 2)
         self.assertEqual(f_id3.node_rank, "2")
         self.assertEqual(f_id3.local_rank, 1)
+
+    def testRankHostNameFollowsBmtool(self) -> None:
+        """bmtool names rank files by SLURMD_NODENAME under Slurm, else by `hostname`."""
+        self.assertEqual(
+            rankHostName({"SLURMD_NODENAME": "node097", "SLURM_NODEID": "3"}), "node097"
+        )
+        self.assertEqual(rankHostName({"SLURM_NODEID": "3"}), socket.gethostname())
+        self.assertEqual(rankHostName({"SLURMD_NODENAME": " "}), socket.gethostname())
 
     def testPbsHostnameGlobalAndNoneLocal(self) -> None:
         """Validate PBS environment resolution from ALPS_APP_PE, HOSTNAME, and local_rank=None."""
@@ -935,6 +944,8 @@ class RankWorkerTest(unittest.TestCase):
         self.assertEqual(f_rec.payload["status"], "failed")
         self.assertEqual(f_rec.payload["exit_code"], 42)
         self.assertIn("RocksDB corruption error", f_rec.payload["error"])
+        # The node's hostname is recorded for the archive's file names
+        self.assertEqual(f_rec.payload["host"], socket.gethostname())
 
         # 2. Child process killed by signal (e.g. SIGKILL -9)
         _, f_sig_manifest, f_sig_layout = self._createManifest(

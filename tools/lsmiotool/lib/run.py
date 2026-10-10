@@ -1339,11 +1339,28 @@ class RunPlanner:
 
     TOKEN_PATTERN: re.Pattern = re.compile(r"^lm-[0-9a-f]{24}$")
 
+    # bmtool run_matrix_workload order: for rf in 4 16; for bs in 1M 64K 8M
     ORDERED_COMBINATIONS: Tuple[Combination, ...] = (
         Combination(
-            f_processes=16,
+            f_processes=4,
+            f_block_size="1M",
+            f_stripe_count=4,
+            f_block_bytes=1048576,
+            f_key_count=4096,
+            f_segment_count=1024,
+        ),
+        Combination(
+            f_processes=4,
+            f_block_size="64K",
+            f_stripe_count=4,
+            f_block_bytes=65536,
+            f_key_count=32768,
+            f_segment_count=16384,
+        ),
+        Combination(
+            f_processes=4,
             f_block_size="8M",
-            f_stripe_count=16,
+            f_stripe_count=4,
             f_block_bytes=8388608,
             f_key_count=1024,
             f_segment_count=128,
@@ -1365,28 +1382,12 @@ class RunPlanner:
             f_segment_count=16384,
         ),
         Combination(
-            f_processes=4,
+            f_processes=16,
             f_block_size="8M",
-            f_stripe_count=4,
+            f_stripe_count=16,
             f_block_bytes=8388608,
             f_key_count=1024,
             f_segment_count=128,
-        ),
-        Combination(
-            f_processes=4,
-            f_block_size="1M",
-            f_stripe_count=4,
-            f_block_bytes=1048576,
-            f_key_count=4096,
-            f_segment_count=1024,
-        ),
-        Combination(
-            f_processes=4,
-            f_block_size="64K",
-            f_stripe_count=4,
-            f_block_bytes=65536,
-            f_key_count=32768,
-            f_segment_count=16384,
         ),
     )
 
@@ -1544,21 +1545,31 @@ class RunPlanner:
         # 5. ScheduledPointResources calculation
         from lsmiotool.lib.scheduler import parseWalltimeToSeconds
 
+        # A site with a fixed walltime (PBS job templates) ignores --time, as bmtool does
+        f_fixed_walltime = isinstance(
+            f_resource_policy.walltime_policy, str
+        ) and f_resource_policy.walltime_policy.startswith("fixed_")
+
         f_scheduled_points: List[ScheduledPointResources] = []
         for f_sp in f_scale_points:
             # Walltime calculation (INV-BACKEND-2, INV-PAIR-1)
-            if f_request.wallhour is not None:
+            if f_request.wallhour is not None and not f_fixed_walltime:
                 max_hours = 23 if f_request.fast else 48
                 f_wallhour = max(1, min(max_hours, f_request.wallhour))
                 f_walltime = f"{f_wallhour:02d}:00:00"
-            elif f_request.walltime is not None:
+            elif f_request.walltime is not None and not f_fixed_walltime:
+                # Clamped to [1, 48] hours ([1, 23] with --fast) like integer hours
                 f_walltime = f_request.walltime
-                if f_request.fast:
+                try:
                     wall_sec = parseWalltimeToSeconds(f_walltime)
-                    if wall_sec > 82800:
-                        f_walltime = "23:00:00"
-                    elif wall_sec < 3600:
-                        f_walltime = "01:00:00"
+                except Exception:
+                    # Left as given: the scheduler checks below reject it
+                    wall_sec = None
+                f_max_sec = (23 if f_request.fast else 48) * 3600
+                if wall_sec is not None and wall_sec > f_max_sec:
+                    f_walltime = f"{f_max_sec // 3600:02d}:00:00"
+                elif wall_sec is not None and wall_sec < 3600:
+                    f_walltime = "01:00:00"
             elif (
                 getattr(f_request, "mode", "standard") == "backends"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
@@ -3106,6 +3117,10 @@ def _attachForExistingRun() -> None:
 class RunOrchestrator:
     """Foreground orchestrator managing preflight, allocation, sequential submission, polling, recovery, interruption, and finalization."""
 
+    # Consecutive UNKNOWN job-state polls tolerated before a point stops being
+    # monitored (75 polls is about 10 minutes at the default 8 s interval).
+    UNKNOWN_POLL_LIMIT = 75
+
     __slots__ = (
         "m_profile_resolver",
         "m_planner",
@@ -3131,6 +3146,8 @@ class RunOrchestrator:
         "m_last_interruption_error",
         "m_reporter",
         "m_views",
+        "m_group_failed",
+        "m_group_ctxs",
         "_frozen",
     )
 
@@ -3250,7 +3267,15 @@ class RunOrchestrator:
         object.__setattr__(self, "m_last_capability_state", None)
         object.__setattr__(self, "m_last_interruption_error", None)
         object.__setattr__(self, "m_views", ())
+        object.__setattr__(self, "m_group_failed", None)
+        object.__setattr__(self, "m_group_ctxs", ())
         object.__setattr__(self, "_frozen", False)
+
+    @property
+    def groupRuns(self) -> Tuple[Dict[str, Any], ...]:
+        """Per-arm runs of the last execute(): dicts with 'arm', 'plan', 'store' and, once
+        execution started, 'evidence' and 'view'."""
+        return tuple(getattr(self, "m_group_ctxs", ()))
 
     @property
     def views(self) -> Tuple[Any, ...]:
@@ -3399,6 +3424,9 @@ class RunOrchestrator:
             and self.m_signal_coordinator.is_interrupted
         ):
             return self.m_signal_coordinator.exit_code or 130
+        if self.m_group_failed is not None:
+            # Set by execute(): every arm of the request, plus its archiving
+            return 1 if self.m_group_failed else 0
         if self.m_last_view is not None:
             from lsmiotool.lib.state import OverallRunState
 
@@ -3802,6 +3830,759 @@ class RunOrchestrator:
         else:
             return (SchedulerJobState.SUCCEEDED, 0)
 
+    # -------------------------------------------------------------------------
+    # Arm groups: several configurations sharing one allocation per scale point
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _reportProgress(f_reporter: Optional[Any], f_msg: str) -> None:
+        if f_reporter is None:
+            sys.stdout.write(f"{f_msg}\n")
+            return
+        try:
+            if hasattr(f_reporter, "reportProgress"):
+                f_reporter.reportProgress(f_msg)
+            elif hasattr(f_reporter, "emit"):
+                f_reporter.emit(f_msg)
+            elif callable(f_reporter):
+                f_reporter(f_msg)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _preflightArm(f_arm: Any, f_profile: SiteProfile) -> None:
+        """Validate an arm's benchmark executable and, for the plugin, liblsmio_adios."""
+        from lsmiotool.lib.benchmarks import LsmioAdapter
+
+        f_exe_name = LsmioAdapter.getExecutableName(f_arm.setup)
+        f_exe = f_arm.executable_overrides.get(
+            f_exe_name
+        ) or f_profile.executables.getExecutable(f_exe_name)
+        try:
+            validateBenchmarkExecutable(f_exe)
+        except Exception as f_err:
+            f_hint = (
+                " Build and install the reference baseline via: ./build.sh install:main"
+                if f_exe_name in f_arm.executable_overrides
+                else ""
+            )
+            raise PreflightError(
+                f"Benchmark executable for arm '{f_arm.label}' is not usable: {f_err}.{f_hint}"
+            ) from f_err
+
+        if f_arm.setup in ("PLUGIN", "PLUGIN-M"):
+            from lsmiotool.lib.site import findAdiosPluginLibrary
+
+            if findAdiosPluginLibrary(f_profile.install_prefix) is None:
+                raise PreflightError(
+                    "LSMIO ADIOS2 plugin liblsmio_adios not found in ADIOS2_PLUGIN_PATH="
+                    f"{os.path.join(f_profile.install_prefix, 'lib')} (arm '{f_arm.label}'). "
+                    "Please verify build and install."
+                )
+
+    @staticmethod
+    def _profileWithOverrides(
+        f_profile: SiteProfile, f_overrides: Mapping[str, str]
+    ) -> SiteProfile:
+        """Copy of f_profile whose executables registry has f_overrides applied, so the
+        arm's manifest (which the worker reads) names e.g. bm_native:main."""
+        if not f_overrides:
+            return f_profile
+        f_exes = dict(f_profile.executables.executables)
+        f_exes.update(f_overrides)
+        return SiteProfile(
+            f_name=f_profile.name,
+            f_scheduler=f_profile.scheduler,
+            f_launcher=f_profile.launcher,
+            f_certification=f_profile.certification,
+            f_test_only=f_profile.test_only,
+            f_benchmark_roots=f_profile.benchmark_roots,
+            f_install_prefix=f_profile.install_prefix,
+            f_executables=ExecutableRegistry(f_exes),
+            f_modules=f_profile.modules,
+            f_resources=f_profile.resources,
+            f_rank_identity=f_profile.rank_identity,
+            f_cancellation=f_profile.cancellation,
+            f_lustre_pools=f_profile.lustre_pools,
+        )
+
+    @staticmethod
+    def _groupScript(
+        f_script: str,
+        f_worker_executable: str,
+        f_point_id: str,
+        f_policy: str,
+        f_manifest_paths: Sequence[str],
+    ) -> str:
+        """Replace the rendered 'exec <worker> allocation <manifest> <point>' tail with one
+        that runs every arm's allocation in order inside this job."""
+        import shlex
+
+        f_lines = f_script.rstrip("\n").split("\n")
+        f_exec_idx = max(
+            f_i for f_i, f_l in enumerate(f_lines) if f_l.strip().startswith("exec ")
+        )
+        f_lines[f_exec_idx] = " ".join(
+            ["exec", shlex.quote(f_worker_executable), "allocation-group"]
+            + [shlex.quote(f_point_id), shlex.quote(f_policy)]
+            + [shlex.quote(f_m) for f_m in f_manifest_paths]
+        )
+        return "\n".join(f_lines) + "\n"
+
+    def _makeSchedulerAdapter(self, f_profile: SiteProfile, f_evidence_store: Any) -> Any:
+        from lsmiotool.lib.scheduler import (
+            PbsSchedulerAdapter,
+            SchedulerAdapter,
+            SlurmSchedulerAdapter,
+        )
+        from lsmiotool.lib.site import SchedulerKind
+
+        if self.m_scheduler_adapter_factory is not None:
+            return self.m_scheduler_adapter_factory(
+                f_profile, f_evidence_store, self.m_worker_validator, self.m_command_runner
+            )
+        if f_profile.scheduler == SchedulerKind.SLURM:
+            return SlurmSchedulerAdapter(
+                f_evidence_store=f_evidence_store,
+                f_worker_validator=self.m_worker_validator,
+                f_command_runner=self.m_command_runner,
+            )
+        if f_profile.scheduler == SchedulerKind.PBS:
+            return PbsSchedulerAdapter(
+                f_evidence_store=f_evidence_store,
+                f_worker_validator=self.m_worker_validator,
+                f_command_runner=self.m_command_runner,
+            )
+        return SchedulerAdapter(
+            f_backend=f_profile.scheduler,
+            f_evidence_store=f_evidence_store,
+            f_worker_validator=self.m_worker_validator,
+            f_command_runner=self.m_command_runner,
+        )
+
+    @staticmethod
+    def _renderPointDirectives(
+        f_profile: SiteProfile,
+        f_scale_point: Any,
+        f_point_res: Any,
+        f_token: str,
+        f_output_path: str,
+        f_error_path: str,
+        f_account: Optional[str],
+        f_email: Optional[str],
+    ) -> Tuple[List[str], Optional[Any]]:
+        from lsmiotool.lib.scheduler import PbsScriptRenderer, SlurmScriptRenderer
+        from lsmiotool.lib.site import PbsMailMode, SchedulerKind, SlurmMailMode
+
+        if f_profile.scheduler == SchedulerKind.SLURM:
+            f_mail = SlurmMailMode.END_FAIL if f_point_res.mail_mode else None
+            return (
+                SlurmScriptRenderer.renderDirectives(
+                    f_point=f_scale_point,
+                    f_profile=f_profile,
+                    f_job_name=f_token,
+                    f_output_path=f_output_path,
+                    f_error_path=f_error_path,
+                    f_account=f_account,
+                    f_mail_user=f_email,
+                    f_mail_mode=f_mail,
+                    f_walltime=f_point_res.walltime,
+                    f_qos=f_point_res.qos,
+                ),
+                f_mail,
+            )
+        if f_profile.scheduler == SchedulerKind.PBS:
+            f_mail = PbsMailMode.ABE if f_point_res.mail_mode else None
+            return (
+                PbsScriptRenderer.renderDirectives(
+                    f_point=f_scale_point,
+                    f_profile=f_profile,
+                    f_job_name=f_token,
+                    f_output_path=f_output_path,
+                    f_error_path=f_error_path,
+                    f_mail_mode=f_mail,
+                    f_walltime=f_point_res.walltime,
+                ),
+                f_mail,
+            )
+        return (
+            [
+                f"#FAKE --job-name={f_token}",
+                f"#FAKE --output={f_output_path}",
+                f"#FAKE --error={f_error_path}",
+            ],
+            None,
+        )
+
+    def _resolvePolling(
+        self, f_profile: SiteProfile, f_kwargs: Mapping[str, Any]
+    ) -> Tuple[float, Callable[[float], None], Callable[[], float]]:
+        f_poll_override = f_kwargs.get(
+            "f_poll_interval", f_kwargs.get("poll_interval", self.m_poll_interval)
+        )
+        if f_poll_override is not None:
+            f_poll_interval = float(f_poll_override)
+        elif (
+            f_profile.cancellation
+            and f_profile.cancellation.poll_interval_seconds is not None
+        ):
+            f_poll_interval = float(f_profile.cancellation.poll_interval_seconds)
+        else:
+            f_poll_interval = 8.0
+        f_sleep_fn = f_kwargs.get(
+            "f_sleep_fn",
+            f_kwargs.get(
+                "f_sleep", self.m_sleep if self.m_sleep is not None else time.sleep
+            ),
+        )
+        f_clock_float = f_kwargs.get(
+            "f_clock_fn",
+            f_kwargs.get(
+                "f_clock_float",
+                self.m_clock_float if self.m_clock_float is not None else time.monotonic,
+            ),
+        )
+        return f_poll_interval, f_sleep_fn, f_clock_float
+
+    def _executeArmGroup(
+        self,
+        f_group: Any,
+        f_ctxs: List[Dict[str, Any]],
+        f_skip: Set[Tuple[int, int]],
+        f_resources_plan: RunPlan,
+        f_profile: SiteProfile,
+        f_validated_worker: str,
+        f_validated_account: Optional[str],
+        f_validated_email: Optional[str],
+        f_sig_coord: Any,
+        f_dest_root: str,
+        f_reporter: Optional[Any] = None,
+        **f_kwargs: Any,
+    ) -> bool:
+        """Run every arm of f_group with one scheduler job per scale point (bmtool's
+        intra-allocation loops). The first arm of a point dispatches the job; the other
+        arms get the same submission and scheduler observations in their own evidence, and
+        each arm's worker records its own results. Each point is archived when its job ends.
+        Sets f_ctx['evidence'] and f_ctx['view']; returns False when archiving failed."""
+        from lsmiotool.lib.evidence import EvidenceStore
+        from lsmiotool.lib.scheduler import JobSpec
+        from lsmiotool.lib.site import SchedulerKind
+        from lsmiotool.lib.state import (
+            OverallRunState,
+            PointRunState,
+            SchedulerJobState,
+            StateReconciler,
+        )
+        from lsmiotool.lib.worker import AllocationGroupRunner
+
+        f_reconciler = self.m_reconciler or StateReconciler
+        f_policy = (
+            AllocationGroupRunner.POLICY_STOP_AFTER_FIRST_FAILURE
+            if f_group.is_paired
+            else AllocationGroupRunner.POLICY_CONTINUE
+        )
+        f_archive_ok = True
+        f_pair_dirs: Dict[int, Tuple[str, str]] = {}
+        try:
+            for f_ctx in f_ctxs:
+                f_ctx["evidence"] = EvidenceStore(f_ctx["store"].layout, f_ctx["plan"])
+                f_ctx["adapter"] = self._makeSchedulerAdapter(
+                    f_profile, f_ctx["evidence"]
+                )
+            object.__setattr__(self, "m_last_evidence_store", f_ctxs[0]["evidence"])
+            f_poll_interval, f_sleep_fn, f_clock_float = self._resolvePolling(
+                f_profile, f_kwargs
+            )
+
+            for f_idx, f_sp in enumerate(f_resources_plan.scale_points):
+                if f_sig_coord.is_interrupted:
+                    break
+                f_included = [
+                    f_c for f_c in f_ctxs if (f_c["index"], f_idx) not in f_skip
+                ]
+                if not f_included:
+                    continue
+
+                for f_c in f_included:
+                    f_c["store"].preparePoint(
+                        f_sp, f_c["plan"].combinations, f_ordinal=f_idx
+                    )
+
+                f_disp = f_included[0]
+                f_layout = f_disp["store"].layout
+                f_point_name = f_layout.pointDirName(f_sp, f_idx)
+                f_script_path = os.path.join(
+                    f_layout.pointSchedulerDir(f_sp, f_idx), "job.sh"
+                )
+                f_logs_dir = f_layout.pointLogsDir(f_sp, f_idx)
+                f_output_path = os.path.join(f_logs_dir, "job.out")
+                f_error_path = os.path.join(f_logs_dir, "job.err")
+                f_point_res = f_resources_plan.scheduled_points[f_idx]
+                f_token = f_disp["plan"].tokens[f_idx]
+
+                f_directives, f_mail_mode = self._renderPointDirectives(
+                    f_profile,
+                    f_sp,
+                    f_point_res,
+                    f_token,
+                    f_output_path,
+                    f_error_path,
+                    f_validated_account,
+                    f_validated_email,
+                )
+                f_script = f_disp["adapter"].renderScript(
+                    f_directives=f_directives,
+                    f_profile=f_profile,
+                    f_worker_executable=f_validated_worker,
+                    f_manifest_path=f_layout.manifestPath,
+                    f_point_id=f_point_name,
+                )
+                f_script = self._groupScript(
+                    f_script,
+                    f_validated_worker,
+                    f_point_name,
+                    f_policy,
+                    [f_c["store"].layout.manifestPath for f_c in f_included],
+                )
+                with open(f_script_path, "w", encoding="utf-8") as f_f:
+                    f_f.write(f_script)
+                os.chmod(f_script_path, 0o755)
+
+                f_is_slurm = f_profile.scheduler == SchedulerKind.SLURM
+                f_spec = JobSpec(
+                    f_point_id=f_sp,
+                    f_script_path=f_script_path,
+                    f_working_dir=f_layout.pointDir(f_sp, f_idx),
+                    f_resources=f_point_res,
+                    f_mail_user=f_validated_email if f_is_slurm else None,
+                    f_mail_mode=f_mail_mode,
+                    f_account=f_validated_account if f_is_slurm else None,
+                    f_output_path=f_output_path,
+                    f_error_path=f_error_path,
+                    f_job_name=f_token,
+                )
+
+                try:
+                    f_job = f_disp["adapter"].dispatchSubmission(
+                        f_point=f_sp, f_spec=f_spec, f_writer_id="control", f_ordinal=f_idx
+                    )
+                    f_handle = f_job.job_handle
+                    if f_handle is None:
+                        raise OrchestrationError("Submission returned no job handle")
+                except Exception as f_err:
+                    # Nothing more can be submitted reliably
+                    self._reportProgress(
+                        f_reporter, f"Submission failed for point {f_point_name}: {f_err}"
+                    )
+                    break
+
+                if f_reporter is not None:
+                    try:
+                        f_reporter.reportPointSubmission(
+                            f_point_name, f_token, f_handle.job_id
+                        )
+                    except Exception:
+                        pass
+
+                f_shared = {
+                    "shared_allocation_run_id": f_disp["plan"].run_id,
+                    "job_name": f_token,
+                }
+                for f_c in f_included[1:]:
+                    f_c["evidence"].recordSubmissionRequested(
+                        f_point=f_sp, f_writer_id="control", f_payload=f_shared, f_ordinal=f_idx
+                    )
+                    f_c["evidence"].recordSubmissionDispatched(
+                        f_point=f_sp, f_writer_id="control", f_payload=f_shared, f_ordinal=f_idx
+                    )
+                    f_c["evidence"].recordSubmissionRecorded(
+                        f_point=f_sp,
+                        f_writer_id="control",
+                        f_handle=f_handle,
+                        f_payload=f_shared,
+                        f_ordinal=f_idx,
+                    )
+
+                for f_c in f_included:
+                    f_obs_dir = f_c["store"].layout.pointSchedulerObservationsDir(
+                        f_sp, f_writer="control", f_ordinal=f_idx
+                    )
+                    f_c["obs_seq"] = 1 + (
+                        len([f_x for f_x in os.listdir(f_obs_dir) if f_x.endswith(".json")])
+                        if os.path.isdir(f_obs_dir)
+                        else 0
+                    )
+
+                f_unknown_polls = 0
+                f_job_state = SchedulerJobState.UNKNOWN
+                while True:
+                    if f_sig_coord.is_interrupted:
+                        for f_c in f_included:
+                            self._recordInterruptionControlEvent(
+                                f_c["evidence"], f_sig_coord
+                            )
+                        self._cancelActiveJob(
+                            f_adapter=f_disp["adapter"],
+                            f_evidence_store=f_disp["evidence"],
+                            f_artifact_store=f_disp["store"],
+                            f_scale_point=f_sp,
+                            f_idx=f_idx,
+                            f_handle=f_handle,
+                            f_sig_coord=f_sig_coord,
+                            f_poll_interval=f_poll_interval,
+                            f_profile=f_profile,
+                            f_clock_float=f_clock_float,
+                            f_sleep_fn=f_sleep_fn,
+                            f_obs_seq=f_disp["obs_seq"],
+                        )
+                        for f_c in f_included[1:]:
+                            self._mirrorCancelRecords(f_disp, f_c, f_sp, f_idx, f_handle)
+                        break
+
+                    f_job_state, f_exit_code = self._queryJobState(
+                        f_adapter=f_disp["adapter"], f_handle=f_handle, f_profile=f_profile
+                    )
+                    for f_c in f_included:
+                        f_payload: Dict[str, Any] = {
+                            "handle": f_handle.toDict(),
+                            "state": f_job_state.value,
+                            "status": f_job_state.value,
+                            "exit_code": f_exit_code,
+                        }
+                        # The shared job's failure (walltime, OOM, node failure, scancel)
+                        # belongs to the arm that was running, not to arms that had already
+                        # finished: those end with their own completion, like bmtool
+                        # archiving each finished arm inside the job.
+                        if f_job_state in (
+                            SchedulerJobState.FAILED,
+                            SchedulerJobState.TIMEOUT,
+                            SchedulerJobState.CANCELLED,
+                        ) and self._armPointComplete(f_c, f_sp, f_idx):
+                            f_payload["state"] = SchedulerJobState.SUCCEEDED.value
+                            f_payload["status"] = SchedulerJobState.SUCCEEDED.value
+                            f_payload["job_state"] = f_job_state.value
+                            f_payload["arm_completed_before_job_end"] = True
+                        f_c["evidence"].recordSchedulerObservation(
+                            f_point=f_sp,
+                            f_writer_id="control",
+                            f_sequence=f_c["obs_seq"],
+                            f_payload=f_payload,
+                            f_ordinal=f_idx,
+                        )
+                        f_c["obs_seq"] += 1
+
+                    if f_job_state == SchedulerJobState.UNKNOWN:
+                        f_unknown_polls += 1
+                    else:
+                        f_unknown_polls = 0
+                    if f_job_state.is_terminal or (
+                        f_job_state == SchedulerJobState.UNKNOWN
+                        and f_unknown_polls > self.UNKNOWN_POLL_LIMIT
+                    ):
+                        break
+                    f_sleep_fn(f_poll_interval)
+
+                if f_sig_coord.is_interrupted:
+                    break
+
+                # Archive this point now, like bmtool does inside each job, so an
+                # interrupted or killed orchestrator keeps every finished point
+                for f_c in f_included:
+                    f_c["view"] = f_reconciler.reconcile(f_c["plan"], f_c["evidence"])
+                if f_group.archive and not self._archiveGroup(
+                    f_group,
+                    f_included,
+                    f_skip,
+                    f_dest_root,
+                    f_reporter,
+                    f_points=(f_idx,),
+                    f_pair_dirs=f_pair_dirs,
+                ):
+                    f_archive_ok = False
+
+                if f_job_state == SchedulerJobState.UNKNOWN:
+                    # Lost track of the job: never overlap it with the next point
+                    break
+
+            for f_ctx in f_ctxs:
+                f_view = f_reconciler.reconcile(f_ctx["plan"], f_ctx["evidence"])
+                if (
+                    not f_sig_coord.is_interrupted
+                    and f_view.state != OverallRunState.SUCCEEDED
+                    and f_view.point_states
+                    and all(
+                        f_pv.state == PointRunState.SUCCEEDED
+                        for f_pv in f_view.point_states
+                    )
+                    and not f_view.has_interruption
+                ):
+                    try:
+                        f_ctx["evidence"].recordWholeRunSucceeded(
+                            f_writer_id="control",
+                            f_sequence=len(f_ctx["evidence"].readControlEvents("control"))
+                            + 1,
+                            f_payload={"run_id": f_ctx["plan"].run_id},
+                        )
+                    except Exception:
+                        pass
+                    f_view = f_reconciler.reconcile(f_ctx["plan"], f_ctx["evidence"])
+                f_ctx["view"] = f_view
+                if f_reporter is not None:
+                    try:
+                        f_reporter.reportProgress(
+                            f"Arm {f_ctx['arm'].label}: {f_view.state.name}"
+                        )
+                    except Exception:
+                        pass
+            return f_archive_ok
+        finally:
+            for f_ctx in f_ctxs:
+                try:
+                    f_ctx["lock"].release()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _armPointComplete(f_ctx: Dict[str, Any], f_sp: Any, f_idx: int) -> bool:
+        """True when the arm's worker recorded a result for every combination of the point."""
+        try:
+            return all(
+                f_ctx["evidence"].readControllerResult(f_sp, f_combo, f_ordinal=f_idx)
+                is not None
+                for f_combo in f_ctx["plan"].combinations
+            )
+        except Exception:
+            return False
+
+    @staticmethod
+    def _mirrorCancelRecords(
+        f_disp: Dict[str, Any],
+        f_ctx: Dict[str, Any],
+        f_sp: Any,
+        f_idx: int,
+        f_handle: Any,
+    ) -> None:
+        """Copy the dispatching arm's cancellation evidence (written by _cancelActiveJob)
+        into an arm sharing the job, keeping timestamps so causal order is the same."""
+        from lsmiotool.lib.evidence import EvidenceKind, EvidenceRecord, WriterKind
+
+        try:
+            f_recs = f_disp["evidence"].readSubmissionRecords(f_sp, f_ordinal=f_idx)
+        except Exception:
+            return
+        f_ev = f_ctx["evidence"]
+        f_req = f_recs.get("cancel_requested")
+        f_rec = f_recs.get("cancel_recorded")
+        try:
+            if f_req is not None:
+                f_ev.recordCancelRequested(
+                    f_point=f_sp,
+                    f_writer_id="control",
+                    f_handle=f_handle,
+                    f_payload=dict(f_req.payload or {}),
+                    f_created_at_utc=f_req.created_at_utc,
+                    f_ordinal=f_idx,
+                )
+            if f_rec is not None:
+                f_ev.recordCancelRecorded(
+                    f_point=f_sp,
+                    f_writer_id="control",
+                    f_handle=f_handle,
+                    f_payload=dict(f_rec.payload or {}),
+                    f_created_at_utc=f_rec.created_at_utc,
+                    f_ordinal=f_idx,
+                )
+                f_terminal = (f_rec.payload or {}).get("terminal_state")
+                if f_terminal:
+                    f_ev.recordSchedulerObservation(
+                        f_point=f_sp,
+                        f_writer_id="control",
+                        f_sequence=f_ctx["obs_seq"],
+                        f_payload={
+                            "handle": f_handle.toDict(),
+                            "state": f_terminal,
+                            "status": f_terminal,
+                        },
+                        f_ordinal=f_idx,
+                    )
+                    f_ctx["obs_seq"] += 1
+            f_unconf = f_disp["evidence"].readRecordIfExists(
+                os.path.join(
+                    f_disp["store"].layout.pointSchedulerDir(f_sp, f_idx),
+                    "cancel_unconfirmed.json",
+                )
+            )
+            if f_unconf is not None:
+                f_layout = f_ctx["store"].layout
+                f_ev.recordRecord(
+                    os.path.join(
+                        f_layout.pointSchedulerDir(f_sp, f_idx), "cancel_unconfirmed.json"
+                    ),
+                    EvidenceRecord(
+                        f_writer_kind=WriterKind.CONTROL,
+                        f_writer_id="control",
+                        f_sequence_number=2,
+                        f_evidence_kind=EvidenceKind.CANCEL_UNCONFIRMED,
+                        f_point_id=f_layout.pointDirName(f_sp, f_idx),
+                        f_payload=dict(f_unconf.payload or {}),
+                        f_run_id=f_layout.runId,
+                    ),
+                )
+        except Exception:
+            pass
+
+    def _archiveGroup(
+        self,
+        f_group: Any,
+        f_ctxs: List[Dict[str, Any]],
+        f_skip: Set[Tuple[int, int]],
+        f_dest_root: str,
+        f_reporter: Optional[Any] = None,
+        f_points: Optional[Sequence[int]] = None,
+        f_pair_dirs: Optional[Dict[int, Tuple[str, str]]] = None,
+    ) -> bool:
+        """Archive completed arms in bmtool's layout (include/archive.in.sh,
+        jobs/batch.in.sh). f_points limits it to those point ordinals (default: all);
+        f_pair_dirs caches each paired arm's :run/:base dirs across calls, so later points
+        of the same run land in the same pair. Returns False when an archive step failed."""
+        from lsmiotool.lib.archive import ArchiveEngine
+        from lsmiotool.lib.export import exportPoint, generateReports
+        from lsmiotool.lib.state import PointRunState
+
+        f_ok = True
+
+        def _succeeded(f_ctx: Dict[str, Any], f_idx: int) -> bool:
+            return (
+                (f_ctx["index"], f_idx) not in f_skip
+                and "view" in f_ctx
+                and f_ctx["view"].point_states[f_idx].state == PointRunState.SUCCEEDED
+            )
+
+        def _export(f_ctx: Dict[str, Any], f_idx: int, f_dir: str) -> None:
+            f_arm = f_ctx["arm"]
+            f_sp = f_ctx["plan"].scale_points[f_idx]
+            exportPoint(
+                f_layout=f_ctx["store"].layout,
+                f_evidence_store=f_ctx["evidence"],
+                f_scale_point=f_sp,
+                f_ordinal=f_idx,
+                f_combinations=f_ctx["plan"].combinations,
+                f_infix=ArchiveEngine.resolveArmId(f_arm.setup, f_arm.variant),
+                f_node_dir=os.path.join(f_dir, str(f_sp.nodes)),
+            )
+
+        def _mark(f_ctx: Dict[str, Any], f_dir: str, f_idxs: Sequence[int]) -> None:
+            ArchiveEngine.writeRunMarker(
+                f_dir,
+                f_ctx["plan"].run_id,
+                f_ctx["store"].layout.runRoot,
+                [
+                    f_ctx["store"].layout.pointDirName(
+                        f_ctx["plan"].scale_points[f_i], f_i
+                    )
+                    for f_i in f_idxs
+                ],
+            )
+
+        def _reports(f_dir: str) -> None:
+            try:
+                if not generateReports(f_dir):
+                    self._reportProgress(
+                        f_reporter, f"WARNING: no lsm-report.csv rows for {f_dir}"
+                    )
+            except Exception as f_err:
+                self._reportProgress(
+                    f_reporter, f"WARNING: report generation failed for {f_dir}: {f_err}"
+                )
+
+        if f_points is None:
+            f_points = range(len(f_ctxs[0]["plan"].scale_points))
+        if f_pair_dirs is None:
+            f_pair_dirs = {}
+
+        if f_group.kind == "paired":
+            f_base = next((f_c for f_c in f_ctxs if f_c["index"] == 0), None)
+            for f_ctx in f_ctxs:
+                if f_ctx["arm"].role != "run":
+                    continue
+                f_pts = [
+                    f_i
+                    for f_i in f_points
+                    if _succeeded(f_ctx, f_i)
+                    and f_base is not None
+                    and _succeeded(f_base, f_i)
+                ]
+                if not f_pts:
+                    self._reportProgress(
+                        f_reporter,
+                        f"Not archived: arm {f_ctx['arm'].label!r} or its baseline did not succeed",
+                    )
+                    continue
+                try:
+                    if f_ctx["index"] not in f_pair_dirs:
+                        f_pair_dirs[f_ctx["index"]] = (
+                            ArchiveEngine.resolvePairTargetDirectories(
+                                f_dest_root, f_ctx["arm"].arm_id
+                            )
+                        )
+                    f_run_dir, f_base_dir = f_pair_dirs[f_ctx["index"]]
+                    for f_i in f_pts:
+                        _export(f_ctx, f_i, f_run_dir)
+                        _export(f_base, f_i, f_base_dir)
+                    _reports(f_run_dir)
+                    _reports(f_base_dir)
+                    _mark(f_ctx, f_run_dir, f_pts)
+                    _mark(f_base, f_base_dir, f_pts)
+                    self._reportProgress(
+                        f_reporter, f"Archived: {f_run_dir} and {f_base_dir}"
+                    )
+                except Exception as f_err:
+                    f_ok = False
+                    self._reportProgress(
+                        f_reporter,
+                        f"ERROR: archiving arm {f_ctx['arm'].label!r} failed: {f_err}",
+                    )
+        elif f_group.kind == "backends":
+            for f_ctx in f_ctxs:
+                f_dir = os.path.join(f_dest_root, f"outputs-{f_ctx['arm'].arm_id}")
+                f_pts = [f_i for f_i in f_points if _succeeded(f_ctx, f_i)]
+                if not f_pts:
+                    continue
+                try:
+                    for f_i in f_pts:
+                        _export(f_ctx, f_i, f_dir)
+                    _reports(f_dir)
+                    _mark(f_ctx, f_dir, f_pts)
+                    self._reportProgress(f_reporter, f"Archived: {f_dir}")
+                except Exception as f_err:
+                    f_ok = False
+                    self._reportProgress(
+                        f_reporter,
+                        f"ERROR: archiving backend {f_ctx['arm'].label!r} failed: {f_err}",
+                    )
+        else:
+            for f_ctx in f_ctxs:
+                if not all(_succeeded(f_ctx, f_i) for f_i in f_points):
+                    self._reportProgress(
+                        f_reporter, "Not archived: the run did not succeed"
+                    )
+                    continue
+                try:
+                    f_dir = ArchiveEngine.resolveTargetDirectory(
+                        f_dest_root, f_ctx["arm"].arm_id
+                    )
+                    for f_i in f_points:
+                        _export(f_ctx, f_i, f_dir)
+                    _reports(f_dir)
+                    _mark(f_ctx, f_dir, list(f_points))
+                    self._reportProgress(f_reporter, f"Archived: {f_dir}")
+                except Exception as f_err:
+                    f_ok = False
+                    self._reportProgress(
+                        f_reporter, f"ERROR: archiving failed: {f_err}"
+                    )
+        return f_ok
+
     def execute(
         self,
         f_request: RunRequest,
@@ -4152,6 +4933,15 @@ class RunOrchestrator:
                     f_profile.install_prefix, "bin", "lsmiotool-worker"
                 )
 
+            # ARCHER2 compute nodes cannot read /home: run a copy from the work file
+            # system instead, like bmtool's relocation
+            from lsmiotool.lib.relocate import RelocationError, relocateForSite
+
+            try:
+                f_raw_worker = relocateForSite(f_profile, f_raw_worker, os.environ)
+            except RelocationError as f_err:
+                raise PreflightError(str(f_err)) from f_err
+
             f_is_custom_mock_validator = (
                 self.m_worker_validator is not None
                 and not hasattr(self.m_worker_validator, "validate")
@@ -4275,8 +5065,7 @@ class RunOrchestrator:
             # -----------------------------------------------------------------
             # 2. Multi-Variant Execution Loop & Archiving
             # -----------------------------------------------------------------
-            from lsmiotool.lib.archive import ArchiveEngine
-            from lsmiotool.lib.state import OverallRunState, RunStateView
+            from lsmiotool.lib.state import OverallRunState, PointRunState, RunStateView
             from lsmiotool.lib.artifacts import (
                 ArtifactError,
                 ArtifactStore,
@@ -4297,11 +5086,9 @@ class RunOrchestrator:
             )
             from lsmiotool.lib.archive import resolveArchiveDest
 
-            f_explicit_dest = (
-                f_request.out_dir
-                or (f_eff_environ and f_eff_environ.get("BM_ARCHIVE_DEST"))
-                or os.environ.get("BM_ARCHIVE_DEST")
-            )
+            # Only --dest: bmtool clears an inherited BM_ARCHIVE_DEST at startup, and
+            # parse/compare/archive resolve the default destination the same way
+            f_explicit_dest = f_request.out_dir
             f_dest_root = resolveArchiveDest(
                 f_benchmark_root,
                 f_mode=getattr(f_request, "mode", None),
@@ -4310,187 +5097,88 @@ class RunOrchestrator:
             )
 
             f_planner_obj = self.m_planner or RunPlanner
-            f_executed_views: List[RunStateView] = []
-            f_all_skipped: bool = True
             object.__setattr__(self, "m_views", ())
+            object.__setattr__(self, "m_group_failed", None)
 
-            # Purge legacy LSM_DIR_OBASE on job start to avoid ghost files from earlier aborted runs
-            if "LSM_DIR_OBASE" in os.environ and os.path.isdir(
-                os.environ["LSM_DIR_OBASE"]
-            ):
-                for f_entry in os.listdir(os.environ["LSM_DIR_OBASE"]):
-                    f_entry_path = os.path.join(os.environ["LSM_DIR_OBASE"], f_entry)
-                    if os.path.isdir(f_entry_path):
-                        shutil.rmtree(f_entry_path)
-                    else:
-                        try:
-                            os.unlink(f_entry_path)
-                        except OSError:
-                            pass
+            # -----------------------------------------------------------------
+            # 2.1. Arms: the configurations bmtool runs in one allocation
+            # -----------------------------------------------------------------
+            from lsmiotool.lib.arms import ArmError, resolveArmGroup
 
-            for f_cur_variant in f_request.variants:
-                f_clean_setup = f_request.setup or "NATIVE-M"
-                f_arm_id = ArchiveEngine.resolveArmId(f_clean_setup, f_cur_variant)
-                f_target_dir = os.path.join(
-                    os.path.abspath(f_dest_root), f"outputs-{f_arm_id}"
+            try:
+                f_group = resolveArmGroup(
+                    f_request,
+                    f_norm_setup,
+                    f_profile.install_prefix,
+                    f_version_tag=f_kwargs.get("f_version_tag"),
                 )
-                f_target_dir_run = os.path.join(
-                    os.path.abspath(f_dest_root), f"outputs-{f_arm_id}:run"
-                )
+            except ArmError as f_err:
+                raise PreflightError(str(f_err)) from f_err
 
-                # Resumption check (INV-MULTI-3, INV-PAIR-7)
-                if f_request.resume and (
-                    os.path.isdir(f_target_dir) or os.path.isdir(f_target_dir_run)
-                ):
-                    f_var_label = (
-                        f_cur_variant if f_cur_variant is not None else "default"
-                    )
-                    f_msg = f"[RESUME] Skipping variant {f_var_label!r}"
-                    if f_eff_reporter is not None:
-                        try:
-                            if hasattr(f_eff_reporter, "reportProgress"):
-                                f_eff_reporter.reportProgress(f_msg)
-                            elif hasattr(f_eff_reporter, "emit"):
-                                f_eff_reporter.emit(f_msg)
-                            elif callable(f_eff_reporter):
-                                f_eff_reporter(f_msg)
-                        except Exception:
-                            pass
-                    else:
-                        sys.stdout.write(f"{f_msg}\n")
-                    continue
+            # Check every arm's binary (each backend, bm_native:main) and the LSMIO ADIOS2
+            # plugin before submitting anything, like bmtool does
+            if f_target == "lsmio" and not f_is_custom_mock_validator:
+                for f_arm in f_group.arms:
+                    self._preflightArm(f_arm, f_profile)
 
-                f_all_skipped = False
-
-                # Sub-request creation for single variant execution
-                f_sub_request = RunRequest(
-                    f_target=f_request.target,
-                    f_scale=f_request.scale,
-                    f_ssd=f_request.ssd,
-                    f_setup=f_request.setup,
-                    f_variant=f_cur_variant,
-                    f_wallhour=f_request.wallhour,
-                    f_walltime=f_request.walltime,
-                    f_fast=f_request.fast,
-                )
-
-                try:
-                    f_plan = f_planner_obj.createPlan(
-                        f_request=f_sub_request,
-                        f_profile=f_profile,
-                        f_run_id_source=self.m_run_id_source,
-                        f_clock=self.m_clock,
-                        f_token_source=self.m_token_source,
-                    )
-                except PlanValidationError as f_err:
-                    raise PreflightError(str(f_err)) from f_err
-                except Exception as f_err:
-                    raise PreflightError(f"Plan creation failed: {f_err}") from f_err
-
-                if self.m_artifact_store_factory is not None:
-                    f_artifact_store = self.m_artifact_store_factory(
-                        f_benchmark_root, f_plan.run_id
-                    )
-                else:
-                    f_artifact_store = ArtifactStore(f_benchmark_root, f_plan.run_id)
-
-                object.__setattr__(self, "m_last_plan", f_plan)
-                object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
-
-                try:
-                    f_artifact_store.allocateRun(f_plan)
-                except ArtifactError as f_err:
-                    raise OrchestrationError(
-                        f"Failed to allocate run: {f_err}"
-                    ) from f_err
-
-                if f_eff_reporter is not None:
-                    try:
-                        f_eff_reporter.reportRunIdentity(
-                            f_plan.run_id, f_artifact_store.layout.runRoot
-                        )
-                    except Exception:
-                        pass
-
-                f_control_lock = f_artifact_store.getControlLock()
-                try:
-                    f_control_lock.acquire(f_blocking=False)
-                except LockContentionError as f_err:
-                    raise OrchestrationError(
-                        f"Control lock contention on run '{f_plan.run_id}': {f_err}"
-                    ) from f_err
-                except ArtifactError as f_err:
-                    raise OrchestrationError(
-                        f"Failed to acquire control lock on run '{f_plan.run_id}': {f_err}"
-                    ) from f_err
-
-                f_view = self._executeLoop(
-                    f_plan=f_plan,
+            # Allocation resources (walltime) come from the whole request, so the
+            # backends / versioned / paired walltime rules apply to the shared job
+            try:
+                f_resources_plan = f_planner_obj.createPlan(
+                    f_request=f_request,
                     f_profile=f_profile,
-                    f_artifact_store=f_artifact_store,
-                    f_control_lock=f_control_lock,
-                    f_validated_worker=f_validated_worker,
-                    f_validated_account=f_validated_account,
-                    f_validated_email=f_validated_email,
-                    f_sig_coord=f_sig_coord,
-                    f_reporter=f_eff_reporter,
-                    **f_kwargs,
+                    f_run_id_source=lambda: "run-resources",
+                    f_clock=self.m_clock,
                 )
-                f_executed_views.append(f_view)
-                object.__setattr__(self, "m_last_view", f_view)
+            except PlanValidationError as f_err:
+                raise PreflightError(str(f_err)) from f_err
+            except Exception as f_err:
+                raise PreflightError(f"Plan creation failed: {f_err}") from f_err
 
-                # Fail-fast check
-                if (
-                    f_view.state
-                    in (
-                        OverallRunState.FAILED,
-                        OverallRunState.CANCELLED,
-                        OverallRunState.INTERRUPTED,
-                    )
-                    or self.exitCode != 0
-                ):
-                    object.__setattr__(self, "m_views", tuple(f_executed_views))
-                    return f_view
-
-                # Auto-archiving
-                if f_request.effective_archive:
-                    f_source_dir = None
-                    if "LSM_DIR_OBASE" in os.environ and os.path.isdir(
-                        os.environ["LSM_DIR_OBASE"]
+            # -----------------------------------------------------------------
+            # 2.2. Resume (bmtool batch.in.sh): skip a variant whose :run archive exists
+            # or a backend whose <nodes> archive exists. Standalone runs and the versioned
+            # run without variants have no resume in bmtool: they rerun.
+            # -----------------------------------------------------------------
+            f_skip: Set[Tuple[int, int]] = set()
+            f_n_points = len(f_resources_plan.scale_points)
+            if f_request.resume and f_group.archive and f_group.kind != "single":
+                for f_arm_idx, f_arm in enumerate(f_group.arms):
+                    if f_arm.arm_id is None or (
+                        f_group.kind == "paired" and f_arm.variant is None
                     ):
-                        f_source_dir = os.environ["LSM_DIR_OBASE"]
-                    elif (
-                        hasattr(f_artifact_store, "layout")
-                        and hasattr(f_artifact_store.layout, "runRoot")
-                        and os.path.isdir(f_artifact_store.layout.runRoot)
-                    ):
-                        f_source_dir = f_artifact_store.layout.runRoot
-                    elif hasattr(f_artifact_store, "run_root") and os.path.isdir(
-                        f_artifact_store.run_root
-                    ):
-                        f_source_dir = f_artifact_store.run_root
-                    else:
-                        f_source_dir = os.path.join(f_benchmark_root, "outputs")
+                        continue
+                    for f_pt_idx, f_sp in enumerate(f_resources_plan.scale_points):
+                        if f_group.kind == "backends":
+                            f_done = os.path.isdir(
+                                os.path.join(
+                                    f_dest_root, f"outputs-{f_arm.arm_id}", str(f_sp.nodes)
+                                )
+                            )
+                        else:
+                            f_done = os.path.isdir(
+                                os.path.join(f_dest_root, f"outputs-{f_arm.arm_id}:run")
+                            )
+                        if f_done:
+                            f_skip.add((f_arm_idx, f_pt_idx))
+                    if all((f_arm_idx, f_p) in f_skip for f_p in range(f_n_points)):
+                        self._reportProgress(
+                            f_eff_reporter, f"[RESUME] Skipping variant {f_arm.label!r}"
+                        )
+                if f_group.is_paired:
+                    # The baseline only runs when some variant still needs it
+                    for f_p in range(f_n_points):
+                        if all(
+                            (f_i, f_p) in f_skip for f_i in range(1, len(f_group.arms))
+                        ):
+                            f_skip.add((0, f_p))
 
-                    f_role = (
-                        "run"
-                        if f_cur_variant not in ("", "default", "base")
-                        and f_cur_variant is not None
-                        else None
-                    )
-                    ArchiveEngine.executeArchive(
-                        f_source_dir=f_source_dir,
-                        f_dest_root=f_dest_root,
-                        f_arm_id=f_arm_id,
-                        f_role=f_role,
-                    )
-
-            object.__setattr__(self, "m_views", tuple(f_executed_views))
-
-            if f_executed_views:
-                return f_executed_views[-1]
-
-            if f_all_skipped:
+            f_active_arms = [
+                f_i
+                for f_i in range(len(f_group.arms))
+                if not all((f_i, f_p) in f_skip for f_p in range(f_n_points))
+            ]
+            if not f_active_arms:
                 synthetic_view = RunStateView(
                     f_run_id="resumed",
                     f_state=OverallRunState.SUCCEEDED,
@@ -4499,9 +5187,219 @@ class RunOrchestrator:
                     f_has_interruption=False,
                 )
                 object.__setattr__(self, "m_last_view", synthetic_view)
+                object.__setattr__(self, "m_group_failed", False)
                 return synthetic_view
 
-            return self.m_last_view
+            # -----------------------------------------------------------------
+            # 2.3. One run (plan, run root, evidence) per arm
+            # -----------------------------------------------------------------
+            f_ctxs: List[Dict[str, Any]] = []
+            try:
+                for f_arm_idx in f_active_arms:
+                    f_arm = f_group.arms[f_arm_idx]
+                    f_arm_profile = self._profileWithOverrides(
+                        f_profile, f_arm.executable_overrides
+                    )
+                    f_sub_request = RunRequest(
+                        f_target=f_request.target,
+                        f_scale=f_request.scale,
+                        f_ssd=f_request.ssd,
+                        f_setup=f_arm.setup,
+                        f_variant=f_arm.variant,
+                        f_wallhour=f_request.wallhour,
+                        f_walltime=f_request.walltime,
+                        f_fast=f_request.fast,
+                    )
+                    try:
+                        f_plan = f_planner_obj.createPlan(
+                            f_request=f_sub_request,
+                            f_profile=f_arm_profile,
+                            f_run_id_source=self.m_run_id_source,
+                            f_clock=self.m_clock,
+                            f_token_source=self.m_token_source,
+                        )
+                    except PlanValidationError as f_err:
+                        raise PreflightError(str(f_err)) from f_err
+                    except Exception as f_err:
+                        raise PreflightError(f"Plan creation failed: {f_err}") from f_err
+                    if f_group.kind != "single":
+                        # The arms share one job per point, submitted with the whole
+                        # request's resources: record those, not this arm's own
+                        f_plan = RunPlan(
+                            f_run_id=f_plan.run_id,
+                            f_request=f_plan.request,
+                            f_profile=f_plan.profile,
+                            f_scale_points=f_plan.scale_points,
+                            f_combinations=f_plan.combinations,
+                            f_scheduled_points=f_resources_plan.scheduled_points,
+                            f_tokens=f_plan.tokens,
+                            f_manifest_timestamp=f_plan.manifest_timestamp,
+                            f_lmp_task_tuning=f_plan.lmp_task_tuning,
+                        )
+
+                    if self.m_artifact_store_factory is not None:
+                        f_artifact_store = self.m_artifact_store_factory(
+                            f_benchmark_root, f_plan.run_id
+                        )
+                    else:
+                        f_artifact_store = ArtifactStore(f_benchmark_root, f_plan.run_id)
+
+                    object.__setattr__(self, "m_last_plan", f_plan)
+                    object.__setattr__(self, "m_last_artifact_store", f_artifact_store)
+
+                    try:
+                        f_artifact_store.allocateRun(f_plan)
+                    except ArtifactError as f_err:
+                        raise OrchestrationError(
+                            f"Failed to allocate run: {f_err}"
+                        ) from f_err
+
+                    if f_eff_reporter is not None:
+                        try:
+                            if len(f_group.arms) > 1:
+                                f_eff_reporter.reportProgress(f"Arm: {f_arm.label}")
+                            f_eff_reporter.reportRunIdentity(
+                                f_plan.run_id, f_artifact_store.layout.runRoot
+                            )
+                        except Exception:
+                            pass
+
+                    f_control_lock = f_artifact_store.getControlLock()
+                    try:
+                        f_control_lock.acquire(f_blocking=False)
+                    except LockContentionError as f_err:
+                        raise OrchestrationError(
+                            f"Control lock contention on run '{f_plan.run_id}': {f_err}"
+                        ) from f_err
+                    except ArtifactError as f_err:
+                        raise OrchestrationError(
+                            f"Failed to acquire control lock on run '{f_plan.run_id}': {f_err}"
+                        ) from f_err
+
+                    f_ctxs.append(
+                        {
+                            "index": f_arm_idx,
+                            "arm": f_arm,
+                            "plan": f_plan,
+                            "store": f_artifact_store,
+                            "lock": f_control_lock,
+                            "profile": f_arm_profile,
+                        }
+                    )
+            except BaseException:
+                for f_ctx in f_ctxs:
+                    try:
+                        f_ctx["lock"].release()
+                    except Exception:
+                        pass
+                raise
+
+            # Arms of a multi-arm run say so next to their manifest: they are archived by
+            # this run, and 'lsmiotool archive' must not take one for a standalone run
+            if f_group.kind != "single":
+                from lsmiotool.lib.archive import ArchiveEngine
+
+                f_group_runs = [f_ctx["plan"].run_id for f_ctx in f_ctxs]
+                for f_ctx in f_ctxs:
+                    f_arm = f_ctx["arm"]
+                    try:
+                        with open(
+                            os.path.join(
+                                f_ctx["store"].layout.runRoot,
+                                ArchiveEngine.ARM_MARKER_FILE,
+                            ),
+                            "w",
+                            encoding="utf-8",
+                        ) as f_f:
+                            json.dump(
+                                {
+                                    "group_kind": f_group.kind,
+                                    "label": f_arm.label,
+                                    "role": f_arm.role,
+                                    "arm_id": f_arm.arm_id,
+                                    "group_run_ids": f_group_runs,
+                                },
+                                f_f,
+                                indent=2,
+                            )
+                    except OSError as f_err:
+                        self._reportProgress(
+                            f_eff_reporter,
+                            f"WARNING: cannot write the arm marker of {f_ctx['plan'].run_id}: {f_err}",
+                        )
+
+            # -----------------------------------------------------------------
+            # 2.4. Execute
+            # -----------------------------------------------------------------
+            object.__setattr__(self, "m_group_ctxs", tuple(f_ctxs))
+            f_archive_ok = True
+            if f_group.kind == "single":
+                f_ctx = f_ctxs[0]
+                f_view = self._executeLoop(
+                    f_plan=f_ctx["plan"],
+                    f_profile=f_profile,
+                    f_artifact_store=f_ctx["store"],
+                    f_control_lock=f_ctx["lock"],
+                    f_validated_worker=f_validated_worker,
+                    f_validated_account=f_validated_account,
+                    f_validated_email=f_validated_email,
+                    f_sig_coord=f_sig_coord,
+                    f_reporter=f_eff_reporter,
+                    f_resources_plan=f_resources_plan,
+                    **f_kwargs,
+                )
+                f_ctx["view"] = f_view
+                f_ctx["evidence"] = self.m_last_evidence_store
+            else:
+                f_archive_ok = self._executeArmGroup(
+                    f_group=f_group,
+                    f_ctxs=f_ctxs,
+                    f_skip=f_skip,
+                    f_resources_plan=f_resources_plan,
+                    f_profile=f_profile,
+                    f_validated_worker=f_validated_worker,
+                    f_validated_account=f_validated_account,
+                    f_validated_email=f_validated_email,
+                    f_sig_coord=f_sig_coord,
+                    f_dest_root=f_dest_root,
+                    f_reporter=f_eff_reporter,
+                    **f_kwargs,
+                )
+
+            f_views = [f_ctx["view"] for f_ctx in f_ctxs]
+            object.__setattr__(self, "m_views", tuple(f_views))
+
+            # An arm counts when every point it ran succeeded (resumed points did not run)
+            f_failed = f_sig_coord.is_interrupted
+            for f_ctx in f_ctxs:
+                for f_pt_idx, f_pv in enumerate(f_ctx["view"].point_states):
+                    if (f_ctx["index"], f_pt_idx) in f_skip:
+                        continue
+                    if f_pv.state != PointRunState.SUCCEEDED:
+                        f_failed = True
+
+            # -----------------------------------------------------------------
+            # 2.5. Archive in bmtool's layout (multi-arm runs archived each point
+            # as its job ended)
+            # -----------------------------------------------------------------
+            if (
+                f_group.kind == "single"
+                and f_group.archive
+                and not f_sig_coord.is_interrupted
+            ):
+                f_archive_ok = self._archiveGroup(
+                    f_group, f_ctxs, f_skip, f_dest_root, f_eff_reporter
+                )
+            if not f_archive_ok:
+                f_failed = True
+
+            object.__setattr__(self, "m_group_failed", f_failed)
+            f_last = next(
+                (f_v for f_v in f_views if f_v.state != OverallRunState.SUCCEEDED),
+                f_views[-1],
+            )
+            object.__setattr__(self, "m_last_view", f_last)
+            return f_last
 
     def recoverRun(
         self,
@@ -4519,6 +5417,7 @@ class RunOrchestrator:
         """
         if not isinstance(f_plan, RunPlan):
             raise PreflightError(f"f_plan must be RunPlan, got: {f_plan!r}")
+        object.__setattr__(self, "m_group_failed", None)
 
         f_eff_reporter = (
             f_reporter
@@ -4708,6 +5607,7 @@ class RunOrchestrator:
         f_validated_email: Optional[str],
         f_sig_coord: Any,
         f_reporter: Optional[Any] = None,
+        f_resources_plan: Optional[RunPlan] = None,
         **f_kwargs: Any,
     ) -> Any:
         f_eff_reporter = (
@@ -4829,7 +5729,7 @@ class RunOrchestrator:
                 f_output_path = os.path.join(f_logs_dir, "job.out")
                 f_error_path = os.path.join(f_logs_dir, "job.err")
 
-                f_point_res = f_plan.scheduled_points[f_idx]
+                f_point_res = (f_resources_plan or f_plan).scheduled_points[f_idx]
                 f_token = f_plan.tokens[f_idx]
                 f_mail_mode_val: Optional[Any] = None
 
@@ -5064,6 +5964,7 @@ class RunOrchestrator:
                     f_obs_seq = len(f_existing_obs) + 1
 
                 f_point_terminal = False
+                f_unknown_polls = 0
                 while not f_point_terminal:
                     if f_sig_coord.is_interrupted:
                         # 1. Record INTERRUPTED control event FIRST
@@ -5115,9 +6016,17 @@ class RunOrchestrator:
                     )
                     f_obs_seq += 1
 
-                    if (
-                        f_job_state.is_terminal
-                        or f_job_state == SchedulerJobState.UNKNOWN
+                    if f_job_state == SchedulerJobState.UNKNOWN:
+                        # A failed or empty squeue/sacct query (e.g. sacct lag right
+                        # after submit) is not a job outcome: keep polling, like
+                        # bmtool's wait_for_completion, within a bounded budget.
+                        f_unknown_polls += 1
+                    else:
+                        f_unknown_polls = 0
+
+                    if f_job_state.is_terminal or (
+                        f_job_state == SchedulerJobState.UNKNOWN
+                        and f_unknown_polls > self.UNKNOWN_POLL_LIMIT
                     ):
                         f_point_terminal = True
                     elif f_sig_coord.is_interrupted:
@@ -5153,19 +6062,22 @@ class RunOrchestrator:
                 f_current_view = f_reconciler_obj.reconcile(f_plan, f_evidence_store)
                 f_pt_view = f_current_view.point_states[f_idx]
 
-                if (
-                    f_sig_coord.is_interrupted
-                    or f_pt_view.state != PointRunState.SUCCEEDED
-                ):
-                    if f_sig_coord.is_interrupted:
-                        self._recordInterruptionControlEvent(
-                            f_evidence_store, f_sig_coord
-                        )
-                        f_current_view = f_reconciler_obj.reconcile(
-                            f_plan, f_evidence_store
-                        )
+                if f_sig_coord.is_interrupted:
+                    self._recordInterruptionControlEvent(f_evidence_store, f_sig_coord)
+                    f_current_view = f_reconciler_obj.reconcile(
+                        f_plan, f_evidence_store
+                    )
                     f_all_points_succeeded = False
                     break
+                if f_pt_view.state == PointRunState.INDETERMINATE:
+                    # The job was lost track of and may still hold its nodes or
+                    # Lustre: never overlap it with the next point.
+                    f_all_points_succeeded = False
+                    break
+                if f_pt_view.state != PointRunState.SUCCEEDED:
+                    # bmtool submits every scale point regardless of earlier
+                    # failures; record it and carry on with the next point.
+                    f_all_points_succeeded = False
 
             # -----------------------------------------------------------------
             # 4. Finalization

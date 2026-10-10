@@ -30,10 +30,11 @@
 
 """Atomic move-on-archive semantics and collision-guarded archive engine for LSMIO."""
 
+import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 class ArchiveError(Exception):
@@ -43,9 +44,23 @@ class ArchiveError(Exception):
 
 
 class ArchiveRequest:
-    """Immutable parsed and validated archive request value object."""
+    """Immutable parsed and validated archive request value object.
 
-    __slots__ = ("m_target", "m_scale", "m_variant", "m_dest", "_frozen")
+    setup: LSMIO setup naming the arm (bmtool BM_SETUP); None means BM_SETUP from
+    the environment, else NATIVE-M (or, for an lsmiotool run root, the run's own).
+    source: explicit source (an lsmiotool run root or a bmtool outputs directory);
+    None means resolve it from the benchmark root.
+    """
+
+    __slots__ = (
+        "m_target",
+        "m_scale",
+        "m_variant",
+        "m_dest",
+        "m_setup",
+        "m_source",
+        "_frozen",
+    )
 
     def __init__(
         self,
@@ -53,6 +68,8 @@ class ArchiveRequest:
         f_scale: str,
         f_variant: Optional[str] = None,
         f_dest: Optional[str] = None,
+        f_setup: Optional[str] = None,
+        f_source: Optional[str] = None,
     ) -> None:
         if not isinstance(f_target, str) or not f_target.strip():
             raise ArchiveError(f"target must be a non-empty string, got: {f_target!r}")
@@ -68,6 +85,18 @@ class ArchiveRequest:
             raise ArchiveError(
                 f"dest must be a non-empty string or None, got: {f_dest!r}"
             )
+        if f_setup is not None and (
+            not isinstance(f_setup, str) or not f_setup.strip()
+        ):
+            raise ArchiveError(
+                f"setup must be a non-empty string or None, got: {f_setup!r}"
+            )
+        if f_source is not None and (
+            not isinstance(f_source, str) or not f_source.strip()
+        ):
+            raise ArchiveError(
+                f"source must be a non-empty string or None, got: {f_source!r}"
+            )
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
@@ -75,6 +104,8 @@ class ArchiveRequest:
             "m_variant", f_variant.strip().lower() if f_variant else None
         )
         super().__setattr__("m_dest", f_dest.strip() if f_dest else None)
+        super().__setattr__("m_setup", f_setup.strip().upper() if f_setup else None)
+        super().__setattr__("m_source", f_source.strip() if f_source else None)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -105,21 +136,36 @@ class ArchiveRequest:
     def dest(self) -> Optional[str]:
         return self.m_dest
 
+    @property
+    def setup(self) -> Optional[str]:
+        return self.m_setup
+
+    @property
+    def source(self) -> Optional[str]:
+        return self.m_source
+
     def toDict(self) -> Dict[str, Any]:
         """Convert ArchiveRequest to dictionary representation."""
-        return {
+        f_dict: Dict[str, Any] = {
             "target": self.m_target,
             "scale": self.m_scale,
             "variant": self.m_variant,
             "dest": self.m_dest,
         }
+        if self.m_setup is not None:
+            f_dict["setup"] = self.m_setup
+        if self.m_source is not None:
+            f_dict["source"] = self.m_source
+        return f_dict
 
     def __repr__(self) -> str:
         return (
             f"ArchiveRequest(target={self.m_target!r}, "
             f"scale={self.m_scale!r}, "
             f"variant={self.m_variant!r}, "
-            f"dest={self.m_dest!r})"
+            f"dest={self.m_dest!r}, "
+            f"setup={self.m_setup!r}, "
+            f"source={self.m_source!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -129,11 +175,22 @@ class ArchiveRequest:
                 and self.m_scale == f_other.m_scale
                 and self.m_variant == f_other.m_variant
                 and self.m_dest == f_other.m_dest
+                and self.m_setup == f_other.m_setup
+                and self.m_source == f_other.m_source
             )
         return False
 
     def __hash__(self) -> int:
-        return hash((self.m_target, self.m_scale, self.m_variant, self.m_dest))
+        return hash(
+            (
+                self.m_target,
+                self.m_scale,
+                self.m_variant,
+                self.m_dest,
+                self.m_setup,
+                self.m_source,
+            )
+        )
 
 
 def resolveArchiveDest(
@@ -190,6 +247,168 @@ def resolveArchiveDest(
 
 class ArchiveEngine:
     """Core engine executing move-on-archive semantics with collision avoidance."""
+
+    # Written into an archive exported from an lsmiotool run root (exportRunRoot), so
+    # the same run is not archived twice; not part of bmtool's layout
+    RUN_MARKER_FILE = ".lsmiotool-run.json"
+
+    # Written next to a multi-arm run's manifest by 'lsmiotool run': the arm belongs to a
+    # paired/versioned/backends group and is archived by the run itself
+    ARM_MARKER_FILE = ".lsmiotool-arm.json"
+
+    @classmethod
+    def writeRunMarker(
+        cls,
+        f_target: Union[str, Path],
+        f_run_id: str,
+        f_run_root: Union[str, Path],
+        f_points: List[str],
+    ) -> None:
+        """Record in an archive dir which run (and points) it was exported from, so the
+        same run is not archived twice. Points of an existing marker for the same run are
+        kept (a backends arm is archived one point at a time)."""
+        from lsmiotool.lib.log import Console
+
+        f_path = os.path.join(str(f_target), cls.RUN_MARKER_FILE)
+        f_all_points = list(f_points)
+        try:
+            with open(f_path, "r", encoding="utf-8") as f_f:
+                f_old = json.load(f_f)
+            if isinstance(f_old, dict) and f_old.get("run_id") == f_run_id:
+                f_all_points = sorted(set(f_old.get("points") or []) | set(f_points))
+        except (OSError, ValueError):
+            pass
+        try:
+            with open(f_path, "w", encoding="utf-8") as f_f:
+                json.dump(
+                    {
+                        "run_id": f_run_id,
+                        "run_root": os.path.abspath(str(f_run_root)),
+                        "points": f_all_points,
+                    },
+                    f_f,
+                    indent=2,
+                )
+        except OSError as f_err:
+            Console.warning(f"Cannot write {cls.RUN_MARKER_FILE} in {f_target}: {f_err}")
+
+    @classmethod
+    def readArmMarker(cls, f_run_root: Union[str, Path]) -> Optional[Dict[str, Any]]:
+        """The arm marker of a run root written by a multi-arm 'lsmiotool run', or None."""
+        try:
+            with open(
+                os.path.join(str(f_run_root), cls.ARM_MARKER_FILE), "r", encoding="utf-8"
+            ) as f_f:
+                f_doc = json.load(f_f)
+        except (OSError, ValueError):
+            return None
+        return f_doc if isinstance(f_doc, dict) else None
+
+    @classmethod
+    def findArchivedRun(
+        cls, f_dest_root: Union[str, Path], f_run_id: str
+    ) -> Optional[str]:
+        """The outputs-* dir under f_dest_root exported from run f_run_id, or None."""
+        f_dest = str(f_dest_root)
+        try:
+            f_entries = sorted(os.listdir(f_dest))
+        except OSError:
+            return None
+        for f_entry in f_entries:
+            if not f_entry.startswith("outputs-"):
+                continue
+            f_marker = os.path.join(f_dest, f_entry, cls.RUN_MARKER_FILE)
+            try:
+                with open(f_marker, "r", encoding="utf-8") as f_f:
+                    f_doc = json.load(f_f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(f_doc, dict) and f_doc.get("run_id") == f_run_id:
+                return os.path.join(f_dest, f_entry)
+        return None
+
+    @classmethod
+    def exportRunRoot(
+        cls,
+        f_run_root: Union[str, Path],
+        f_dest_root: Union[str, Path],
+        f_arm_id: str,
+        f_target_path: Optional[Union[str, Path]] = None,
+    ) -> Tuple[str, List[str], List[str]]:
+        """Archive an lsmiotool run root in bmtool's layout, as 'lsmiotool run' does.
+
+        The rank logs of every succeeded scale point are copied (lib/export.py) to
+        <target>/<nodes>/<date>/out-<arm>-<rf>-<bs>-...txt and the agg files and
+        lsm-report.csv generated; the run root itself is left untouched (it is the
+        run's evidence), so nothing is recreated in its place.
+
+        Returns:
+            (target directory, exported point ids, skipped point ids)
+
+        Raises:
+            ArchiveError: When the run root cannot be read or no point could be
+                exported (nothing is left behind in the destination then).
+        """
+        from lsmiotool.lib.export import exportPoint, generateReports
+        from lsmiotool.lib.log import Console
+        from lsmiotool.lib.runparse import RunParseError, RunRootResolver
+        from lsmiotool.lib.state import PointRunState
+
+        try:
+            f_resolved = RunRootResolver.resolve(str(f_run_root), f_allow_partial=True)
+        except RunParseError as f_err:
+            raise ArchiveError(f"Cannot read run root {f_run_root}: {f_err}") from f_err
+
+        f_store = f_resolved.evidenceStore
+        f_skipped = [
+            f_pt.pointId
+            for f_pt in f_resolved.points
+            if f_pt.state != PointRunState.SUCCEEDED
+        ]
+        f_points = [
+            f_pt for f_pt in f_resolved.points if f_pt.state == PointRunState.SUCCEEDED
+        ]
+        if not f_points:
+            raise ArchiveError(
+                f"Run '{f_resolved.runId}' ({f_run_root}) has no succeeded scale point "
+                f"to archive"
+            )
+
+        f_target = (
+            os.path.abspath(str(f_target_path))
+            if f_target_path is not None
+            else cls.resolveTargetDirectory(f_dest_root, f_arm_id)
+        )
+        f_created = not os.path.exists(f_target)
+        f_exported: List[str] = []
+        for f_pt in f_points:
+            try:
+                exportPoint(
+                    f_layout=f_store.layout,
+                    f_evidence_store=f_store,
+                    f_scale_point=f_pt.scalePoint,
+                    f_ordinal=f_pt.ordinal,
+                    f_combinations=f_resolved.plan.combinations,
+                    f_infix=f_arm_id,
+                    f_node_dir=os.path.join(f_target, str(f_pt.scalePoint.nodes)),
+                )
+            except Exception as f_err:
+                Console.warning(f"Not archiving point '{f_pt.pointId}': {f_err}")
+                f_skipped.append(f_pt.pointId)
+                continue
+            f_exported.append(f_pt.pointId)
+
+        if not f_exported:
+            if f_created:
+                shutil.rmtree(f_target, ignore_errors=True)
+            raise ArchiveError(
+                f"No point of run '{f_resolved.runId}' could be exported from {f_run_root}"
+            )
+
+        if not generateReports(f_target):
+            Console.warning(f"No lsm-report.csv rows for {f_target}")
+        cls.writeRunMarker(f_target, f_resolved.runId, f_run_root, f_exported)
+        return f_target, f_exported, f_skipped
 
     @classmethod
     def resolveArmId(
@@ -275,8 +494,14 @@ class ArchiveEngine:
         f_arm_id: str,
         f_role: Optional[str] = None,
         f_target_path: Optional[Union[str, Path]] = None,
+        f_scale: Optional[str] = None,
     ) -> str:
-        """Atomically moves f_source_dir to collision-free target, returning str (INV-PAIR-8)."""
+        """Atomically moves f_source_dir to collision-free target, returning str (INV-PAIR-8).
+
+        bmtool include/archive.in.sh semantics for a bmtool outputs directory: reports
+        are generated first when missing (for f_scale's node counts; every node dir
+        when None), the directory is moved and an empty one recreated in its place.
+        """
         if not f_source_dir or not str(f_source_dir).strip():
             raise ArchiveError(
                 f"source_dir must be a non-empty path, got: {f_source_dir!r}"
@@ -299,16 +524,9 @@ class ArchiveEngine:
         )
 
         # Ensure aggregated reports exist prior to moving into archive
-        report_file = abs_source / "lsm-report.csv"
-        if not report_file.is_file():
-            try:
-                if any(abs_source.glob("*/*/out-*.txt*")):
-                    from lsmiotool.lib.output import LsmioAggOutput
+        from lsmiotool.lib.output import ensureLsmioReports
 
-                    agg = LsmioAggOutput(str(abs_source), f_scale="variants")
-                    agg.generateReports(f_out_dir=str(abs_source))
-            except Exception:
-                pass
+        ensureLsmioReports(str(abs_source), f_scale=f_scale)
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
         # bmtool's clean-finish marker (jobs/batch.in.sh) is job bookkeeping, not results
@@ -361,16 +579,9 @@ class ArchiveEngine:
         )
 
         # Ensure aggregated reports exist prior to replicating staged baseline
-        report_file = abs_source / "lsm-report.csv"
-        if not report_file.is_file():
-            try:
-                if any(abs_source.glob("*/*/out-*.txt*")):
-                    from lsmiotool.lib.output import LsmioAggOutput
+        from lsmiotool.lib.output import ensureLsmioReports
 
-                    agg = LsmioAggOutput(str(abs_source), f_scale="variants")
-                    agg.generateReports(f_out_dir=str(abs_source))
-            except Exception:
-                pass
+        ensureLsmioReports(str(abs_source))
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
         try:

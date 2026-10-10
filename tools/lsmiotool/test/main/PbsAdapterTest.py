@@ -197,9 +197,9 @@ class PbsAdapterTest(unittest.TestCase):
 
     def testExactArgvEveryOperation(self) -> None:
         """Validates exact command argv for submit, exact-job query, historical query, recovery, and cancel."""
-        # 1. Submit command: ['qsub', <script_path>]
+        # 1. Submit command: ['qsub', '-V', <script_path>]
         f_submit_argv = PbsSchedulerAdapter.submitCommand("/path/to/job.sh")
-        self.assertEqual(f_submit_argv, ["qsub", "/path/to/job.sh"])
+        self.assertEqual(f_submit_argv, ["qsub", "-V", "/path/to/job.sh"])
 
         # 2. Exact-job query (active): ['qstat', '-f', '-F', 'json', <job_id>]
         f_active_argv = PbsSchedulerAdapter.activeQueryCommand("123456.isambard-pbs")

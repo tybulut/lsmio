@@ -88,6 +88,11 @@ from lsmiotool.lib.worker import (
 )
 
 
+
+def _tolerant(f_cmd: str) -> str:
+    """Module command as rendered: failures are logged, not fatal (bmtool parity)."""
+    return f'{f_cmd} || echo "WARNING: {f_cmd} failed" >&2'
+
 class MockProcessRunner:
     """Mock process runner for recording command argv and returning custom responses."""
 
@@ -204,9 +209,11 @@ class SlurmAdapterTest(unittest.TestCase):
 
     def testExactArgvForEveryOperation(self) -> None:
         """Validates exact command argv for submit, active query, accounting query, recovery, and cancel."""
-        # 1. Submit command: ['sbatch', '--parsable', <script>]
+        # 1. Submit command: ['sbatch', '--parsable', '--export=ALL', <script>]
         f_submit_argv = SlurmSchedulerAdapter.submitCommand("/path/to/job.sh")
-        self.assertEqual(f_submit_argv, ["sbatch", "--parsable", "/path/to/job.sh"])
+        self.assertEqual(
+            f_submit_argv, ["sbatch", "--parsable", "--export=ALL", "/path/to/job.sh"]
+        )
 
         # 2. Active query command: ['squeue', '--noheader', f'--jobs={job_id}', '--format=%i|%T']
         f_active_argv = SlurmSchedulerAdapter.activeQueryCommand("123456")
@@ -1071,7 +1078,8 @@ class SlurmAdapterTest(unittest.TestCase):
         self.assertEqual(f_lines_viking[13], f"#SBATCH --output={self.m_output_path}")
         self.assertEqual(f_lines_viking[14], f"#SBATCH --error={self.m_error_path}")
         self.assertEqual(f_lines_viking[15], "set -euo pipefail")
-        self.assertEqual(f_lines_viking[16], "module purge")
+        self.assertEqual(f_lines_viking[16], "set +eu")
+        self.assertEqual(f_lines_viking[17], _tolerant("module purge"))
         self.assertEqual(
             f_lines_viking[-1],
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} 0-tasks-8",

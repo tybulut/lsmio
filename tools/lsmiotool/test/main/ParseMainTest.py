@@ -480,7 +480,7 @@ class ParseMainTest(unittest.TestCase):
             "run-ext-err-lsm-001", "lsmio", "local", "NATIVE-M"
         )
         # Do NOT write mock logs
-        f_inst1 = ParseMain(f_run_root_lsm)
+        f_inst1 = ParseMain(f_run_root_lsm, "--output-dir", self.m_temp_dir)
         f_stderr = io.StringIO()
         with unittest.mock.patch("sys.stderr", f_stderr):
             f_code = f_inst1.run()
@@ -499,7 +499,8 @@ class ParseMainTest(unittest.TestCase):
         ) as f_f:
             f_f.write("Corrupted log file without summary tables\n")
 
-        f_inst2 = ParseMain(f_run_root_ior)
+        # A partial report is written: keep it out of the current directory
+        f_inst2 = ParseMain(f_run_root_ior, "--output-dir", self.m_temp_dir)
         f_stderr = io.StringIO()
         with unittest.mock.patch("sys.stderr", f_stderr):
             f_code = f_inst2.run()

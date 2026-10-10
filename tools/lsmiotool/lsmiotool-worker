@@ -70,7 +70,7 @@ def main(f_argv: Optional[Sequence[str]] = None) -> int:
         f_tokens = list(f_argv)
 
     if not f_tokens:
-        sys.stderr.write("Usage: lsmiotool-worker <allocation|rank> <args...>\n")
+        sys.stderr.write("Usage: lsmiotool-worker <allocation|allocation-group|rank> <args...>\n")
         return 1
 
     mode = f_tokens[0].strip().lower()
@@ -109,6 +109,54 @@ def main(f_argv: Optional[Sequence[str]] = None) -> int:
             return 1
         except Exception as err:
             sys.stderr.write(f"Worker error: {err}\n")
+            return 1
+
+    elif mode == "allocation-group":
+        if len(f_tokens) < 4:
+            sys.stderr.write(
+                "Usage: lsmiotool-worker allocation-group <point_id> <policy> <manifest_path>...\n"
+            )
+            return 2
+
+        point_id = f_tokens[1]
+        policy = f_tokens[2]
+        manifest_paths = f_tokens[3:]
+
+        from lsmiotool.lib.resources import ResourceLocator
+
+        runtime_layout = ResourceLocator.forSource(os.path.abspath(__file__))
+        from lsmiotool.lib.worker import (
+            AllocationController,
+            AllocationControllerError,
+            AllocationGroupRunner,
+        )
+
+        worker_exe = os.path.abspath(__file__)
+
+        def run_allocation(f_manifest_path: str, f_point_id: str) -> int:
+            try:
+                controller = AllocationController(
+                    f_worker_executable=worker_exe,
+                    f_asset_source=runtime_layout.asset_root,
+                    f_layout=None,
+                )
+                return controller.run(
+                    f_manifest_path=f_manifest_path,
+                    f_point_id=f_point_id,
+                )
+            except AllocationControllerError as err:
+                sys.stderr.write(f"AllocationController error: {err}\n")
+                return 1
+
+        try:
+            return AllocationGroupRunner.run(
+                f_point_id=point_id,
+                f_policy=policy,
+                f_manifest_paths=manifest_paths,
+                f_run_allocation=run_allocation,
+            )
+        except AllocationControllerError as err:
+            sys.stderr.write(f"AllocationController error: {err}\n")
             return 1
 
     elif mode == "rank":

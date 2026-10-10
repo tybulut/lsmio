@@ -590,6 +590,7 @@ class ResultPayloadValidator:
         "timed_out",
         "node_rank",
         "local_rank",
+        "host",
         "elapsed_seconds",
         "stage",
     }
@@ -608,6 +609,7 @@ class ResultPayloadValidator:
         "timed_out",
         "node_rank",
         "local_rank",
+        "host",
         "elapsed_seconds",
         "error",
         "signal_number",

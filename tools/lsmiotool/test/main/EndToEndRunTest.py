@@ -959,7 +959,7 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertIn("#PBS -q arm", f_pbs_large)
         self.assertIn("#PBS -m abe", f_pbs_large)
         self.assertIn("#PBS -l walltime=06:00:00", f_pbs_large)
-        self.assertIn("#PBS -l select=4:ncpus=4:mpiprocs=4:mem=32GB", f_pbs_large)
+        self.assertIn("#PBS -l select=4:ncpus=4:mpiprocs=4:mem=128GB", f_pbs_large)
         # Large shape omits pmem and pvmem
         self.assertFalse(any("pmem" in f_line for f_line in f_pbs_large))
         self.assertFalse(any("pvmem" in f_line for f_line in f_pbs_large))
@@ -2064,8 +2064,10 @@ class EndToEndRunTest(unittest.TestCase):
 
         self.assertEqual(f_view_err.state, OverallRunState.INDETERMINATE)
         self.assertEqual(f_view_err.point_states[0].state, PointRunState.INDETERMINATE)
+        # Each timed-out query is retried after one poll interval (no busy loop)
+        # until the UNKNOWN budget is spent
         self.assertEqual(
-            len(f_sleep_records), 0, "No busy loop or sleep on query timeout"
+            f_sleep_records, [8.0] * RunOrchestrator.UNKNOWN_POLL_LIMIT
         )
 
     def testEndToEndConflictAndCorruptObservations(self) -> None:

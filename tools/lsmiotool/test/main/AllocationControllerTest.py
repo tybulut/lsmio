@@ -227,9 +227,9 @@ class AllocationControllerTest(unittest.TestCase):
                 self.assertEqual(f_res.payload["status"], "success")
                 self.assertEqual(f_res.payload["exit_code"], 0)
 
-    def testEveryStageAndPositionStops(self) -> None:
-        """Tests failure at each stage (stripe, stage assets, launch, rank evidence) immediately stops execution."""
-        # 1. Failure at Lustre stripe on combination index 2 (c16_b64K)
+    def testEveryStageAndPositionContinues(self) -> None:
+        """Tests a failure at each stage (stripe, stage assets, launch) is recorded and later combinations still run (bmtool run_matrix_workload)."""
+        # 1. Failure at Lustre stripe on combination index 2 (c4_b8M)
         f_doc, f_manifest_path, f_layout = self._createManifest(
             f_target="ior", f_scale="local", f_run_id="run-stripe-fail"
         )
@@ -241,7 +241,7 @@ class AllocationControllerTest(unittest.TestCase):
             nonlocal f_stripe_call_count
             if len(f_argv) >= 2 and f_argv[0] == "lfs" and f_argv[1] == "setstripe":
                 f_stripe_call_count += 1
-                if f_stripe_call_count == 3:  # 3rd combination: c16_b64K
+                if f_stripe_call_count == 3:  # 3rd combination: c4_b8M
                     return ProcessResult(f_returncode=1, f_stderr="stripe config error")
             return ProcessResult(f_returncode=0)
 
@@ -254,33 +254,37 @@ class AllocationControllerTest(unittest.TestCase):
         )
 
         self.assertEqual(f_status, 1)
-        self.assertEqual(f_stripe_call_count, 3)
+        self.assertEqual(f_stripe_call_count, 6)
 
         f_store = EvidenceStore(f_layout, f_plan=f_doc.toRunPlan())
         f_sp = f_doc.scale_points[0]
         # Combos 0 and 1 succeeded
         self.assertEqual(
-            f_store.readControllerResult(f_sp, "c16_b8M", f_ordinal=0).payload[
+            f_store.readControllerResult(f_sp, "c4_b1M", f_ordinal=0).payload[
                 "status"
             ],
             "success",
         )
         self.assertEqual(
-            f_store.readControllerResult(f_sp, "c16_b1M", f_ordinal=0).payload[
+            f_store.readControllerResult(f_sp, "c4_b64K", f_ordinal=0).payload[
                 "status"
             ],
             "success",
         )
         # Combo 2 recorded failure
-        f_res_failed = f_store.readControllerResult(f_sp, "c16_b64K", f_ordinal=0)
+        f_res_failed = f_store.readControllerResult(f_sp, "c4_b8M", f_ordinal=0)
         self.assertEqual(f_res_failed.payload["status"], "failed")
         self.assertEqual(f_res_failed.payload["stage"], "stripe")
-        # Combos 3, 4, 5 were never attempted
-        self.assertIsNone(f_store.readControllerResult(f_sp, "c4_b8M", f_ordinal=0))
-        self.assertIsNone(f_store.readControllerResult(f_sp, "c4_b1M", f_ordinal=0))
-        self.assertIsNone(f_store.readControllerResult(f_sp, "c4_b64K", f_ordinal=0))
+        # Combos 3, 4, 5 still ran
+        for f_later in ("c16_b1M", "c16_b64K", "c16_b8M"):
+            self.assertEqual(
+                f_store.readControllerResult(f_sp, f_later, f_ordinal=0).payload[
+                    "status"
+                ],
+                "success",
+            )
 
-        # 2. Failure at Shared Launch on combination index 1 (c16_b1M) with specific exit code 42
+        # 2. Failure at Shared Launch on combination index 1 (c4_b64K) with specific exit code 42
         f_doc2, f_manifest_path2, f_layout2 = self._createManifest(
             f_target="ior", f_scale="local", f_run_id="run-launch-fail"
         )
@@ -307,18 +311,23 @@ class AllocationControllerTest(unittest.TestCase):
         )
 
         self.assertEqual(f_status2, 42)
-        self.assertEqual(f_launch_count, 2)
+        self.assertEqual(f_launch_count, 6)
         f_store2 = EvidenceStore(f_layout2, f_plan=f_doc2.toRunPlan())
         self.assertEqual(
-            f_store2.readControllerResult(f_sp, "c16_b8M", f_ordinal=0).payload[
+            f_store2.readControllerResult(f_sp, "c4_b1M", f_ordinal=0).payload[
                 "status"
             ],
             "success",
         )
-        f_fail_res2 = f_store2.readControllerResult(f_sp, "c16_b1M", f_ordinal=0)
+        f_fail_res2 = f_store2.readControllerResult(f_sp, "c4_b64K", f_ordinal=0)
         self.assertEqual(f_fail_res2.payload["status"], "failed")
         self.assertEqual(f_fail_res2.payload["exit_code"], 42)
-        self.assertIsNone(f_store2.readControllerResult(f_sp, "c16_b64K", f_ordinal=0))
+        self.assertEqual(
+            f_store2.readControllerResult(f_sp, "c4_b8M", f_ordinal=0).payload[
+                "status"
+            ],
+            "success",
+        )
 
         # 3. Failure at LMP Asset Staging (corrupt/missing asset source)
         f_doc3, f_manifest_path3, f_layout3 = self._createManifest(
@@ -338,9 +347,14 @@ class AllocationControllerTest(unittest.TestCase):
 
         self.assertEqual(f_status3, 1)
         f_store3 = EvidenceStore(f_layout3, f_plan=f_doc3.toRunPlan())
-        f_fail_res3 = f_store3.readControllerResult(f_sp, "c16_b8M", f_ordinal=0)
+        f_fail_res3 = f_store3.readControllerResult(f_sp, "c4_b1M", f_ordinal=0)
         self.assertEqual(f_fail_res3.payload["status"], "failed")
         self.assertEqual(f_fail_res3.payload["stage"], "stage_assets")
+        for f_stripe, f_block in STANDARD_COMBINATION_TUPLES:
+            f_res3 = f_store3.readControllerResult(
+                f_sp, f"c{f_stripe}_b{f_block}", f_ordinal=0
+            )
+            self.assertEqual(f_res3.payload["stage"], "stage_assets")
 
     def testSharedOneResult(self) -> None:
         """Tests IOR and LMP shared execution producing exactly 1 controller combination result per combination."""
@@ -385,6 +399,58 @@ class AllocationControllerTest(unittest.TestCase):
             f_res = f_store_lmp.readControllerResult(f_sp, f_combo, f_ordinal=0)
             self.assertIsNotNone(f_res)
             self.assertEqual(f_res.payload["status"], "success")
+
+    def testStepSettlePauseDefaultsToBmtool(self) -> None:
+        """M13: bmtool sleeps 3 s after each benchmark step; LSMIO_STEP_SETTLE_SECONDS overrides."""
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LSMIO_STEP_SETTLE_SECONDS", None)
+            with patch("time.sleep") as f_sleep:
+                AllocationController._settle()
+            f_sleep.assert_called_once_with(3.0)
+            os.environ["LSMIO_STEP_SETTLE_SECONDS"] = "0"
+            with patch("time.sleep") as f_sleep:
+                AllocationController._settle()
+            f_sleep.assert_not_called()
+
+    def testLmpRunsInStripedDataDirAndDataIsFreed(self) -> None:
+        """LMP runs from <data>/c<rf>/b<bs>/lmp-reaxff (the striped dir, like bmtool) and each
+        combination's data is removed after it completes, keeping the striped directory."""
+        f_doc, f_path, f_layout = self._createManifest(
+            f_target="lmp", f_scale="local", f_run_id="run-lmp-cwd"
+        )
+        f_sp = f_doc.scale_points[0]
+        f_lmp_cwds: List[str] = []
+        f_striped_dirs: List[str] = []
+
+        def side_effect(
+            f_argv: Sequence[str], f_kwargs: Dict[str, Any]
+        ) -> ProcessResult:
+            if f_argv[:2] == ["lfs", "setstripe"]:
+                f_striped_dirs.append(f_argv[-1])
+            elif f_argv and f_argv[0] == self.m_dev_profile.executables["lmp"]:
+                f_cwd = f_kwargs.get("f_cwd")
+                f_lmp_cwds.append(f_cwd)
+                with open(os.path.join(f_cwd, "checkpoint"), "w") as f_f:
+                    f_f.write("x")
+            return ProcessResult(f_returncode=0)
+
+        f_status = AllocationController.run(
+            f_manifest_path=f_path,
+            f_point_id=0,
+            f_runner=MockProcessRunner(f_side_effect=side_effect),
+            f_asset_source=self.m_lmp_assets_dir,
+            f_layout=f_layout,
+        )
+        self.assertEqual(f_status, 0)
+        self.assertEqual(len(f_lmp_cwds), 6)
+        for f_cwd, (f_stripe, f_block) in zip(f_lmp_cwds, STANDARD_COMBINATION_TUPLES):
+            f_data_dir = f_layout.pointDataSubdir(f_sp, f_stripe, f_block, f_ordinal=0)
+            self.assertEqual(f_cwd, os.path.join(f_data_dir, "lmp-reaxff"))
+            self.assertIn(f_data_dir, f_striped_dirs)
+            self.assertTrue(os.path.isdir(f_data_dir))
+            self.assertEqual(os.listdir(f_data_dir), [])
 
     def _recordMockRankResult(
         self,

@@ -36,6 +36,8 @@ import re
 import stat
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
+from lsmiotool.lib import data
+from lsmiotool.lib.log import Console
 from lsmiotool.lib.artifacts import (
     ArtifactError,
     ArtifactLayout,
@@ -556,6 +558,39 @@ class ResolvedRun:
         return False
 
 
+class ArchivedArtifactLayout(ArtifactLayout):
+    """ArtifactLayout of a run root moved out of '<benchmark_root>/runs/<run_id>'.
+
+    The archive step moves (and may rename) a run root, e.g. to
+    '<benchmark_root>/lsmio-archive/variants/outputs-native-legacy:run'. Every path
+    of the layout derives from runRoot, so pinning it to the archived directory
+    makes the manifest, control and point paths resolve inside the archive.
+    """
+
+    __slots__ = ("m_archived_root",)
+
+    def __init__(self, f_archived_root: str, f_run_id: str) -> None:
+        f_abs_root = os.path.abspath(f_archived_root)
+        object.__setattr__(self, "m_archived_root", f_abs_root)
+        super().__init__(os.path.dirname(f_abs_root), f_run_id)
+
+    @property
+    def runRoot(self) -> str:
+        return self.m_archived_root
+
+    @property
+    def run_root(self) -> str:
+        return self.m_archived_root
+
+    @property
+    def runsDir(self) -> str:
+        return os.path.dirname(self.m_archived_root)
+
+    @property
+    def runs_dir(self) -> str:
+        return self.runsDir
+
+
 class RunRootResolver:
     """Explicit, manifest-aware run root resolver with strict boundary validation."""
 
@@ -641,23 +676,28 @@ class RunRootResolver:
     def _createArtifactLayout(
         cls, f_abs_root: str, f_manifest: ManifestDocument
     ) -> ArtifactLayout:
-        """Create and containment-validate ArtifactLayout from run root and manifest."""
+        """Create and containment-validate the ArtifactLayout for a run root.
+
+        A pristine run root is '<benchmark_root>/runs/<run_id>'. A root that was moved
+        or renamed by the archive step (e.g. '<dest>/outputs-native-legacy:run') keeps
+        its manifest.json and point layout and is resolved in place.
+        """
         f_root_basename = os.path.basename(f_abs_root)
-        if f_root_basename != f_manifest.run_id:
-            raise RunRootResolutionError(
-                f"Run root directory basename '{f_root_basename}' does not match manifest run_id '{f_manifest.run_id}'"
-            )
-
         f_parent = os.path.dirname(f_abs_root)
-        if os.path.basename(f_parent) != "runs":
-            raise RunRootResolutionError(
-                f"Run root directory '{f_abs_root}' is not located in a 'runs' directory: parent is '{f_parent}'"
-            )
+        f_is_pristine = (
+            f_root_basename == f_manifest.run_id
+            and os.path.basename(f_parent) == "runs"
+        )
 
-        f_bm_root = os.path.dirname(f_parent)
         try:
-            f_layout = ArtifactLayout(f_bm_root, f_manifest.run_id)
-            validatePathContainment(f_layout.runRoot, f_layout.benchmarkRoot)
+            if f_is_pristine:
+                f_layout: ArtifactLayout = ArtifactLayout(
+                    os.path.dirname(f_parent), f_manifest.run_id
+                )
+                validatePathContainment(f_layout.runRoot, f_layout.benchmarkRoot)
+            else:
+                f_layout = ArchivedArtifactLayout(f_abs_root, f_manifest.run_id)
+                validatePathContainment(f_layout.runRoot, f_parent)
         except Exception as f_err:
             raise RunRootResolutionError(
                 f"Layout containment validation failed for '{f_abs_root}': {f_err}"
@@ -666,8 +706,17 @@ class RunRootResolver:
         return f_layout
 
     @classmethod
-    def resolve(cls, f_explicit_root: str) -> ResolvedRun:
-        """Resolve and validate an explicit run root, verifying that the whole run succeeded."""
+    def resolve(
+        cls, f_explicit_root: str, f_allow_partial: bool = False
+    ) -> ResolvedRun:
+        """Resolve and validate an explicit run root.
+
+        By default the whole run must have succeeded. With f_allow_partial a run in
+        any reconciled state resolves: every scale point is returned with whatever
+        controller/rank results exist (None for missing ones), so callers can report
+        the points and combinations that completed (bmtool reports whatever output
+        exists). Check ResolvedRun.isSuccess / ResolvedPoint.isSuccess.
+        """
         f_abs_root = cls._validateRootDirectory(f_explicit_root)
         f_manifest = cls._loadAndValidateManifest(f_abs_root)
         f_layout = cls._createArtifactLayout(f_abs_root, f_manifest)
@@ -682,12 +731,16 @@ class RunRootResolver:
                 f"State reconciliation failed for run '{f_manifest.run_id}': {f_err}"
             ) from f_err
 
-        if not f_run_state.is_success or f_run_state.state != OverallRunState.SUCCEEDED:
+        f_strict = not f_allow_partial
+        if f_strict and (
+            not f_run_state.is_success
+            or f_run_state.state != OverallRunState.SUCCEEDED
+        ):
             raise RunRootResolutionError(
                 f"Run '{f_manifest.run_id}' did not succeed (state: {f_run_state.state.value}, diagnostics: {f_run_state.diagnostics})"
             )
 
-        if not f_run_state.has_success_marker:
+        if f_strict and not f_run_state.has_success_marker:
             raise RunRootResolutionError(
                 f"Run '{f_manifest.run_id}' is missing whole_run_succeeded control event marker"
             )
@@ -698,7 +751,9 @@ class RunRootResolver:
 
         for f_idx, f_sp in enumerate(f_plan.scale_points):
             f_pt_view = f_run_state.point_states[f_idx]
-            if not f_pt_view.is_success or f_pt_view.state != PointRunState.SUCCEEDED:
+            if f_strict and (
+                not f_pt_view.is_success or f_pt_view.state != PointRunState.SUCCEEDED
+            ):
                 raise RunRootResolutionError(
                     f"Scale point {f_idx} (tasks={f_sp.tasks}) did not succeed: state={f_pt_view.state.value}"
                 )
@@ -713,7 +768,7 @@ class RunRootResolver:
                 f_c_res = f_evidence_store.readControllerResult(
                     f_sp, f_combo, f_ordinal=f_idx
                 )
-                if f_c_res is None:
+                if f_c_res is None and f_strict:
                     raise RunRootResolutionError(
                         f"Missing controller result for point {f_idx} combination {f_combo.name}"
                     )
@@ -724,7 +779,7 @@ class RunRootResolver:
                         f_r_res = f_evidence_store.readRankResult(
                             f_sp, f_rank, f_combo, f_ordinal=f_idx
                         )
-                        if f_r_res is None:
+                        if f_r_res is None and f_strict:
                             raise RunRootResolutionError(
                                 f"Missing rank result for point {f_idx} rank {f_rank} combination {f_combo.name}"
                             )
@@ -875,8 +930,59 @@ class RunRootResolver:
         return cls.resolvePoint(f_explicit_root, f_point_id)
 
     @classmethod
-    def inferLatestRun(cls, f_benchmark_name_or_dir: str) -> str:
-        """Infer and locate the latest succeeded run directory from a benchmark name or root path."""
+    def _manifestMatches(
+        cls,
+        f_manifest_path: str,
+        f_target: Optional[str],
+        f_scale: Optional[str],
+    ) -> bool:
+        """Return True when the manifest's request target/scale match the filters."""
+        if f_target is None and f_scale is None:
+            return True
+        try:
+            with open(f_manifest_path, "r", encoding="utf-8") as f_f:
+                f_doc = json.load(f_f)
+        except (OSError, ValueError):
+            return False
+        if not isinstance(f_doc, dict):
+            return False
+        f_req = f_doc.get("request") if isinstance(f_doc.get("request"), dict) else {}
+        f_plan = f_doc.get("plan") if isinstance(f_doc.get("plan"), dict) else {}
+
+        def norm(f_val: Any) -> str:
+            f_txt = str(f_val or "").strip().lower()
+            if f_txt == "lammps":
+                return "lmp"
+            if f_txt == "baseline":
+                return "variants"
+            return f_txt
+
+        if f_target is not None:
+            f_doc_target = norm(f_req.get("target") or f_plan.get("target"))
+            if f_doc_target != norm(f_target):
+                return False
+        if f_scale is not None:
+            f_doc_scale = norm(f_req.get("scale") or f_plan.get("scale"))
+            if f_doc_scale != norm(f_scale):
+                return False
+        return True
+
+    @classmethod
+    def inferLatestRun(
+        cls,
+        f_benchmark_name_or_dir: str,
+        f_target: Optional[str] = None,
+        f_scale: Optional[str] = None,
+    ) -> str:
+        """Infer and locate the latest run directory from a benchmark name or root path.
+
+        Args:
+            f_benchmark_name_or_dir: Benchmark name ('lsmio', ...) or a benchmark root,
+                runs/ directory or run root.
+            f_target: Only consider runs whose manifest targets this benchmark. A
+                benchmark name implies its own target.
+            f_scale: Only consider runs of this scale.
+        """
         if (
             not isinstance(f_benchmark_name_or_dir, str)
             or not f_benchmark_name_or_dir.strip()
@@ -896,6 +1002,8 @@ class RunRootResolver:
         f_candidates: List[str] = []
 
         if f_name_lower in ("ior", "lsmio", "lmp", "lammps"):
+            if f_target is None:
+                f_target = f_name_lower
             # Known benchmark names
             f_candidates.extend(
                 [
@@ -932,7 +1040,8 @@ class RunRootResolver:
                         and not stat.S_ISLNK(f_mst.st_mode)
                         and stat.S_ISREG(f_mst.st_mode)
                     ):
-                        f_valid_runs.append(f_cand)
+                        if cls._manifestMatches(f_direct_man, f_target, f_scale):
+                            f_valid_runs.append(f_cand)
                 except OSError:
                     pass
 
@@ -960,6 +1069,10 @@ class RunRootResolver:
                                 f_mst.st_mode
                             ):
                                 continue
+                            if not cls._manifestMatches(
+                                f_man_path, f_target, f_scale
+                            ):
+                                continue
                             f_valid_runs.append(f_run_path)
                         except OSError:
                             continue
@@ -967,8 +1080,11 @@ class RunRootResolver:
                     pass
 
         if not f_valid_runs:
+            f_filters = ""
+            if f_target is not None or f_scale is not None:
+                f_filters = f" (target={f_target!r}, scale={f_scale!r})"
             raise RunRootResolutionError(
-                f"Cannot infer latest run for '{f_benchmark_name_or_dir}': no valid run directories containing manifest.json found in {f_candidates}"
+                f"Cannot infer latest run for '{f_benchmark_name_or_dir}'{f_filters}: no valid run directories containing manifest.json found in {f_candidates}"
             )
 
         # Sort descending by run directory basename / name
@@ -977,9 +1093,17 @@ class RunRootResolver:
 
     @classmethod
     def resolveTarget(
-        cls, f_target: str, f_benchmark_root: Optional[str] = None
+        cls,
+        f_target: str,
+        f_benchmark_root: Optional[str] = None,
+        f_scale: Optional[str] = None,
+        f_allow_partial: bool = False,
     ) -> ResolvedRun:
-        """Resolve a target string (manifest path, run root directory, or benchmark name) into a ResolvedRun."""
+        """Resolve a target string (manifest path, run root directory, or benchmark name) into a ResolvedRun.
+
+        A benchmark name selects the latest run of that benchmark (and of f_scale,
+        when given) under '<f_benchmark_root>/runs' when a benchmark root is given.
+        """
         if not isinstance(f_target, str) or not f_target.strip():
             raise RunRootResolutionError(
                 f"Target must be a non-empty string, got: {f_target!r}"
@@ -992,12 +1116,15 @@ class RunRootResolver:
 
         if f_norm_target in ("ior", "lsmio", "lmp", "lammps"):
             if f_benchmark_root is not None and f_benchmark_root.strip():
-                f_candidate_dir = os.path.join(f_benchmark_root.strip(), f_raw)
-                if not os.path.exists(f_candidate_dir):
-                    f_candidate_dir = f_benchmark_root.strip()
-                f_run_root = cls.inferLatestRun(f_candidate_dir)
+                f_bm_root = f_benchmark_root.strip()
+                f_candidate_dir = os.path.join(f_bm_root, f_raw)
+                if not os.path.isdir(os.path.join(f_candidate_dir, "runs")):
+                    f_candidate_dir = f_bm_root
+                f_run_root = cls.inferLatestRun(
+                    f_candidate_dir, f_target=f_norm_target, f_scale=f_scale
+                )
             else:
-                f_run_root = cls.inferLatestRun(f_raw)
+                f_run_root = cls.inferLatestRun(f_raw, f_scale=f_scale)
         elif f_raw.endswith("manifest.json"):
             f_abs_man = os.path.abspath(f_raw)
             f_run_root = os.path.dirname(f_abs_man)
@@ -1013,7 +1140,7 @@ class RunRootResolver:
             else:
                 f_run_root = os.path.abspath(f_raw)
 
-        return cls.resolve(f_run_root)
+        return cls.resolve(f_run_root, f_allow_partial=f_allow_partial)
 
 
 # Standard 26 metrics extracted from IOR summary tables
@@ -1099,8 +1226,11 @@ class IorLogExtractor:
     @classmethod
     def extractPointCombo(
         cls, f_point: ResolvedPoint, f_combo: Combination
-    ) -> Dict[str, Dict[str, Union[float, int, str]]]:
-        """Extract write and read metrics from IOR output log."""
+    ) -> Dict[str, Any]:
+        """Extract write and read metrics from IOR output log.
+
+        'bmtool_lines' holds the summary lines ior-parse.sh would report verbatim.
+        """
         f_log_path = cls.findLogPath(f_point, f_combo)
 
         try:
@@ -1162,10 +1292,12 @@ class IorLogExtractor:
                 f"Malformed IOR summary in log '{f_log_path}': expected >= 20 columns, got heads={len(f_heads)}, writes={len(f_writes)}, reads={len(f_reads)}"
             )
 
-        f_res: Dict[str, Dict[str, Union[float, int, str]]] = {"write": {}, "read": {}}
+        f_res: Dict[str, Any] = {"write": {}, "read": {}}
 
+        # The second 'StdDev' (OPs) gets its own key instead of overwriting the first
+        f_col_keys = data.iorSummaryKeys(IOR_SUMMARY_COLUMNS)
         for f_i in range(len(IOR_SUMMARY_COLUMNS)):
-            f_col_name = IOR_SUMMARY_COLUMNS[f_i]
+            f_col_name = f_col_keys[f_i]
             f_w_raw = f_writes[f_i] if f_i < len(f_writes) else ""
             f_r_raw = f_reads[f_i] if f_i < len(f_reads) else ""
 
@@ -1177,6 +1309,7 @@ class IorLogExtractor:
                 "Max(OPs)",
                 "Min(OPs)",
                 "Mean(OPs)",
+                data.IOR_OPS_STDDEV_KEY,
                 "Mean(s)",
                 "aggs(MiB)",
             ):
@@ -1214,6 +1347,16 @@ class IorLogExtractor:
             f_reads[i] if i < len(f_reads) else "" for i in range(26)
         ]
 
+        # The lines bmtool ior-parse.sh copies into ior-report.csv
+        try:
+            f_res["bmtool_lines"] = data.iorSummaryLines(
+                data.readBmtoolLines(f_log_path)
+            )
+        except OSError as f_err:
+            raise ExtractionError(
+                f"Failed to read log file '{f_log_path}': {f_err}"
+            ) from f_err
+
         return f_res
 
 
@@ -1233,6 +1376,8 @@ class LsmioLogExtractor:
         f_first_r_line = ""
 
         f_logs_dir = os.path.join(f_point.pointDir, "logs")
+        # bmtool lsmio-parse.sh aggregate: summed 'write,'/'read,' lines across ranks
+        f_bm_agg = data.LsmioBmtoolAggregate()
 
         for f_rank in range(f_tasks):
             f_candidates = [
@@ -1291,6 +1436,13 @@ class LsmioLogExtractor:
 
             if not f_lines:
                 raise ExtractionError(f"Rank log is empty: '{f_abs_path}'")
+
+            try:
+                f_bm_agg.addLines(data.readBmtoolLines(f_abs_path))
+            except OSError as f_err:
+                raise ExtractionError(
+                    f"Failed to read rank log '{f_abs_path}': {f_err}"
+                ) from f_err
 
             f_found_w_summary = False
             f_found_r_summary = False
@@ -1361,7 +1513,12 @@ class LsmioLogExtractor:
         f_r_iter = parseInt(f_r_parts[5]) if len(f_r_parts) > 5 else len(f_r_iters)
 
         return {
+            "bmtool_agg": {
+                "lines": f_bm_agg.aggLines(),
+                "ranks": f_bm_agg.fileCount,
+            },
             "write": {
+                "bmtool_row": f_bm_agg.row("write"),
                 "first_line": f_first_w_line,
                 "bw": f_w_bw,
                 "latency": f_w_lat,
@@ -1374,6 +1531,7 @@ class LsmioLogExtractor:
                 "iterations": f_w_iters,
             },
             "read": {
+                "bmtool_row": f_bm_agg.row("read"),
                 "first_line": f_first_r_line,
                 "bw": f_r_bw,
                 "latency": f_r_lat,
@@ -1441,12 +1599,19 @@ class LmpLogExtractor:
     def extractPointCombo(
         cls, f_point: ResolvedPoint, f_combo: Combination
     ) -> Dict[str, Any]:
-        """Extract write throughput from LMP output log."""
+        """Extract write throughput from LMP output log.
+
+        Like tools/bmtool/parse/lmp-parse.sh, the last line matching '^.write,' (the
+        LSMIO 'iwrite,<MiB/s>,...' lines of an LSMIO-enabled LAMMPS) is the result:
+        'bmtool_field' is what lmp-report.csv shows after 'n,rf,bs,' (the line up to
+        its first colon) and its second comma field the throughput. A log without
+        such a line falls back to the last 'write,'/'write:' line (lsmiotool only;
+        bmtool reports nothing for it).
+        """
         f_log_path = cls.findLogPath(f_point, f_combo)
 
         try:
-            with open(f_log_path, "r", encoding="utf-8", errors="replace") as f_f:
-                f_lines = f_f.readlines()
+            f_lines = data.readBmtoolLines(f_log_path)
         except OSError as f_err:
             raise ExtractionError(
                 f"Failed to read log file '{f_log_path}': {f_err}"
@@ -1455,9 +1620,14 @@ class LmpLogExtractor:
         if not f_lines:
             raise ExtractionError(f"Log file is empty: '{f_log_path}'")
 
+        f_bmtool_line: Optional[str] = None
+        f_fallback_line: Optional[str] = None
         f_throughput: Optional[float] = None
 
         for f_line in f_lines:
+            if data.isLmpResultLine(f_line):
+                f_bmtool_line = f_line
+                continue
             f_stripped = f_line.strip()
             if (
                 f_stripped.startswith(".write,")
@@ -1472,24 +1642,45 @@ class LmpLogExtractor:
 
                 if len(f_parts) >= 3:
                     f_val = parseFloat(f_parts[2])
-                    if f_val > 0.0 or f_throughput is None:
-                        f_throughput = f_val
                 elif len(f_parts) >= 2:
                     f_val = parseFloat(f_parts[1])
-                    if f_val > 0.0 or f_throughput is None:
-                        f_throughput = f_val
+                else:
+                    continue
+                if f_val > 0.0 or f_throughput is None:
+                    f_throughput = f_val
+                    f_fallback_line = f_stripped
 
-        if f_throughput is None:
+        if f_bmtool_line is not None:
+            f_throughput = data.lmpLineThroughput(f_bmtool_line)
+            f_report_line = f_bmtool_line
+        elif f_throughput is not None and f_fallback_line is not None:
+            f_report_line = f_fallback_line
+        else:
             raise ExtractionError(
                 f"Malformed LMP output log '{f_log_path}': could not extract write throughput metric"
             )
 
         return {
+            "bmtool_field": f_report_line.split(":")[0],
             "write": {
                 "throughput": f_throughput,
                 "bw(MiB/s)": f_throughput,
-            }
+            },
         }
+
+
+def _bmtoolComboOrder(f_combo: Combination) -> Tuple[int, int]:
+    """Sort key for bmtool's combination loop order: rf 4, 16; bs 64K, 1M, 8M."""
+    f_rf = str(f_combo.stripe_count)
+    f_bs = str(f_combo.block_size)
+    return (
+        data.BMTOOL_STRIPE_COUNTS.index(f_rf)
+        if f_rf in data.BMTOOL_STRIPE_COUNTS
+        else len(data.BMTOOL_STRIPE_COUNTS),
+        data.BMTOOL_BLOCK_SIZES.index(f_bs)
+        if f_bs in data.BMTOOL_BLOCK_SIZES
+        else len(data.BMTOOL_BLOCK_SIZES),
+    )
 
 
 class ConsoleSummaryFormatter:
@@ -1530,6 +1721,8 @@ class ConsoleSummaryFormatter:
             )
 
             for f_combo in f_resolved_run.plan.combinations:
+                if f_combo.name not in f_extracted_data.get(f_pt_id, {}):
+                    continue  # skipped as incomplete (partial run)
                 f_combo_data = f_extracted_data.get(f_pt_id, {}).get(f_combo.name, {})
 
                 if f_bm == "IOR":
@@ -1702,20 +1895,38 @@ class IorReportGenerator(ReportGenerator):
     ) -> Dict[str, str]:
         f_res: Dict[str, str] = {}
         f_master_file = os.path.join(f_out_dir, "ior-report.csv")
-        f_rows: List[str] = []
-
+        # Rows per (point, combination), emitted in the shell glob order ior-parse.sh
+        # visits '<n>/<date>/out-<infix>-<rf>-<bs>-...' files in
+        f_groups: List[Tuple[Tuple[str, str, str], List[str]]] = []
         for f_pt in f_resolved_run.points:
-            f_n_count = f_pt.scalePoint.nodes
-            f_node_str = (
-                f"{f_n_count:02d}" if str(f_n_count).isdigit() else str(f_n_count)
-            )
+            # bmtool takes the node count from the outputs dir name: no padding
+            f_node_str = str(f_pt.scalePoint.nodes)
 
             for f_combo in f_resolved_run.plan.combinations:
+                f_group_rows: List[str] = []
+                f_groups.append(
+                    (
+                        data.bmtoolCollationKey(
+                            f"{f_node_str}/2000-01-01/out-x-{f_combo.stripe_count}"
+                            f"-{f_combo.block_size}-2000-01-01-node000-0.txt"
+                        ),
+                        f_group_rows,
+                    )
+                )
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
                 f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
                     f_combo.name, {}
                 )
+
+                # ior-parse.sh: the log's summary lines, spaces runs turned into commas
+                f_bm_lines = f_combo_data.get("bmtool_lines")
+                if f_bm_lines:
+                    f_group_rows.extend(
+                        data.bmtoolIorRow(f_node_str, f_s_count, f_s_size, f_line)
+                        for f_line in f_bm_lines
+                    )
+                    continue
 
                 for f_op in ("write", "read"):
                     f_op_data = f_combo_data.get(f_op, {})
@@ -1725,16 +1936,28 @@ class IorReportGenerator(ReportGenerator):
                         f_vals = [str(f_v) for f_v in f_op_data["_raw_values"]]
                     else:
                         f_vals = [
-                            str(f_op_data.get(k, "")) for k in IOR_SUMMARY_COLUMNS
+                            str(f_op_data.get(k, ""))
+                            for k in data.iorSummaryKeys(IOR_SUMMARY_COLUMNS)
                         ]
 
                     f_row_str = (
                         f"{f_node_str},{f_s_count},{f_s_size},{f_op},"
                         + ",".join(f_vals)
                     )
-                    f_rows.append(f_row_str)
+                    f_group_rows.append(f_row_str)
 
-        cls.exportCsv(f_rows, f_master_file)
+        f_rows = [
+            f_row
+            for _f_key, f_group in sorted(f_groups, key=lambda f_g: f_g[0])
+            for f_row in f_group
+        ]
+        if not f_rows:
+            Console.warning(
+                f"No IOR report rows for run '{f_resolved_run.runId}'; "
+                f"not writing {f_master_file}"
+            )
+            return f_res
+        data.writeBmtoolLines(f_master_file, f_rows)
         f_res["ior-report.csv"] = f_master_file
         f_res["master_csv"] = f_master_file
 
@@ -1762,7 +1985,7 @@ class IorReportGenerator(ReportGenerator):
 
 
 class LsmioReportGenerator(ReportGenerator):
-    """Generates Stage 1 point-level and Stage 2 master LSMIO CSV and JSON reports."""
+    """Generates bmtool-identical LSMIO agg-<rf>-<bs>-report.csv / lsm-report.csv and JSON reports."""
 
     @classmethod
     def generate(
@@ -1772,10 +1995,17 @@ class LsmioReportGenerator(ReportGenerator):
         f_out_dir: str,
         f_format: str = "csv",
     ) -> Dict[str, str]:
-        f_res: Dict[str, str] = {}
-        f_master_rows: List[str] = []
+        """Write <nodes>/agg-<rf>-<bs>-report.csv per point/combination and lsm-report.csv.
 
-        # Stage 1: agg-<stripe_count>-<stripe_size>-report.csv for each point
+        The content matches tools/bmtool/parse/lsmio-parse.sh for the same rank logs:
+        each agg file holds the first rank's header plus the 'write'/'read' lines
+        summed across ranks, and lsm-report.csv lists their rows in bmtool's order.
+        lsm-report.csv is not written when there are no rows.
+        """
+        f_res: Dict[str, str] = {}
+        f_agg_files: Dict[str, List[str]] = {}
+
+        # Stage 1: <nodes>/agg-<stripe_count>-<stripe_size>-report.csv for each point
         for f_pt in f_resolved_run.points:
             f_n_part = str(f_pt.scalePoint.nodes)
 
@@ -1783,47 +2013,39 @@ class LsmioReportGenerator(ReportGenerator):
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
                 f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
-                    f_combo.name, {}
+                    f_combo.name
                 )
+                if f_combo_data is None:
+                    continue  # skipped (and warned about) by extractRun
+                f_agg_lines = f_combo_data.get("bmtool_agg", {}).get("lines")
+                if not f_agg_lines:
+                    Console.warning(
+                        f"No rank aggregate for point '{f_pt.pointId}' combination "
+                        f"'{f_combo.name}'; skipping its agg report"
+                    )
+                    continue
 
-                f_w_data = f_combo_data.get("write", {})
-                f_r_data = f_combo_data.get("read", {})
-
-                f_first_w = f_w_data.get("first_line", "write,0.0,0.0,0,0,0")
-                f_first_r = f_r_data.get("first_line", "read,0.0,0.0,0,0,0")
-
-                f_max_w = f_w_data.get("max", 0.0)
-                f_min_w = f_w_data.get("min", 0.0)
-                f_mean_w = f_w_data.get("mean", 0.0)
-
-                f_max_r = f_r_data.get("max", 0.0)
-                f_min_r = f_r_data.get("min", 0.0)
-                f_mean_r = f_r_data.get("mean", 0.0)
-
-                f_w_line = f"{f_first_w},{f_max_w:.2f},{f_min_w:.2f},{f_mean_w:.6g}"
-                f_r_line = f"{f_first_r},{f_max_r:.2f},{f_min_r:.2f},{f_mean_r:.6g}"
-
-                f_agg_lines = [
-                    "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter,max(MiB/s),min(MiB/s),mean(MiB/s)",
-                    f_w_line,
-                    f_r_line,
-                ]
-
-                f_agg_file_path = os.path.join(
-                    f_out_dir, f_n_part, f"agg-{f_s_count}-{f_s_size}-report.csv"
-                )
-                cls.exportCsv(f_agg_lines, f_agg_file_path)
+                f_agg_name = data.aggReportFileName(f_s_count, f_s_size)
+                f_agg_file_path = os.path.join(f_out_dir, f_n_part, f_agg_name)
+                data.writeBmtoolLines(f_agg_file_path, f_agg_lines)
+                f_agg_files[f"{f_n_part}/{f_agg_name}"] = list(f_agg_lines)
                 f_res[f"agg-{f_n_part}-{f_s_count}-{f_s_size}"] = f_agg_file_path
 
-                # Master rows
-                f_master_rows.append(f"{f_n_part},{f_s_count},{f_s_size},{f_w_line}")
-                f_master_rows.append(f"{f_n_part},{f_s_count},{f_s_size},{f_r_line}")
+        # Stage 2: master lsm-report.csv in bmtool's (shell glob) order
+        f_master_rows: List[str] = []
+        for f_rel in sorted(f_agg_files, key=data.bmtoolCollationKey):
+            f_master_rows.extend(data.bmtoolReportRows(f_rel, f_agg_files[f_rel]))
 
-        # Stage 2: master lsm-report.csv
-        f_master_file = os.path.join(f_out_dir, "lsm-report.csv")
-        cls.exportCsv(f_master_rows, f_master_file)
-        f_res["lsm-report.csv"] = f_master_file
-        f_res["master_csv"] = f_master_file
+        f_master_file = os.path.join(f_out_dir, data.LSM_REPORT_FILE)
+        if f_master_rows:
+            data.writeBmtoolLines(f_master_file, f_master_rows)
+            f_res["lsm-report.csv"] = f_master_file
+            f_res["master_csv"] = f_master_file
+        else:
+            Console.warning(
+                f"No LSMIO report rows for run '{f_resolved_run.runId}'; "
+                f"not writing {f_master_file}"
+            )
 
         if f_format.lower() == "json":
             f_json_file = os.path.join(f_out_dir, "lsm-report.json")
@@ -1866,17 +2088,31 @@ class LmpReportGenerator(ReportGenerator):
         for f_pt in f_resolved_run.points:
             f_n_part = str(f_pt.scalePoint.nodes)
 
-            for f_combo in f_resolved_run.plan.combinations:
+            # lmp-parse.sh row order: rf 4 16, bs 64K 1M 8M
+            for f_combo in sorted(
+                f_resolved_run.plan.combinations, key=_bmtoolComboOrder
+            ):
                 f_s_count = str(f_combo.stripe_count)
                 f_s_size = str(f_combo.block_size)
                 f_combo_data = f_extracted_data.get(f_pt.pointId, {}).get(
-                    f_combo.name, {}
+                    f_combo.name
                 )
+                if not f_combo_data:
+                    continue
 
-                f_tp = f_combo_data.get("write", {}).get("throughput", 0.0)
-                f_master_rows.append(f"{f_n_part},{f_s_count},{f_s_size},{f_tp}")
+                # bmtool: 'n,rf,bs,' + the matched log line up to its first colon
+                f_field = f_combo_data.get("bmtool_field")
+                if f_field is None:
+                    f_field = str(f_combo_data.get("write", {}).get("throughput", ""))
+                f_master_rows.append(f"{f_n_part},{f_s_count},{f_s_size},{f_field}")
 
-        cls.exportCsv(f_master_rows, f_master_file)
+        if not f_master_rows:
+            Console.warning(
+                f"No LMP report rows for run '{f_resolved_run.runId}'; "
+                f"not writing {f_master_file}"
+            )
+            return f_res
+        data.writeBmtoolLines(f_master_file, f_master_rows)
         f_res["lmp-report.csv"] = f_master_file
         f_res["master_csv"] = f_master_file
 
@@ -1903,32 +2139,109 @@ class LmpReportGenerator(ReportGenerator):
         return f_res
 
 
-def extractRun(f_resolved_run: ResolvedRun) -> Dict[str, Dict[str, Any]]:
-    """Extract metrics for all points and combinations in a resolved run."""
+def _recordSucceeded(f_rec: Optional[EvidenceRecord]) -> bool:
+    """True when a controller/rank result record reports success (exit code 0)."""
+    if f_rec is None:
+        return False
+    f_payload = f_rec.payload or {}
+    for f_key in ("exit_code", "exit_status"):
+        if f_payload.get(f_key) is not None:
+            try:
+                return int(f_payload[f_key]) == 0
+            except (TypeError, ValueError):
+                return False
+    return str(f_payload.get("status", "")).strip().lower() in (
+        "success",
+        "succeeded",
+        "ok",
+    )
+
+
+def incompleteReason(
+    f_target: str, f_point: ResolvedPoint, f_combo: Combination
+) -> Optional[str]:
+    """Why a combination of a point that did not succeed has no complete output, or None.
+
+    A succeeded point was verified by state reconciliation. Otherwise an LSMIO
+    combination needs a successful result from every rank, and an IOR/LMP one a
+    successful controller result.
+    """
+    if f_point.state == PointRunState.SUCCEEDED:
+        return None
+    if f_target == "lsmio":
+        for f_rank in range(f_point.scalePoint.tasks):
+            if not _recordSucceeded(f_point.getRankResult(f_rank, f_combo)):
+                return f"rank {f_rank} has no successful result"
+        return None
+    if not _recordSucceeded(f_point.getControllerResult(f_combo)):
+        return "no successful controller result"
+    return None
+
+
+def extractRun(
+    f_resolved_run: ResolvedRun,
+    f_skip_incomplete: bool = False,
+    f_warnings: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Extract metrics for all points and combinations in a resolved run.
+
+    Args:
+        f_resolved_run: The run (resolved with f_allow_partial for a partial run).
+        f_skip_incomplete: Skip, with a warning, every combination without complete
+            output (see incompleteReason) or whose logs cannot be extracted, instead
+            of raising; skipped combinations are absent from the result. bmtool's
+            parsers likewise report whatever output exists.
+        f_warnings: Collects the warnings; when None they are logged.
+
+    Raises:
+        ExtractionError: Without f_skip_incomplete, on the first unusable log.
+    """
     f_target = f_resolved_run.target.lower()
+    if f_target not in ("ior", "lsmio", "lmp", "lammps"):
+        raise ExtractionError(
+            f"Unsupported benchmark target '{f_target}' for extraction"
+        )
     f_data: Dict[str, Dict[str, Any]] = {}
+
+    def warn(f_msg: str) -> None:
+        if f_warnings is None:
+            Console.warning(f_msg)
+        else:
+            f_warnings.append(f_msg)
 
     for f_pt in f_resolved_run.points:
         f_data[f_pt.pointId] = {}
         for f_combo in f_resolved_run.plan.combinations:
-            if f_target == "ior":
-                f_data[f_pt.pointId][f_combo.name] = IorLogExtractor.extractPointCombo(
-                    f_pt, f_combo
+            if f_skip_incomplete:
+                f_reason = incompleteReason(f_target, f_pt, f_combo)
+                if f_reason is not None:
+                    warn(
+                        f"Skipping point '{f_pt.pointId}' combination '{f_combo.name}' "
+                        f"(point state: {f_pt.state.value}): {f_reason}"
+                    )
+                    continue
+            try:
+                if f_target == "ior":
+                    f_res = IorLogExtractor.extractPointCombo(f_pt, f_combo)
+                elif f_target == "lsmio":
+                    f_res = LsmioLogExtractor.extractPointCombo(f_pt, f_combo)
+                else:
+                    f_res = LmpLogExtractor.extractPointCombo(f_pt, f_combo)
+            except ExtractionError as f_err:
+                if not f_skip_incomplete:
+                    raise
+                warn(
+                    f"Skipping point '{f_pt.pointId}' combination '{f_combo.name}': {f_err}"
                 )
-            elif f_target == "lsmio":
-                f_data[f_pt.pointId][f_combo.name] = (
-                    LsmioLogExtractor.extractPointCombo(f_pt, f_combo)
-                )
-            elif f_target in ("lmp", "lammps"):
-                f_data[f_pt.pointId][f_combo.name] = LmpLogExtractor.extractPointCombo(
-                    f_pt, f_combo
-                )
-            else:
-                raise ExtractionError(
-                    f"Unsupported benchmark target '{f_target}' for extraction"
-                )
+                continue
+            f_data[f_pt.pointId][f_combo.name] = f_res
 
     return f_data
+
+
+def countExtracted(f_extracted_data: Mapping[str, Mapping[str, Any]]) -> int:
+    """Number of (point, combination) entries extractRun produced."""
+    return sum(len(f_combos) for f_combos in f_extracted_data.values())
 
 
 def generateReports(

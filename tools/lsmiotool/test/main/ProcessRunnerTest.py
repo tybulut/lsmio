@@ -182,6 +182,45 @@ class ProcessRunnerTest(unittest.TestCase):
             self.assertIn("Disk write error", str(f_ctx2.exception))
             self.assertIsNotNone(f_ctx2.exception.result)
 
+    def testLogIsWrittenWhileProcessRuns(self) -> None:
+        """M13: output reaches the log as it is produced (like 'CMD 2>&1 | tee LOG'), so a
+        step killed at its time limit still leaves what it printed; both streams are kept."""
+        import threading
+
+        f_log_path = os.path.join(self.m_temp_dir.name, "live.log")
+        f_argv = [
+            sys.executable,
+            "-c",
+            "import sys, time; print('first', flush=True); "
+            "sys.stderr.write('warn\\n'); sys.stderr.flush(); time.sleep(30)",
+        ]
+        f_result: Dict[str, Any] = {}
+        f_thread = threading.Thread(
+            target=lambda: f_result.update(
+                res=self.m_runner.run(f_argv, f_log_path=f_log_path, f_timeout=3)
+            )
+        )
+        f_thread.start()
+        f_deadline = time.monotonic() + 2.5
+        f_content = ""
+        while time.monotonic() < f_deadline:
+            if os.path.exists(f_log_path):
+                with open(f_log_path) as f_f:
+                    f_content = f_f.read()
+                if "first" in f_content and "warn" in f_content:
+                    break
+            time.sleep(0.05)
+        self.assertTrue(f_thread.is_alive(), "process should still be running")
+        self.assertIn("first\n", f_content)
+        self.assertIn("warn\n", f_content)
+        f_thread.join()
+        f_res = f_result["res"]
+        self.assertTrue(f_res.timed_out)
+        self.assertEqual(f_res.stdout, "first\n")
+        self.assertEqual(f_res.stderr, "warn\n")
+        with open(f_log_path) as f_f:
+            self.assertEqual(sorted(f_f.read().splitlines()), ["first", "warn"])
+
     def testLiteralAdversarialArgv(self) -> None:
         """Proves tokens with spaces, $VAR, ;, |, and newlines are executed literally and not interpreted by a shell."""
         f_adversarial_args = [

@@ -44,11 +44,12 @@ LSMIOTOOL_HELP = """How to run
 ./lsmiotool [options] <cmd> <cmd-arguments>
 
 common cmds:
-  archive <benchmark> <scale> [<variant>] [--dest <path>]
+  archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
   compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
-  parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
+  parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
+  parseLegacy lsmio backends <local|bake|small|large> [<path>]
   run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast]
 
 other cmds:
@@ -64,7 +65,7 @@ options:
 """
 
 ARCHIVE_HELP_TEXT = """Usage:
-  lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+  lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
 Arguments:
   <benchmark>   Supported benchmarks: lsmio
@@ -75,7 +76,21 @@ Arguments:
 
 Options:
   --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+                Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
+  --setup <name>
+                LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE-M;
+                for an lsmiotool run, the run's own setup).
+  --source <path>
+                What to archive: an lsmiotool run root or a bmtool outputs directory.
+
+Source (default): <benchmark_root> is the site profile's benchmark root.
+  - <benchmark_root>/lsmio/outputs, when it holds bmtool outputs: moved to
+    <dest>/outputs-<arm> and recreated empty, like bmtool archive.
+  - otherwise the latest lsmiotool run of 'lsmio <scale>' (and <variant>) under
+    <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
+    in bmtool's layout with reports; the run root is left in place.
+  Both present is an error: pick one with --source.
 """
 
 RUN_HELP_TEXT = """Usage:
@@ -239,12 +254,15 @@ class RunCliParser:
         cls,
         f_argv: Sequence[str],
         f_global_ssd: bool = False,
+        f_environ: Optional[Dict[str, str]] = None,
     ) -> RunRequest:
         """Parses argument sequence into an immutable canonical RunRequest.
 
         Args:
             f_argv: Sequence of argument strings (either including or excluding leading 'run').
             f_global_ssd: Whether global '--ssd' was supplied before the command.
+            f_environ: Environment for bmtool's BM_SETUP / BM_WALLHOUR defaults
+                (default: os.environ).
 
         Returns:
             Canonical RunRequest instance.
@@ -490,8 +508,6 @@ class RunCliParser:
                     raise RunCliParseError(
                         "Cannot specify both '--archive' and '--no-archive'."
                     )
-                if f_archive is True:
-                    raise RunCliParseError("Duplicate '--archive' option specified.")
                 f_archive = True
                 f_idx += 1
             elif f_tok == "--no-archive":
@@ -499,13 +515,10 @@ class RunCliParser:
                     raise RunCliParseError(
                         "Cannot specify both '--archive' and '--no-archive'."
                     )
-                if f_archive is False:
-                    raise RunCliParseError("Duplicate '--no-archive' option specified.")
                 f_archive = False
                 f_idx += 1
             elif f_tok == "--resume":
-                if f_resume:
-                    raise RunCliParseError("Duplicate '--resume' option specified.")
+                # Repeating a flag is harmless, as in bmtool
                 f_resume = True
                 f_idx += 1
             elif f_tok in ("--out-dir", "--output-dir", "--dest"):
@@ -605,6 +618,48 @@ class RunCliParser:
                 )
             f_archive = True
 
+        # bmtool accepts archive/resume/destination/walltime options only for 'variants'
+        # and backends runs; plain scaling runs take just --ssd and --fast
+        if f_mode != "backends" and f_scale != "variants":
+            f_unsupported = [
+                f_opt
+                for f_opt, f_used in (
+                    ("--archive/--no-archive", f_archive is not None),
+                    ("--resume", f_resume),
+                    ("--dest/--out-dir", f_out_dir is not None),
+                    ("--time", f_wallhour is not None or f_walltime is not None),
+                )
+                if f_used
+            ]
+            if f_unsupported:
+                raise RunCliParseError(
+                    f"{', '.join(f_unsupported)} not supported for '{f_benchmark} {f_scale}': "
+                    "only 'variants' and 'backends' runs are archived or resumed "
+                    "(set BM_WALLHOUR to change the walltime)."
+                )
+
+        # bmtool environment defaults: BM_SETUP picks the lsmio setup when --setup is not
+        # given (ior/lmp hard-set theirs in bmtool); BM_WALLHOUR sets the walltime of any
+        # run when --time is not given
+        f_env = os.environ if f_environ is None else f_environ
+        if (
+            f_benchmark == "lsmio"
+            and f_setup_name is None
+            and f_env.get("BM_SETUP", "").strip()
+        ):
+            f_setup_name = f_env["BM_SETUP"].strip().upper()
+        if (
+            f_wallhour is None
+            and f_walltime is None
+            and f_env.get("BM_WALLHOUR", "").strip()
+        ):
+            f_raw_hours = f_env["BM_WALLHOUR"].strip()
+            if not f_raw_hours.isdigit() or int(f_raw_hours) <= 0:
+                raise RunCliParseError(
+                    f"Invalid BM_WALLHOUR value: {f_raw_hours!r} (must be a positive integer)"
+                )
+            f_wallhour = max(1, min(48, int(f_raw_hours)))
+
         return RunRequest(
             f_target=f_benchmark,
             f_scale=f_scale,
@@ -627,9 +682,12 @@ class RunCliParser:
 def parseRunArguments(
     f_argv: Sequence[str],
     f_global_ssd: bool = False,
+    f_environ: Optional[Dict[str, str]] = None,
 ) -> RunRequest:
     """Convenience function wrapping RunCliParser.parse."""
-    return RunCliParser.parse(f_argv=f_argv, f_global_ssd=f_global_ssd)
+    return RunCliParser.parse(
+        f_argv=f_argv, f_global_ssd=f_global_ssd, f_environ=f_environ
+    )
 
 
 class ParseRequest:
@@ -759,16 +817,28 @@ class ParseCliParser:
 
     Usage:
         lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
+        lsmiotool parse lsmio <local|bake|small|large|variants> [options]
+        lsmiotool parse lsmio backends <local|bake|small|large> [options]
 
     Arguments:
-        <target>: Target run root path, manifest file path, or benchmark name ('ior', 'lsmio', 'lmp').
+        <target>: Run root path (also an archived one), manifest file path, bmtool-layout
+            outputs directory, or benchmark name ('ior', 'lsmio', 'lmp'). A benchmark
+            name selects the latest run of that benchmark under the site profile's
+            benchmark root.
+        <scale>: With 'lsmio', restricts the latest-run search to that scale.
+            'parse lsmio variants' and 'parse lsmio backends <scale>' instead
+            regenerate the reports of every outputs-* directory in the archive
+            destination, like bmtool.
 
     Options:
-        --output-dir <dir>: Destination directory for reports (default: current working directory).
+        --output-dir <dir>: Destination directory for reports (default: current working
+            directory; for a bmtool-layout directory, the directory itself; for the
+            archive forms, the archive destination to regenerate).
         --format <format>: Report format ('csv' or 'json', default: 'csv').
     """
 
     VALID_FORMATS = frozenset({"csv", "json"})
+    VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants", "baseline"})
 
     @classmethod
     def parse(
@@ -842,6 +912,15 @@ class ParseCliParser:
                     f"Invalid scale for backends parse: {f_scale_tok!r}. Must be one of: {sorted(valid_scales)}"
                 )
             f_scale = f_scale_tok
+        elif (
+            f_target.lower() == "lsmio"
+            and f_remaining_tokens
+            and f_remaining_tokens[0].strip().lower() in cls.VALID_SCALES
+        ):
+            # bmtool form: parse lsmio <local|bake|small|large|variants>
+            f_scale = f_remaining_tokens.pop(0).strip().lower()
+            if f_scale == "baseline":
+                f_scale = "variants"
 
         f_output_dir: Optional[str] = None
         f_format: str = "csv"
@@ -911,7 +990,7 @@ class ArchiveCliParser:
     """Pure standard-library parser for 'lsmiotool archive' CLI arguments.
 
     Grammar:
-        lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+        lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
     Positional Arguments:
         <benchmark>: Required. Must be 'lsmio'.
@@ -922,6 +1001,10 @@ class ArchiveCliParser:
     Options:
         --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
+        --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE-M;
+            for an lsmiotool run, the run's own setup).
+        --source <path>: What to archive: an lsmiotool run root or a bmtool outputs
+            directory (default: resolved from the benchmark root, see ArchiveMain).
     """
 
     VALID_BENCHMARKS = frozenset({"lsmio"})
@@ -1043,11 +1126,29 @@ class ArchiveCliParser:
 
         f_dest_path: Optional[str] = None
         f_dest_seen: bool = False
+        f_setup: Optional[str] = None
+        f_source: Optional[str] = None
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
             f_tok = f_trailing_tokens[f_idx]
-            if f_tok == "--dest":
+            if f_tok in ("--setup", "--source"):
+                f_opt_seen = f_setup if f_tok == "--setup" else f_source
+                if f_opt_seen is not None:
+                    raise ArchiveCliParseError(f"Duplicate '{f_tok}' option specified.")
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise ArchiveCliParseError(f"Missing value after '{f_tok}' option.")
+                f_val = f_trailing_tokens[f_idx + 1].strip()
+                if not f_val or f_val.startswith("-"):
+                    raise ArchiveCliParseError(
+                        f"Missing valid value after '{f_tok}' option, got: {f_trailing_tokens[f_idx + 1]!r}"
+                    )
+                if f_tok == "--setup":
+                    f_setup = cls.validateSetup(f_val)
+                else:
+                    f_source = f_val
+                f_idx += 2
+            elif f_tok == "--dest":
                 if f_dest_seen:
                     raise ArchiveCliParseError("Duplicate '--dest' option specified.")
                 if f_idx + 1 >= len(f_trailing_tokens):
@@ -1074,7 +1175,25 @@ class ArchiveCliParser:
             f_scale=f_scale,
             f_variant=f_variant_name,
             f_dest=f_dest_path,
+            f_setup=f_setup,
+            f_source=f_source,
         )
+
+    @classmethod
+    def validateSetup(cls, f_setup: str) -> str:
+        """Canonical (upper-case) LSMIO setup name, as 'run --setup' accepts it.
+
+        Raises:
+            ArchiveCliParseError: For an unknown setup.
+        """
+        from lsmiotool.lib.benchmarks import LsmioAdapter
+
+        f_norm = f_setup.strip().upper()
+        if f_norm not in LsmioAdapter.ALLOWED_SETUPS:
+            raise ArchiveCliParseError(
+                f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
+            )
+        return f_norm
 
 
 def parseArchiveArguments(f_argv: Sequence[str]) -> ArchiveRequest:

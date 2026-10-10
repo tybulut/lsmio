@@ -507,20 +507,78 @@ class RunCliParserTest(unittest.TestCase):
             str(f_ctx_conflict.exception),
         )
 
-        with self.assertRaises(RunCliParseError) as f_ctx_dup:
-            parseRunArguments(["lsmio", "baseline", "footer", "--archive", "--archive"])
-        self.assertIn(
-            "Duplicate '--archive' option specified", str(f_ctx_dup.exception)
+        # Repeating a flag is harmless, as in bmtool
+        self.assertTrue(
+            parseRunArguments(
+                ["lsmio", "baseline", "footer", "--archive", "--archive"]
+            ).archive
         )
 
+    def testScalingRunsRejectArchiveOptions(self) -> None:
+        """M4: like bmtool, plain scaling runs accept only --ssd/--fast (and --setup); archive,
+        resume, destination and walltime options belong to variants and backends runs."""
+        for f_opts in (
+            ["--archive"],
+            ["--no-archive"],
+            ["--resume"],
+            ["--dest", "/tmp/x"],
+            ["--time", "5"],
+        ):
+            for f_target, f_scale in (("lsmio", "small"), ("ior", "local"), ("lmp", "bake")):
+                with self.assertRaises(RunCliParseError) as f_ctx:
+                    parseRunArguments([f_target, f_scale] + f_opts, f_environ={})
+                self.assertIn("not supported", str(f_ctx.exception))
+        self.assertTrue(
+            parseRunArguments(["lsmio", "small", "--ssd", "--fast"], f_environ={}).fast
+        )
+        self.assertTrue(
+            parseRunArguments(
+                ["lsmio", "backends", "small", "--resume", "--time", "5"], f_environ={}
+            ).resume
+        )
+        self.assertTrue(
+            parseRunArguments(["ior", "variants", "--resume"], f_environ={}).resume
+        )
+
+    def testBmtoolEnvironmentDefaults(self) -> None:
+        """M6: BM_SETUP picks the setup and BM_WALLHOUR the walltime when the options are absent."""
+        f_req = parseRunArguments(
+            ["lsmio", "small"], f_environ={"BM_SETUP": "rocksdb-m", "BM_WALLHOUR": "7"}
+        )
+        self.assertEqual(f_req.setup, "ROCKSDB-M")
+        self.assertEqual(f_req.wallhour, 7)
+        self.assertEqual(
+            parseRunArguments(
+                ["lsmio", "small"], f_environ={"BM_WALLHOUR": "99"}
+            ).wallhour,
+            48,
+        )
+        # Explicit options win, as BM_WALLHOUR_OVERRIDE does in bmtool
+        f_req = parseRunArguments(
+            ["lsmio", "variants", "--setup", "ADIOS-M", "--time", "3"],
+            f_environ={"BM_SETUP": "ROCKSDB-M", "BM_WALLHOUR": "7"},
+        )
+        self.assertEqual(f_req.setup, "ADIOS-M")
+        self.assertEqual(f_req.wallhour, 3)
+        with self.assertRaises(RunCliParseError):
+            parseRunArguments(["lsmio", "small"], f_environ={"BM_WALLHOUR": "abc"})
+        # BM_SETUP is lsmio's: bmtool hard-sets the ior and lmp setups (M19)
+        for f_target in ("ior", "lmp"):
+            self.assertIsNone(
+                parseRunArguments(
+                    [f_target, "local"], f_environ={"BM_SETUP": "NATIVE-M"}
+                ).setup
+            )
+
     def testResumeOptionFlag(self) -> None:
-        """Task 2.5.4: Asserts --resume flag sets resume=True and rejects duplicates."""
+        """Task 2.5.4: Asserts --resume flag sets resume=True; repeating it is harmless."""
         f_req = parseRunArguments(["lsmio", "baseline", "footer", "--resume"])
         self.assertTrue(f_req.resume)
-
-        with self.assertRaises(RunCliParseError) as f_ctx_dup:
-            parseRunArguments(["lsmio", "baseline", "footer", "--resume", "--resume"])
-        self.assertIn("Duplicate '--resume' option specified", str(f_ctx_dup.exception))
+        self.assertTrue(
+            parseRunArguments(
+                ["lsmio", "baseline", "footer", "--resume", "--resume"]
+            ).resume
+        )
 
     def testOutDirOptionFlags(self) -> None:
         """Task 2.5.5: Asserts --out-dir, --output-dir, and --dest aliases populate out_dir."""

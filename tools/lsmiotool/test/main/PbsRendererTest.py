@@ -58,6 +58,11 @@ from lsmiotool.lib.site import (
 from lsmiotool.lib.worker import ModuleSetup
 
 
+
+def _tolerant(f_cmd: str) -> str:
+    """Module command as rendered: failures are logged, not fatal (bmtool parity)."""
+    return f'{f_cmd} || echo "WARNING: {f_cmd} failed" >&2'
+
 class PbsRendererTest(unittest.TestCase):
     """Unit test suite verifying exact Isambard PBS resource rendering and directives."""
 
@@ -136,19 +141,34 @@ class PbsRendererTest(unittest.TestCase):
             # 3. Shell fail-fast option
             self.assertEqual(f_lines[10], "set -euo pipefail")
 
-            # 4. Module Preamble: check purge and all 27 Isambard modules
-            self.assertEqual(f_lines[11], "module purge")
-            f_module_lines = f_lines[12:39]
+            # 4. Module Preamble (not fatal): check purge and all 27 Isambard modules
+            self.assertEqual(f_lines[11], "set +eu")
+            self.assertEqual(f_lines[12], _tolerant("module purge"))
+            f_module_lines = f_lines[13:40]
             self.assertEqual(len(f_module_lines), 27)
             for f_mod_name in self.m_isambard_profile.modules:
-                self.assertIn(f"module load {shlex.quote(f_mod_name)}", f_module_lines)
+                self.assertIn(
+                    _tolerant(f"module load {shlex.quote(f_mod_name)}"), f_module_lines
+                )
+            self.assertEqual(f_lines[40], "set -eu")
 
-            # 5. Worker execution tail
+            # 5. Library environment from install_prefix (bmtool vars.in.sh)
+            f_prefix = self.m_isambard_profile.install_prefix
+            self.assertEqual(
+                f_lines[41:43],
+                [
+                    f'export LD_LIBRARY_PATH={f_prefix}/lib:{f_prefix}/lib64"${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"',
+                    f"export ADIOS2_PLUGIN_PATH={f_prefix}/lib",
+                ],
+            )
+
+            # 6. Worker execution tail
             f_expected_tail = (
                 f"exec {shlex.quote(self.m_worker_path)} allocation "
                 f"{shlex.quote(self.m_manifest_path)} {shlex.quote(f'0-tasks-{f_tasks}')}"
             )
-            self.assertEqual(f_lines[39], f_expected_tail)
+            self.assertEqual(f_lines[43], f_expected_tail)
+            self.assertEqual(len(f_lines), 44)
 
     def testGoldenEveryLargeBoundary(self) -> None:
         """Validates golden PBS scripts for large scale boundaries (4..256 tasks, ppn=4) omitting pmem/pvmem."""
@@ -186,10 +206,10 @@ class PbsRendererTest(unittest.TestCase):
             self.assertEqual(f_lines[2], "#PBS -m abe")
             # 3. #PBS -N <job_name>
             self.assertEqual(f_lines[3], f"#PBS -N {self.m_job_name}")
-            # 4. #PBS -l select=<nodes>:ncpus=4:mpiprocs=4:mem=32GB
+            # 4. #PBS -l select=<nodes>:ncpus=4:mpiprocs=4:mem=128GB
             self.assertEqual(
                 f_lines[4],
-                f"#PBS -l select={f_nodes}:ncpus=4:mpiprocs=4:mem=32GB",
+                f"#PBS -l select={f_nodes}:ncpus=4:mpiprocs=4:mem=128GB",
             )
             # Large scale: pmem and pvmem MUST BE OMITTED!
             self.assertFalse(any("-l pmem" in f_l for f_l in f_lines))
@@ -205,17 +225,30 @@ class PbsRendererTest(unittest.TestCase):
             # 3. Shell fail-fast option
             self.assertEqual(f_lines[8], "set -euo pipefail")
 
-            # 4. Module Preamble
-            self.assertEqual(f_lines[9], "module purge")
-            f_module_lines = f_lines[10:37]
+            # 4. Module Preamble (not fatal)
+            self.assertEqual(f_lines[9], "set +eu")
+            self.assertEqual(f_lines[10], _tolerant("module purge"))
+            f_module_lines = f_lines[11:38]
             self.assertEqual(len(f_module_lines), 27)
+            self.assertEqual(f_lines[38], "set -eu")
 
-            # 5. Worker execution tail
+            # 5. Library environment from install_prefix (bmtool vars.in.sh)
+            f_prefix = self.m_isambard_profile.install_prefix
+            self.assertEqual(
+                f_lines[39:41],
+                [
+                    f'export LD_LIBRARY_PATH={f_prefix}/lib:{f_prefix}/lib64"${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"',
+                    f"export ADIOS2_PLUGIN_PATH={f_prefix}/lib",
+                ],
+            )
+
+            # 6. Worker execution tail
             f_expected_tail = (
                 f"exec {shlex.quote(self.m_worker_path)} allocation "
                 f"{shlex.quote(self.m_manifest_path)} {shlex.quote(f'0-tasks-{f_tasks}')}"
             )
-            self.assertEqual(f_lines[37], f_expected_tail)
+            self.assertEqual(f_lines[41], f_expected_tail)
+            self.assertEqual(len(f_lines), 42)
 
     def testRejectsSlurmRawAndInjectedMailModes(self) -> None:
         """Asserts rejection of SlurmMailMode.END_FAIL, raw strings, injected values, and invalid types."""
@@ -326,7 +359,7 @@ class PbsRendererTest(unittest.TestCase):
             f_error_path=self.m_error_path,
             f_mail_mode=PbsMailMode.ABE,
         )
-        self.assertIn("#PBS -l select=32:ncpus=4:mpiprocs=4:mem=32GB", f_large_dirs)
+        self.assertIn("#PBS -l select=32:ncpus=4:mpiprocs=4:mem=128GB", f_large_dirs)
 
         # Mismatched tasks != nodes * ppn
         class MockPointMismatch:
@@ -374,7 +407,7 @@ class PbsRendererTest(unittest.TestCase):
             )
 
     def testMemPerCorrectedChunkAndSmallPmemPvmem(self) -> None:
-        """Asserts mem=32GB per select chunk, and presence of pmem/pvmem only on small scale."""
+        """Asserts mem=32GB per rank (ppn x 32GB per select chunk, like bmtool), and pmem/pvmem only on small scale."""
         # Small scale: ppn=1
         f_small_point = ScalePoint(f_tasks=16, f_ppn=1, f_nodes=16)
         f_small_dirs = PbsScriptRenderer.renderDirectives(
@@ -397,7 +430,7 @@ class PbsRendererTest(unittest.TestCase):
             f_output_path=self.m_output_path,
             f_error_path=self.m_error_path,
         )
-        self.assertIn("#PBS -l select=4:ncpus=4:mpiprocs=4:mem=32GB", f_large_dirs)
+        self.assertIn("#PBS -l select=4:ncpus=4:mpiprocs=4:mem=128GB", f_large_dirs)
         self.assertFalse(any("pmem" in f_d for f_d in f_large_dirs))
         self.assertFalse(any("pvmem" in f_d for f_d in f_large_dirs))
 

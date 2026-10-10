@@ -75,6 +75,7 @@ from lsmiotool.lib.site import (
     SiteProfile,
     SlurmMailMode,
 )
+from lsmiotool.lib.profile import ProfileRecord
 from lsmiotool.lib.state import SchedulerJobState
 from lsmiotool.lib.worker import (
     ModuleSetup,
@@ -842,6 +843,48 @@ class SchedulerScriptRenderer:
     render_module_preamble = renderModulePreamble
 
     @classmethod
+    def renderLibraryEnvironment(cls, f_profile: Any) -> str:
+        """Render the bmtool library environment (include/vars.in.sh) for the profile's install prefix.
+
+        Emits, for PROJECT_DIR=<install_prefix>:
+            export LD_LIBRARY_PATH=<prefix>/lib:<prefix>/lib64"${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            export ADIOS2_PLUGIN_PATH=<prefix>/lib
+        Returns "" when the profile carries no resolved install prefix (module sequences, None,
+        or an unresolved ProfileRecord template).
+        """
+        if f_profile is None or isinstance(f_profile, ProfileRecord):
+            return ""
+        f_prefix = getattr(f_profile, "install_prefix", None)
+        if f_prefix is None or isinstance(f_profile, type):
+            return ""
+        if not isinstance(f_prefix, str) or not f_prefix.strip():
+            raise SchedulerScriptError(
+                f"install_prefix must be a non-empty string, got: {f_prefix!r}"
+            )
+        _checkNoControlChars(f_prefix, "install_prefix")
+        _checkNoDirectiveInjection(f_prefix, "install_prefix")
+        f_norm_prefix = os.path.normpath(f_prefix.strip())
+        if not f_norm_prefix.startswith("/"):
+            raise SchedulerScriptError(
+                f"install_prefix must be an absolute path: {f_prefix!r}"
+            )
+        if ":" in f_norm_prefix:
+            raise SchedulerScriptError(
+                f"install_prefix must not contain ':' (LD_LIBRARY_PATH separator): {f_prefix!r}"
+            )
+        f_lib_dir = os.path.join(f_norm_prefix, "lib")
+        f_lib64_dir = os.path.join(f_norm_prefix, "lib64")
+        f_ld_value = shlex.quote(f"{f_lib_dir}:{f_lib64_dir}")
+        return "\n".join(
+            [
+                f'export LD_LIBRARY_PATH={f_ld_value}"${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"',
+                f"export ADIOS2_PLUGIN_PATH={shlex.quote(f_lib_dir)}",
+            ]
+        )
+
+    render_library_environment = renderLibraryEnvironment
+
+    @classmethod
     def renderScript(
         cls,
         f_backend: SchedulerKind,
@@ -905,12 +948,27 @@ class SchedulerScriptRenderer:
         # 3. Fail-fast shell option
         f_sections.append("set -euo pipefail")
 
-        # 4. One-time module preamble
+        # 4. One-time module preamble. A failing 'module load' (or a module script using
+        # an unset variable) is logged and tolerated like bmtool's load-modules.in.sh,
+        # instead of killing the job before the benchmark starts.
         f_preamble = cls.renderModulePreamble(f_profile)
         if f_preamble:
-            f_sections.append(f_preamble)
+            f_sections.append("set +eu")
+            for f_line in f_preamble.splitlines():
+                if f_line.startswith("module "):
+                    f_sections.append(
+                        f'{f_line} || echo "WARNING: {f_line} failed" >&2'
+                    )
+                else:
+                    f_sections.append(f_line)
+            f_sections.append("set -eu")
 
-        # 5. Worker execution tail
+        # 5. Library environment (after module loads, which may reset LD_LIBRARY_PATH)
+        f_lib_env = cls.renderLibraryEnvironment(f_profile)
+        if f_lib_env:
+            f_sections.append(f_lib_env)
+
+        # 6. Worker execution tail
         f_tail = cls.renderExecutionTail(
             f_worker_executable=f_worker_executable,
             f_manifest_path=f_manifest_path,
@@ -1201,9 +1259,9 @@ class SchedulerAdapter:
     def buildSubmitArgv(self, f_spec: JobSpec) -> List[str]:
         """Build command argv for job script submission."""
         if self.m_backend == SchedulerKind.SLURM:
-            return ["sbatch", "--parsable", f_spec.script_path]
+            return ["sbatch", "--parsable", "--export=ALL", f_spec.script_path]
         elif self.m_backend == SchedulerKind.PBS:
-            return ["qsub", f_spec.script_path]
+            return ["qsub", "-V", f_spec.script_path]
         elif self.m_backend == SchedulerKind.FAKE:
             return [f_spec.script_path]
         else:
@@ -1883,7 +1941,7 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
     1. #PBS -q arm
     2. #PBS -m abe (enforcing PbsMailMode.ABE)
     3. #PBS -N <job_name>
-    4. #PBS -l select=<nodes>:ncpus=<ppn>:mpiprocs=<ppn>:mem=32GB
+    4. #PBS -l select=<nodes>:ncpus=<ppn>:mpiprocs=<ppn>:mem=<ppn x 32GB>
     5. If small scale (ppn == 1):
        #PBS -l pmem=8G
        #PBS -l pvmem=8G
@@ -1902,6 +1960,14 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
     __slots__ = ()
 
     FIXED_WALLTIME = "06:00:00"
+
+    @staticmethod
+    def scaleMemory(f_mem: str, f_factor: int) -> str:
+        """Multiply a PBS memory size such as '32GB' or '8gb' by f_factor ('128GB')."""
+        f_match = re.match(r"^(\d+)([A-Za-z]*)$", f_mem.strip())
+        if f_match is None:
+            raise SchedulerScriptError(f"Unsupported PBS memory size: {f_mem!r}")
+        return f"{int(f_match.group(1)) * int(f_factor)}{f_match.group(2)}"
 
     @classmethod
     def renderDirectives(
@@ -2015,9 +2081,11 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         # 3. Job name
         f_directives.append(f"#PBS -N {f_valid_job_name}")
 
-        # 4. Select chunk
+        # 4. Select chunk: one chunk per node for aprun -N <ppn>, with the policy memory
+        # per rank like bmtool's one-chunk-per-task 'select=<tasks>:mem=32GB'
         f_directives.append(
-            f"#PBS -l select={f_nodes}:ncpus={f_ppn}:mpiprocs={f_ppn}:mem={f_mem}"
+            f"#PBS -l select={f_nodes}:ncpus={f_ppn}:mpiprocs={f_ppn}"
+            f":mem={cls.scaleMemory(f_mem, f_ppn)}"
         )
 
         # 5. Small scale pmem / pvmem
@@ -2128,7 +2196,7 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
     """Concrete Slurm scheduler adapter implementing exact commands, parsers, and recovery.
 
     Command Specifications:
-    - submit: ['sbatch', '--parsable', <script_path>]
+    - submit: ['sbatch', '--parsable', '--export=ALL', <script_path>]
     - active query: ['squeue', '-j', <job_id>, '-h', '-o', '%T']
     - accounting query: ['sacct', '-j', <job_id>, '-P', '-n', '-o', 'JobIDRaw,State,ExitCode']
     - cancel: ['scancel', <job_id>]
@@ -2179,13 +2247,16 @@ class SlurmSchedulerAdapter(SchedulerAdapter):
 
     @classmethod
     def submitCommand(cls, f_script_path: str) -> List[str]:
-        """Build exact sbatch submission argv: ['sbatch', '--parsable', <script_path>]."""
+        """Build exact sbatch submission argv: ['sbatch', '--parsable', '--export=ALL', <script_path>].
+
+        --export=ALL propagates the submitter environment like bmtool (submission.in.sh:126-136).
+        """
         if not isinstance(f_script_path, str) or not f_script_path.strip():
             raise SchedulerError(
                 f"Script path must be a non-empty string, got: {f_script_path!r}"
             )
         _checkNoControlChars(f_script_path, "script_path")
-        return ["sbatch", "--parsable", f_script_path.strip()]
+        return ["sbatch", "--parsable", "--export=ALL", f_script_path.strip()]
 
     submit_command = submitCommand
 
@@ -2807,7 +2878,7 @@ class PbsSchedulerAdapter(SchedulerAdapter):
     """Concrete PBS scheduler adapter implementing exact commands, JSON parsing, and recovery.
 
     Command Specifications:
-    - submit: ['qsub', <script_path>]
+    - submit: ['qsub', '-V', <script_path>]
     - active query: ['qstat', '-f', '-F', 'json', <job_id>]
     - accounting query: ['qstat', '-x', '-f', '-F', 'json', <job_id>]
     - cancel: ['qdel', <job_id>]
@@ -2865,13 +2936,18 @@ class PbsSchedulerAdapter(SchedulerAdapter):
 
     @classmethod
     def submitCommand(cls, f_script_path: str) -> List[str]:
-        """Build exact qsub submission argv: ['qsub', <script_path>]."""
+        """Build exact qsub submission argv: ['qsub', '-V', <script_path>].
+
+        -V exports the full submitter environment to the job (PBS Pro), the superset of
+        bmtool's explicit `qsub -v BM_SCRIPT,...` list (submission.in.sh:142-145); the job
+        script itself sets the module and library environment it needs.
+        """
         if not isinstance(f_script_path, str) or not f_script_path.strip():
             raise SchedulerError(
                 f"Script path must be a non-empty string, got: {f_script_path!r}"
             )
         _checkNoControlChars(f_script_path, "script_path")
-        return ["qsub", f_script_path.strip()]
+        return ["qsub", "-V", f_script_path.strip()]
 
     submit_command = submitCommand
 

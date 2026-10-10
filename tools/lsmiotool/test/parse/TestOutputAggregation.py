@@ -92,9 +92,10 @@ class TestOutputAggregation(TestCase):
         f1 = os.path.join(n_dir, "out-lsmio-4-64K-2023-07-01-node000-0.txt.2")
         self.m_mock_gen.generateLsmioFile(f1, 2, 4, "64K")
 
-        # Initializing MockTwoNodeLsmioAggOutput should raise MissingDataError
+        # Building the strict per-node map should raise MissingDataError
+        lsm_agg = MockTwoNodeLsmioAggOutput(base)
         with self.assertRaises(output.MissingDataError):
-            MockTwoNodeLsmioAggOutput(base)
+            lsm_agg.getMap()
 
     def testLmpOutputDirAndAggOutput(self) -> None:
         """Test LMP directory traversal and aggregation."""
