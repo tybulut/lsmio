@@ -81,6 +81,27 @@ def requireBmtoolShell(f_case: unittest.TestCase, f_script: str) -> None:
         f_case.skipTest("en_US.UTF-8 locale (bmtool's collation) not available")
 
 
+def hasGlibcGlobCollation() -> bool:
+    """Return True if the host shell glob under en_US.UTF-8 uses glibc collation (ignores punctuation)."""
+    with tempfile.TemporaryDirectory(prefix="lsmiotool-glob-check-") as f_td:
+        os.makedirs(os.path.join(f_td, "1"), exist_ok=True)
+        os.makedirs(os.path.join(f_td, "16"), exist_ok=True)
+        open(os.path.join(f_td, "1", "a"), "w").close()
+        open(os.path.join(f_td, "16", "a"), "w").close()
+        f_cmd = 'LC_ALL=en_US.UTF-8; for f in */a; do echo "$f"; break; done'
+        try:
+            f_proc = subprocess.run(
+                [BMTOOL_SHELL, "-c", f_cmd],
+                cwd=f_td,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return f_proc.stdout.strip().startswith("16")
+        except OSError:
+            return False
+
+
 def lmpLog(f_bws: List[float], f_extra: Optional[List[str]] = None) -> str:
     """A constructed LSMIO-enabled LAMMPS (in.reaxc.hns) log, one rank's run_tee output.
 
@@ -570,6 +591,10 @@ class LsmioAggOutputParityTest(unittest.TestCase):
             self.skipTest("locale not available")
         if "en_us.utf8" not in f_locales and "en_us.utf-8" not in f_locales:
             self.skipTest("en_US.UTF-8 locale (bmtool's collation) not available")
+        if not hasGlibcGlobCollation():
+            self.skipTest(
+                "Host shell glob does not use glibc collation (bmtool's collation on Viking/ARCHER2)"
+            )
 
         with open(BMTOOL_PARSE_SCRIPT) as f_f:
             f_script = f_f.read()
