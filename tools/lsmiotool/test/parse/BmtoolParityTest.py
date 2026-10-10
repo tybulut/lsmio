@@ -59,9 +59,14 @@ BMTOOL_PARSE_DIR = os.path.dirname(BMTOOL_PARSE_SCRIPT)
 EXAMPLE_IOR_OUTPUTS = os.path.join(os.path.dirname(__file__), "example", "ior-outputs")
 
 
+# bmtool's #!/bin/sh is bash on its sites (Viking, ARCHER2). Its globs then sort by the
+# locale's collation, which lsmiotool reproduces; dash (Ubuntu's sh) sorts by bytes.
+BMTOOL_SHELL = "bash"
+
+
 def requireBmtoolShell(f_case: unittest.TestCase, f_script: str) -> None:
     """Skip f_case unless bmtool's script and its tools / en_US.UTF-8 collation exist."""
-    for f_tool in ("sh", "grep", "egrep", "awk", "sed", "perl", "tail"):
+    for f_tool in (BMTOOL_SHELL, "grep", "egrep", "awk", "sed", "perl", "tail"):
         if shutil.which(f_tool) is None:
             f_case.skipTest(f"'{f_tool}' not available")
     if not os.path.isfile(f_script):
@@ -373,7 +378,7 @@ class IorLmpParityTest(unittest.TestCase):
         f_bm = self._iorOutputs(os.path.join(self.m_temp_dir, "bm"))
         f_py = self._iorOutputs(os.path.join(self.m_temp_dir, "py"))
         subprocess.run(
-            ["sh", f_driver, f_bm],
+            [BMTOOL_SHELL, f_driver, f_bm],
             env=dict(os.environ, LC_ALL="en_US.UTF-8"),
             check=True,
             capture_output=True,
@@ -460,7 +465,7 @@ class IorLmpParityTest(unittest.TestCase):
         self._lmpOutputs(f_bm)
         f_expected = self._lmpOutputs(f_py)
         subprocess.run(
-            ["sh", f_driver, f_bm],
+            [BMTOOL_SHELL, f_driver, f_bm],
             env=dict(os.environ, LC_ALL="en_US.UTF-8"),
             check=True,
             capture_output=True,
@@ -552,7 +557,7 @@ class LsmioAggOutputParityTest(unittest.TestCase):
 
     def testMatchesRealBmtoolScript(self) -> None:
         """Runs bmtool's own generate_aggregates/generate_report and diffs the bytes."""
-        for f_tool in ("sh", "grep", "egrep", "awk", "sed", "perl", "tail"):
+        for f_tool in (BMTOOL_SHELL, "grep", "egrep", "awk", "sed", "perl", "tail"):
             if shutil.which(f_tool) is None:
                 self.skipTest(f"'{f_tool}' not available")
         if not os.path.isfile(BMTOOL_PARSE_SCRIPT):
@@ -590,7 +595,7 @@ class LsmioAggOutputParityTest(unittest.TestCase):
 
             f_env = dict(os.environ, LC_ALL="en_US.UTF-8")
             subprocess.run(
-                ["sh", f_driver, f_bm_dir, f_scale],
+                [BMTOOL_SHELL, f_driver, f_bm_dir, f_scale],
                 env=f_env,
                 check=True,
                 capture_output=True,
