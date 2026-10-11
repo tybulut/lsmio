@@ -34,7 +34,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 class ArchiveError(Exception):
@@ -334,6 +334,32 @@ class ArchiveEngine:
             if isinstance(f_doc, dict) and f_doc.get("run_id") == f_run_id:
                 return os.path.join(f_dest, f_entry)
         return None
+
+    @classmethod
+    def archivedPoints(cls, f_dest_root: Union[str, Path], f_run_id: str) -> List[str]:
+        """Points of run f_run_id recorded by the run markers of the outputs-* dirs under
+        f_dest_root (several dirs for the :base twin of a paired baseline)."""
+        f_dest = str(f_dest_root)
+        try:
+            f_entries = sorted(os.listdir(f_dest))
+        except OSError:
+            return []
+        f_points: Set[str] = set()
+        for f_entry in f_entries:
+            if not f_entry.startswith("outputs-"):
+                continue
+            try:
+                with open(
+                    os.path.join(f_dest, f_entry, cls.RUN_MARKER_FILE),
+                    "r",
+                    encoding="utf-8",
+                ) as f_f:
+                    f_doc = json.load(f_f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(f_doc, dict) and f_doc.get("run_id") == f_run_id:
+                f_points.update(str(f_p) for f_p in f_doc.get("points") or [])
+        return sorted(f_points)
 
     @classmethod
     def exportRunRoot(

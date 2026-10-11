@@ -3566,6 +3566,324 @@ class RunOrchestratorTest(unittest.TestCase):
                 )
             )
 
+    def testArchiveCommandArchivesWhatAGroupRunLeft(self) -> None:
+        """M22/M27: 'archive --source <arm run root>' archives a group run's finished points
+        as :run/:base pairs when the run did not (here --no-archive; likewise a lost
+        session or a failed archive step), leaves out an arm that failed, and is idempotent."""
+        from lsmiotool.lib.main import ArchiveMain
+
+        def fake_export(**f_kw: Any) -> int:
+            os.makedirs(f_kw["f_node_dir"], exist_ok=True)
+            return 1
+
+        with tempfile.TemporaryDirectory() as f_dest:
+            f_runner = FakeSchedulerCommandRunner()
+            f_orch = RunOrchestrator(
+                f_profile_resolver=self.m_registry,
+                f_command_runner=f_runner,
+                f_poll_interval=0.01,
+            )
+            f_runner.m_on_submit_callback = self._groupOnSubmit(
+                f_orch, f_fail_labels=("manoff",)
+            )
+            with patch("lsmiotool.lib.export.exportPoint") as f_export:
+                f_orch.execute(
+                    RunRequest(
+                        "lsmio",
+                        "variants",
+                        f_variants=["footer", "manoff"],
+                        f_archive=False,
+                    ),
+                    f_site=self.m_viking_profile,
+                    f_worker_executable=self.m_worker_path,
+                )
+            self.assertEqual(f_export.call_count, 0)
+            f_footer_root = f_orch.groupRuns[1]["store"].layout.runRoot
+
+            def archive() -> int:
+                with (
+                    patch("lsmiotool.lib.export.exportPoint", side_effect=fake_export),
+                    patch("lsmiotool.lib.export.generateReports", return_value=True),
+                    patch("sys.stdout", new_callable=io.StringIO),
+                ):
+                    return ArchiveMain(
+                        [
+                            "lsmio",
+                            "variants",
+                            "--source",
+                            f_footer_root,
+                            "--dest",
+                            f_dest,
+                        ]
+                    ).run()
+
+            self.assertEqual(archive(), 0)
+            f_pair = ["outputs-native-footer:base", "outputs-native-footer:run"]
+            self.assertEqual(sorted(os.listdir(f_dest)), f_pair)
+            # Archived points are not archived again
+            self.assertEqual(archive(), 0)
+            self.assertEqual(sorted(os.listdir(f_dest)), f_pair)
+
+    def testArchiveGroupRunUsesTheRunsDestinationPerBackendPoint(self) -> None:
+        """M22: without --dest a group run is archived where the run would have archived it
+        (recorded in its arm markers): backends/<scale>/outputs-<arm>/<nodes>."""
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+
+        def fake_export(**f_kw: Any) -> int:
+            os.makedirs(f_kw["f_node_dir"], exist_ok=True)
+            return 1
+
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest("lsmio", "local", f_mode="backends", f_archive=False),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+        f_dest = os.path.join(
+            self.m_viking_root_hdd, "lsmio-archive", "backends", "local"
+        )
+        self.assertFalse(os.path.exists(f_dest))
+        with (
+            patch("lsmiotool.lib.export.exportPoint", side_effect=fake_export),
+            patch("lsmiotool.lib.export.generateReports", return_value=True),
+        ):
+            f_ok, f_dirs = RunOrchestrator().archiveGroupRun(
+                f_orch.groupRuns[2]["store"].layout.runRoot, f_reporter=lambda f_l: None
+            )
+            self.assertTrue(f_ok)
+            self.assertEqual(
+                sorted(f_dirs),
+                sorted(
+                    os.path.join(f_dest, f"outputs-{f_a}")
+                    for f_a in ("adios", "native", "plugin", "rocksdb")
+                ),
+            )
+            for f_a in ("adios", "native", "plugin", "rocksdb"):
+                self.assertTrue(
+                    os.path.isdir(os.path.join(f_dest, f"outputs-{f_a}", "1"))
+                )
+            self.assertEqual(
+                RunOrchestrator().archiveGroupRun(
+                    f_orch.groupRuns[0]["store"].layout.runRoot,
+                    f_reporter=lambda f_l: None,
+                ),
+                (True, []),
+            )
+
+    def testRunRecordsItsPidWhileRunningAndArchiveWaitsForIt(self) -> None:
+        """Every arm's control dir names the orchestrator while it runs (f_on_ready sees
+        it); it is removed at the end; 'archive --source' refuses a run that is live."""
+        from lsmiotool.lib.archive import ArchiveError
+        from lsmiotool.lib.run import readOrchestratorPid, writeOrchestratorPid
+
+        f_seen: List[Any] = []
+
+        def on_ready(f_roots: List[str]) -> None:
+            f_seen.append([readOrchestratorPid(f_r) for f_r in f_roots])
+
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+            f_on_ready=on_ready,
+        )
+        self.assertEqual(len(f_seen), 1)
+        self.assertEqual([f_d["pid"] for f_d in f_seen[0]], [os.getpid()] * 2)
+        f_roots = [f_r["store"].layout.runRoot for f_r in f_orch.groupRuns]
+        self.assertEqual([readOrchestratorPid(f_r) for f_r in f_roots], [None, None])
+
+        writeOrchestratorPid(f_roots[:1])
+        with self.assertRaises(ArchiveError) as f_ctx:
+            RunOrchestrator().archiveGroupRun(f_roots[1], f_reporter=lambda f_l: None)
+        self.assertIn("still running", str(f_ctx.exception))
+
+    def testArchiveGroupRunNeedsEveryRankToSucceed(self) -> None:
+        """L47: as bmtool keeps a run with a failed step (any failed rank) out of the
+        archive, a point is archived only when every rank result succeeded too."""
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+        f_footer = f_orch.groupRuns[1]
+        f_sp = f_footer["plan"].scale_points[0]
+        os.remove(
+            f_footer["store"].layout.pointRankResultPath(
+                f_sp, 1, f_footer["plan"].combinations[2], f_ordinal=0
+            )
+        )
+        f_lines: List[str] = []
+        with patch("lsmiotool.lib.export.exportPoint") as f_export:
+            f_result = RunOrchestrator().archiveGroupRun(
+                f_footer["store"].layout.runRoot, f_reporter=f_lines.append
+            )
+        self.assertEqual(f_result, (True, []))
+        self.assertEqual(f_export.call_count, 0)
+        self.assertTrue(
+            any(f_l.startswith("Not archived: arm 'footer'") for f_l in f_lines)
+        )
+
+    def testArchiveGroupRunNeverReplacesAnotherRunsBackendPoint(self) -> None:
+        """L44: archiving a backends run after the fact fills in missing <nodes> dirs but
+        never replaces one holding another run's results (only a job replaces, as bmtool)."""
+        from lsmiotool.lib.archive import ArchiveEngine
+
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+
+        def fake_export(**f_kw: Any) -> int:
+            os.makedirs(f_kw["f_node_dir"], exist_ok=True)
+            return 1
+
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest("lsmio", "local", f_mode="backends", f_archive=False),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+        f_dest = os.path.join(self.m_temp_dir, "dest")
+        f_newer = os.path.join(f_dest, "outputs-native", "1")
+        os.makedirs(f_newer)
+        ArchiveEngine.writeRunMarker(
+            os.path.dirname(f_newer), "run-newer", f_newer, ["00-tasks-1"]
+        )
+        f_lines: List[str] = []
+        with (
+            patch(
+                "lsmiotool.lib.export.exportPoint", side_effect=fake_export
+            ) as f_export,
+            patch("lsmiotool.lib.export.generateReports", return_value=True),
+        ):
+            f_ok, f_dirs = RunOrchestrator().archiveGroupRun(
+                f_orch.groupRuns[0]["store"].layout.runRoot,
+                f_dest_root=f_dest,
+                f_reporter=f_lines.append,
+            )
+        self.assertTrue(f_ok)
+        self.assertEqual(
+            sorted(os.path.basename(f_d) for f_d in f_dirs),
+            ["outputs-adios", "outputs-plugin", "outputs-rocksdb"],
+        )
+        self.assertNotIn(
+            f_newer, [f_c.kwargs["f_node_dir"] for f_c in f_export.call_args_list]
+        )
+        self.assertIn(f"Not archived: {f_newer} holds another run's results", f_lines)
+        self.assertEqual(
+            ArchiveEngine.findArchivedRun(f_dest, "run-newer"),
+            os.path.dirname(f_newer),
+        )
+
+    def testRunGoesOnAttachedWhenDetachingFails(self) -> None:
+        """A failing f_on_ready (e.g. fork or the console log failing) does not abandon the
+        allocated run: it warns, goes on attached, and still removes its pid files."""
+        from lsmiotool.lib.run import readOrchestratorPid
+
+        def on_ready(f_roots: List[str]) -> None:
+            raise OSError("cannot fork")
+
+        f_lines: List[str] = []
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+            f_on_ready=on_ready,
+            f_reporter=f_lines.append,
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        self.assertTrue(
+            any("detaching the run failed (cannot fork)" in f_l for f_l in f_lines)
+        )
+        self.assertEqual(
+            [
+                readOrchestratorPid(f_r["store"].layout.runRoot)
+                for f_r in f_orch.groupRuns
+            ],
+            [None, None],
+        )
+
+    def testArchiveRefusesToMoveAnArchiveOrFailedOutputs(self) -> None:
+        """M23: --source may not be an archive dir (run marker), anything inside an archive
+        destination, or a failed bmtool job's outputs; the source is left untouched."""
+        from lsmiotool.lib.archive import ArchiveEngine
+        from lsmiotool.lib.main import ArchiveMain
+
+        f_root = self.m_viking_root_hdd
+
+        def bmtoolOutputs(f_dir: str) -> str:
+            os.makedirs(os.path.join(f_dir, "8", "2026-10-10"), exist_ok=True)
+            with open(
+                os.path.join(f_dir, "8", "2026-10-10", "out-native-4-1M.txt"), "w"
+            ) as f_f:
+                f_f.write("write,1,1,1,1,1,10\n")
+            return f_dir
+
+        f_marked = bmtoolOutputs(os.path.join(self.m_temp_dir, "copied-archive"))
+        ArchiveEngine.writeRunMarker(f_marked, "run-x", f_marked, ["00-tasks-8"])
+        f_cases = [
+            f_marked,
+            bmtoolOutputs(
+                os.path.join(
+                    f_root, "lsmio-archive", "variants", "outputs-native-footer:run"
+                )
+            ),
+            bmtoolOutputs(os.path.join(f_root, "lsmio", "outputs-failed", "job-1")),
+        ]
+        f_dest = os.path.join(self.m_temp_dir, "dest")
+        with patch.object(ArchiveMain, "_benchmarkRoot", return_value=f_root):
+            for f_src in f_cases:
+                with patch("sys.stderr", new_callable=io.StringIO) as f_err:
+                    f_rc = ArchiveMain(
+                        [
+                            "lsmio",
+                            "variants",
+                            "footer",
+                            "--source",
+                            f_src,
+                            "--dest",
+                            f_dest,
+                        ]
+                    ).run()
+                self.assertEqual(f_rc, 1, f_src)
+                self.assertIn("refusing", f_err.getvalue())
+                self.assertTrue(os.path.isdir(os.path.join(f_src, "8")))
+            self.assertFalse(os.path.exists(f_dest))
+
     def testSubmitErrorFailsAllArms(self) -> None:
         """A rejected submission of the shared job fails the whole request."""
         f_fake_runner = FakeSchedulerCommandRunner()

@@ -153,6 +153,7 @@ graph TD
 | `parse` | Parses immutable run root artifacts, formats ASCII console summaries, and produces Stage 1/2 CSV/JSON reports. |
 | `compare` | Generates comparative scaling and variant sensitivity plots using Matplotlib. |
 | `archive` | Bundles and archives benchmark run directories for long-term comparative analysis. |
+| `cancel` | Stops a running `run` (detached or not) and cancels its job: `lsmiotool cancel <run root \| run id>`. |
 | `test` | Executes the internal Python test suite across unit, functional, and integration fixtures. |
 | `parseLegacy` | Backward-compatible parser for legacy unstructured output hierarchies. |
 | `load-modules` | Dynamically configures HPC cluster environment modules defined in `environments.json`. |
@@ -188,7 +189,7 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
 #### Typical Workflows:
 `run` waits for its jobs and archives each scale point with its reports as it finishes, so a run can be followed directly by `compare`; no `parse` step is needed. The archive paths below are the defaults under the benchmark root (`~/scratch/benchmark` on Viking2).
 
-`run` must stay alive until its last job ends: it is the process that submits the next scale point and archives each finished one. Start long runs inside `tmux`/`screen` or under `nohup`, so a dropped SSH session does not stop them (a lost `run` leaves its running job to finish, but that point is not archived and later points are not submitted).
+`run` is the process that submits each scale point and archives each finished one, so it lives until its last job ends. Started from a terminal, it detaches once its run roots exist (like running it under `nohup` and tailing the output): it goes on in its own session with its output in `<run root>/control/console.log` (the first arm's run root for a multi-arm run), and that log is followed on screen until the run ends. A dropped SSH session therefore does not stop it, and Ctrl-C only stops the following; the screen then shows how to follow (`tail -f <log>`) and how to stop the run (`lsmiotool cancel <run root>`, which cancels its job, as Ctrl-C does with `--foreground`). With `--foreground`, or when its output is not a terminal (a script, a pipe, `nohup`), `run` stays attached. If `run` dies anyway (a crash, `kill -9`), the job it was waiting for still finishes; `lsmiotool archive lsmio <scale> --source <one of its run roots>` then archives the points that finished, and a new `run ... --resume` picks up the variants or backend points that are still missing.
 
 Repeated campaigns land in the same default folders. A second `variants` run is archived next to the first as `outputs-<arm>:run-1`/`:base-1`, and `compare variants` charts every pair in the folder; a second `backends` run replaces each `outputs-<backend>/<nodes>` it reruns. Give each campaign its own folder with `--out-dir` (e.g. `--out-dir lsmio-archive/variants-0.4.0`), or move the previous one aside first.
 ```bash
@@ -697,13 +698,18 @@ If `<archive_folder>` contains no `:run` directory at all (only unpaired `output
 `lsmiotool archive` bundles, validates, and archives benchmark outputs for long-term preservation and cross-cluster comparative evaluations.
 
 ```bash
-lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 ```
 
-- `<benchmark>`: Benchmark suite (`ior`, `lsmio`, or `lmp`).
+- `<benchmark>`: Benchmark suite (`lsmio`).
 - `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `variants`; `baseline` is a deprecated alias of `variants`).
-- `[variant]`: Variant identifier (mandatory for `variants` scale; resolved against `VariantCatalogue`).
-- `--dest <path>`: Destination archive directory.
+- `[variant]`: Optional variant identifier for `variants` (resolved against `VariantCatalogue`); it names the arm, `outputs-<arm>`.
+- `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`).
+- `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE-M`; for an lsmiotool run, its own setup).
+- `--source <path>`: What to archive. Without it: bmtool's `<benchmark_root>/lsmio/outputs`, else the latest standalone lsmiotool run of `lsmio <scale>` (and `<variant>`).
+  - An lsmiotool run root: its succeeded points are copied in bmtool's layout with reports; the run root stays.
+  - The run root of any arm of a `variants`, `--versioned` or `backends` run: the whole run is archived as `run` would have, each finished point not yet archived (`:run`/`:base` pairs, or `outputs-<backend>/<nodes>`), in the run's own destination unless `--dest` is given; `<variant>` is not used. A point counts as finished when every combination and every rank succeeded (bmtool keeps a run with a failed step out of the archive), whatever happened to the `run` process. Running it again archives nothing twice, and an existing backend `<nodes>` directory of another run is never replaced (only `run` replaces, as bmtool's jobs do). A run whose `run` process is still alive (its `control/orchestrator.pid`) is refused: it archives itself.
+  - bmtool's live outputs directory `<benchmark_root>/lsmio/outputs`: moved to `<dest>/outputs-<arm>`, like `bmtool archive`. It is the only bmtool directory `archive` moves; any other (a copy, an old archive, `lsmio/outputs-failed`) is refused: move bmtool outputs there first.
 
 Under paired execution workflows, the archiving engine automatically coordinates symmetrical twin directory generation (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`) with synchronized collision suffix locking (`INV-PAIR-2`), while standalone baseline runs maintain clean unadorned directory names (`outputs-native`, `INV-PAIR-3`).
 

@@ -45,13 +45,14 @@ LSMIOTOOL_HELP = """How to run
 
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
+  cancel <run root | run id>  stop a running 'run' (its job is cancelled)
   compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
   parseLegacy lsmio backends <local|bake|small|large> [<path>]
-  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast]
-  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
+  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -83,7 +84,15 @@ Options:
                 LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE-M;
                 for an lsmiotool run, the run's own setup).
   --source <path>
-                What to archive: an lsmiotool run root or a bmtool outputs directory.
+                What to archive: an lsmiotool run root, or bmtool's live outputs directory
+                <benchmark_root>/lsmio/outputs (the only bmtool directory moved, as in bmtool).
+                The run root of any arm of a variants, --versioned or backends run archives that
+                whole run: each finished point (every combination and rank succeeded) not
+                archived yet, as :run/:base pairs or outputs-<backend>/<nodes>, in the run's own
+                destination unless --dest is given (<variant> is not used). An existing
+                <nodes> dir of another run is never replaced. This picks up what 'run' left,
+                e.g. after --no-archive or when its process ended before its jobs did; a run
+                still running is refused.
 
 Source (default): <benchmark_root> is the site profile's benchmark root.
   - <benchmark_root>/lsmio/outputs, when it holds bmtool outputs: moved to
@@ -95,8 +104,8 @@ Source (default): <benchmark_root> is the site profile's benchmark root.
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast]
-  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
+  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
@@ -131,6 +140,11 @@ Options:
                 Overrides default dynamic scaling (2 + total_runs * 2 hours, granting 120 minutes per matrix run + 2 hours safety headroom).
   --versioned   Execute versioned comparison run against reference baseline.
   --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
+  --foreground  Stay attached to the terminal. By default a run started from a terminal
+                detaches once its run roots exist: it goes on in the background with its
+                output in <run root>/control/console.log, which is followed on screen until
+                it ends. Ctrl-C then only stops the following; 'lsmiotool cancel <run root>'
+                stops the run (and cancels its job).
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.

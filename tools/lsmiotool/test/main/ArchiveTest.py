@@ -410,8 +410,12 @@ class ArchiveTest(unittest.TestCase):
 
     def testArchiveMainRunSuccess(self) -> None:
         """Tasks 4.5.7: Asserts ArchiveMain dispatching and successful execution."""
-        with tempfile.TemporaryDirectory() as temp_root:
-            source_dir = os.path.join(temp_root, "outputs")
+        with (
+            tempfile.TemporaryDirectory() as temp_root,
+            patch.object(ArchiveMain, "_benchmarkRoot", return_value=temp_root),
+        ):
+            # bmtool's live outputs dir, the only bmtool directory archive moves (L48)
+            source_dir = os.path.join(temp_root, "lsmio", "outputs")
             dest_root = os.path.join(temp_root, "lsmio-archive")
             # bmtool outputs layout: <nodes>/<date>/out-*.txt
             payload_rel = os.path.join(
@@ -434,6 +438,16 @@ class ArchiveTest(unittest.TestCase):
                     ArchiveMain(f_request=stray_req, f_source_dir=stray_dir).run(), 1
                 )
             self.assertTrue(os.path.isfile(os.path.join(stray_dir, "notes.txt")))
+
+            # L48: bmtool-format outputs anywhere else (a copy, an old archive) are not moved
+            copy_dir = os.path.join(temp_root, "outputs-copy")
+            shutil.copytree(source_dir, copy_dir)
+            with patch("sys.stderr", new_callable=io.StringIO) as f_err:
+                self.assertEqual(
+                    ArchiveMain(f_request=stray_req, f_source_dir=copy_dir).run(), 1
+                )
+            self.assertIn("bmtool's live outputs directory", f_err.getvalue())
+            self.assertTrue(os.path.isfile(os.path.join(copy_dir, payload_rel)))
 
             # Initialize ArchiveMain with direct request
             req = ArchiveRequest(

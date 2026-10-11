@@ -174,12 +174,12 @@ Status: `[ ]` open, `[x]` fixed.
   `lsmiotool archive`, not by `run`'s own archiving, and arm manifests do not record the arm's
   kind/role: `archive` can re-export a group arm (baseline, `bm_native:main` reference, a backend)
   as a standalone `outputs-native`.
-- [ ] **M22.** A group arm can never be archived by hand: `archive` (`main.py` source check and
+- [x] **M22.** A group arm can never be archived by hand: `archive` (`main.py` source check and
   `_latestRunRoot`) refuses/skips every run root with `.lsmiotool-arm.json`, saying `run`
   archives it, which is false after `--no-archive`, a failed archive step ("ERROR: archiving
   arm … failed") or an interrupt (L15). The arm marker does not record whether the arm was
   archived; refuse only when `findArchivedRun` finds the run.
-- [ ] **M23.** `archive --source` accepts an existing archive dir (it satisfies
+- [x] **M23.** `archive --source` accepts an existing archive dir (it satisfies
   `isBmtoolOutputDir`) and moves it: `--source <dest>/outputs-native-footer:run` renames it to
   `outputs-native-footer` and leaves an empty `:run` next to `:base` (compare sees an empty arm,
   `--resume` skips footer). `lsmio/outputs-failed/<x>` is accepted too. Refuse sources holding
@@ -198,7 +198,7 @@ Status: `[ ]` open, `[x]` fixed.
   versioned run (job 37416785) archived `node0-0` … `node7-0` where bmtool had `node097-0` …,
   and the real host was recorded nowhere. On PBS, where `node_rank` is the hostname, names became
   `nodenid001234-0` and every rank on a node collided on suffix 0, falling back to `-r<rank>`.
-- [ ] **M27.** A dropped login session ends `run` mid-campaign. `run` is the foreground process
+- [x] **M27.** A dropped login session ends `run` mid-campaign. `run` is the foreground process
   that submits each scale point and archives each finished one, and only SIGINT/SIGTERM are
   handled (`lib/run.py` signal coordinator); SIGHUP kills it. The running job finishes, but its
   point is not archived and later points are not submitted; `archive` refuses multi-arm group
@@ -310,6 +310,31 @@ Status: `[ ]` open, `[x]` fixed.
 - [ ] **L43.** On ARCHER2 a source-mode relocation (lsmiotool, or bmtool's rsync of `tools/`) runs
   `rsync --delete` over `<work>/tools/lsmiotool`, which removes an installed-mode mirror kept under
   it; a queued installed-mode job could lose its worker. Predates the bmtool deprecation.
+- [x] **L44.** Archiving an older backends run with `archive --source` replaces a newer run's
+  `outputs-<backend>/<nodes>` and its run marker (`exportPoint` rmtree + rename; the marker holds
+  one run id), and two runs can then replace each other back and forth. Skip a `<nodes>` dir whose
+  marker names another run (with a warning), or keep a per-run points map in the marker.
+- [ ] **L45.** A pair half-written by `_archiveGroup` (the `:base` export fails, or the process is
+  killed between export and `_mark`) leaves a `:run` without a run marker: the next
+  `archive --source` archives a duplicate `:run-1`/`:base-1` pair, and `run --resume` treats the
+  variant as done. Write the markers as soon as the pair dirs exist, or export into temporary
+  dirs and rename at the end.
+- [ ] **L46.** With `--foreground`, a hangup also reaches `sbatch`/`squeue` children (bash forwards
+  SIGHUP to its jobs): a killed `squeue` costs one UNKNOWN poll, a killed `sbatch` after the
+  controller accepted the job can leave an orphan job. Detached runs are not affected. Fix:
+  start scheduler commands with `start_new_session=True`.
+- [x] **L47.** `archive --source`'s success test (`_armPointSucceeded`) reads controller results
+  only; a rank with a failed rank result under a successful controller status would be archived.
+  Also check `readRankResult` status.
+- [x] **L48.** M23 still accepts an unmarked bmtool pair dir outside `<root>/lsmio-archive` and the
+  destination (e.g. `lsmio-archive-0.3/variants/outputs-x:run`). Also refuse basenames matching
+  `outputs-*:(run|base)(-N)?`.
+- [ ] **L49.** `recoverRun` never installs the signal coordinator (no SIGINT/SIGTERM handling there);
+  only relevant if it is reached from the CLI.
+- [ ] **L50.** `orchestratorRunning` compares the process start (btime-based on Linux, `ps lstart`
+  elsewhere) with the pid file's wall-clock `started_at_utc` within 5 s: a forward wall-clock
+  step of more than 5 s after the pid file is written makes a live run look dead (`cancel` and
+  the archive guard then miss it). Record the process's own start ticks instead of wall time.
 
 ---
 
@@ -424,3 +449,41 @@ Status: `[ ]` open, `[x]` fixed.
 - **L34** Arms of a multi-arm run (paired, versioned, backends) take the scheduled resources of
   the whole-request plan, the one the shared job is rendered from, so `manifest.json` `points`
   match the job script.
+
+## Resolution notes (remaining medium items)
+
+- **M22** `archive --source <run root>` of any arm of a paired/versioned/backends run archives
+  that whole run (`RunOrchestrator.archiveGroupRun`, reusing `run`'s `_archiveGroup`): every point
+  whose combinations all have a successful controller result (and, since L47, successful rank
+  results) and that the destination's run markers do not list yet, as `:run`/`:base` pairs or `outputs-<backend>/<nodes>`. The destination
+  is `--dest`, else the one the run recorded in its arm markers (`archive_dest`, now written with
+  `setup`/`variant`), else the run's default. A failed arm is left out; a second call archives
+  nothing. Latest-run discovery still skips group arms (its error message names `--source`).
+- **M23** (Superseded by L48.) First fixed by refusing a `--source` holding
+  `.lsmiotool-run.json`, inside an archive destination or inside `lsmio/outputs-failed`; L48
+  replaced those checks with bmtool's rule: only `<root>/lsmio/outputs` is accepted as a bmtool
+  source.
+- **M27** Like bmtool under nohup with its output tailed: started from a terminal, `run`
+  forks once its run roots exist (`lib/detach.py`); the child goes on in a new session (no
+  SIGHUP, no Ctrl-C) with its output in `<first run root>/control/console.log`, and the parent
+  follows that log and exits with the run's status. Ctrl-C only stops the following;
+  `lsmiotool cancel <run root | run id>` sends SIGTERM to the pid in `control/orchestrator.pid`
+  (written into every arm's control dir while a run is live, foreground or not), which cancels
+  the job as an interrupt does. `--foreground`, or output that is not a terminal, keeps `run`
+  attached. `archive --source` refuses a run whose orchestrator is alive (or on another host),
+  closing the race with a live `run` found in review. If `run` dies anyway, M22's
+  `archive --source` archives what finished and `run --resume` reruns what is missing.
+
+## Resolution notes (L44, L47, L48: bmtool's rules)
+
+- **L47** `_armPointSucceeded` requires a successful controller result and a successful result
+  for every rank of every combination, as bmtool keeps a run whose `srun --kill-on-bad-exit`
+  step failed (any failed rank) out of the archive (`batch.in.sh` `BM_MATRIX_FAILED`).
+- **L44** `archiveGroupRun` fills in, never replaces: a backend `<nodes>` dir that exists and is
+  not recorded for this run is skipped with "Not archived: … holds another run's results". Only
+  `run` replaces `<nodes>`, as bmtool's jobs do (`rm -rf` + `cp -Rp`).
+- **L48** For bmtool output, `archive --source` accepts only `<benchmark_root>/lsmio/outputs`,
+  the one directory bmtool's archive moves (`$LSM_DIR_OBASE`). This replaces M23's list of
+  refused locations (`_refuseArchivedSource` is gone): a copy, an old archive, a pair dir or
+  `outputs-failed` is refused because it is not the live outputs dir.
+

@@ -37,7 +37,9 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import socket
 import stat
+import subprocess
 import sys
 import time
 from typing import (
@@ -2931,6 +2933,148 @@ class SignalCoordinator:
         self.uninstall()
 
 
+# Written by 'lsmiotool run' into each run root's control dir while it runs: the process to
+# stop for 'lsmiotool cancel', and the live run 'lsmiotool archive' must not race
+ORCHESTRATOR_PID_FILE = "orchestrator.pid"
+
+
+def orchestratorPidPath(f_run_root: str) -> str:
+    return os.path.join(f_run_root, "control", ORCHESTRATOR_PID_FILE)
+
+
+def writeOrchestratorPid(
+    f_run_roots: Sequence[str], f_pid: Optional[int] = None
+) -> None:
+    """Record this orchestrator process (pid, host) in each run root's control dir."""
+    f_doc = {
+        "pid": f_pid if f_pid is not None else os.getpid(),
+        "host": socket.gethostname(),
+        "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    for f_root in f_run_roots:
+        f_path = orchestratorPidPath(f_root)
+        try:
+            with open(f_path + ".tmp", "w", encoding="utf-8") as f_f:
+                json.dump(f_doc, f_f)
+            os.replace(f_path + ".tmp", f_path)
+        except OSError:
+            pass
+
+
+def readOrchestratorPid(f_run_root: str) -> Optional[Dict[str, Any]]:
+    try:
+        with open(orchestratorPidPath(f_run_root), "r", encoding="utf-8") as f_f:
+            f_doc = json.load(f_f)
+    except (OSError, ValueError):
+        return None
+    return f_doc if isinstance(f_doc, dict) else None
+
+
+def removeOrchestratorPid(
+    f_run_roots: Sequence[str], f_pid: Optional[int] = None
+) -> None:
+    """Remove the pid files that still name f_pid (default: this process)."""
+    f_pid = f_pid if f_pid is not None else os.getpid()
+    for f_root in f_run_roots:
+        f_doc = readOrchestratorPid(f_root)
+        if f_doc is not None and f_doc.get("pid") == f_pid:
+            try:
+                os.unlink(orchestratorPidPath(f_root))
+            except OSError:
+                pass
+
+
+def _processInfo(f_pid: int) -> Tuple[Optional[str], Optional[float]]:
+    """(command line, start time as epoch seconds) of a live process, each None when it
+    cannot be read: /proc on Linux, else ps (macOS)."""
+    try:
+        with open(f"/proc/{f_pid}/cmdline", "rb") as f_f:
+            f_cmd = f_f.read().replace(b"\0", b" ").decode(errors="replace")
+        with open(f"/proc/{f_pid}/stat", "r", encoding="utf-8") as f_f:
+            f_ticks = int(f_f.read().rsplit(")", 1)[1].split()[19])
+        with open("/proc/stat", "r", encoding="utf-8") as f_f:
+            f_boot = next(
+                int(f_l.split()[1]) for f_l in f_f if f_l.startswith("btime ")
+            )
+        return f_cmd, f_boot + f_ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        pass
+
+    def ps(f_field: str) -> Optional[str]:
+        # C locale: lstart's day and month names parse the same everywhere
+        try:
+            f_out = subprocess.run(
+                ["ps", "-o", f"{f_field}=", "-p", str(f_pid)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                env=dict(os.environ, LC_ALL="C"),
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return f_out or None
+
+    f_cmd = ps("command")
+    f_start: Optional[float] = None
+    f_lstart = ps("lstart")
+    if f_lstart:
+        try:
+            f_start = time.mktime(time.strptime(f_lstart, "%a %b %d %H:%M:%S %Y"))
+        except (ValueError, OverflowError):
+            f_start = None
+    return f_cmd, f_start
+
+
+def orchestratorRunning(f_doc: Optional[Dict[str, Any]]) -> Optional[bool]:
+    """Whether the orchestrator in a pid file is alive: None when it ran on another host,
+    where this cannot be checked. A pid reused by another program, or by a process that
+    started after the pid file was written, is not it."""
+    if not f_doc:
+        return False
+    if f_doc.get("host") != socket.gethostname():
+        return None
+    try:
+        f_pid = int(f_doc.get("pid"))
+        os.kill(f_pid, 0)
+    except (TypeError, ValueError, ProcessLookupError):
+        return False
+    except PermissionError:
+        # Another user's process: the pid was reused, the run was the caller's own
+        return False
+    f_cmd, f_start = _processInfo(f_pid)
+    if f_cmd is not None and "lsmiotool" not in f_cmd:
+        return False
+    try:
+        f_recorded = datetime.strptime(
+            str(f_doc.get("started_at_utc")), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    # The orchestrator wrote the pid file after it started (5 s for clock rounding)
+    return f_start is None or f_start <= f_recorded.timestamp() + 5
+
+
+def liveOrchestratorMessage(f_run_roots: Sequence[str]) -> Optional[str]:
+    """Why the run of f_run_roots must not be archived now (its 'lsmiotool run' is still
+    running, or may be on another host), or None."""
+    for f_root in f_run_roots:
+        f_doc = readOrchestratorPid(f_root)
+        f_running = orchestratorRunning(f_doc)
+        if f_running:
+            return (
+                f"the run of {f_root} is still running (PID {f_doc.get('pid')}): it "
+                f"archives itself; wait for it, or stop it with 'lsmiotool cancel {f_root}'"
+            )
+        if f_running is None:
+            return (
+                f"the run of {f_root} may still be running on host {f_doc.get('host')!r} "
+                f"(PID {f_doc.get('pid')}); archive it there, or remove "
+                f"{orchestratorPidPath(f_root)} if that process is gone"
+            )
+    return None
+
+
 class OrchestrationError(Exception):
     """Base exception for run orchestration errors."""
 
@@ -4470,11 +4614,13 @@ class RunOrchestrator:
         f_reporter: Optional[Any] = None,
         f_points: Optional[Sequence[int]] = None,
         f_pair_dirs: Optional[Dict[int, Tuple[str, str]]] = None,
+        f_succeeded: Optional[Callable[[Dict[str, Any], int], bool]] = None,
     ) -> bool:
         """Archive completed arms in bmtool's layout (include/archive.in.sh,
         jobs/batch.in.sh). f_points limits it to those point ordinals (default: all);
         f_pair_dirs caches each paired arm's :run/:base dirs across calls, so later points
-        of the same run land in the same pair. Returns False when an archive step failed."""
+        of the same run land in the same pair; f_succeeded replaces the reconciled point
+        state as the test of an (arm, point). Returns False when an archive step failed."""
         from lsmiotool.lib.archive import ArchiveEngine
         from lsmiotool.lib.export import exportPoint, generateReports
         from lsmiotool.lib.state import PointRunState
@@ -4482,9 +4628,12 @@ class RunOrchestrator:
         f_ok = True
 
         def _succeeded(f_ctx: Dict[str, Any], f_idx: int) -> bool:
+            if (f_ctx["index"], f_idx) in f_skip:
+                return False
+            if f_succeeded is not None:
+                return f_succeeded(f_ctx, f_idx)
             return (
-                (f_ctx["index"], f_idx) not in f_skip
-                and "view" in f_ctx
+                "view" in f_ctx
                 and f_ctx["view"].point_states[f_idx].state == PointRunState.SUCCEEDED
             )
 
@@ -4614,6 +4763,200 @@ class RunOrchestrator:
                     )
         return f_ok
 
+    @staticmethod
+    def _armPointSucceeded(f_ctx: Dict[str, Any], f_idx: int) -> bool:
+        """True when every combination of the arm's point succeeded, as bmtool requires
+        every matrix step to exit 0 (srun --kill-on-bad-exit fails the step on any failed
+        rank): a successful controller result and a successful result for every rank,
+        whatever scheduler state was (or was not) recorded for the job."""
+        from lsmiotool.lib.evidence import ResultPayloadValidator
+
+        f_ok = ResultPayloadValidator.CANONICAL_SUCCESS_STATUSES
+
+        def succeeded(f_rec: Any) -> bool:
+            f_status = str((f_rec.payload or {}).get("status") or "") if f_rec else ""
+            return f_status.strip().lower() in f_ok
+
+        f_evidence = f_ctx["evidence"]
+        f_sp = f_ctx["plan"].scale_points[f_idx]
+        try:
+            for f_combo in f_ctx["plan"].combinations:
+                if not succeeded(
+                    f_evidence.readControllerResult(f_sp, f_combo, f_ordinal=f_idx)
+                ):
+                    return False
+                for f_rank in range(f_sp.tasks):
+                    if not succeeded(
+                        f_evidence.readRankResult(
+                            f_sp, f_rank, f_combo, f_ordinal=f_idx
+                        )
+                    ):
+                        return False
+        except Exception:
+            return False
+        return True
+
+    def archiveGroupRun(
+        self,
+        f_run_root: str,
+        f_dest_root: Optional[str] = None,
+        f_reporter: Optional[Any] = None,
+    ) -> Tuple[bool, List[str]]:
+        """Archive the finished, not yet archived points of the multi-arm run that the arm
+        at f_run_root belongs to, in the layout 'run' uses (:run/:base pairs, or
+        outputs-<backend>/<nodes>): after --no-archive, a failed archive step, or a run
+        whose process ended before its jobs did. A point counts as finished when every
+        combination has a successful controller result and successful rank results
+        (_armPointSucceeded). An existing backend <nodes> dir of another run is never
+        replaced, and a run whose orchestrator is still alive is refused.
+
+        f_dest_root defaults to the destination the run recorded in its arm markers.
+        Returns (no archive step failed, archived directories)."""
+        from types import SimpleNamespace
+
+        from lsmiotool.lib.archive import (
+            ArchiveEngine,
+            ArchiveError,
+            resolveArchiveDest,
+        )
+        from lsmiotool.lib.arms import ArmGroup, RunArm
+        from lsmiotool.lib.artifacts import ArtifactLayout
+        from lsmiotool.lib.evidence import EvidenceStore
+
+        f_run_root = os.path.abspath(f_run_root).rstrip(os.sep)
+        f_marker = ArchiveEngine.readArmMarker(f_run_root)
+        if f_marker is None:
+            raise ArchiveError(f"{f_run_root} is not an arm of a multi-arm run")
+        f_kind = f_marker.get("group_kind")
+        if f_kind not in ("paired", "backends"):
+            raise ArchiveError(f"{f_run_root}: unknown group kind {f_kind!r}")
+        f_runs_dir = os.path.dirname(f_run_root)
+        f_bench_root = os.path.dirname(f_runs_dir)
+
+        # Rebuild the group from its arms' run roots; the paired baseline is index 0
+        f_ctxs: List[Dict[str, Any]] = []
+        f_next_index = 1
+        for f_run_id in f_marker.get("group_run_ids") or []:
+            f_root = os.path.join(f_runs_dir, str(f_run_id))
+            f_arm_doc = ArchiveEngine.readArmMarker(f_root)
+            if f_arm_doc is None:
+                raise ArchiveError(
+                    f"{f_root}: missing the arm marker of run {f_run_id}"
+                )
+            try:
+                with open(os.path.join(f_root, "manifest.json"), "rb") as f_f:
+                    f_plan = ManifestSerializer.deserialize(f_f.read()).toRunPlan()
+            except Exception as f_err:
+                raise ArchiveError(
+                    f"{f_root}: cannot read its manifest: {f_err}"
+                ) from f_err
+            f_req = f_plan.request
+            f_arm = RunArm(
+                str(f_arm_doc.get("label") or f_run_id),
+                str(f_arm_doc.get("setup") or f_req.setup or "NATIVE-M"),
+                f_arm_doc.get("variant", f_req.variant),
+                f_arm_doc.get("arm_id"),
+                f_arm_doc.get("role"),
+            )
+            if f_kind == "paired" and f_arm.role == "base":
+                f_index = 0
+            else:
+                f_index, f_next_index = f_next_index, f_next_index + 1
+            f_layout = ArtifactLayout(f_bench_root, f_plan.run_id)
+            f_ctxs.append(
+                {
+                    "index": f_index,
+                    "arm": f_arm,
+                    "plan": f_plan,
+                    "store": SimpleNamespace(layout=f_layout),
+                    "evidence": EvidenceStore(f_layout, f_plan),
+                }
+            )
+        if not f_ctxs:
+            raise ArchiveError(f"{f_run_root}: its arm marker lists no runs")
+        f_ctxs.sort(key=lambda f_c: f_c["index"])
+        f_live = liveOrchestratorMessage(
+            [f_c["store"].layout.runRoot for f_c in f_ctxs]
+        )
+        if f_live:
+            raise ArchiveError(f_live)
+
+        if not f_dest_root:
+            f_dest_root = f_marker.get("archive_dest")
+        if not f_dest_root:
+            # Arm markers written before archive_dest was recorded
+            f_scale = f_ctxs[0]["plan"].request.scale
+            f_versioned = any(
+                "-version-" in str(f_c["arm"].arm_id or "") for f_c in f_ctxs
+            )
+            f_dest_root = resolveArchiveDest(
+                f_bench_root,
+                f_mode="backends" if f_kind == "backends" else None,
+                f_scale=f_scale,
+                f_versioned=f_versioned,
+            )
+
+        # Points already archived (per run arm; a paired baseline is archived with each)
+        f_skip: Set[Tuple[int, int]] = set()
+        f_active: List[Dict[str, Any]] = []
+        for f_ctx in f_ctxs:
+            f_layout = f_ctx["store"].layout
+            f_names = [
+                f_layout.pointDirName(f_sp, f_i)
+                for f_i, f_sp in enumerate(f_ctx["plan"].scale_points)
+            ]
+            f_done = set(
+                ArchiveEngine.archivedPoints(f_dest_root, f_ctx["plan"].run_id)
+            )
+            if f_ctx["arm"].role == "base":
+                f_active.append(f_ctx)
+                continue
+            for f_i, f_name in enumerate(f_names):
+                if f_name in f_done:
+                    f_skip.add((f_ctx["index"], f_i))
+                elif f_kind == "backends":
+                    # Fill in, never replace: only the job that ran replaces a <nodes> dir
+                    # (bmtool batch.in.sh), not a later archive of another run
+                    f_node_dir = os.path.join(
+                        f_dest_root,
+                        f"outputs-{f_ctx['arm'].arm_id}",
+                        str(f_ctx["plan"].scale_points[f_i].nodes),
+                    )
+                    if os.path.exists(f_node_dir):
+                        f_skip.add((f_ctx["index"], f_i))
+                        self._reportProgress(
+                            f_reporter,
+                            f"Not archived: {f_node_dir} holds another run's results",
+                        )
+            if all(f_name in f_done for f_name in f_names):
+                self._reportProgress(
+                    f_reporter, f"Already archived: arm {f_ctx['arm'].label!r}"
+                )
+                continue
+            if all((f_ctx["index"], f_i) in f_skip for f_i in range(len(f_names))):
+                continue
+            f_active.append(f_ctx)
+        if not any(f_c["arm"].role != "base" for f_c in f_active):
+            return True, []
+
+        f_archived: List[str] = []
+
+        def _collect(f_line: str) -> None:
+            if f_line.startswith("Archived: "):
+                f_archived.extend(f_line[len("Archived: ") :].split(" and "))
+            self._reportProgress(f_reporter, f_line)
+
+        f_group = ArmGroup(f_kind, tuple(f_c["arm"] for f_c in f_active), True)
+        f_ok = self._archiveGroup(
+            f_group,
+            f_active,
+            f_skip,
+            f_dest_root,
+            f_reporter=_collect,
+            f_succeeded=lambda f_ctx, f_idx: self._armPointSucceeded(f_ctx, f_idx),
+        )
+        return f_ok, f_archived
+
     def execute(
         self,
         f_request: RunRequest,
@@ -4627,6 +4970,7 @@ class RunOrchestrator:
         f_environ: Optional[Mapping[str, str]] = None,
         f_environment: Optional[Mapping[str, str]] = None,
         f_reporter: Optional[Any] = None,
+        f_on_ready: Optional[Callable[[List[str]], None]] = None,
         **f_kwargs: Any,
     ) -> Any:
         """Execute full foreground orchestration of a benchmark run request."""
@@ -5355,7 +5699,11 @@ class RunOrchestrator:
                                     "label": f_arm.label,
                                     "role": f_arm.role,
                                     "arm_id": f_arm.arm_id,
+                                    "setup": f_arm.setup,
+                                    "variant": f_arm.variant,
                                     "group_run_ids": f_group_runs,
+                                    # Where this run archives, for 'lsmiotool archive'
+                                    "archive_dest": f_dest_root,
                                 },
                                 f_f,
                                 indent=2,
@@ -5366,78 +5714,99 @@ class RunOrchestrator:
                             f"WARNING: cannot write the arm marker of {f_ctx['plan'].run_id}: {f_err}",
                         )
 
-            # -----------------------------------------------------------------
-            # 2.4. Execute
-            # -----------------------------------------------------------------
-            object.__setattr__(self, "m_group_ctxs", tuple(f_ctxs))
-            f_archive_ok = True
-            if f_group.kind == "single":
-                f_ctx = f_ctxs[0]
-                f_view = self._executeLoop(
-                    f_plan=f_ctx["plan"],
-                    f_profile=f_profile,
-                    f_artifact_store=f_ctx["store"],
-                    f_control_lock=f_ctx["lock"],
-                    f_validated_worker=f_validated_worker,
-                    f_validated_account=f_validated_account,
-                    f_validated_email=f_validated_email,
-                    f_sig_coord=f_sig_coord,
-                    f_reporter=f_eff_reporter,
-                    f_resources_plan=f_resources_plan,
-                    **f_kwargs,
+            # The orchestrator's pid, in every arm's control dir; f_on_ready may move the
+            # run to another process (RunMain detaches it), which records its own pid
+            f_run_roots: List[str] = []
+            try:
+                f_run_roots = [f_ctx["store"].layout.runRoot for f_ctx in f_ctxs]
+                writeOrchestratorPid(f_run_roots)
+            except Exception:
+                pass
+
+            try:
+                if f_on_ready is not None:
+                    try:
+                        f_on_ready(f_run_roots)
+                    except Exception as f_err:
+                        # The run is allocated: carry on attached rather than abandon it
+                        self._reportProgress(
+                            f_eff_reporter,
+                            f"WARNING: detaching the run failed ({f_err}); the run goes on",
+                        )
+                # -----------------------------------------------------------------
+                # 2.4. Execute
+                # -----------------------------------------------------------------
+                object.__setattr__(self, "m_group_ctxs", tuple(f_ctxs))
+                f_archive_ok = True
+                if f_group.kind == "single":
+                    f_ctx = f_ctxs[0]
+                    f_view = self._executeLoop(
+                        f_plan=f_ctx["plan"],
+                        f_profile=f_profile,
+                        f_artifact_store=f_ctx["store"],
+                        f_control_lock=f_ctx["lock"],
+                        f_validated_worker=f_validated_worker,
+                        f_validated_account=f_validated_account,
+                        f_validated_email=f_validated_email,
+                        f_sig_coord=f_sig_coord,
+                        f_reporter=f_eff_reporter,
+                        f_resources_plan=f_resources_plan,
+                        **f_kwargs,
+                    )
+                    f_ctx["view"] = f_view
+                    f_ctx["evidence"] = self.m_last_evidence_store
+                else:
+                    f_archive_ok = self._executeArmGroup(
+                        f_group=f_group,
+                        f_ctxs=f_ctxs,
+                        f_skip=f_skip,
+                        f_resources_plan=f_resources_plan,
+                        f_profile=f_profile,
+                        f_validated_worker=f_validated_worker,
+                        f_validated_account=f_validated_account,
+                        f_validated_email=f_validated_email,
+                        f_sig_coord=f_sig_coord,
+                        f_dest_root=f_dest_root,
+                        f_reporter=f_eff_reporter,
+                        **f_kwargs,
+                    )
+
+                f_views = [f_ctx["view"] for f_ctx in f_ctxs]
+                object.__setattr__(self, "m_views", tuple(f_views))
+
+                # An arm counts when every point it ran succeeded (resumed points did not run)
+                f_failed = f_sig_coord.is_interrupted
+                for f_ctx in f_ctxs:
+                    for f_pt_idx, f_pv in enumerate(f_ctx["view"].point_states):
+                        if (f_ctx["index"], f_pt_idx) in f_skip:
+                            continue
+                        if f_pv.state != PointRunState.SUCCEEDED:
+                            f_failed = True
+
+                # -----------------------------------------------------------------
+                # 2.5. Archive in bmtool's layout (multi-arm runs archived each point
+                # as its job ended)
+                # -----------------------------------------------------------------
+                if (
+                    f_group.kind == "single"
+                    and f_group.archive
+                    and not f_sig_coord.is_interrupted
+                ):
+                    f_archive_ok = self._archiveGroup(
+                        f_group, f_ctxs, f_skip, f_dest_root, f_eff_reporter
+                    )
+                if not f_archive_ok:
+                    f_failed = True
+
+                object.__setattr__(self, "m_group_failed", f_failed)
+                f_last = next(
+                    (f_v for f_v in f_views if f_v.state != OverallRunState.SUCCEEDED),
+                    f_views[-1],
                 )
-                f_ctx["view"] = f_view
-                f_ctx["evidence"] = self.m_last_evidence_store
-            else:
-                f_archive_ok = self._executeArmGroup(
-                    f_group=f_group,
-                    f_ctxs=f_ctxs,
-                    f_skip=f_skip,
-                    f_resources_plan=f_resources_plan,
-                    f_profile=f_profile,
-                    f_validated_worker=f_validated_worker,
-                    f_validated_account=f_validated_account,
-                    f_validated_email=f_validated_email,
-                    f_sig_coord=f_sig_coord,
-                    f_dest_root=f_dest_root,
-                    f_reporter=f_eff_reporter,
-                    **f_kwargs,
-                )
-
-            f_views = [f_ctx["view"] for f_ctx in f_ctxs]
-            object.__setattr__(self, "m_views", tuple(f_views))
-
-            # An arm counts when every point it ran succeeded (resumed points did not run)
-            f_failed = f_sig_coord.is_interrupted
-            for f_ctx in f_ctxs:
-                for f_pt_idx, f_pv in enumerate(f_ctx["view"].point_states):
-                    if (f_ctx["index"], f_pt_idx) in f_skip:
-                        continue
-                    if f_pv.state != PointRunState.SUCCEEDED:
-                        f_failed = True
-
-            # -----------------------------------------------------------------
-            # 2.5. Archive in bmtool's layout (multi-arm runs archived each point
-            # as its job ended)
-            # -----------------------------------------------------------------
-            if (
-                f_group.kind == "single"
-                and f_group.archive
-                and not f_sig_coord.is_interrupted
-            ):
-                f_archive_ok = self._archiveGroup(
-                    f_group, f_ctxs, f_skip, f_dest_root, f_eff_reporter
-                )
-            if not f_archive_ok:
-                f_failed = True
-
-            object.__setattr__(self, "m_group_failed", f_failed)
-            f_last = next(
-                (f_v for f_v in f_views if f_v.state != OverallRunState.SUCCEEDED),
-                f_views[-1],
-            )
-            object.__setattr__(self, "m_last_view", f_last)
-            return f_last
+                object.__setattr__(self, "m_last_view", f_last)
+                return f_last
+            finally:
+                removeOrchestratorPid(f_run_roots)
 
     def recoverRun(
         self,

@@ -34,6 +34,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from typing import (
     Any,
     Callable,
@@ -1718,6 +1719,13 @@ class CompareMain(BaseMain):
         return self.m_delegate.run()
 
 
+def _stdoutIsTerminal() -> bool:
+    try:
+        return os.isatty(sys.stdout.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 class RunMain(BaseMain):
     """Run command for executing benchmarks via RunOrchestrator."""
 
@@ -1727,6 +1735,7 @@ class RunMain(BaseMain):
     m_site: Optional[Union[str, Any]]
     m_runtime_layout: Optional[Any]
     m_reporter: Optional[Any]
+    m_detach: bool
 
     def __init__(
         self,
@@ -1737,6 +1746,7 @@ class RunMain(BaseMain):
         f_site: Optional[Union[str, Any]] = None,
         f_runtime_layout: Optional[Any] = None,
         f_reporter: Optional[Any] = None,
+        f_detach: bool = False,
         **f_kwargs: Any,
     ) -> None:
         """Initialize RunMain.
@@ -1751,6 +1761,8 @@ class RunMain(BaseMain):
             f_site: Optional explicit site or profile.
             f_runtime_layout: Optional runtime layout.
             f_reporter: Optional injected reporter or stream.
+            f_detach: Detach the run from a terminal stdout once its run roots exist
+                (lib/detach.py); the launchers set it unless --foreground is given.
             **f_kwargs: Additional keyword arguments (e.g. ssd=True, setup="...").
         """
         super().__init__()
@@ -1787,6 +1799,7 @@ class RunMain(BaseMain):
 
         self.m_orchestrator_factory = f_orchestrator_factory
         self.m_worker_validator = f_worker_validator
+        self.m_detach = bool(f_detach)
         self.m_site = f_site
         self.m_runtime_layout = f_runtime_layout
         self.m_reporter = (
@@ -1883,11 +1896,19 @@ class RunMain(BaseMain):
             except Exception:
                 pass
 
+        # From a terminal the run detaches once its run roots exist (lib/detach.py), so a
+        # dropped login session does not stop it; scripts and pipes keep it attached
+        f_extra: Dict[str, Any] = {}
+        if self.m_detach and hasattr(os, "fork") and _stdoutIsTerminal():
+            from lsmiotool.lib.detach import detachAndFollow
+
+            f_extra["f_on_ready"] = detachAndFollow
         try:
             f_view = f_orch.execute(
                 f_request=self.m_request,
                 f_site=self.m_site,
                 f_runtime_layout=self.m_runtime_layout,
+                **f_extra,
             )
             return f_orch.exitCode
         except (PreflightError, OrchestrationError) as f_err:
@@ -2107,7 +2128,8 @@ class ArchiveMain(BaseMain):
 
     def _latestRunRoot(self, f_root: str, f_setup: Optional[str]) -> Optional[str]:
         """Latest standalone run under <f_root>/runs matching the request (see
-        _runArmId). Arms of a multi-arm run are archived by 'lsmiotool run' itself."""
+        _runArmId). Arms of a multi-arm run are archived by 'lsmiotool run' itself, or
+        with an explicit --source naming one of their run roots."""
         from lsmiotool.lib.archive import ArchiveEngine
 
         f_runs = os.path.join(f_root, "runs")
@@ -2148,6 +2170,17 @@ class ArchiveMain(BaseMain):
             f_scale = self.m_request.scale
             f_root = self._benchmarkRoot()
             f_explicit_dest = self.m_request.dest or self.m_dest_dir
+            f_source = self.m_source_dir or getattr(self.m_request, "source", None)
+            if f_source:
+                f_source = os.path.abspath(os.path.expanduser(f_source))
+                # A group run archives to the destination it recorded: no root needed
+                if (
+                    os.path.isfile(os.path.join(f_source, "manifest.json"))
+                    and ArchiveEngine.readArmMarker(f_source) is not None
+                ):
+                    return self._archiveGroupRun(
+                        f_source, f_explicit_dest, f_root, f_scale
+                    )
             if f_root is None and not (
                 f_explicit_dest and os.path.isabs(f_explicit_dest)
             ):
@@ -2163,36 +2196,25 @@ class ArchiveMain(BaseMain):
             )
 
             # Source: explicit, else bmtool's $LSM_DIR_OBASE or the latest lsmiotool run
-            f_source = self.m_source_dir or getattr(self.m_request, "source", None)
             f_run_root: Optional[str] = None
             if f_source:
-                f_source = os.path.abspath(os.path.expanduser(f_source))
                 if os.path.isfile(os.path.join(f_source, "manifest.json")):
-                    f_arm = ArchiveEngine.readArmMarker(f_source)
-                    if f_arm is not None:
-                        raise ArchiveError(
-                            f"{f_source} is the '{f_arm.get('label')}' arm of a "
-                            f"{f_arm.get('group_kind')} run, which 'lsmiotool run' archives "
-                            "itself (as :run/:base pairs or per backend)"
-                        )
                     f_run_root, f_source = f_source, None
                 else:
-                    # Only bmtool outputs are moved (include/archive.in.sh moves
-                    # $LSM_DIR_OBASE): never an arbitrary directory
-                    from lsmiotool.lib.output import isBmtoolOutputDir
-
+                    # bmtool's archive only ever moves its live outputs dir
+                    # (include/archive.in.sh moves $LSM_DIR_OBASE): never an archive, a copy
+                    # or outputs-failed, which moving would break or misfile
                     f_bm_outputs = (
                         os.path.realpath(os.path.join(f_root, "lsmio", "outputs"))
                         if f_root
                         else None
                     )
-                    if not isBmtoolOutputDir(f_source) and (
-                        os.path.realpath(f_source) != f_bm_outputs
-                    ):
+                    if os.path.realpath(f_source) != f_bm_outputs:
                         raise ArchiveError(
                             f"--source {f_source} is neither an lsmiotool run root "
-                            "(manifest.json) nor a bmtool outputs directory "
-                            "(<nodes>/<date>/out-*.txt); refusing to move it"
+                            "(manifest.json) nor bmtool's live outputs directory "
+                            f"({f_bm_outputs or '<benchmark_root>/lsmio/outputs'}); refusing "
+                            "to move it (move bmtool outputs there first)"
                         )
             else:
                 if f_root is None:
@@ -2223,13 +2245,20 @@ class ArchiveMain(BaseMain):
                         )
                         + f" was found under {os.path.join(f_root, 'runs')}"
                         " (a failed bmtool job leaves its outputs in "
-                        f"{os.path.join(f_root, 'lsmio', 'outputs-failed')})"
+                        f"{os.path.join(f_root, 'lsmio', 'outputs-failed')}; a variants, "
+                        "--versioned or backends run is archived with --source <one of "
+                        "its run roots>)"
                     )
 
             if f_run_root is not None:
                 f_arm_id = self._runArmId(f_run_root, f_setup, True)
                 if f_arm_id is None:
                     raise ArchiveError(f"Cannot derive the arm of {f_run_root}")
+                from lsmiotool.lib.run import liveOrchestratorMessage
+
+                f_live = liveOrchestratorMessage([f_run_root])
+                if f_live:
+                    raise ArchiveError(f_live)
                 f_run_id = os.path.basename(f_run_root.rstrip(os.sep))
                 f_manifest_id = self._manifestRunId(f_run_root) or f_run_id
                 f_done = ArchiveEngine.findArchivedRun(f_dest_root, f_manifest_id)
@@ -2271,6 +2300,56 @@ class ArchiveMain(BaseMain):
             log.Console.error(f"Unexpected archive error: {f_err}")
             return 1
 
+    def _archiveGroupRun(
+        self,
+        f_arm_root: str,
+        f_explicit_dest: Optional[str],
+        f_root: Optional[str],
+        f_scale: str,
+    ) -> int:
+        """Archive what 'run' left unarchived of the multi-arm run f_arm_root belongs to:
+        its finished points, as :run/:base pairs or per backend, in the run's own archive
+        destination unless --dest is given. The variant argument is not used: every arm
+        of the run is considered."""
+        from lsmiotool.lib.archive import ArchiveError, resolveArchiveDest
+        from lsmiotool.lib.run import RunOrchestrator
+
+        f_req = self._manifestRequest(f_arm_root)
+        f_target = str(f_req.get("target") or "").strip().lower()
+        f_run_scale = str(f_req.get("scale") or "").strip().lower()
+        if f_run_scale == "baseline":
+            f_run_scale = "variants"
+        if f_target != "lsmio" or f_run_scale != f_scale:
+            raise ArchiveError(
+                f"Run root {f_arm_root} does not match the request: "
+                f"{f_target} {f_run_scale}, not lsmio {f_scale}"
+            )
+        if f_explicit_dest and f_root is None and not os.path.isabs(f_explicit_dest):
+            raise ArchiveError(
+                "cannot resolve the benchmark root from the site profile; pass an "
+                "absolute --dest"
+            )
+        f_dest = (
+            resolveArchiveDest(
+                f_root or "", f_scale=f_scale, f_explicit=f_explicit_dest
+            )
+            if f_explicit_dest
+            else None
+        )
+        f_ok, f_archived = RunOrchestrator().archiveGroupRun(
+            f_arm_root,
+            f_dest_root=f_dest,
+            f_reporter=lambda f_line: sys.stdout.write(f"{f_line}\n"),
+        )
+        if not f_ok:
+            raise ArchiveError(f"archiving the run of {f_arm_root} failed (see above)")
+        if not f_archived:
+            sys.stdout.write(
+                f"Nothing to archive for the run of {f_arm_root}: every finished point "
+                "is archived already, or no arm finished a point with its baseline\n"
+            )
+        return 0
+
     def _manifestRunId(self, f_run_root: str) -> Optional[str]:
         try:
             with open(
@@ -2281,6 +2360,88 @@ class ArchiveMain(BaseMain):
             return None
         f_id = f_doc.get("run_id") if isinstance(f_doc, dict) else None
         return str(f_id) if f_id else None
+
+
+class CancelMain(BaseMain):
+    """'lsmiotool cancel <run root | run id>': stop a running 'lsmiotool run'.
+
+    Sends SIGTERM to the orchestrator recorded in the run root's control/orchestrator.pid,
+    which interrupts the run as Ctrl-C does in the foreground: its job is cancelled and
+    the interruption recorded. Any arm's run root of a multi-arm run will do."""
+
+    WAIT_SECONDS = 300.0
+    POLL_SECONDS = 2.0
+
+    def __init__(self, f_target: str, f_wait: Optional[float] = None) -> None:
+        super().__init__()
+        self.m_target = f_target
+        self.m_wait = self.WAIT_SECONDS if f_wait is None else f_wait
+
+    def _runRoot(self) -> Optional[str]:
+        f_path = os.path.abspath(os.path.expanduser(self.m_target))
+        if os.path.isfile(os.path.join(f_path, "manifest.json")):
+            return f_path
+        if os.sep not in self.m_target:
+            for f_root in siteBenchmarkRoots(("hdd", "ssd")):
+                f_run = os.path.join(f_root, "runs", self.m_target)
+                if os.path.isfile(os.path.join(f_run, "manifest.json")):
+                    return f_run
+        return None
+
+    def run(self) -> int:
+        from lsmiotool.lib.run import (
+            orchestratorPidPath,
+            orchestratorRunning,
+            readOrchestratorPid,
+        )
+
+        f_root = self._runRoot()
+        if f_root is None:
+            sys.stderr.write(f"Cancel: no run root or run id {self.m_target!r}\n")
+            return 1
+        f_doc = readOrchestratorPid(f_root)
+        f_running = orchestratorRunning(f_doc)
+        if f_running is False:
+            sys.stderr.write(
+                f"Cancel: no lsmiotool run is running for {f_root} (it has finished or "
+                "was stopped)\n"
+            )
+            return 1
+        f_pid = int((f_doc or {}).get("pid", 0))
+        if f_running is None:
+            sys.stderr.write(
+                f"Cancel: the run is on host {f_doc.get('host')!r} (PID {f_pid}); run "
+                f"'lsmiotool cancel' there, or remove {orchestratorPidPath(f_root)} if "
+                "that process is gone\n"
+            )
+            return 1
+        try:
+            os.kill(f_pid, signal.SIGTERM)
+        except OSError as f_err:
+            sys.stderr.write(f"Cancel: cannot signal PID {f_pid}: {f_err}\n")
+            return 1
+        sys.stdout.write(
+            f"Sent SIGTERM to the run (PID {f_pid}); it cancels its job and stops.\n"
+        )
+        from lsmiotool.lib.detach import consoleLogFor
+
+        f_deadline = time.monotonic() + self.m_wait
+        while orchestratorRunning(readOrchestratorPid(f_root)):
+            if time.monotonic() >= f_deadline:
+                f_log = consoleLogFor(f_root)
+                sys.stdout.write(
+                    "Still stopping (it waits for the scheduler to confirm the "
+                    "cancellation); "
+                    + (
+                        f"see {f_log}\n"
+                        if os.path.isfile(f_log)
+                        else "its output is in the terminal it runs in (--foreground)\n"
+                    )
+                )
+                return 0
+            time.sleep(self.POLL_SECONDS)
+        sys.stdout.write("Stopped.\n")
+        return 0
 
 
 class ShellMain(BaseMain):

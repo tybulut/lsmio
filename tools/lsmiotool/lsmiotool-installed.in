@@ -193,8 +193,17 @@ if __name__ == '__main__':
             )
             sys.exit(1)
         inst_main = main.ParseLegacyMain(*cmd_args, ssd=is_ssd)
+    elif cmd == 'cancel':
+        from lsmiotool.lib import main
+        if len(args) != 2 or args[1].startswith('-'):
+            sys.stderr.write("Cancel: needs one argument: <run root | run id>\n")
+            sys.exit(1)
+        inst_main = main.CancelMain(args[1])
     elif cmd == 'run':
         from lsmiotool.lib import main
+        # --foreground: stay attached to the terminal (lib/detach.py)
+        foreground = '--foreground' in args
+        args = [arg for arg in args if arg != '--foreground']
         try:
             run_request = parseRunArguments(args, f_global_ssd=is_ssd)
         except RunCliParseError as err:
@@ -203,6 +212,7 @@ if __name__ == '__main__':
         inst_main = main.RunMain(
             f_request=run_request,
             f_runtime_layout=runtime_layout,
+            f_detach=not foreground,
         )
     elif cmd == 'shell':
         from lsmiotool.lib import main

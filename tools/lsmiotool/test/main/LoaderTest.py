@@ -75,6 +75,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.CompareNodesTest",
     "lsmiotool.test.main.CoverageContractTest",
     "lsmiotool.test.main.DeltaBarPlotTest",
+    "lsmiotool.test.main.DetachTest",
     "lsmiotool.test.main.DispatchTest",
     "lsmiotool.test.main.EndToEndRunTest",
     "lsmiotool.test.main.EvidenceStoreTest",
@@ -288,7 +289,7 @@ class LoaderTest(unittest.TestCase):
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
         self.assertEqual(len(preexisting_test_ids), 79)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 836)
+        self.assertEqual(len(all_test_ids), 853)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),
