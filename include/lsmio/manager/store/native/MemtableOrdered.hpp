@@ -45,9 +45,6 @@ class MemtableOrdered : public IMemtable {
     MemtableOrdered() : m_size_bytes(0) {}
 
     void add(const std::string& f_key, const std::string& f_value) override {
-        // Single traversal for every MapT: insert() reports whether the key
-        // existed, unlike lower_bound + hinted insert (tlx::btree_map ignores
-        // insert hints and would descend the tree twice).
         auto result = m_data.insert({f_key, f_value});
         if (result.second) {
             m_size_bytes += f_key.size() + f_value.size();
@@ -62,25 +59,19 @@ class MemtableOrdered : public IMemtable {
         const size_t val_bytes = f_value.size();
 
         if constexpr (std::is_same_v<MapT, std::map<std::string, std::string>>) {
-            // --- std::map Specialization (Default Engine) ---
-            // try_emplace guarantees f_value is NOT moved from if key already exists
             auto [it, inserted] = m_data.try_emplace(f_key, std::move(f_value));
             if (inserted) {
                 m_size_bytes += f_key.size() + val_bytes;
             } else {
-                // Overwrite existing key: replace value via move assignment
                 m_size_bytes -= it->second.size();
                 m_size_bytes += val_bytes;
                 it->second = std::move(f_value);
             }
         } else {
-            // --- tlx::btree_map Fallback Specialization ---
-            // Single traversal: insert() reports whether the key existed
             auto result = m_data.insert({f_key, f_value});
             if (result.second) {
                 m_size_bytes += f_key.size() + val_bytes;
             } else {
-                // Overwrite existing key: move-assign into existing node
                 m_size_bytes -= result.first->second.size();
                 m_size_bytes += val_bytes;
                 result.first->second = std::move(f_value);

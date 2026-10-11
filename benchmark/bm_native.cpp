@@ -50,7 +50,6 @@ class BMNative : public BMBase {
     }
 
     int writePrepare(bool opt) override {
-        // Note: Native might not use BloomFilter, but we keep the path generation consistent
         _lc = new lsmio::LSMIOStoreNative(
             genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), true);
         return 0;
@@ -87,7 +86,6 @@ class BMNative : public BMBase {
 int main(int argc, char **argv) {
     int exitCode = 0;
     bool alwaysFlush[2] = {false, true};
-    // Native doesn't implement Bloom Filters, so this is ignored but simulation ran twice
     bool bloomFilters[2] = {false, true};
 
     exitCode += BMBase::beginMain(argc, argv);
