@@ -157,6 +157,13 @@ void LSMIOStoreNative::close() {
         return;
     }
 
+    // FlushWorkLoop checks m_shutting_down under m_state_mutex and then waits.
+    // Taking the mutex here orders the flag before that check or after the
+    // thread is waiting; without it the notify can arrive between the two, be
+    // lost, and leave join() below waiting forever.
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+    }
     m_flush_cv.notify_one();  // Wake up the flush thread
     if (m_flush_thread.joinable()) {
         m_flush_thread.join();
@@ -256,19 +263,14 @@ bool LSMIOStoreNative::stopBatch() {
     return writeBarrier();
 }
 
-bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string f_key,
-                                      const std::string f_value, bool f_flush) {
+bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& f_key,
+                                      const std::string& f_value, bool f_flush) {
     if (m_read_only) return false;
     if (m_bg_error.load(std::memory_order_relaxed)) return false;
-    std::string actual_value = f_value;
-    if (f_m_type == MutationType::Del) {
-        actual_value = MEMTABLE_TOMBSTONE;
-    }
-    // Validate what will actually be stored: for deletes that is the
-    // tombstone sentinel, not the caller-supplied value.
-    if (f_key.size() > m_max_key_len || actual_value.size() > m_max_value_len) return false;
-
-    size_t entry_size = f_key.size() + actual_value.size();
+    const bool is_del = (f_m_type == MutationType::Del);
+    const size_t val_size = is_del ? MEMTABLE_TOMBSTONE.size() : f_value.size();
+    if (f_key.size() > m_max_key_len || val_size > m_max_value_len) return false;
+    const size_t entry_size = f_key.size() + val_size;
 
     std::unique_lock<std::mutex> lock(m_state_mutex);
 
@@ -291,7 +293,50 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string f
     }
 
     // --- 4. Write to active memtable ---
-    m_active_memtable->add(f_key, actual_value);
+    if (is_del) {
+        m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
+    } else {
+        m_active_memtable->add(f_key, f_value);
+    }
+
+    return true;
+}
+
+bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& f_key,
+                                      std::string&& f_value, bool f_flush) {
+    if (m_read_only) return false;
+    if (m_bg_error.load(std::memory_order_relaxed)) return false;
+    const bool is_del = (f_m_type == MutationType::Del);
+    const size_t val_size = is_del ? MEMTABLE_TOMBSTONE.size() : f_value.size();
+    if (f_key.size() > m_max_key_len || val_size > m_max_value_len) return false;
+    const size_t entry_size = f_key.size() + val_size;
+
+    std::unique_lock<std::mutex> lock(m_state_mutex);
+
+    // --- 1. Check if active memtable needs to be rotated ---
+    if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
+        m_active_memtable->sizeBytes() > 0) {
+        // --- 2. Apply Backpressure ---
+        if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
+            m_backpressure_cv.wait(
+                lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });
+        }
+
+        // --- 3. Rotate Memtables ---
+        auto next_memtable = createMemtable();
+        m_immutable_memtables.push_back(std::move(m_active_memtable));
+        m_active_memtable = std::move(next_memtable);
+
+        // Notify the flush thread that there is new work
+        m_flush_cv.notify_one();
+    }
+
+    // --- 4. Write to active memtable ---
+    if (is_del) {
+        m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
+    } else {
+        m_active_memtable->add(f_key, std::move(f_value));
+    }
 
     return true;
 }

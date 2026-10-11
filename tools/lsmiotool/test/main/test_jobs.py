@@ -112,14 +112,14 @@ class TestBatchJobOrchestration(unittest.TestCase):
         self, mock_sleep: Mock, mock_run: Mock, mock_setup: Mock
     ) -> None:
         # One failed step: the remaining steps still run, then the orchestration fails
-        mock_run.side_effect = [
-            Mock(returncode=3 if i == 1 else 0) for i in range(6)
-        ]
+        mock_run.side_effect = [Mock(returncode=3 if i == 1 else 0) for i in range(6)]
         with self.assertRaisesRegex(RuntimeError, r"c16/b1M \(exit code 3\)"):
             jobs.batch_job_orchestration("ior", "/tmp", env.HpcManager.PBS, "ds")
         self.assertEqual(mock_run.call_count, 6)
         # Every step gets the same job date (BM_JOB_DS), as batch.in.sh pins it
-        f_dates = {f_call.kwargs["env"]["BM_JOB_DS"] for f_call in mock_run.call_args_list}
+        f_dates = {
+            f_call.kwargs["env"]["BM_JOB_DS"] for f_call in mock_run.call_args_list
+        }
         self.assertEqual(len(f_dates), 1)
         self.assertRegex(f_dates.pop(), r"^\d{4}-\d{2}-\d{2}$")
 
@@ -223,12 +223,17 @@ class TestLSMIOBenchmark(unittest.TestCase):
 
     @patch("subprocess.run")
     @patch("builtins.open", create=True)
-    def test_run_plugin_passes_lsmio_plugin(self, mock_open: Mock, mock_run: Mock) -> None:
+    def test_run_plugin_passes_lsmio_plugin(
+        self, mock_open: Mock, mock_run: Mock
+    ) -> None:
         # PLUGIN-M runs bm_adios with the LSMIO engine plugin; ADIOS-M runs plain ADIOS2
         mock_open.return_value.__enter__.return_value = MagicMock()
         for setup, expected in (("PLUGIN-M", True), ("ADIOS-M", False)):
             bench = jobs.LSMIOBenchmark(
-                bm_setup=setup, sb_bin="/bin", dirs_bm_base="/base", lsm_dir_output="/out"
+                bm_setup=setup,
+                sb_bin="/bin",
+                dirs_bm_base="/base",
+                lsm_dir_output="/out",
             )
             bench.run("16", "64K")
             cmd = mock_run.call_args.args[0]

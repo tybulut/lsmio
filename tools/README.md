@@ -10,11 +10,13 @@ For C++ and Python test verification, see the [Testing Guide](../test/README.md)
 
 ## 1. Toolchain Architecture
 
-The LSMIO toolchain subsystem provides two coordinated orchestration engines:
-1. **POSIX Shell Orchestration (`tools/bmtool`)**: A lightweight, zero-dependency POSIX `/bin/sh` toolchain (`tools/bmtool/bmtool`) optimized for direct execution on HPC compute nodes, batch script wrapping, and legacy environments.
-2. **Python Orchestration (`tools/lsmiotool`)**: The modern enterprise orchestration CLI (`tools/lsmiotool/lsmiotool` in source or `<prefix>/bin/lsmiotool` when installed) offering immutable execution planning, isolated private run roots, SQLite state tracking, and structured reporting.
+The LSMIO toolchain subsystem has one supported orchestration engine and one frozen predecessor:
+1. **Python Orchestration (`tools/lsmiotool`)**: The supported orchestration CLI (`tools/lsmiotool/lsmiotool` in source or `<prefix>/bin/lsmiotool` when installed) offering immutable execution planning, isolated private run roots, state tracking, and structured reporting. New benchmarks and features are added here only.
+2. **POSIX Shell Orchestration (`tools/bmtool`) — deprecated**: The original `/bin/sh` toolchain. It is frozen (critical fixes only) and kept as the reference lsmiotool's parity tests run against; see [`bmtool/DEPRECATED.md`](bmtool/DEPRECATED.md) for the policy and the command mapping.
 
-### 1.1 Shell Orchestration (`tools/bmtool`)
+### 1.1 Shell Orchestration (`tools/bmtool`) — Deprecated
+
+> **Deprecated.** Use `tools/lsmiotool/lsmiotool` (section 1.2 and onwards). bmtool prints a deprecation warning on every command except `help`. This section documents the frozen behaviour lsmiotool's parity tests compare against; see [`bmtool/DEPRECATED.md`](bmtool/DEPRECATED.md).
 
 `bmtool` is located at `tools/bmtool/bmtool` and conforms strictly to pure POSIX `/bin/sh` (`INV-MULTI-1`).
 
@@ -115,6 +117,7 @@ bmtool parse lsmio backends small
 - `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}` or `outputs-${ARM_ID}:run`) already exists in the destination directory (`INV-MULTI-3`, `INV-PAIR-7`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
 - `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory. Default: the partitioned path for the run (`$BM_PATH/lsmio-archive/backends/<scale>`, `.../variants` or `.../baseline`). An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against `$BM_PATH`.
 - `--time <hours>` / `--walltime <hours>` / `--wallhour <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides the default dynamic scaling calculation (`2 + total_runs * 2` hours, granting 120 minutes per matrix run + 2 hours safety headroom to absorb 64K workloads and regressions).
+- `--fast`: Fast simulation mode. Reduces requested walltime by approximately half and caps maximum walltime at 23 hours (instead of 48 hours), ensuring multi-node scaling sweeps and variant evaluations on ARCHER2 enter `qos=standard` ($\le 24\text{h}$) rather than being deprioritized in `qos=long`.
 - `-h`, `--help`: Early help dispatch without credentials.
 
 ### 1.2 Python Orchestration (`tools/lsmiotool`)
@@ -150,6 +153,7 @@ graph TD
 | `parse` | Parses immutable run root artifacts, formats ASCII console summaries, and produces Stage 1/2 CSV/JSON reports. |
 | `compare` | Generates comparative scaling and variant sensitivity plots using Matplotlib. |
 | `archive` | Bundles and archives benchmark run directories for long-term comparative analysis. |
+| `cancel` | Stops a running `run` (detached or not) and cancels its job: `lsmiotool cancel <run root \| run id>`. |
 | `test` | Executes the internal Python test suite across unit, functional, and integration fixtures. |
 | `parseLegacy` | Backward-compatible parser for legacy unstructured output hierarchies. |
 | `load-modules` | Dynamically configures HPC cluster environment modules defined in `environments.json`. |
@@ -171,15 +175,37 @@ lsmiotool run lsmio backends <scale> [<backends>] [options]
 Full invocation signature:
 ```bash
 # Standard / Variant Execution:
-lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
+lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast]
 
 # Multi-Backend Intra-Allocation Scaling Execution:
-lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>]
+lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--fast]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
 ```bash
 lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
+```
+
+#### Typical Workflows:
+`run` waits for its jobs and archives each scale point with its reports as it finishes, so a run can be followed directly by `compare`; no `parse` step is needed. The archive paths below are the defaults under the benchmark root (`~/scratch/benchmark` on Viking2).
+
+`run` is the process that submits each scale point and archives each finished one, so it lives until its last job ends. Started from a terminal, it detaches once its run roots exist (like running it under `nohup` and tailing the output): it goes on in its own session with its output in `<run root>/control/console.log` (the first arm's run root for a multi-arm run), and that log is followed on screen until the run ends. A dropped SSH session therefore does not stop it, and Ctrl-C only stops the following; the screen then shows how to follow (`tail -f <log>`) and how to stop the run (`lsmiotool cancel <run root>`, which cancels its job, as Ctrl-C does with `--foreground`). With `--foreground`, or when its output is not a terminal (a script, a pipe, `nohup`), `run` stays attached. If `run` dies anyway (a crash, `kill -9`), the job it was waiting for still finishes; `lsmiotool archive lsmio <scale> --source <one of its run roots>` then archives the points that finished, and a new `run ... --resume` picks up the variants or backend points that are still missing.
+
+Repeated campaigns land in the same default folders. A second `variants` run is archived next to the first as `outputs-<arm>:run-1`/`:base-1`, and `compare variants` charts every pair in the folder; a second `backends` run replaces each `outputs-<backend>/<nodes>` it reruns. Give each campaign its own folder with `--out-dir` (e.g. `--out-dir lsmio-archive/variants-0.4.0`), or move the previous one aside first.
+```bash
+# Backend scaling: adios2, native, plugin and rocksdb on 1-48 nodes, one job per node count,
+# then 12 scaling charts (write and read x stripes 4/16 x 64K/1M/8M)
+./tools/lsmiotool/lsmiotool run lsmio backends small
+./tools/lsmiotool/lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small --all --output-dir ~/png/backends/small
+
+# Every variant against the baseline on 8 nodes, in one job, then 12 delta charts
+./tools/lsmiotool/lsmiotool run lsmio variants all
+./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants --all --output-dir ~/png/variants
+
+# The working branch against the bm_native:main reference binary, for two variants;
+# archived to lsmio-archive/variants-versioned, apart from the variant matrix
+./tools/lsmiotool/lsmiotool run lsmio variants legacy,autotune --versioned
+./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants-versioned --all --output-dir ~/png/variants-versioned
 ```
 
 #### Arguments & Options:
@@ -197,9 +223,10 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
 - `backends`: Positional mode token for `lsmio` selecting Multi-Backend Intra-Allocation Scaling (`INV-BACKEND-1`).
   - Positional syntax: `lsmiotool run lsmio backends <scale> [<backends>] [options]`.
   - Supported `<scale>` values: `local`, `bake`, `small`, `large` (`variants` is rejected).
-  - Optional `[<backends>]`: Comma-separated list of backends (defaults to `adios2,native,plugin,rocksdb`). Supported backend tokens: `adios2` (or `adios`), `native`, `plugin` (ADIOS2 with the LSMIO engine plugin), `rocksdb`, `leveldb`. lsmiotool uses the list for the run plan and the walltime only; it does not yet run the backends one after another like `bmtool run lsmio backends`.
-  - **Single Cluster Allocation** (bmtool only; see Multi-Backend Intra-Allocation Scaling): Submits a single job allocation for each scale point ($K$). Backends execute sequentially within that allocation on identical physical nodes (`nid*`), ensuring fair cross-engine comparisons.
-  - **Lustre Data Sanitization** (bmtool only; see Multi-Backend Intra-Allocation Scaling): Storage OST directories are scrubbed before and after each backend run.
+  - Optional `[<backends>]`: Comma-separated list of backends (defaults to `adios2,native,plugin,rocksdb`). Supported backend tokens: `adios2` (or `adios`), `native`, `plugin` (ADIOS2 with the LSMIO engine plugin), `rocksdb`, `leveldb`.
+  - **Single Cluster Allocation**: Submits a single job allocation for each scale point ($K$). Backends execute one after another within that allocation on identical physical nodes, ensuring fair cross-engine comparisons. The same holds for `variants` (baseline and each variant) and `--versioned` (reference baseline and each variant). Each backend or variant keeps its own run root under `<root>/runs/`.
+  - **Per-point archiving**: Unless `--no-archive` is given, each backend's `<nodes>` directory is archived to `<dest>/outputs-<arm>/<nodes>` (`adios`, `native`, `plugin`, `rocksdb`, `leveldb`; `adios2` is `adios`) as soon as its scale point finishes, with `agg-*-report.csv` and `lsm-report.csv` regenerated. A rerun replaces the `<nodes>` directories it archives again.
+  - **Data cleanup**: Each combination's data directory is emptied before the next combination runs.
   - **Dynamic Walltime Calculation (`INV-BACKEND-2`)**: Automatically scales allocation walltime based on backend count and node count:
     $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{K}{3} \right\rfloor\right)\right)$$
 - `<variants>`: Optional variant specification for `lsmio variants`. Supported formats:
@@ -213,19 +240,21 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
 - `--ssd`: Selects SSD storage class root. Default storage class is HDD.
 - `--setup <name>`: Explicitly overrides the benchmark setup profile.
   - **Syntax rule**: `--setup <name>` must be specified as two separate arguments. Syntax `--setup=value` is strictly rejected.
-- `--archive` / `--no-archive`: Automatic post-run archiving control:
-  - **Automatic archive default rules**: When multiple variants are specified ($N > 1$) or `most` / `all` is used, `--archive` defaults to `yes` to ensure each variant's outputs are safely archived before the next variant executes. When a single variant ($N = 1$) or default baseline is specified, `--archive` defaults to `no` for backward compatibility (`INV-MULTI-2`).
-  - `--archive`: Explicitly forces post-run archiving even for single-variant runs.
-  - `--no-archive`: Explicitly disables post-run archiving (forces `no`) even when multiple variants or `most` / `all` are selected.
+- `--archive` / `--no-archive`: Archiving control. Each scale point is archived when its job ends:
+  - **Defaults**: on for `backends`, for `variants` with one or more variants (including `most` / `all`), and for `--versioned`. A `variants` run of the baseline alone (no variants, `default` or `base`) is archived only with `--archive`.
+  - `--no-archive`: Disables archiving; rejected with `--versioned`.
+  - Plain scaling runs (`local`, `bake`, `small`, `large`) reject both options.
   - Specifying both `--archive` and `--no-archive` is rejected as an error.
 - `--resume`: Idempotent pre-run resumption (`INV-MULTI-3`):
-  - Before executing each variant, checks if the target archive directory (`outputs-${ARM_ID}`) already exists under the archive destination directory.
-  - If the directory exists, execution of that variant is skipped immediately with `[RESUME] Skipping variant '<variant>'` prior to allocating run locks or submitting scheduler jobs.
-  - When `--resume` is omitted and the target directory exists, automatic collision protection increments a numerical suffix (`-1`, `-2`, ..., `-N`) to prevent overwriting (`INV-MULTI-6`).
+  - Before running, checks the archive destination for each arm: a variant is skipped when its `outputs-<arm>:run` exists, a backend's scale point when its `outputs-<backend>/<nodes>` exists. The baseline only runs while some variant still needs it.
+  - A skipped variant is reported as `[RESUME] Skipping variant '<variant>'` before any run root is allocated or job submitted.
+  - A `variants` run of the baseline alone and a `--versioned` run without variants are never skipped, as in bmtool: they run again.
+  - Without `--resume`, an existing variant pair is kept and the new one is archived with a numerical suffix (`:run-1`/`:base-1`, ..., `-N`; `INV-MULTI-6`); an existing backend `<nodes>` directory is replaced.
 - `--out-dir <dir>` / `--output-dir <dir>` (alias: `--dest <dir>`): Configurable archive destination directory:
-  - Specifies the destination root directory where variant outputs are archived. Default: the partitioned path for the run (`<benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}`). An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against the benchmark root, matching `bmtool` (`lsmiotool.lib.archive.resolveArchiveDest`).
+  - Specifies the destination root directory where variant outputs are archived. Default: the partitioned path for the run (`<benchmark_root>/lsmio-archive/{backends/<scale>|variants|variants-versioned}`; `variants-versioned` for `--versioned` runs). Plain scaling runs (`local`, `bake`, `small`, `large`) are not archived by `run` and reject this option. An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against the benchmark root, matching `bmtool` (`lsmiotool.lib.archive.resolveArchiveDest`).
   - **Syntax rule**: Must be specified as two separate tokens (`--out-dir <path>`); equals syntax (`--out-dir=<path>`) is strictly rejected.
 - `--wallhour <hours>` / `--walltime <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides dynamic walltime scaling calculations.
+- `--fast`: Fast simulation mode. Reduces computed allocation walltime by half (`// 2`) and caps maximum walltime at 23 hours (instead of 48 hours). Clamps minimum walltime to 1 hour (2 hours for variants). Ensures jobs on ARCHER2 stay within the 24-hour limit for `qos=standard` scheduling. Explicit walltime overrides are honored but capped at 23 hours.
 - `-h`, `--help`: Early CLI help dispatch (`INV-MULTI-7`):
   - Intercepts help requests at CLI entry point, displaying comprehensive documentation and exiting with status 0 immediately without touching the filesystem or verifying credentials.
 
@@ -277,7 +306,7 @@ LMP benchmark runs adhere strictly to upstream asset naming, tuning parameters, 
   - `in.reaxc.hns` (input script)
   - `data.hns-equil` (initial molecular topology)
   - `ffield.reax.hns` (ReaxFF force field parameters)
-  These assets are verified and staged from `share/lsmio/lmp-reaxff/` (installed) or `tools/bmtool/lmp-reaxff/` (source) without renamed aliases. SHA-256 hashes are verified during preflight and re-validated at combination staging.
+  These assets are verified and staged from `share/lsmio/lmp-reaxff/` (installed) or `tools/lsmiotool/share/lmp-reaxff/` (source) without renamed aliases. SHA-256 hashes are verified during preflight and re-validated at combination staging.
 - **Immutable Task Tuning**:
   Tuning parameters are derived exclusively from the immutable plan (`lmp_task_tuning`):
 
@@ -346,7 +375,7 @@ Before allocating a run root or interacting with the scheduler:
 - Computed walltime directive: `#SBATCH --time=...` (scaled with task count)
 - Typed mail mode directive: `#SBATCH --mail-type=END,FAIL`
 - Task distribution directive: `#SBATCH --distribution=cyclic:cyclic`
-- Viking / Viking2 memory directive: `#SBATCH --mem=8gb`
+- Viking / Viking2 memory directive: `#SBATCH --mem=16gb`
 - Archer2 partition & QoS directives: `#SBATCH -p standard`, dynamic `#SBATCH --qos=standard` (walltime $\le 24\text{h}$) or `#SBATCH --qos=long` (walltime $> 24\text{h}$, up to $96\text{h}$, $\le 64$ nodes, 16 queued job limit) (no memory directive).
 - Archer2 `/work` filesystem & symlink rules: On ARCHER2, compute nodes cannot mount `/home`. Binaries install to `$ARCHER2_WORK_ROOT/usr` (via the `~/src/usr -> /work/...` symlink). If `bmtool` is invoked from `/home`, it automatically mirrors `tools/` to `$ARCHER2_WORK_ROOT/tools` (using `rsync -a --delete`), re-executes the `/work` copy preserving all CLI arguments, and submits batch jobs with `--chdir` targeting the `/work` tool directory to guarantee compute node accessibility.
 - Standard directives for job name, ntasks, nodes, ntasks-per-node, output, error, account, and mail-user.
@@ -457,7 +486,7 @@ The runtime paths are explicitly constructed without cross-fallback or directory
   - Python Package: `tools/lsmiotool/`
   - Profiles: `tools/lsmiotool/etc/environments.json`
   - Version: `VERSION`
-  - Assets: `tools/bmtool/lmp-reaxff/`
+  - Assets: `tools/lsmiotool/share/lmp-reaxff/`
 
 ---
 
@@ -589,29 +618,26 @@ Evaluates performance progression across node scaling configurations:
 
 ```bash
 lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
 ```
 
 #### Arguments & Options:
-- `<folder>`: Benchmark folder containing node subdirectories (e.g. `01`, `02`, `04`, `08`, ...) or partitioned backend archive directories (e.g., `<archive>/backends/<scale>`).
-- `<read|write>`: Required operation phase to compare (`read` or `write`).
+- `<folder>`: Archive directory holding one `outputs-<backend>` directory per backend (e.g., `<archive>/backends/<scale>`), each with its `lsm-report.csv`.
+- `<read|write>`: Operation phase to compare (`read` or `write`); optional with `--all`.
 - `[stripes]`: Stripe count: `4` or `16` (default: `4`).
 - `[blocksize]`: Block size: `'64K'`, `'1M'`, or `'8M'` (default: `'1M'`).
-- `--output-dir <dir>`: Destination directory for generated PNG plots (default: current working directory).
+- `--all`: One chart per (stripes, blocksize) permutation: 6 for the given operation, or 12 (write and read) without one. Not combinable with explicit `<stripes>`/`<blocksize>`.
+- `--output-dir <dir>`: Directory the PNG plots are written to, as given (default: current working directory). Like `compare variants`, no subdirectories are added.
 
-#### Approach 2 Mirrored Plot Directory Architecture (`INV-BACKEND-4`):
-When `--output-dir` is specified, `lsmiotool compare nodes` automatically detects Approach 2 partitioned archives and mirrors the directory structure:
-- `<archive>/backends/<scale>` $\to$ `<output-dir>/backends/<scale>/`
-- `<archive>/variants` $\to$ `<output-dir>/variants/`
-- Legacy unpartitioned archives $\to$ `<output-dir>/`
-
-Parent directories are created automatically (`os.makedirs(out_dir, exist_ok=True)`). Standardized output filename format is strictly maintained:
+#### Output Files:
+Plots are named after the scale (`<archive>/backends/<scale>` gives `<scale>`, a variants archive gives `variants`, anything else its directory name):
 $$\text{compare-}<\text{scale}>-<\text{op}>-<\text{stripes}>-<\text{bs}>.png$$
 
 *Example*:
 ```bash
-lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small write 4 1M --output-dir png
+lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small --all --output-dir ~/png/backends/small
 ```
-Renders clustered grouped bar chart saved directly to `png/backends/small/compare-small-write-4-1M.png`.
+Renders 12 clustered bar charts, e.g. `~/png/backends/small/compare-small-write-4-1M.png`.
 
 #### Canonical Legend Mapping & Precedence Sorting (`INV-BACKEND-5`):
 When comparing multi-backend archive directories:
@@ -622,14 +648,12 @@ When comparing multi-backend archive directories:
 
 ---
 
-### 4.2 Variant Sensitivity Comparison (`lsmiotool compare variants` / `lsmiotool compare-archive`)
+### 4.2 Variant Sensitivity Comparison (`lsmiotool compare variants`)
 
 Evaluates sensitivity across storage engine parameters and tuning variants on fixed 8-node baseline runs:
 
 ```bash
 lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
-# Equivalent direct archive comparison alias:
-lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
 ```
 
 #### Arguments & Options:
@@ -637,12 +661,18 @@ lsmiotool compare-archive <archive_folder> [read|write|both] [<stripes>] [<block
 - `[operation]`: Operation to compare: `read`, `write`, or `both` (default: `both`).
 - `[stripes]`: Stripe count: `4` or `16` (default: `4`).
 - `[blocksize]`: Block size: `'64K'`, `'1M'`, or `'8M'` (default: `'1M'`).
-- `--all`: Generate comparison charts across all 6 `(stripes, blocksize)` permutations.
-- `--output-dir <dir>`: Destination directory for generated PNG plots (default: current working directory).
+- `--all`: Generate comparison charts across all 6 `(stripes, blocksize)` permutations, for each operation (12 with the default `both`). Not combinable with explicit `<stripes>`/`<blocksize>`.
+- `--output-dir <dir>`: Directory the PNG plots are written to, as given (default: current working directory).
+
+*Example*:
+```bash
+lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants --all --output-dir ~/png/variants
+```
+Renders 12 charts, e.g. `~/png/variants/compare-variants-delta-variants-write-4-1M.png` (the archive folder's name follows `delta`).
 
 #### Paired Delta Comparison Plots (`INV-PAIR-4`):
-When `<archive_folder>` contains paired variant runs (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`), `lsmiotool compare-archive` (and `lsmiotool compare variants`) automatically activates paired delta mode:
-- **Output Filename**: Renders `compare-variants-delta-<op>-c<stripes>-b<blocksize>.png`.
+When `<archive_folder>` contains paired variant runs (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`), `lsmiotool compare variants` automatically activates paired delta mode:
+- **Output Filename**: Renders `compare-variants-delta-<archive-name>-<op>-<stripes>-<blocksize>.png`.
 - **1 Bar Per Variant**: Each variant displays exactly 1 bar representing its relative $+/-$ percentage delta against its paired base run:
   $$\Delta_{\%} = \frac{\text{BW}_{\text{run}} - \text{BW}_{\text{base}}}{\text{BW}_{\text{base}}} \times 100\%$$
 - **Zero Baseline Reference Line**: Draws a prominent horizontal reference line at zero (`y = 0`) via `plt.axhline(0)`.
@@ -659,7 +689,7 @@ When `<archive_folder>` contains paired versioned archives generated via `--vers
 - **Non-native backend**: `outputs-rocksdb-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `rocksdb-<branch> (<hash>) [<variant>]`.
 
 #### Legacy Absolute Comparison Mode:
-If `<archive_folder>` contains unpaired directories without `:run` and `:base` suffixes, the command falls back to rendering standard multi-bar absolute throughput comparison charts (`compare-variants-<op>-c<stripes>-b<blocksize>.png`).
+If `<archive_folder>` contains no `:run` directory at all (only unpaired `outputs-*` directories), the command falls back to rendering standard multi-bar absolute throughput comparison charts (`compare-variants-<archive-name>-<op>-<stripes>-<blocksize>.png`).
 
 ---
 
@@ -668,21 +698,27 @@ If `<archive_folder>` contains unpaired directories without `:run` and `:base` s
 `lsmiotool archive` bundles, validates, and archives benchmark outputs for long-term preservation and cross-cluster comparative evaluations.
 
 ```bash
-lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 ```
 
-- `<benchmark>`: Benchmark suite (`ior`, `lsmio`, or `lmp`).
+- `<benchmark>`: Benchmark suite (`lsmio`).
 - `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `variants`; `baseline` is a deprecated alias of `variants`).
-- `[variant]`: Variant identifier (mandatory for `variants` scale; resolved against `VariantCatalogue`).
-- `--dest <path>`: Destination archive directory.
+- `[variant]`: Optional variant identifier for `variants` (resolved against `VariantCatalogue`); it names the arm, `outputs-<arm>`.
+- `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`).
+- `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE-M`; for an lsmiotool run, its own setup).
+- `--source <path>`: What to archive. Without it: bmtool's `<benchmark_root>/lsmio/outputs`, else the latest standalone lsmiotool run of `lsmio <scale>` (and `<variant>`).
+  - An lsmiotool run root: its succeeded points are copied in bmtool's layout with reports; the run root stays.
+  - The run root of any arm of a `variants`, `--versioned` or `backends` run: the whole run is archived as `run` would have, each finished point not yet archived (`:run`/`:base` pairs, or `outputs-<backend>/<nodes>`), in the run's own destination unless `--dest` is given; `<variant>` is not used. A point counts as finished when every combination and every rank succeeded (bmtool keeps a run with a failed step out of the archive), whatever happened to the `run` process. Running it again archives nothing twice, and an existing backend `<nodes>` directory of another run is never replaced (only `run` replaces, as bmtool's jobs do). A run whose `run` process is still alive (its `control/orchestrator.pid`) is refused: it archives itself.
+  - bmtool's live outputs directory `<benchmark_root>/lsmio/outputs`: moved to `<dest>/outputs-<arm>`, like `bmtool archive`. It is the only bmtool directory `archive` moves; any other (a copy, an old archive, `lsmio/outputs-failed`) is refused: move bmtool outputs there first.
 
 Under paired execution workflows, the archiving engine automatically coordinates symmetrical twin directory generation (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`) with synchronized collision suffix locking (`INV-PAIR-2`), while standalone baseline runs maintain clean unadorned directory names (`outputs-native`, `INV-PAIR-3`).
 
 #### Approach 2 Partitioned Directory Layout (`INV-BACKEND-3`):
 To prevent cross-experiment collisions between baseline variant parameter sweeps and multi-node backend scaling benchmarks, the archive subsystem enforces domain partitioning:
-All three destinations are resolved by a single helper, `bmtool/include/archive-dest.in.sh`, so `bmtool`, the batch harness and the `archive` command always agree:
+The destinations are resolved by one helper per tool (`lsmiotool.lib.archive.resolveArchiveDest`; `bmtool/include/archive-dest.in.sh` for bmtool), so `run`, `parse` and `archive` agree:
 - **Backend Scaling Runs** (`run lsmio backends <scale>`): `$BM_PATH/lsmio-archive/backends/<scale>/outputs-<backend>/` (with node subfolders `1/`, `2/`, ..., and master `lsm-report.csv`).
-- **Variant Matrix Runs** (`run lsmio variants [<variants>]`): `$BM_PATH/lsmio-archive/variants/outputs-native-<variant>/`.
+- **Variant Matrix Runs** (`run lsmio variants [<variants>]`): `$BM_PATH/lsmio-archive/variants/outputs-native-<variant>:run` and `:base`.
+- **Versioned Runs** (`run lsmio variants [<variants>] --versioned`, lsmiotool only; bmtool uses `variants/`): `$BM_PATH/lsmio-archive/variants-versioned/outputs-native-version-<branch>-<hash>[-<variant>]:run` and `:base`. Versioned pairs archived to `variants/` earlier (by bmtool, or by lsmiotool before this default) are not seen there by `--resume` and still appear in `variants/` charts: move their `outputs-*-version-*` directories to `variants-versioned/`, or pass `--out-dir lsmio-archive/variants`.
 - **Plain Scaling Runs** (`local`, `bake`, `small`, `large`): `$BM_PATH/lsmio-archive/baseline/outputs-<arm>/`.
 - **Explicit `--dest`**: absolute paths are used as given; a path starting with `/lsmio-archive` and any relative path are resolved against `$BM_PATH`.
 

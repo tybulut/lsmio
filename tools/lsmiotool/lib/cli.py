@@ -44,12 +44,15 @@ LSMIOTOOL_HELP = """How to run
 ./lsmiotool [options] <cmd> <cmd-arguments>
 
 common cmds:
-  archive <benchmark> <scale> [<variant>] [--dest <path>]
+  archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
+  cancel <run root | run id>  stop a running 'run' (its job is cancelled)
   compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
-  parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned]
+  parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
+  parseLegacy lsmio backends <local|bake|small|large> [<path>]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
+  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -64,7 +67,7 @@ options:
 """
 
 ARCHIVE_HELP_TEXT = """Usage:
-  lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+  lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
 Arguments:
   <benchmark>   Supported benchmarks: lsmio
@@ -74,20 +77,42 @@ Arguments:
                 (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio variants'.
 
 Options:
-  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
+                Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
+  --setup <name>
+                LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE-M;
+                for an lsmiotool run, the run's own setup).
+  --source <path>
+                What to archive: an lsmiotool run root, or bmtool's live outputs directory
+                <benchmark_root>/lsmio/outputs (the only bmtool directory moved, as in bmtool).
+                The run root of any arm of a variants, --versioned or backends run archives that
+                whole run: each finished point (every combination and rank succeeded) not
+                archived yet, as :run/:base pairs or outputs-<backend>/<nodes>, in the run's own
+                destination unless --dest is given (<variant> is not used). An existing
+                <nodes> dir of another run is never replaced. This picks up what 'run' left,
+                e.g. after --no-archive or when its process ended before its jobs did; a run
+                still running is refused.
+
+Source (default): <benchmark_root> is the site profile's benchmark root.
+  - <benchmark_root>/lsmio/outputs, when it holds bmtool outputs: moved to
+    <dest>/outputs-<arm> and recreated empty, like bmtool archive.
+  - otherwise the latest lsmiotool run of 'lsmio <scale>' (and <variant>) under
+    <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
+    in bmtool's layout with reports; the run root is left in place.
+  Both present is an error: pick one with --source.
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned]
-  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
+  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
   <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
   <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb).
-                Used for the run plan and walltime; the backends are not yet run one after another.
+                Each scale point is one job running the backends one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
@@ -99,18 +124,27 @@ Options:
   --setup <name>
                 Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE-M, ROCKSDB-M, LSMIO).
                 Note: '--setup=value' syntax is strictly rejected; use '--setup <name>'.
-  --archive     Force automatic post-run archiving after each variant run.
-                (Default: enabled when multiple variants, 'most', or 'all' specified; disabled for single variant)
-  --no-archive  Disable automatic post-run archiving after variant execution.
-  --resume      Skip variant execution if target archive directory (outputs-<arm_id>) already exists.
+  --archive     Archive each scale point when its job ends. On by default for 'backends', for
+                'variants' with one or more variants and for --versioned; a 'variants' run of
+                the baseline alone is archived only with --archive.
+  --no-archive  Do not archive (not allowed with --versioned).
+  --resume      Skip a variant whose outputs-<arm>:run archive exists, or a backend's scale point
+                whose outputs-<backend>/<nodes> archive exists. A baseline-alone or a --versioned run
+                without variants always runs again.
   --out-dir <path>
-                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|variants-versioned}).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
                 Explicit job walltime limit in hours (aliases: --walltime, --wallhour, clamped to [1, 48]).
                 Overrides default dynamic scaling (2 + total_runs * 2 hours, granting 120 minutes per matrix run + 2 hours safety headroom).
   --versioned   Execute versioned comparison run against reference baseline.
+  --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
+  --foreground  Stay attached to the terminal. By default a run started from a terminal
+                detaches once its run roots exist: it goes on in the background with its
+                output in <run root>/control/console.log, which is followed on screen until
+                it ends. Ctrl-C then only stops the following; 'lsmiotool cancel <run root>'
+                stops the run (and cancels its job).
 
 Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
@@ -136,13 +170,17 @@ COMPARE_HELP_TEXT = """Usage:
 
 Submodes:
   nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+  nodes <folder> [read|write] --all [--output-dir <dir>]
       Compares performance across node counts for a benchmark folder.
       Arguments:
-          <folder>: Benchmark folder containing node subdirectories (e.g. 01, 02, 04, ...).
-          <read|write>: Required operation to compare ('read' or 'write').
+          <folder>: Archive folder with one outputs-<backend> directory per backend (e.g. <archive>/backends/<scale>).
+          <read|write>: Operation to compare ('read' or 'write'); optional with --all.
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
       Options:
+          --all: Generate charts for all 6 (stripes, blocksize) permutations, for the given
+                 operation or, without one, for both read and write (12 charts). Not combinable
+                 with <stripes>/<blocksize>.
           --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 
   variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
@@ -153,7 +191,8 @@ Submodes:
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
       Options:
-          --all: Generate comparison charts across all 6 (stripes, blocksize) permutations.
+          --all: Generate comparison charts across all 6 (stripes, blocksize) permutations, per
+                 operation (12 with the default 'both'). Not combinable with <stripes>/<blocksize>.
           --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
 """
 
@@ -238,12 +277,15 @@ class RunCliParser:
         cls,
         f_argv: Sequence[str],
         f_global_ssd: bool = False,
+        f_environ: Optional[Dict[str, str]] = None,
     ) -> RunRequest:
         """Parses argument sequence into an immutable canonical RunRequest.
 
         Args:
             f_argv: Sequence of argument strings (either including or excluding leading 'run').
             f_global_ssd: Whether global '--ssd' was supplied before the command.
+            f_environ: Environment for bmtool's BM_SETUP / BM_WALLHOUR defaults
+                (default: os.environ).
 
         Returns:
             Canonical RunRequest instance.
@@ -449,6 +491,7 @@ class RunCliParser:
         f_wallhour: Optional[int] = None
         f_walltime: Optional[str] = None
         f_versioned: bool = False
+        f_fast: bool = False
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -463,6 +506,11 @@ class RunCliParser:
                 if f_versioned:
                     raise RunCliParseError("Duplicate '--versioned' option specified.")
                 f_versioned = True
+                f_idx += 1
+            elif f_tok == "--fast":
+                if f_fast:
+                    raise RunCliParseError("Duplicate '--fast' option specified.")
+                f_fast = True
                 f_idx += 1
             elif f_tok == "--setup":
                 if f_setup_name is not None:
@@ -483,8 +531,6 @@ class RunCliParser:
                     raise RunCliParseError(
                         "Cannot specify both '--archive' and '--no-archive'."
                     )
-                if f_archive is True:
-                    raise RunCliParseError("Duplicate '--archive' option specified.")
                 f_archive = True
                 f_idx += 1
             elif f_tok == "--no-archive":
@@ -492,13 +538,10 @@ class RunCliParser:
                     raise RunCliParseError(
                         "Cannot specify both '--archive' and '--no-archive'."
                     )
-                if f_archive is False:
-                    raise RunCliParseError("Duplicate '--no-archive' option specified.")
                 f_archive = False
                 f_idx += 1
             elif f_tok == "--resume":
-                if f_resume:
-                    raise RunCliParseError("Duplicate '--resume' option specified.")
+                # Repeating a flag is harmless, as in bmtool
                 f_resume = True
                 f_idx += 1
             elif f_tok in ("--out-dir", "--output-dir", "--dest"):
@@ -573,6 +616,7 @@ class RunCliParser:
                     "--walltime=",
                     "--wallhour=",
                     "--versioned=",
+                    "--fast=",
                 )
             ):
                 flag_name = f_tok.split("=")[0]
@@ -597,6 +641,48 @@ class RunCliParser:
                 )
             f_archive = True
 
+        # bmtool accepts archive/resume/destination/walltime options only for 'variants'
+        # and backends runs; plain scaling runs take just --ssd and --fast
+        if f_mode != "backends" and f_scale != "variants":
+            f_unsupported = [
+                f_opt
+                for f_opt, f_used in (
+                    ("--archive/--no-archive", f_archive is not None),
+                    ("--resume", f_resume),
+                    ("--dest/--out-dir", f_out_dir is not None),
+                    ("--time", f_wallhour is not None or f_walltime is not None),
+                )
+                if f_used
+            ]
+            if f_unsupported:
+                raise RunCliParseError(
+                    f"{', '.join(f_unsupported)} not supported for '{f_benchmark} {f_scale}': "
+                    "only 'variants' and 'backends' runs are archived or resumed "
+                    "(set BM_WALLHOUR to change the walltime)."
+                )
+
+        # bmtool environment defaults: BM_SETUP picks the lsmio setup when --setup is not
+        # given (ior/lmp hard-set theirs in bmtool); BM_WALLHOUR sets the walltime of any
+        # run when --time is not given
+        f_env = os.environ if f_environ is None else f_environ
+        if (
+            f_benchmark == "lsmio"
+            and f_setup_name is None
+            and f_env.get("BM_SETUP", "").strip()
+        ):
+            f_setup_name = f_env["BM_SETUP"].strip().upper()
+        if (
+            f_wallhour is None
+            and f_walltime is None
+            and f_env.get("BM_WALLHOUR", "").strip()
+        ):
+            f_raw_hours = f_env["BM_WALLHOUR"].strip()
+            if not f_raw_hours.isdigit() or int(f_raw_hours) <= 0:
+                raise RunCliParseError(
+                    f"Invalid BM_WALLHOUR value: {f_raw_hours!r} (must be a positive integer)"
+                )
+            f_wallhour = max(1, min(48, int(f_raw_hours)))
+
         return RunRequest(
             f_target=f_benchmark,
             f_scale=f_scale,
@@ -612,15 +698,19 @@ class RunCliParser:
             f_wallhour=f_wallhour,
             f_walltime=f_walltime,
             f_versioned=f_versioned,
+            f_fast=f_fast,
         )
 
 
 def parseRunArguments(
     f_argv: Sequence[str],
     f_global_ssd: bool = False,
+    f_environ: Optional[Dict[str, str]] = None,
 ) -> RunRequest:
     """Convenience function wrapping RunCliParser.parse."""
-    return RunCliParser.parse(f_argv=f_argv, f_global_ssd=f_global_ssd)
+    return RunCliParser.parse(
+        f_argv=f_argv, f_global_ssd=f_global_ssd, f_environ=f_environ
+    )
 
 
 class ParseRequest:
@@ -750,16 +840,30 @@ class ParseCliParser:
 
     Usage:
         lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
+        lsmiotool parse lsmio <local|bake|small|large|variants> [options]
+        lsmiotool parse lsmio backends <local|bake|small|large> [options]
 
     Arguments:
-        <target>: Target run root path, manifest file path, or benchmark name ('ior', 'lsmio', 'lmp').
+        <target>: Run root path (also an archived one), manifest file path, bmtool-layout
+            outputs directory, or benchmark name ('ior', 'lsmio', 'lmp'). A benchmark
+            name selects the latest run of that benchmark under the site profile's
+            benchmark root.
+        <scale>: With 'lsmio', restricts the latest-run search to that scale.
+            'parse lsmio variants' and 'parse lsmio backends <scale>' instead
+            regenerate the reports of every outputs-* directory in the archive
+            destination, like bmtool.
 
     Options:
-        --output-dir <dir>: Destination directory for reports (default: current working directory).
+        --output-dir <dir>: Destination directory for reports (default: current working
+            directory; for a bmtool-layout directory, the directory itself; for the
+            archive forms, the archive destination to regenerate).
         --format <format>: Report format ('csv' or 'json', default: 'csv').
     """
 
     VALID_FORMATS = frozenset({"csv", "json"})
+    VALID_SCALES = frozenset(
+        {"local", "bake", "small", "large", "variants", "baseline"}
+    )
 
     @classmethod
     def parse(
@@ -833,6 +937,15 @@ class ParseCliParser:
                     f"Invalid scale for backends parse: {f_scale_tok!r}. Must be one of: {sorted(valid_scales)}"
                 )
             f_scale = f_scale_tok
+        elif (
+            f_target.lower() == "lsmio"
+            and f_remaining_tokens
+            and f_remaining_tokens[0].strip().lower() in cls.VALID_SCALES
+        ):
+            # bmtool form: parse lsmio <local|bake|small|large|variants>
+            f_scale = f_remaining_tokens.pop(0).strip().lower()
+            if f_scale == "baseline":
+                f_scale = "variants"
 
         f_output_dir: Optional[str] = None
         f_format: str = "csv"
@@ -902,7 +1015,7 @@ class ArchiveCliParser:
     """Pure standard-library parser for 'lsmiotool archive' CLI arguments.
 
     Grammar:
-        lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>]
+        lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
     Positional Arguments:
         <benchmark>: Required. Must be 'lsmio'.
@@ -911,8 +1024,12 @@ class ArchiveCliParser:
         <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
-        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|baseline}).
+        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
+        --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE-M;
+            for an lsmiotool run, the run's own setup).
+        --source <path>: What to archive: an lsmiotool run root or a bmtool outputs
+            directory (default: resolved from the benchmark root, see ArchiveMain).
     """
 
     VALID_BENCHMARKS = frozenset({"lsmio"})
@@ -1034,11 +1151,29 @@ class ArchiveCliParser:
 
         f_dest_path: Optional[str] = None
         f_dest_seen: bool = False
+        f_setup: Optional[str] = None
+        f_source: Optional[str] = None
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
             f_tok = f_trailing_tokens[f_idx]
-            if f_tok == "--dest":
+            if f_tok in ("--setup", "--source"):
+                f_opt_seen = f_setup if f_tok == "--setup" else f_source
+                if f_opt_seen is not None:
+                    raise ArchiveCliParseError(f"Duplicate '{f_tok}' option specified.")
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise ArchiveCliParseError(f"Missing value after '{f_tok}' option.")
+                f_val = f_trailing_tokens[f_idx + 1].strip()
+                if not f_val or f_val.startswith("-"):
+                    raise ArchiveCliParseError(
+                        f"Missing valid value after '{f_tok}' option, got: {f_trailing_tokens[f_idx + 1]!r}"
+                    )
+                if f_tok == "--setup":
+                    f_setup = cls.validateSetup(f_val)
+                else:
+                    f_source = f_val
+                f_idx += 2
+            elif f_tok == "--dest":
                 if f_dest_seen:
                     raise ArchiveCliParseError("Duplicate '--dest' option specified.")
                 if f_idx + 1 >= len(f_trailing_tokens):
@@ -1065,7 +1200,25 @@ class ArchiveCliParser:
             f_scale=f_scale,
             f_variant=f_variant_name,
             f_dest=f_dest_path,
+            f_setup=f_setup,
+            f_source=f_source,
         )
+
+    @classmethod
+    def validateSetup(cls, f_setup: str) -> str:
+        """Canonical (upper-case) LSMIO setup name, as 'run --setup' accepts it.
+
+        Raises:
+            ArchiveCliParseError: For an unknown setup.
+        """
+        from lsmiotool.lib.benchmarks import LsmioAdapter
+
+        f_norm = f_setup.strip().upper()
+        if f_norm not in LsmioAdapter.ALLOWED_SETUPS:
+            raise ArchiveCliParseError(
+                f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
+            )
+        return f_norm
 
 
 def parseArchiveArguments(f_argv: Sequence[str]) -> ArchiveRequest:
@@ -1082,24 +1235,32 @@ class CompareNodesRequest:
         "m_stripes",
         "m_blocksize",
         "m_output_dir",
+        "m_all",
         "_frozen",
     )
 
     def __init__(
         self,
         f_folder: str,
-        f_op: str,
+        f_op: Optional[str] = None,
         f_stripes: int = 4,
         f_blocksize: str = "1M",
         f_output_dir: Optional[str] = None,
+        f_all: bool = False,
     ) -> None:
         if not isinstance(f_folder, str) or not f_folder.strip():
             raise ValueError(f"folder must be a non-empty string, got: {f_folder!r}")
+        if not isinstance(f_all, bool):
+            raise ValueError(f"all must be a boolean, got: {f_all!r}")
+        # With --all the operation is optional: 'both' charts read and write
+        if f_op is None and f_all:
+            f_op = "both"
         if not isinstance(f_op, str) or not f_op.strip():
             raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
         f_norm_op = f_op.strip().lower()
-        if f_norm_op not in ("read", "write"):
-            raise ValueError(f"op must be one of ('read', 'write'), got: {f_op!r}")
+        f_valid_ops = ("read", "write", "both") if f_all else ("read", "write")
+        if f_norm_op not in f_valid_ops:
+            raise ValueError(f"op must be one of {f_valid_ops}, got: {f_op!r}")
         if (
             isinstance(f_stripes, bool)
             or not isinstance(f_stripes, int)
@@ -1130,6 +1291,7 @@ class CompareNodesRequest:
             "m_output_dir",
             f_output_dir.strip() if f_output_dir is not None else None,
         )
+        super().__setattr__("m_all", f_all)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -1147,6 +1309,10 @@ class CompareNodesRequest:
     @property
     def submode(self) -> str:
         return "nodes"
+
+    @property
+    def all(self) -> bool:
+        return self.m_all
 
     @property
     def folder(self) -> str:
@@ -1180,6 +1346,7 @@ class CompareNodesRequest:
             "stripes": self.m_stripes,
             "blocksize": self.m_blocksize,
             "output_dir": self.m_output_dir,
+            "all": self.m_all,
         }
 
     def __repr__(self) -> str:
@@ -1187,7 +1354,7 @@ class CompareNodesRequest:
             f"CompareNodesRequest(folder={self.m_folder!r}, "
             f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
             f"blocksize={self.m_blocksize!r}, "
-            f"output_dir={self.m_output_dir!r})"
+            f"output_dir={self.m_output_dir!r}, all={self.m_all!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -1198,6 +1365,7 @@ class CompareNodesRequest:
                 and self.m_stripes == f_other.m_stripes
                 and self.m_blocksize == f_other.m_blocksize
                 and self.m_output_dir == f_other.m_output_dir
+                and self.m_all == f_other.m_all
             )
         return False
 
@@ -1209,6 +1377,7 @@ class CompareNodesRequest:
                 self.m_stripes,
                 self.m_blocksize,
                 self.m_output_dir,
+                self.m_all,
             )
         )
 
@@ -1387,6 +1556,7 @@ class CompareCliParser:
 
     Grammar:
         lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+        lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
         lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
     """
 
@@ -1488,12 +1658,6 @@ class CompareCliParser:
         cls,
         f_tokens: Sequence[str],
     ) -> CompareNodesRequest:
-        for f_tok in f_tokens:
-            if f_tok == "--all" or f_tok.startswith("--all="):
-                raise CompareCliParseError(
-                    "Option '--all' is only valid for 'variants' submode"
-                )
-
         if not f_tokens:
             raise CompareCliParseError("Missing required positional argument: <folder>")
 
@@ -1511,6 +1675,9 @@ class CompareCliParser:
         f_stripes: int = 4
         f_blocksize: str = "1M"
         f_output_dir: Optional[str] = None
+        f_all = f_tokens.count("--all") > 0
+        if f_tokens.count("--all") > 1:
+            raise CompareCliParseError("Duplicate '--all' option specified.")
 
         f_remaining_tokens = f_tokens[1:]
         f_pos_idx = 0
@@ -1558,9 +1725,13 @@ class CompareCliParser:
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
 
-        if f_op is None:
+        if f_op is None and not f_all:
             raise CompareCliParseError(
                 "Missing required positional argument: <read|write>"
+            )
+        if f_all and f_pos_idx > 1:
+            raise CompareCliParseError(
+                "'--all' charts every <stripes> and <blocksize>; do not give them"
             )
 
         f_output_dir_seen = False
@@ -1586,6 +1757,8 @@ class CompareCliParser:
                 f_output_dir = f_val.strip()
                 f_output_dir_seen = True
                 f_rem_idx += 2
+            elif f_tok == "--all":
+                f_rem_idx += 1
             elif f_tok.startswith("-"):
                 raise CompareCliParseError(f"Unknown option: {f_tok!r}")
             else:
@@ -1599,6 +1772,7 @@ class CompareCliParser:
             f_stripes=f_stripes,
             f_blocksize=f_blocksize,
             f_output_dir=f_output_dir,
+            f_all=f_all,
         )
 
     @classmethod
@@ -1709,6 +1883,10 @@ class CompareCliParser:
                 raise CompareCliParseError(
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
+        if f_all and f_pos_idx > 1:
+            raise CompareCliParseError(
+                "'--all' charts every <stripes> and <blocksize>; do not give them"
+            )
 
         return CompareVariantsRequest(
             f_archive_folder=f_archive_folder,

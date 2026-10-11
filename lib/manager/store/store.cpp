@@ -68,26 +68,39 @@ bool LSMIOStore::metaGetAll(std::vector<std::tuple<std::string, std::string>>* v
     return getPrefix(prefix, values);
 }
 
-bool LSMIOStore::metaPut(const std::string key, const std::string value, bool flush) {
+bool LSMIOStore::metaPut(const std::string& key, const std::string& value, bool flush) {
     LOG(INFO) << "LSMIOStore::metaPut: " << std::endl;
     return put(_metaPrefix + key, value, flush);
 }
 
-bool LSMIOStore::put(const std::string key, const std::string value, bool flush) {
-    bool retValue;
+bool LSMIOStore::metaPut(const std::string& key, std::string&& value, bool flush) {
+    LOG(INFO) << "LSMIOStore::metaPut: " << std::endl;
+    return put(_metaPrefix + key, std::move(value), flush);
+}
 
+bool LSMIOStore::put(const std::string& key, const std::string& value, bool flush) {
     LOG(INFO) << "LSMIOStore::put: key: " << key << " flush: " << flush << " size: " << value.size()
               << std::endl;
 
     return _batchMutation(MutationType::Put, key, value, flush);
 }
 
-bool LSMIOStore::del(const std::string key, bool flush) {
-    bool retValue;
+bool LSMIOStore::put(const std::string& key, std::string&& value, bool flush) {
+    LOG(INFO) << "LSMIOStore::put: key: " << key << " flush: " << flush << " size: " << value.size()
+              << std::endl;
 
+    return _batchMutation(MutationType::Put, key, std::move(value), flush);
+}
+
+bool LSMIOStore::del(const std::string& key, bool flush) {
     LOG(INFO) << "LSMIOStore::del: key: " << key << " flush: " << flush << std::endl;
 
     return _batchMutation(MutationType::Del, key, "", flush);
+}
+
+bool LSMIOStore::_batchMutation(MutationType mType, const std::string& key, std::string&& value,
+                                bool flush) {
+    return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
 }
 
 bool LSMIOStore::writeBarrier() {

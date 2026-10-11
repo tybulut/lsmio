@@ -94,6 +94,11 @@ from lsmiotool.lib.worker import (
 )
 
 
+def _tolerant(f_cmd: str) -> str:
+    """Module command as rendered: failures are logged, not fatal (bmtool parity)."""
+    return f'{f_cmd} || echo "WARNING: {f_cmd} failed" >&2'
+
+
 class MockProcessRunner:
     """Mock process runner for recording argv and simulating process results."""
 
@@ -253,8 +258,9 @@ class SchedulerRendererTest(unittest.TestCase):
         # Line 0: #!/bin/bash
         # Lines 1-8: Directives
         # Line 9: set -euo pipefail
-        # Line 10: module purge
-        # Line 11+: module load ...
+        # Line 10: set +eu (module setup is not fatal)
+        # Line 11: module purge
+        # Line 12+: module load ...
         # Final line: exec <worker> allocation <manifest> <point>
         f_lines = [
             f_l.strip() for f_l in f_script_viking2.strip().splitlines() if f_l.strip()
@@ -262,8 +268,10 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(f_lines[0], "#!/bin/bash")
         self.assertEqual(f_lines[1:9], f_slurm_directives)
         self.assertEqual(f_lines[9], "set -euo pipefail")
-        self.assertEqual(f_lines[10], "module purge")
-        self.assertTrue(any("module load" in f_l for f_l in f_lines[11:-1]))
+        self.assertEqual(f_lines[10], "set +eu")
+        self.assertEqual(f_lines[11], _tolerant("module purge"))
+        self.assertTrue(any("module load" in f_l for f_l in f_lines[12:-1]))
+        self.assertIn("set -eu", f_lines[12:-1])
         self.assertEqual(
             f_lines[-1],
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} {self.m_point_id}",
@@ -293,7 +301,8 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(f_pbs_lines[0], "#!/bin/bash")
         self.assertEqual(f_pbs_lines[1:8], f_pbs_directives)
         self.assertEqual(f_pbs_lines[8], "set -euo pipefail")
-        self.assertEqual(f_pbs_lines[9], "module purge")
+        self.assertEqual(f_pbs_lines[9], "set +eu")
+        self.assertEqual(f_pbs_lines[10], _tolerant("module purge"))
         self.assertEqual(
             f_pbs_lines[-1],
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} {self.m_point_id}",
@@ -317,6 +326,108 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(
             f_dev_lines[-1],
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} {self.m_point_id}",
+        )
+
+    def testLibraryEnvironmentRenderedAfterModulesBeforeExec(self) -> None:
+        """Job script exports LD_LIBRARY_PATH/ADIOS2_PLUGIN_PATH from install_prefix like bmtool vars.in.sh (H9)."""
+        f_prefix = self.m_archer2_profile.install_prefix
+        self.assertEqual(f_prefix, "/work/e281/e281/testuser/usr")
+        f_expected_env = [
+            f'export LD_LIBRARY_PATH={f_prefix}/lib:{f_prefix}/lib64"${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"',
+            f"export ADIOS2_PLUGIN_PATH={f_prefix}/lib",
+        ]
+        for f_backend, f_directives in (
+            (SchedulerKind.SLURM, ["#SBATCH --job-name=lm-abcdef0123456789abcdef01"]),
+            (SchedulerKind.PBS, ["#PBS -N lm-abcdef0123456789abcdef01"]),
+        ):
+            f_script = SchedulerScriptRenderer.renderScript(
+                f_backend=f_backend,
+                f_directives=f_directives,
+                f_profile=self.m_archer2_profile,
+                f_worker_executable=self.m_worker_path,
+                f_manifest_path=self.m_manifest_path,
+                f_point_id=self.m_point_id,
+            )
+            f_lines = [f_l for f_l in f_script.splitlines() if f_l.strip()]
+            self.assertEqual(f_lines[-3:-1], f_expected_env)
+            self.assertTrue(f_lines[-1].startswith("exec "))
+            f_last_module = max(
+                f_i for f_i, f_l in enumerate(f_lines) if f_l.startswith("module ")
+            )
+            self.assertEqual(f_last_module, len(f_lines) - 5)
+            self.assertEqual(f_lines[-4], "set -eu")
+
+        # DEV profile (no modules) still gets the library environment
+        f_dev_script = SchedulerScriptRenderer.renderScript(
+            f_backend=SchedulerKind.FAKE,
+            f_directives=[],
+            f_profile=self.m_dev_profile,
+            f_worker_executable=self.m_worker_path,
+            f_manifest_path=self.m_manifest_path,
+            f_point_id=self.m_point_id,
+        )
+        self.assertIn(
+            f"export ADIOS2_PLUGIN_PATH={self.m_dev_profile.install_prefix}/lib",
+            f_dev_script,
+        )
+
+        # Module sequences / None carry no install prefix: nothing rendered
+        self.assertEqual(
+            SchedulerScriptRenderer.renderLibraryEnvironment(["gcc/11"]), ""
+        )
+        self.assertEqual(SchedulerScriptRenderer.renderLibraryEnvironment(None), "")
+        self.assertEqual(
+            SchedulerScriptRenderer.renderLibraryEnvironment(
+                self.m_profile_doc.getProfile("VIKING")
+            ),
+            "",
+        )
+
+    def testLibraryEnvironmentQuotesAndRejectsUnsafePrefixes(self) -> None:
+        """install_prefix is POSIX-quoted and must be absolute, ':'-free, and control/injection free."""
+        f_spaced = MagicMock(spec=["install_prefix"])
+        f_spaced.install_prefix = "/opt/my usr"
+        f_rendered = SchedulerScriptRenderer.renderLibraryEnvironment(f_spaced)
+        self.assertEqual(
+            f_rendered.splitlines(),
+            [
+                "export LD_LIBRARY_PATH='/opt/my usr/lib:/opt/my usr/lib64'"
+                '"${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"',
+                "export ADIOS2_PLUGIN_PATH='/opt/my usr/lib'",
+            ],
+        )
+        for f_bad in (
+            "relative/usr",
+            "/opt/a:b",
+            "/opt/a\nexport X=1",
+            "/opt/#SBATCH",
+            "",
+        ):
+            f_prof = MagicMock(spec=["install_prefix"])
+            f_prof.install_prefix = f_bad
+            with self.assertRaises(SchedulerScriptError, msg=repr(f_bad)):
+                SchedulerScriptRenderer.renderLibraryEnvironment(f_prof)
+
+    def testSubmitArgvExportsEnvironment(self) -> None:
+        """sbatch passes --export=ALL and qsub passes -V so the job inherits the submit environment (H10, L6)."""
+        self.assertEqual(
+            SlurmSchedulerAdapter.submitCommand("/tmp/job.sh"),
+            ["sbatch", "--parsable", "--export=ALL", "/tmp/job.sh"],
+        )
+        self.assertEqual(
+            PbsSchedulerAdapter.submitCommand("/tmp/job.sh"),
+            ["qsub", "-V", "/tmp/job.sh"],
+        )
+        f_spec = JobSpec(
+            f_point_id="p", f_script_path="/tmp/job.sh", f_working_dir="/tmp"
+        )
+        self.assertEqual(
+            SchedulerAdapter(f_backend=SchedulerKind.SLURM).buildSubmitArgv(f_spec),
+            ["sbatch", "--parsable", "--export=ALL", "/tmp/job.sh"],
+        )
+        self.assertEqual(
+            SchedulerAdapter(f_backend=SchedulerKind.PBS).buildSubmitArgv(f_spec),
+            ["qsub", "-V", "/tmp/job.sh"],
         )
 
     def testDispatchEvidenceOrder(self) -> None:
@@ -381,7 +492,8 @@ class SchedulerRendererTest(unittest.TestCase):
 
         # Verify dispatched payload: contains pre-spawn metadata only (NO post-return result)
         self.assertEqual(
-            f_disp.payload["argv"], ["sbatch", "--parsable", f_script_path]
+            f_disp.payload["argv"],
+            ["sbatch", "--parsable", "--export=ALL", f_script_path],
         )
         self.assertEqual(f_disp.payload["job_name"], self.m_token)
         self.assertEqual(f_disp.payload["correlation_token"], self.m_token)
@@ -401,7 +513,8 @@ class SchedulerRendererTest(unittest.TestCase):
         # Verify runner was invoked with exact submit command
         self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
         self.assertEqual(
-            f_mock_runner.m_invoked_argv[0], ["sbatch", "--parsable", f_script_path]
+            f_mock_runner.m_invoked_argv[0],
+            ["sbatch", "--parsable", "--export=ALL", f_script_path],
         )
 
     def testDispatchEvidenceExistsAtRunnerEntry(self) -> None:
@@ -462,7 +575,8 @@ class SchedulerRendererTest(unittest.TestCase):
         f_disp_entry = f_evidence_at_entry["dispatched"]
         self.assertEqual(f_disp_entry.sequence_number, 2)
         self.assertEqual(
-            f_disp_entry.payload["argv"], ["sbatch", "--parsable", f_script_path]
+            f_disp_entry.payload["argv"],
+            ["sbatch", "--parsable", "--export=ALL", f_script_path],
         )
         self.assertEqual(f_disp_entry.payload["job_name"], self.m_token)
         self.assertEqual(f_disp_entry.payload["correlation_token"], self.m_token)

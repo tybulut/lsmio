@@ -33,6 +33,7 @@
 
 #include <map>
 #include <string>
+#include <type_traits>
 
 #include "IMemtable.hpp"
 
@@ -54,6 +55,36 @@ class MemtableOrdered : public IMemtable {
             m_size_bytes -= result.first->second.size();
             m_size_bytes += f_value.size();
             result.first->second = f_value;
+        }
+    }
+
+    void add(const std::string& f_key, std::string&& f_value) override {
+        const size_t val_bytes = f_value.size();
+
+        if constexpr (std::is_same_v<MapT, std::map<std::string, std::string>>) {
+            // --- std::map Specialization (Default Engine) ---
+            // try_emplace guarantees f_value is NOT moved from if key already exists
+            auto [it, inserted] = m_data.try_emplace(f_key, std::move(f_value));
+            if (inserted) {
+                m_size_bytes += f_key.size() + val_bytes;
+            } else {
+                // Overwrite existing key: replace value via move assignment
+                m_size_bytes -= it->second.size();
+                m_size_bytes += val_bytes;
+                it->second = std::move(f_value);
+            }
+        } else {
+            // --- tlx::btree_map Fallback Specialization ---
+            // Single traversal: insert() reports whether the key existed
+            auto result = m_data.insert({f_key, f_value});
+            if (result.second) {
+                m_size_bytes += f_key.size() + val_bytes;
+            } else {
+                // Overwrite existing key: move-assign into existing node
+                m_size_bytes -= result.first->second.size();
+                m_size_bytes += val_bytes;
+                result.first->second = std::move(f_value);
+            }
         }
     }
 

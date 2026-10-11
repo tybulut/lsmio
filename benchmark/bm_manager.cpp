@@ -37,15 +37,19 @@ class BMManager : public BMBase {
   protected:
     lsmio::LSMIOManager *_lm = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) {
+    bool doRead(const std::string key, std::string *value) override {
         return _lm->get(key, value);
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         return _lm->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
     }
 
-    virtual int writePrepare(bool opt) {
+    bool doWrite(const std::string& key, std::string&& value) override {
+        return _lm->put(key, std::move(value), lsmio::gConfigLSMIO.alwaysFlush);
+    }
+
+    int writePrepare(bool opt) override {
         if (gConfigBM.enableCollectiveIO)
             _lm = new lsmio::LSMIOManager(
                 genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), "",
@@ -57,19 +61,19 @@ class BMManager : public BMBase {
         return 0;
     }
 
-    virtual bool doWriteFinalize() {
+    bool doWriteFinalize() override {
         _lm->writeBarrier();
         _lm->close();
         return true;
     }
 
-    virtual int writeCleanup() {
+    int writeCleanup() override {
         delete _lm;
         _lm = nullptr;
         return 0;
     }
 
-    virtual int readPrepare(bool opt) {
+    int readPrepare(bool opt) override {
         if (gConfigBM.enableCollectiveIO)
             _lm = new lsmio::LSMIOManager(
                 genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), "",
@@ -81,7 +85,7 @@ class BMManager : public BMBase {
         return 0;
     }
 
-    virtual int readCleanup() {
+    int readCleanup() override {
         delete _lm;
         _lm = nullptr;
         return 0;

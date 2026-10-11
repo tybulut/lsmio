@@ -54,6 +54,7 @@ if python_root not in sys.path:
 from lsmiotool.lib.cli import (
     ARCHIVE_HELP_TEXT,
     COMPARE_HELP_TEXT,
+    LSMIOTOOL_HELP,
     PARSE_HELP_TEXT,
     RUN_HELP_TEXT,
     ArchiveCliParseError,
@@ -69,30 +70,6 @@ from lsmiotool.lib.cli import (
 )
 from lsmiotool.lib.resources import InstallRelativeLayout, ResourceLocator
 from lsmiotool.lib.version import getVersion
-
-LSMIOTOOL_HELP = """How to run
------------------------------------------------------------------------
-./lsmiotool [options] <cmd> <cmd-arguments>
-
-common cmds:
-  archive <benchmark> <scale> [<variant>] [--dest <path>]
-  compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
-  load-modules  load needed HPC modules
-  parse <target> [--output-dir <dir>] [--format <csv|json>]
-  parseLegacy <ior|lsmio|lmp> <local|bake|small|large>
-  run <ior|lsmio|lmp> <local|bake|small|large|baseline> [<variant>] [--ssd] [--setup <name>]
-
-other cmds:
-  latex <viking|viking2|isambard>
-  shell       provide interactive access to the python tool
-  test        run lsmiotool unit and functional tests
-
-options:
-  --debug     enable debug mode and run
-  --help      print this help screen
-  --ssd       use SSD storage instead
-  --version   print version and exit
-"""
 
 if __name__ == '__main__':
     pkg_root = os.path.normpath(os.path.join(python_root, "lsmiotool"))
@@ -216,8 +193,17 @@ if __name__ == '__main__':
             )
             sys.exit(1)
         inst_main = main.ParseLegacyMain(*cmd_args, ssd=is_ssd)
+    elif cmd == 'cancel':
+        from lsmiotool.lib import main
+        if len(args) != 2 or args[1].startswith('-'):
+            sys.stderr.write("Cancel: needs one argument: <run root | run id>\n")
+            sys.exit(1)
+        inst_main = main.CancelMain(args[1])
     elif cmd == 'run':
         from lsmiotool.lib import main
+        # --foreground: stay attached to the terminal (lib/detach.py)
+        foreground = '--foreground' in args
+        args = [arg for arg in args if arg != '--foreground']
         try:
             run_request = parseRunArguments(args, f_global_ssd=is_ssd)
         except RunCliParseError as err:
@@ -226,6 +212,7 @@ if __name__ == '__main__':
         inst_main = main.RunMain(
             f_request=run_request,
             f_runtime_layout=runtime_layout,
+            f_detach=not foreground,
         )
     elif cmd == 'shell':
         from lsmiotool.lib import main

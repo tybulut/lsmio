@@ -54,6 +54,27 @@ from lsmiotool.lib.variants import (
 class CompareCliParserTest(unittest.TestCase):
     """Unit tests for CompareNodesRequest, CompareVariantsRequest, and CompareCliParser."""
 
+    def testNodesAllOption(self) -> None:
+        """compare nodes --all: every (stripes, blocksize), for one operation or both."""
+        f_req = parseCompareArguments(
+            ["nodes", "/path/to/bench", "--all", "--output-dir", "/tmp/png"]
+        )
+        self.assertTrue(f_req.all)
+        self.assertEqual(f_req.op, "both")
+        self.assertEqual(f_req.output_dir, "/tmp/png")
+
+        f_req = parseCompareArguments(["nodes", "/path/to/bench", "write", "--all"])
+        self.assertTrue(f_req.all)
+        self.assertEqual(f_req.op, "write")
+
+        f_req = parseCompareArguments(["nodes", "/path/to/bench", "read"])
+        self.assertFalse(f_req.all)
+        self.assertEqual(f_req.toDict()["all"], False)
+
+        # 'both' is only an operation for --all
+        with self.assertRaises(ValueError):
+            CompareNodesRequest(f_folder="/path/to/bench", f_op="both")
+
     def testCompareNodesRequestValueObject(self) -> None:
         """Validates CompareNodesRequest construction, properties, immutability, toDict, repr, eq, and hash."""
         req = CompareNodesRequest(
@@ -119,6 +140,7 @@ class CompareCliParserTest(unittest.TestCase):
             "stripes": 16,
             "blocksize": "8M",
             "output_dir": "/tmp/plots",
+            "all": False,
         }
         self.assertEqual(req.toDict(), expected_dict)
 
@@ -415,29 +437,28 @@ class CompareCliParserTest(unittest.TestCase):
                 "variants",
                 "/path/to/archive",
                 "read",
-                "16",
-                "8M",
                 "--all",
                 "--output-dir",
                 "/tmp/plots",
             ]
         )
         self.assertTrue(req_all_out.all)
+        self.assertEqual(req_all_out.op, "read")
         self.assertEqual(req_all_out.output_dir, "/tmp/plots")
 
+        # --all charts every (stripes, blocksize): explicit ones are refused, as for nodes
+        for f_extra in (["16"], ["16", "8M"]):
+            with self.assertRaises(CompareCliParseError) as ctx:
+                parseCompareArguments(
+                    ["variants", "/path/to/archive", "read"] + f_extra + ["--all"]
+                )
+            self.assertIn("'--all' charts every <stripes>", str(ctx.exception))
+
         # Compatibility function parseCompareArchiveArguments
-        req_compat = parseCompareArchiveArguments(
-            [
-                "/path/to/archive",
-                "read",
-                "16",
-                "--all",
-            ]
-        )
+        req_compat = parseCompareArchiveArguments(["/path/to/archive", "read", "--all"])
         self.assertIsInstance(req_compat, CompareVariantsRequest)
         self.assertEqual(req_compat.archive_folder, "/path/to/archive")
         self.assertEqual(req_compat.op, "read")
-        self.assertEqual(req_compat.stripes, 16)
         self.assertTrue(req_compat.all)
 
     def testParseCompareErrorsZeroAliasAndFallback(self) -> None:
@@ -543,12 +564,16 @@ class CompareCliParserTest(unittest.TestCase):
             parseCompareArguments(["nodes", "/path/to/bench", "read", "4", "2M"])
         self.assertIn("Invalid blocksize: '2M'", str(ctx.exception))
 
-        # Rejection of --all option under nodes mode
+        # --all charts every (stripes, blocksize): explicit ones are refused
         with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--all"])
+            parseCompareArguments(["nodes", "/path/to/bench", "read", "4", "--all"])
         self.assertIn(
-            "Option '--all' is only valid for 'variants' submode", str(ctx.exception)
+            "'--all' charts every <stripes> and <blocksize>", str(ctx.exception)
         )
+
+        with self.assertRaises(CompareCliParseError) as ctx:
+            parseCompareArguments(["nodes", "/path/to/bench", "--all", "--all"])
+        self.assertIn("Duplicate '--all'", str(ctx.exception))
 
         # Prohibited --all=val and --output-dir=val syntax
         with self.assertRaises(CompareCliParseError) as ctx:

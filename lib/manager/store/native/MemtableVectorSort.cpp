@@ -62,6 +62,20 @@ void MemtableVectorSort::add(const std::string& f_key, const std::string& f_valu
     }
 }
 
+void MemtableVectorSort::add(const std::string& f_key, std::string&& f_value) {
+    const size_t val_bytes = f_value.size();
+    auto it = std::lower_bound(m_data.begin(), m_data.end(), f_key, EntryKeyLess{});
+
+    if (it != m_data.end() && it->first == f_key) {
+        m_size_bytes -= it->second.size();
+        m_size_bytes += val_bytes;
+        it->second = std::move(f_value);
+    } else {
+        m_data.insert(it, std::make_pair(f_key, std::move(f_value)));
+        m_size_bytes += f_key.size() + val_bytes;
+    }
+}
+
 bool MemtableVectorSort::get(const std::string& f_key, std::string& f_value) const {
     auto it = std::lower_bound(m_data.begin(), m_data.end(), f_key, EntryKeyLess{});
 

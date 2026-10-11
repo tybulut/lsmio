@@ -64,12 +64,6 @@ if(NOT LSMIO_GIT_COMMIT_HASH)
   set(LSMIO_GIT_COMMIT_HASH "unknown")
 endif()
 
-add_compile_definitions(
-  LSMIO_VERSION_STR="${LSMIO_VERSION}"
-  LSMIO_GIT_BRANCH="${LSMIO_GIT_BRANCH}"
-  LSMIO_GIT_COMMIT_HASH="${LSMIO_GIT_COMMIT_HASH}"
-)
-
 # Defines
 add_subdirectory(include)
 include(PackageTLX)

@@ -497,23 +497,10 @@ class ArtifactStoreTest(unittest.TestCase):
 
         f_expected_subdirs = [
             os.path.join(
-                f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b8M"
-            ),
-            os.path.join(
-                f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b1M"
-            ),
-            os.path.join(
-                f_layout.runRoot, "points", "00-tasks-16", "data", "c16", "b64K"
-            ),
-            os.path.join(
-                f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b8M"
-            ),
-            os.path.join(
-                f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b1M"
-            ),
-            os.path.join(
-                f_layout.runRoot, "points", "00-tasks-16", "data", "c4", "b64K"
-            ),
+                f_layout.runRoot, "points", "00-tasks-16", "data", f"c{f_s}", f"b{f_b}"
+            )
+            for f_s in (4, 16)
+            for f_b in ("1M", "64K", "8M")
         ]
         self.assertEqual(list(f_data_dirs), f_expected_subdirs)
 

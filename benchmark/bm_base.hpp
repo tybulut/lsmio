@@ -72,7 +72,10 @@ class BMBase {
     int benchIteration(int iteration, bool opt = false);
 
     virtual bool doRead(const std::string key, std::string *value) = 0;
-    virtual bool doWrite(const std::string key, const std::string value) = 0;
+    virtual bool doWrite(const std::string& key, const std::string& value) = 0;
+    virtual bool doWrite(const std::string& key, std::string&& value) {
+        return doWrite(key, value);
+    }
 
     virtual bool doReadFinalize();
     virtual bool doWriteFinalize();

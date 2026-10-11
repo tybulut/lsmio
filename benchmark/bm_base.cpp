@@ -34,10 +34,11 @@
 #include <signal.h>
 
 #include <CLI/CLI.hpp>
-#include <filesystem>
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <iostream>
+#include <lsmio/Version.hpp>
 #include <lsmio/lsmio.hpp>
 #include <numeric>
 #include <random>
@@ -97,7 +98,7 @@ int BMBase::benchWrite(long long *duration) {
         std::string key(_keyPrefix + fmt::format("{:06}", pRandomKeyIndex[count]));
         std::string value(std::to_string(count) + "::" + valSuffix);
 
-        success &= doWrite(key, value);
+        success &= doWrite(key, std::move(value));
         if (success == false) {
             break;
         }
@@ -173,8 +174,9 @@ int BMBase::benchIteration(int iteration, bool opt) {
     }
 
     if (globalWriteFail != 0) {
-        LOG(ERROR) << "BMBase::benchIteration: benchWrite failed on one or more ranks (localStatus: "
-                   << writeStatus << ")." << std::endl;
+        LOG(ERROR)
+            << "BMBase::benchIteration: benchWrite failed on one or more ranks (localStatus: "
+            << writeStatus << ")." << std::endl;
         exitCode |= lsmio::BM_ERR_WRITE;
         // Tier 1 suppression: DO NOT call _bm.addIteration("iwrite")!
     } else {
@@ -222,9 +224,9 @@ int BMBase::benchSuite(std::string bmPrefix, bool opt) {
         int iterStatus = benchIteration(iter, opt);
         if (iterStatus != lsmio::BM_SUCCESS) {
             exitCode |= iterStatus;
-            LOG(ERROR) << "BMBase::benchSuite: Iteration " << iter
-                       << " failed with status " << iterStatus
-                       << ". Halting suite execution immediately without retry." << std::endl;
+            LOG(ERROR) << "BMBase::benchSuite: Iteration " << iter << " failed with status "
+                       << iterStatus << ". Halting suite execution immediately without retry."
+                       << std::endl;
             break;  // Zero Retries / Fail-Fast
         }
     }
@@ -264,9 +266,9 @@ void BMBase::writeBenchmarkResults() {
 std::string genOptionsToString() {
     std::stringstream optStream;
 
-    optStream << " version: " << LSMIO_VERSION_STR << "\n"
-              << " gitBranch: " << LSMIO_GIT_BRANCH << "\n"
-              << " gitCommit: " << LSMIO_GIT_COMMIT_HASH << "\n"
+    optStream << " version: " << lsmio::getVersion() << "\n"
+              << " gitBranch: " << lsmio::getGitBranch() << "\n"
+              << " gitCommit: " << lsmio::getGitCommitHash() << "\n"
               << " fileName: " << gConfigBM.fileName << "\n dirName: " << gConfigBM.dirName
               << "\n useLSMIOPlugin: " << gConfigBM.useLSMIOPlugin
               << "\n loopAll: " << gConfigBM.loopAll << "\n verbose: " << gConfigBM.verbose
@@ -307,9 +309,9 @@ std::string genOptionsToString() {
               << "\n manualOffset: " << (lsmio::gConfigLSMIO.manualOffset ? "true" : "false")
               << "\n footerIndex: " << (lsmio::gConfigLSMIO.footerIndex ? "true" : "false")
               << "\n writeBufferNumber: " << lsmio::gConfigLSMIO.writeBufferNumber
-              << "\n autoTuneParameters: " << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
-              << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
-              << "\n";
+              << "\n autoTuneParameters: "
+              << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
+              << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false") << "\n";
 
     return optStream.str();
 }
@@ -318,9 +320,9 @@ int BMBase::beginMain(int argc, char **argv) {
     CLI::App app{"LSMIO Benchmark"};
     try {
         std::string binaryName = std::filesystem::path(argv[0]).filename().string();
-        std::string versionInfo = binaryName + " version " + LSMIO_VERSION_STR +
-                                  " (branch: " + LSMIO_GIT_BRANCH +
-                                  ", commit: " + LSMIO_GIT_COMMIT_HASH + ")";
+        std::string versionInfo = binaryName + " version " + lsmio::getVersion() +
+                                  " (branch: " + lsmio::getGitBranch() +
+                                  ", commit: " + lsmio::getGitCommitHash() + ")";
         app.set_version_flag("-V,--version", versionInfo, "Print version information and exit");
 
         app.add_option("-o,--output-file", gConfigBM.fileName, "output file")->required();
@@ -402,13 +404,16 @@ int BMBase::beginMain(int argc, char **argv) {
             ->transform(CLI::CheckedTransformer(memtableMap, CLI::ignore_case));
         app.add_option("--lsmio-max-key", lsmio::gConfigLSMIO.maxKeyLen,
                        "maximum accepted key length in bytes (default: 256K)");
-        app.add_flag("--lsmio-manual-offset,!--lsmio-no-manual-offset", lsmio::gConfigLSMIO.manualOffset,
+        app.add_flag("--lsmio-manual-offset,!--lsmio-no-manual-offset",
+                     lsmio::gConfigLSMIO.manualOffset,
                      "bypass tellp() and manually track offsets (default: true)");
-        app.add_flag("--lsmio-footer-index,!--lsmio-no-footer-index", lsmio::gConfigLSMIO.footerIndex,
+        app.add_flag("--lsmio-footer-index,!--lsmio-no-footer-index",
+                     lsmio::gConfigLSMIO.footerIndex,
                      "append the Dense Index Footer to the SSTable (default: true)");
         app.add_option("--lsmio-wbuffer-num", lsmio::gConfigLSMIO.writeBufferNumber,
                        "number of write buffers (default: 4)");
-        app.add_flag("--lsmio-autotune,!--lsmio-no-autotune", lsmio::gConfigLSMIO.autoTuneParameters,
+        app.add_flag("--lsmio-autotune,!--lsmio-no-autotune",
+                     lsmio::gConfigLSMIO.autoTuneParameters,
                      "enable filesystem auto-tuning (default: false)");
         app.add_flag(
             "--lsmio-read-only,--lsmio-readonly,--lsmio-ro,"

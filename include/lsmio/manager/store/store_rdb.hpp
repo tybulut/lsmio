@@ -53,7 +53,9 @@ class LSMIOStoreRDB : public LSMIOStore {
     bool startBatch() override;
     bool stopBatch() override;
 
-    bool _batchMutation(MutationType mType, const std::string key, const std::string value,
+    bool _batchMutation(MutationType mType, const std::string& key, const std::string& value,
+                        bool flush) override;
+    bool _batchMutation(MutationType mType, const std::string& key, std::string&& value,
                         bool flush) override;
 
     /// cleanup the ENTIRE store

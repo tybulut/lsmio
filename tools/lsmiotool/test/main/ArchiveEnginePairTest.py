@@ -179,8 +179,9 @@ class ArchiveEnginePairTest(unittest.TestCase):
                     f_arm_id="native-footer",
                 )
 
+                # Every node directory present is aggregated, whatever the scale
                 mock_agg_cls.assert_called_once_with(
-                    os.path.abspath(source_dir), f_scale="variants"
+                    os.path.abspath(source_dir), f_scale=None
                 )
                 mock_agg.generateReports.assert_called_once_with(
                     f_out_dir=os.path.abspath(source_dir)

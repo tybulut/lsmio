@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import socket
 import stat
@@ -411,53 +412,103 @@ class ProcessRunner:
         f_stderr_bytes = b""
         f_proc: Optional[subprocess.Popen] = None
 
-        try:
-            f_proc = subprocess.Popen(
-                f_argv_list,
-                cwd=f_process_cwd,
-                env=f_process_env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-            )
-        except (
-            FileNotFoundError,
-            PermissionError,
-            NotADirectoryError,
-            OSError,
-        ) as f_spawn_err:
-            raise ProcessSpawnError(
-                f"Failed to spawn process '{f_argv_list[0]}': {f_spawn_err}"
-            ) from f_spawn_err
-        except Exception as f_unexpected_err:
-            raise ProcessSpawnError(
-                f"Unexpected error spawning process '{f_argv_list[0]}': {f_unexpected_err}"
-            ) from f_unexpected_err
+        # With a log file, output is written to it as it arrives (bmtool run_tee's
+        # 'CMD 2>&1 | tee LOG'), so a step killed at walltime still leaves its log
+        f_log_file: Optional[Any] = None
+        f_log_open_error: Optional[OSError] = None
+        if f_log_path is not None:
+            try:
+                f_log_file = open(f_log_path, "ab")
+            except OSError as f_log_err:
+                # The process still runs; the failure is raised with its result below
+                f_log_open_error = f_log_err
 
         try:
-            f_stdout_bytes, f_stderr_bytes = f_proc.communicate(timeout=f_timeout)
-        except subprocess.TimeoutExpired:
-            f_timed_out = True
             try:
-                f_proc.kill()
-            except OSError:
-                pass
-            f_stdout_bytes, f_stderr_bytes = f_proc.communicate()
-        except Exception as f_comm_err:
-            try:
-                f_proc.kill()
-            except OSError:
-                pass
-            f_proc.wait()
-            raise ProcessExecutionError(
-                f"Communication error during process execution '{f_argv_list[0]}': {f_comm_err}"
-            ) from f_comm_err
+                f_proc = subprocess.Popen(
+                    f_argv_list,
+                    cwd=f_process_cwd,
+                    env=f_process_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=False,
+                )
+            except (
+                FileNotFoundError,
+                PermissionError,
+                NotADirectoryError,
+                OSError,
+            ) as f_spawn_err:
+                raise ProcessSpawnError(
+                    f"Failed to spawn process '{f_argv_list[0]}': {f_spawn_err}"
+                ) from f_spawn_err
+            except Exception as f_unexpected_err:
+                raise ProcessSpawnError(
+                    f"Unexpected error spawning process '{f_argv_list[0]}': {f_unexpected_err}"
+                ) from f_unexpected_err
+
+            if f_log_file is None:
+                try:
+                    f_stdout_bytes, f_stderr_bytes = f_proc.communicate(
+                        timeout=f_timeout
+                    )
+                except subprocess.TimeoutExpired:
+                    f_timed_out = True
+                    try:
+                        f_proc.kill()
+                    except OSError:
+                        pass
+                    f_stdout_bytes, f_stderr_bytes = f_proc.communicate()
+                except Exception as f_comm_err:
+                    try:
+                        f_proc.kill()
+                    except OSError:
+                        pass
+                    f_proc.wait()
+                    raise ProcessExecutionError(
+                        f"Communication error during process execution '{f_argv_list[0]}': {f_comm_err}"
+                    ) from f_comm_err
+            else:
+                f_stdout_bytes, f_stderr_bytes, f_timed_out, f_log_error = (
+                    self._streamToLog(f_proc, f_log_file, f_timeout)
+                )
+                if f_log_error is not None:
+                    raise ProcessLoggingError(
+                        f"Failed to write or flush log file '{f_log_path}': {f_log_error}",
+                        f_result=ProcessResult(
+                            f_returncode=f_proc.returncode
+                            if f_proc.returncode is not None
+                            else -1,
+                            f_stdout=f_stdout_bytes.decode("utf-8", errors="replace"),
+                            f_stderr=f_stderr_bytes.decode("utf-8", errors="replace"),
+                            f_elapsed_seconds=time.monotonic() - f_start_time,
+                            f_timed_out=f_timed_out,
+                        ),
+                    )
+        finally:
+            if f_log_file is not None:
+                try:
+                    f_log_file.close()
+                except OSError:
+                    pass
 
         f_elapsed_seconds = time.monotonic() - f_start_time
         f_returncode = f_proc.returncode if f_proc.returncode is not None else -1
 
         f_stdout_str = f_stdout_bytes.decode("utf-8", errors="replace")
         f_stderr_str = f_stderr_bytes.decode("utf-8", errors="replace")
+
+        if f_log_open_error is not None:
+            raise ProcessLoggingError(
+                f"Failed to open log file '{f_log_path}': {f_log_open_error}",
+                f_result=ProcessResult(
+                    f_returncode=f_returncode,
+                    f_stdout=f_stdout_str,
+                    f_stderr=f_stderr_str,
+                    f_elapsed_seconds=f_elapsed_seconds,
+                    f_timed_out=f_timed_out,
+                ),
+            ) from f_log_open_error
 
         # Mirror output to standard streams if requested
         if f_mirror_stdout:
@@ -472,31 +523,6 @@ class ProcessRunner:
                 # Do not mask process status on stdout/stderr console mirroring issues
                 pass
 
-        # Write output to log file if requested
-        if f_log_path is not None:
-            try:
-                with open(
-                    f_log_path, "a", encoding="utf-8", errors="replace"
-                ) as f_log_file:
-                    if f_stdout_str:
-                        f_log_file.write(f_stdout_str)
-                    if f_stderr_str:
-                        f_log_file.write(f_stderr_str)
-                    f_log_file.flush()
-                    os.fsync(f_log_file.fileno())
-            except OSError as f_log_err:
-                f_partial_result = ProcessResult(
-                    f_returncode=f_returncode,
-                    f_stdout=f_stdout_str,
-                    f_stderr=f_stderr_str,
-                    f_elapsed_seconds=f_elapsed_seconds,
-                    f_timed_out=f_timed_out,
-                )
-                raise ProcessLoggingError(
-                    f"Failed to write or flush log file '{f_log_path}': {f_log_err}",
-                    f_result=f_partial_result,
-                ) from f_log_err
-
         return ProcessResult(
             f_returncode=f_returncode,
             f_stdout=f_stdout_str,
@@ -504,6 +530,67 @@ class ProcessRunner:
             f_elapsed_seconds=f_elapsed_seconds,
             f_timed_out=f_timed_out,
             f_spawn_error=None,
+        )
+
+    @staticmethod
+    def _streamToLog(
+        f_proc: "subprocess.Popen[bytes]",
+        f_log_file: Any,
+        f_timeout: Optional[float],
+    ) -> Tuple[bytes, bytes, bool, Optional[BaseException]]:
+        """Copy the process's stdout and stderr to f_log_file as they arrive, in arrival
+        order, while capturing each. Returns (stdout, stderr, timed_out, log_error)."""
+        import threading
+
+        f_lock = threading.Lock()
+        f_chunks: Dict[str, List[bytes]] = {"stdout": [], "stderr": []}
+        f_errors: List[BaseException] = []
+
+        def _pump(f_name: str, f_pipe: Any) -> None:
+            for f_chunk in iter(lambda: f_pipe.read1(65536), b""):
+                f_chunks[f_name].append(f_chunk)
+                with f_lock:
+                    if f_errors:
+                        continue
+                    try:
+                        f_log_file.write(f_chunk)
+                        f_log_file.flush()
+                    except (OSError, ValueError) as f_err:
+                        f_errors.append(f_err)
+            f_pipe.close()
+
+        f_threads = [
+            threading.Thread(target=_pump, args=("stdout", f_proc.stdout), daemon=True),
+            threading.Thread(target=_pump, args=("stderr", f_proc.stderr), daemon=True),
+        ]
+        for f_t in f_threads:
+            f_t.start()
+
+        f_timed_out = False
+        try:
+            f_proc.wait(timeout=f_timeout)
+        except subprocess.TimeoutExpired:
+            f_timed_out = True
+            try:
+                f_proc.kill()
+            except OSError:
+                pass
+            f_proc.wait()
+        for f_t in f_threads:
+            f_t.join()
+
+        if not f_errors:
+            try:
+                f_log_file.flush()
+                os.fsync(f_log_file.fileno())
+            except OSError as f_err:
+                f_errors.append(f_err)
+
+        return (
+            b"".join(f_chunks["stdout"]),
+            b"".join(f_chunks["stderr"]),
+            f_timed_out,
+            f_errors[0] if f_errors else None,
         )
 
 
@@ -2229,13 +2316,24 @@ class AllocationController:
                 f"Unsupported benchmark target: {f_manifest.request.target!r}"
             )
 
+        # Like bmtool's run_matrix_workload, a failed combination is recorded and the
+        # remaining ones still run; the first failure code is returned at the end.
+        f_failed_rc = 0
+        f_prev_data_dir: Optional[str] = None
         for f_combo_idx, (f_stripe, f_block) in enumerate(STANDARD_COMBINATION_TUPLES):
             f_combo_name = f"c{f_stripe}_b{f_block}"
+
+            # Let the file system settle, then free the previous combination's data so
+            # peak quota usage is one combination, not six (bmtool run_matrix_workload)
+            if f_prev_data_dir is not None:
+                cls._settle()
+                cls._purgeDirContents(f_prev_data_dir)
 
             # Prepare directories
             f_data_dir = f_layout_obj.pointDataSubdir(
                 f_matched_sp, f_stripe, f_block, f_matched_ord
             )
+            f_prev_data_dir = f_data_dir
             f_combo_dir = f_layout_obj.pointCombinationDir(
                 f_matched_sp, f_combo_name, f_matched_ord
             )
@@ -2284,7 +2382,12 @@ class AllocationController:
                     )
                 except Exception:
                     pass
-                return 1
+                f_failed_rc = f_failed_rc or 1
+                continue
+
+            # LMP runs inside the striped data directory, like bmtool's copy of
+            # lmp-reaxff into c$rf/b$bs: its checkpoints are written to the cwd.
+            f_lmp_run_dir = os.path.join(f_data_dir, "lmp-reaxff")
 
             # LMP Asset Staging
             if f_target == "lmp":
@@ -2307,7 +2410,7 @@ class AllocationController:
                 try:
                     f_lmp_adapter.stageAssets(
                         f_asset_source=f_resolved_assets,
-                        f_work_dir=f_combo_work_dir,
+                        f_work_dir=f_lmp_run_dir,
                     )
                 except Exception as f_stage_err:
                     try:
@@ -2324,7 +2427,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
             # Shared Launch (IOR or LMP)
             if f_target == "ior":
@@ -2367,7 +2471,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 try:
                     f_proc_res = Launcher.launchShared(
@@ -2393,7 +2498,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_is_ok = f_proc_res.is_success
                 f_ret = f_proc_res.returncode
@@ -2409,7 +2515,8 @@ class AllocationController:
                         },
                         f_ordinal=f_matched_ord,
                     )
-                    return f_ret if f_ret != 0 else 1
+                    f_failed_rc = f_failed_rc or (f_ret if f_ret != 0 else 1)
+                    continue
 
                 # Validate expected benchmark output artifact
                 f_out_path = f_stdout_file
@@ -2444,7 +2551,8 @@ class AllocationController:
                         },
                         f_ordinal=f_matched_ord,
                     )
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_store.recordControllerResult(
                     f_point=f_matched_sp,
@@ -2504,7 +2612,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_point_tuning = f_tuning_map[f_tasks_str]
                 if not isinstance(f_point_tuning, (dict, Mapping)):
@@ -2523,7 +2632,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_rep = f_point_tuning.get("replication")
                 f_buf = f_point_tuning.get("buffer_size_mb")
@@ -2534,7 +2644,7 @@ class AllocationController:
                         f_setup=f_setup,
                         f_replication=f_rep,
                         f_buffer_size_mb=f_buf,
-                        f_working_dir=f_combo_work_dir,
+                        f_working_dir=f_lmp_run_dir,
                         f_stdout_path=f_stdout_file,
                         f_stderr_path=f_stderr_file,
                     )
@@ -2553,7 +2663,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 try:
                     f_proc_res = Launcher.launchShared(
@@ -2561,7 +2672,7 @@ class AllocationController:
                         f_point=f_matched_sp,
                         f_command=f_cmd,
                         f_runner=f_runner,
-                        f_cwd=f_combo_work_dir,
+                        f_cwd=f_lmp_run_dir,
                         f_log_path=f_cmd.stdout_path,
                     )
                 except Exception as f_launch_err:
@@ -2579,7 +2690,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_is_ok = f_proc_res.is_success
                 f_ret = f_proc_res.returncode
@@ -2595,7 +2707,8 @@ class AllocationController:
                         },
                         f_ordinal=f_matched_ord,
                     )
-                    return f_ret if f_ret != 0 else 1
+                    f_failed_rc = f_failed_rc or (f_ret if f_ret != 0 else 1)
+                    continue
 
                 # Validate expected benchmark output artifact
                 f_out_path = f_stdout_file
@@ -2630,7 +2743,8 @@ class AllocationController:
                         },
                         f_ordinal=f_matched_ord,
                     )
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_store.recordControllerResult(
                     f_point=f_matched_sp,
@@ -2694,7 +2808,8 @@ class AllocationController:
                         )
                     except Exception:
                         pass
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 if not f_proc_res.is_success or f_proc_res.returncode != 0:
                     f_ret = f_proc_res.returncode
@@ -2709,7 +2824,8 @@ class AllocationController:
                         },
                         f_ordinal=f_matched_ord,
                     )
-                    return f_ret if f_ret != 0 else 1
+                    f_failed_rc = f_failed_rc or (f_ret if f_ret != 0 else 1)
+                    continue
 
                 # Scan and validate rank evidence
                 f_ranks_failed = False
@@ -2795,7 +2911,8 @@ class AllocationController:
                         },
                         f_ordinal=f_matched_ord,
                     )
-                    return 1
+                    f_failed_rc = f_failed_rc or 1
+                    continue
 
                 f_store.recordControllerResult(
                     f_point=f_matched_sp,
@@ -2810,9 +2927,106 @@ class AllocationController:
                     f_ordinal=f_matched_ord,
                 )
 
-        return 0
+        if f_prev_data_dir is not None:
+            cls._settle()
+            cls._purgeDirContents(f_prev_data_dir)
+
+        return f_failed_rc
+
+    # bmtool sleeps 3 s after every step (batch.in.sh run_matrix_workload);
+    # LSMIO_STEP_SETTLE_SECONDS overrides it (tests set 0)
+    STEP_SETTLE_SECONDS = 3.0
+
+    @classmethod
+    def _settle(cls) -> None:
+        f_raw = os.environ.get("LSMIO_STEP_SETTLE_SECONDS")
+        try:
+            f_seconds = float(f_raw) if f_raw is not None else cls.STEP_SETTLE_SECONDS
+        except ValueError:
+            f_seconds = cls.STEP_SETTLE_SECONDS
+        if f_seconds > 0:
+            time.sleep(f_seconds)
+
+    @staticmethod
+    def _purgeDirContents(f_dir: str) -> None:
+        """Remove everything inside f_dir, keeping the directory and its Lustre striping."""
+        try:
+            f_entries = os.listdir(f_dir)
+        except OSError:
+            return
+        for f_entry in f_entries:
+            f_path = os.path.join(f_dir, f_entry)
+            try:
+                if os.path.isdir(f_path) and not os.path.islink(f_path):
+                    shutil.rmtree(f_path)
+                else:
+                    os.unlink(f_path)
+            except OSError as f_err:
+                sys.stderr.write(f"WARNING: failed to remove '{f_path}': {f_err}\n")
 
     execute = run
+
+
+class AllocationGroupRunner:
+    """Runs several arms' allocations for one scale point inside a single job, in order,
+    like bmtool's jobs/batch.in.sh runs the baseline and every variant (or every backend)
+    on the same nodes.
+
+    Each arm records its own outcome in its own run's evidence, so the group returns 0
+    whatever the arms did: a non-zero job exit would make the scheduler report FAILED
+    for every arm of the allocation, including the ones that succeeded.
+    """
+
+    POLICY_CONTINUE = "continue"
+    # Paired runs: every variant is compared against the first arm (the baseline), so
+    # stop rather than run variants that cannot be paired (bmtool: "Baseline run failed")
+    POLICY_STOP_AFTER_FIRST_FAILURE = "stop-after-first-failure"
+    POLICIES = (POLICY_CONTINUE, POLICY_STOP_AFTER_FIRST_FAILURE)
+
+    @classmethod
+    def run(
+        cls,
+        f_point_id: str,
+        f_policy: str,
+        f_manifest_paths: Sequence[str],
+        f_run_allocation: Any,
+        f_stderr: Any = None,
+    ) -> int:
+        """Run f_run_allocation(manifest_path, point_id) -> int for every manifest."""
+        if f_policy not in cls.POLICIES:
+            raise AllocationControllerError(
+                f"Unknown allocation group policy {f_policy!r}; expected one of {cls.POLICIES}"
+            )
+        if not f_manifest_paths:
+            raise AllocationControllerError(
+                "Allocation group needs at least one manifest"
+            )
+        f_err = f_stderr if f_stderr is not None else sys.stderr
+        for f_idx, f_manifest in enumerate(f_manifest_paths):
+            try:
+                f_rc = int(f_run_allocation(f_manifest, f_point_id))
+            except Exception as f_exc:
+                f_err.write(
+                    f"ERROR: arm allocation for '{f_manifest}' raised: {f_exc}\n"
+                )
+                f_rc = 1
+            if f_rc != 0:
+                f_err.write(
+                    f"WARNING: arm allocation for '{f_manifest}' failed with exit code {f_rc}\n"
+                )
+                if f_idx == 0 and f_policy == cls.POLICY_STOP_AFTER_FIRST_FAILURE:
+                    f_err.write(
+                        "ERROR: baseline arm failed; the remaining arms are not run\n"
+                    )
+                    break
+        return 0
+
+
+def rankHostName(f_env: Mapping[str, str]) -> str:
+    """The rank's node as bmtool names its output files: SLURMD_NODENAME under Slurm,
+    else the hostname (job-all.in.sh's `hostname` under PBS)."""
+    f_name = str(f_env.get("SLURMD_NODENAME") or "").strip()
+    return f_name or socket.gethostname()
 
 
 class RankIdentityResolver:
@@ -3714,6 +3928,7 @@ class RankWorker:
             "combination": f_combo_name,
             "node_rank": f_rank_identity.node_rank,
             "local_rank": f_rank_identity.local_rank,
+            "host": rankHostName(f_effective_env),
             "elapsed_seconds": f_proc_res.elapsed_seconds,
             "timed_out": f_proc_res.timed_out,
             "argv": list(f_bound_cmd.argv),

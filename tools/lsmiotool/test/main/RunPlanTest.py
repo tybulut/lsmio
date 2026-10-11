@@ -78,14 +78,14 @@ class RunPlanTest(unittest.TestCase):
         self.m_archer2_profile = self.m_registry.getProfile("ARCHER2")
 
     def testAllValidCombinationsAndScalePoints(self) -> None:
-        """Assert the exact 6 ordered combinations and 4 scale matrices."""
+        """Assert the exact 6 combinations in bmtool order (rf 4 16; bs 1M 64K 8M) and 4 scale matrices."""
         f_expected_combos = (
-            (16, "8M", 16, 8388608, 1024, 128),
-            (16, "1M", 16, 1048576, 4096, 1024),
-            (16, "64K", 16, 65536, 32768, 16384),
-            (4, "8M", 4, 8388608, 1024, 128),
             (4, "1M", 4, 1048576, 4096, 1024),
             (4, "64K", 4, 65536, 32768, 16384),
+            (4, "8M", 4, 8388608, 1024, 128),
+            (16, "1M", 16, 1048576, 4096, 1024),
+            (16, "64K", 16, 65536, 32768, 16384),
+            (16, "8M", 16, 8388608, 1024, 128),
         )
 
         self.assertEqual(len(RunPlanner.ORDERED_COMBINATIONS), 6)
@@ -338,7 +338,7 @@ class RunPlanTest(unittest.TestCase):
         f_req_local = RunRequest("ior", "local")
         f_plan_viking_local = RunPlanner.createPlan(f_req_local, self.m_viking_profile)
         self.assertEqual(f_plan_viking_local.scheduled_points[0].walltime, "02:00:00")
-        self.assertEqual(f_plan_viking_local.scheduled_points[0].mem, "8gb")
+        self.assertEqual(f_plan_viking_local.scheduled_points[0].mem, "16gb")
         self.assertEqual(f_plan_viking_local.scheduled_points[0].mail_mode, "END,FAIL")
         self.assertIsNone(f_plan_viking_local.scheduled_points[0].select_chunks)
 
@@ -604,7 +604,7 @@ class RunPlanTest(unittest.TestCase):
         self.assertEqual(len(f_plan.scheduled_points), 1)
         # Viking slurm_nodes walltime policy for 8 nodes: 2 + (8 // 3) = 4 hours -> '04:00:00'
         self.assertEqual(f_plan.scheduled_points[0].walltime, "04:00:00")
-        self.assertEqual(f_plan.scheduled_points[0].mem, "8gb")
+        self.assertEqual(f_plan.scheduled_points[0].mem, "16gb")
 
         # Also verify under PBS scheduler profile (Isambard small shape: fixed 06:00:00, ncpus=1, pmem=8G)
         f_plan_isambard = RunPlanner.createPlan(f_req, self.m_isambard_profile)
@@ -764,6 +764,28 @@ class RunPlanTest(unittest.TestCase):
         for sp in f_plan_override.scheduled_points:
             self.assertEqual(sp.walltime, "15:00:00")
 
+    def testPbsFixedWalltimeIgnoresTimeOverride(self) -> None:
+        """M1: a PBS site's fixed walltime wins over --time, as in bmtool, so the job script
+        still renders instead of failing on a non-06:00:00 walltime."""
+        from lsmiotool.lib.scheduler import PbsScriptRenderer
+
+        for f_req in (
+            RunRequest("lsmio", "variants", f_variants=["footer"], f_wallhour=10),
+            RunRequest("lsmio", "small", f_walltime="12:00:00"),
+        ):
+            f_plan = RunPlanner.createPlan(f_req, self.m_isambard_profile)
+            for f_idx, f_sp in enumerate(f_plan.scale_points):
+                f_res = f_plan.scheduled_points[f_idx]
+                self.assertEqual(f_res.walltime, "06:00:00")
+                PbsScriptRenderer.renderDirectives(
+                    f_point=f_sp,
+                    f_profile=self.m_isambard_profile,
+                    f_job_name=f_plan.tokens[f_idx],
+                    f_output_path="/tmp/out",
+                    f_error_path="/tmp/err",
+                    f_walltime=f_res.walltime,
+                )
+
     def testSlurmQosPromotionBoundariesAndLimits(self) -> None:
         """Verify exact QoS promotion boundaries, Slurm time format handling, and limit enforcement (T1, S4, S5)."""
         # 1. Exact boundary 24:00:00 -> standard
@@ -796,23 +818,20 @@ class RunPlanTest(unittest.TestCase):
         f_plan_day_dhm = RunPlanner.createPlan(f_req_day_dhm, self.m_archer2_profile)
         self.assertEqual(f_plan_day_dhm.scheduled_points[0].qos, "long")
 
-        # 7. Long QoS max limit 96h (4-00:00:00 / 96:00:00) -> valid long
-        f_req_96h = RunRequest("lsmio", "local", f_walltime="96:00:00")
-        f_plan_96h = RunPlanner.createPlan(f_req_96h, self.m_archer2_profile)
-        self.assertEqual(f_plan_96h.scheduled_points[0].qos, "long")
-
-        f_req_4d = RunRequest("lsmio", "local", f_walltime="4-00:00:00")
-        f_plan_4d = RunPlanner.createPlan(f_req_4d, self.m_archer2_profile)
-        self.assertEqual(f_plan_4d.scheduled_points[0].qos, "long")
-
-        # 8. Exceeding 96h for long QoS -> PlanValidationError
-        f_req_97h = RunRequest("lsmio", "local", f_walltime="97:00:00")
-        with self.assertRaises(PlanValidationError):
-            RunPlanner.createPlan(f_req_97h, self.m_archer2_profile)
-
-        f_req_4d_1h = RunRequest("lsmio", "local", f_walltime="4-01:00:00")
-        with self.assertRaises(PlanValidationError):
-            RunPlanner.createPlan(f_req_4d_1h, self.m_archer2_profile)
+        # 7/8. Requested walltimes are clamped to 48h like bmtool's --time (M11), so
+        # 96h, 4 days and anything beyond become 48:00:00 on the long QoS
+        for f_long in ("96:00:00", "4-00:00:00", "97:00:00", "4-01:00:00"):
+            f_plan_long = RunPlanner.createPlan(
+                RunRequest("lsmio", "local", f_walltime=f_long), self.m_archer2_profile
+            )
+            self.assertEqual(f_plan_long.scheduled_points[0].walltime, "48:00:00")
+            self.assertEqual(f_plan_long.scheduled_points[0].qos, "long")
+        f_plan_fast = RunPlanner.createPlan(
+            RunRequest("lsmio", "local", f_walltime="30:00:00", f_fast=True),
+            self.m_archer2_profile,
+        )
+        self.assertEqual(f_plan_fast.scheduled_points[0].walltime, "23:00:00")
+        self.assertEqual(f_plan_fast.scheduled_points[0].qos, "standard")
 
         # 9. Invalid/unparseable walltime inputs -> PlanValidationError
         for bad_walltime in ("invalid", "24:60:00", "1-25:00:00", "-1:00:00", ""):
@@ -852,3 +871,154 @@ class RunPlanTest(unittest.TestCase):
         for sp in f_plan_viking_wh48.scheduled_points:
             self.assertEqual(sp.walltime, "48:00:00")
             self.assertIsNone(sp.qos)
+
+    def testBackendsModeFastWalltimeScaling(self) -> None:
+        """Asserts backends mode walltime formula with --fast halves walltime, caps at 23h, and stays in standard QoS."""
+        f_req_small_fast = RunRequest(
+            f_target="lsmio",
+            f_scale="small",
+            f_mode="backends",
+            f_fast=True,
+        )
+        f_plan_viking = RunPlanner.createPlan(f_req_small_fast, self.m_viking_profile)
+        # Small scale has 9 points: 1, 2, 4, 8, 16, 24, 32, 40, 48
+        # Formula: (2 + 4 * max(1, nodes // 3)) // 2, clamped to [1, 23]
+        f_expected_walltimes = [
+            "03:00:00",  # node 1: (2 + 4*1)//2 = 3
+            "03:00:00",  # node 2: (2 + 4*1)//2 = 3
+            "03:00:00",  # node 4: (2 + 4*1)//2 = 3
+            "05:00:00",  # node 8: (2 + 4*2)//2 = 5
+            "11:00:00",  # node 16: (2 + 4*5)//2 = 11
+            "17:00:00",  # node 24: (2 + 4*8)//2 = 17
+            "21:00:00",  # node 32: (2 + 4*10)//2 = 21
+            "23:00:00",  # node 40: (2 + 4*13)//2 = 27 -> min(23, 27) = 23
+            "23:00:00",  # node 48: (2 + 4*16)//2 = 33 -> min(23, 33) = 23
+        ]
+        self.assertEqual(len(f_plan_viking.scheduled_points), len(f_expected_walltimes))
+        for idx, exp_wt in enumerate(f_expected_walltimes):
+            self.assertEqual(
+                f_plan_viking.scheduled_points[idx].walltime,
+                exp_wt,
+                f"Mismatch at point {idx} (nodes={f_plan_viking.scale_points[idx].nodes})",
+            )
+
+        # On ARCHER2, verify all 9 points stay in standard QoS under --fast
+        f_plan_archer2 = RunPlanner.createPlan(f_req_small_fast, self.m_archer2_profile)
+        for idx, sp in enumerate(f_plan_archer2.scheduled_points):
+            self.assertEqual(
+                sp.qos,
+                "standard",
+                f"Point {idx} (walltime={sp.walltime}) promoted to non-standard QoS",
+            )
+
+    def testVariantsModeFastWalltimeScaling(self) -> None:
+        """Asserts variants mode walltime formula with --fast halves walltime and caps at 23h."""
+        # 3 variants: total_runs = 4 -> (2 + 4*2)//2 = 5h
+        f_req_3 = RunRequest(
+            f_target="lsmio",
+            f_scale="variants",
+            f_variants=("footer", "btree", "mmap"),
+            f_fast=True,
+        )
+        f_plan_3 = RunPlanner.createPlan(f_req_3, self.m_viking_profile)
+        self.assertEqual(f_plan_3.scheduled_points[0].walltime, "05:00:00")
+
+        # 24 variants: total_runs = 25 -> (2 + 25*2)//2 = 26 -> clamped to 23h
+        f_vars_24 = tuple(f"var_{i}" for i in range(24))
+        f_req_24 = RunRequest(
+            f_target="lsmio",
+            f_scale="variants",
+            f_variants=f_vars_24,
+            f_fast=True,
+        )
+        f_plan_24 = RunPlanner.createPlan(f_req_24, self.m_viking_profile)
+        self.assertEqual(f_plan_24.scheduled_points[0].walltime, "23:00:00")
+
+        # On ARCHER2, verify qos is standard
+        f_plan_archer2 = RunPlanner.createPlan(f_req_24, self.m_archer2_profile)
+        self.assertEqual(f_plan_archer2.scheduled_points[0].qos, "standard")
+
+        # Versioned variants mode with --fast
+        f_req_ver = RunRequest(
+            f_target="lsmio",
+            f_scale="variants",
+            f_variants=("footer",),
+            f_versioned=True,
+            f_fast=True,
+        )
+        f_plan_ver = RunPlanner.createPlan(f_req_ver, self.m_viking_profile)
+        # var_cnt = 1 -> total_runs = 2 -> (2 + 2*2)//2 = 3h
+        self.assertEqual(f_plan_ver.scheduled_points[0].walltime, "03:00:00")
+
+    def testStandardModeFastWalltimeScaling(self) -> None:
+        """Asserts standard scaling mode with --fast halves raw walltime and caps at 23h."""
+        # Bake: nodes 1, 2, 4, 8
+        f_req_bake = RunRequest(f_target="lsmio", f_scale="bake", f_fast=True)
+        f_plan_bake = RunPlanner.createPlan(f_req_bake, self.m_viking_profile)
+        # raw_hours:
+        # node 1: 2 + 0 = 2 -> 2 // 2 = 1
+        # node 2: 2 + 0 = 2 -> 2 // 2 = 1
+        # node 4: 2 + 1 = 3 -> 3 // 2 = 1
+        # node 8: 2 + 2 = 4 -> 4 // 2 = 2
+        self.assertEqual(f_plan_bake.scheduled_points[0].walltime, "01:00:00")
+        self.assertEqual(f_plan_bake.scheduled_points[1].walltime, "01:00:00")
+        self.assertEqual(f_plan_bake.scheduled_points[2].walltime, "01:00:00")
+        self.assertEqual(f_plan_bake.scheduled_points[3].walltime, "02:00:00")
+
+        # Large scale: point 7 has 256 tasks / 4 ppn = 64 nodes -> raw_hours = 2 + 64//3 = 23 -> 23 // 2 = 11
+        f_req_large = RunRequest(f_target="lsmio", f_scale="large", f_fast=True)
+        f_plan_large = RunPlanner.createPlan(f_req_large, self.m_viking_profile)
+        self.assertEqual(f_plan_large.scheduled_points[7].walltime, "11:00:00")
+
+        # High node count ceiling cap: 200 nodes -> raw_hours = 2 + 200//3 = 68 -> 68 // 2 = 34 -> capped at 23
+        f_point_200 = ScalePoint(f_tasks=200, f_ppn=1, f_nodes=200)
+        with patch.dict(RunPlanner.SCALE_MATRICES, {"custom": (f_point_200,)}):
+            f_req_custom = RunRequest(f_target="lsmio", f_scale="custom", f_fast=True)
+            f_plan_custom = RunPlanner.createPlan(f_req_custom, self.m_viking_profile)
+            self.assertEqual(f_plan_custom.scheduled_points[0].walltime, "23:00:00")
+
+    def testExplicitOverrideWithFastPrecedence(self) -> None:
+        """Asserts user walltime override takes precedence over formula but is capped at 23h under --fast."""
+        # 1. wallhour <= 23 honored as-is
+        f_req_15 = RunRequest(
+            f_target="lsmio",
+            f_scale="small",
+            f_mode="backends",
+            f_wallhour=15,
+            f_fast=True,
+        )
+        f_plan_15 = RunPlanner.createPlan(f_req_15, self.m_viking_profile)
+        for sp in f_plan_15.scheduled_points:
+            self.assertEqual(sp.walltime, "15:00:00")
+
+        # 2. wallhour > 23 capped at 23h
+        f_req_30 = RunRequest(
+            f_target="lsmio",
+            f_scale="small",
+            f_mode="backends",
+            f_wallhour=30,
+            f_fast=True,
+        )
+        f_plan_30 = RunPlanner.createPlan(f_req_30, self.m_viking_profile)
+        for sp in f_plan_30.scheduled_points:
+            self.assertEqual(sp.walltime, "23:00:00")
+
+        # 3. walltime string > 23h capped at 23:00:00
+        f_req_str = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_walltime="36:00:00",
+            f_fast=True,
+        )
+        f_plan_str = RunPlanner.createPlan(f_req_str, self.m_viking_profile)
+        self.assertEqual(f_plan_str.scheduled_points[0].walltime, "23:00:00")
+
+        # 4. walltime string < 1h clamped up to 01:00:00
+        f_req_sub1h = RunRequest(
+            f_target="lsmio",
+            f_scale="baseline",
+            f_walltime="00:20:00",
+            f_fast=True,
+        )
+        f_plan_sub1h = RunPlanner.createPlan(f_req_sub1h, self.m_viking_profile)
+        self.assertEqual(f_plan_sub1h.scheduled_points[0].walltime, "01:00:00")

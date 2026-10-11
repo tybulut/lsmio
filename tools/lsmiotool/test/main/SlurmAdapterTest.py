@@ -88,6 +88,11 @@ from lsmiotool.lib.worker import (
 )
 
 
+def _tolerant(f_cmd: str) -> str:
+    """Module command as rendered: failures are logged, not fatal (bmtool parity)."""
+    return f'{f_cmd} || echo "WARNING: {f_cmd} failed" >&2'
+
+
 class MockProcessRunner:
     """Mock process runner for recording command argv and returning custom responses."""
 
@@ -204,9 +209,11 @@ class SlurmAdapterTest(unittest.TestCase):
 
     def testExactArgvForEveryOperation(self) -> None:
         """Validates exact command argv for submit, active query, accounting query, recovery, and cancel."""
-        # 1. Submit command: ['sbatch', '--parsable', <script>]
+        # 1. Submit command: ['sbatch', '--parsable', '--export=ALL', <script>]
         f_submit_argv = SlurmSchedulerAdapter.submitCommand("/path/to/job.sh")
-        self.assertEqual(f_submit_argv, ["sbatch", "--parsable", "/path/to/job.sh"])
+        self.assertEqual(
+            f_submit_argv, ["sbatch", "--parsable", "--export=ALL", "/path/to/job.sh"]
+        )
 
         # 2. Active query command: ['squeue', '--noheader', f'--jobs={job_id}', '--format=%i|%T']
         f_active_argv = SlurmSchedulerAdapter.activeQueryCommand("123456")
@@ -1067,11 +1074,12 @@ class SlurmAdapterTest(unittest.TestCase):
         self.assertEqual(f_lines_viking[9], f"#SBATCH --account={self.m_account}")
         self.assertEqual(f_lines_viking[10], f"#SBATCH --mail-user={self.m_mail_user}")
         self.assertEqual(f_lines_viking[11], "#SBATCH --mail-type=END,FAIL")
-        self.assertEqual(f_lines_viking[12], "#SBATCH --mem=8gb")
+        self.assertEqual(f_lines_viking[12], "#SBATCH --mem=16gb")
         self.assertEqual(f_lines_viking[13], f"#SBATCH --output={self.m_output_path}")
         self.assertEqual(f_lines_viking[14], f"#SBATCH --error={self.m_error_path}")
         self.assertEqual(f_lines_viking[15], "set -euo pipefail")
-        self.assertEqual(f_lines_viking[16], "module purge")
+        self.assertEqual(f_lines_viking[16], "set +eu")
+        self.assertEqual(f_lines_viking[17], _tolerant("module purge"))
         self.assertEqual(
             f_lines_viking[-1],
             f"exec {self.m_worker_path} allocation {self.m_manifest_path} 0-tasks-8",
@@ -1105,7 +1113,7 @@ class SlurmAdapterTest(unittest.TestCase):
         self.assertEqual(f_lines_viking2[9], f"#SBATCH --account={self.m_account}")
         self.assertEqual(f_lines_viking2[10], f"#SBATCH --mail-user={self.m_mail_user}")
         self.assertEqual(f_lines_viking2[11], "#SBATCH --mail-type=END,FAIL")
-        self.assertEqual(f_lines_viking2[12], "#SBATCH --mem=8gb")
+        self.assertEqual(f_lines_viking2[12], "#SBATCH --mem=16gb")
         self.assertEqual(f_lines_viking2[13], f"#SBATCH --output={self.m_output_path}")
         self.assertEqual(f_lines_viking2[14], f"#SBATCH --error={self.m_error_path}")
         self.assertEqual(f_lines_viking2[15], "set -euo pipefail")
@@ -1257,6 +1265,31 @@ class SlurmAdapterTest(unittest.TestCase):
             SlurmScriptRenderer.computeWalltime(-1)
         with self.assertRaises(SchedulerScriptError):
             SlurmScriptRenderer.computeWalltime("8")  # type: ignore
+
+    def testComputeWalltimeFastScaling(self) -> None:
+        """Asserts computeWalltime with f_fast=True halves walltime, clamps min 1h, and caps at 23h."""
+        f_expected_fast_walltimes = {
+            1: "01:00:00",
+            2: "01:00:00",
+            3: "01:00:00",
+            4: "01:00:00",
+            8: "02:00:00",
+            16: "03:00:00",
+            24: "05:00:00",
+            32: "06:00:00",
+            40: "07:00:00",
+            48: "09:00:00",
+            64: "11:00:00",
+            128: "22:00:00",
+            192: "23:00:00",
+            256: "23:00:00",
+        }
+        for f_nodes, f_exp in f_expected_fast_walltimes.items():
+            self.assertEqual(
+                SlurmScriptRenderer.computeWalltime(f_nodes, f_fast=True),
+                f_exp,
+                msg=f"Fast walltime calculation failed for nodes: {f_nodes}",
+            )
 
     def testDirectiveAdversaries(self) -> None:
         """Tests prevention of directive injection in job name, account, mail user, and paths."""

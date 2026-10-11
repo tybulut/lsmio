@@ -63,8 +63,10 @@ class LSMIOStore {
     virtual bool startBatch() = 0;
     virtual bool stopBatch() = 0;
 
-    virtual bool _batchMutation(MutationType mType, const std::string key, const std::string value,
-                                bool flush) = 0;
+    virtual bool _batchMutation(MutationType mType, const std::string& key,
+                                const std::string& value, bool flush) = 0;
+    virtual bool _batchMutation(MutationType mType, const std::string& key,
+                                std::string&& value, bool flush);
 
     /// cleanup the ENTIRE store
     /// @return bool success
@@ -85,18 +87,20 @@ class LSMIOStore {
 
     /// put value given a key
     /// @return bool success
-    virtual bool put(const std::string key, const std::string value, bool flush = true);
+    virtual bool put(const std::string& key, const std::string& value, bool flush = true);
+    virtual bool put(const std::string& key, std::string&& value, bool flush = true);
 
     /// delete value given a key
     /// @return bool success
-    virtual bool del(const std::string key, bool flush = true);
+    virtual bool del(const std::string& key, bool flush = true);
 
     /// meta operations
     /// @return bool success
     virtual bool metaGet(const std::string key, std::string* value);
     virtual bool metaGetAll(std::vector<std::tuple<std::string, std::string>>* values,
                             std::string inFix = "");
-    virtual bool metaPut(const std::string key, const std::string value, bool flush = true);
+    virtual bool metaPut(const std::string& key, const std::string& value, bool flush = true);
+    virtual bool metaPut(const std::string& key, std::string&& value, bool flush = true);
 
     /// sync barriers
     /// @return bool success

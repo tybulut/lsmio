@@ -75,8 +75,6 @@ On HPC systems such as Viking, ARCHER2, or Isambard:
 - **Operating System**: Rocky Linux release 8 / RedHat Enterprise Linux 8.
 - **HPC Modules**: Automatically load required compiler and MPI modules:
   ```bash
-  ./tools/bmtool/bmtool load-modules
-  # Or via modern lsmiotool:
   ./tools/lsmiotool/lsmiotool load-modules
   ```
 - **Custom Dependencies**: Packages listed under `doc/dependencies/` provide standalone installation scripts targeting `$HOME/src` as the default prefix. Dependencies with filenames starting with `9` are optional.

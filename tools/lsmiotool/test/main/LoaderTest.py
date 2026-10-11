@@ -65,6 +65,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.AllocationControllerTest",
     "lsmiotool.test.main.ArchiveEnginePairTest",
     "lsmiotool.test.main.ArchiveTest",
+    "lsmiotool.test.main.ArmGroupTest",
     "lsmiotool.test.main.ArtifactStoreTest",
     "lsmiotool.test.main.BmtoolBackendsTest",
     "lsmiotool.test.main.BmtoolRelocationTest",
@@ -74,6 +75,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.CompareNodesTest",
     "lsmiotool.test.main.CoverageContractTest",
     "lsmiotool.test.main.DeltaBarPlotTest",
+    "lsmiotool.test.main.DetachTest",
     "lsmiotool.test.main.DispatchTest",
     "lsmiotool.test.main.EndToEndRunTest",
     "lsmiotool.test.main.EvidenceStoreTest",
@@ -81,6 +83,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.InterruptionTest",
     "lsmiotool.test.main.IorAdapterTest",
     "lsmiotool.test.main.LauncherTest",
+    "lsmiotool.test.main.LegacyEnvDetectionTest",
     "lsmiotool.test.main.LmpAdapterTest",
     "lsmiotool.test.main.LoaderTest",
     "lsmiotool.test.main.LsmioAdapterTest",
@@ -97,6 +100,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.ProcessRunnerTest",
     "lsmiotool.test.main.ProfileSchemaTest",
     "lsmiotool.test.main.RankWorkerTest",
+    "lsmiotool.test.main.RelocateTest",
     "lsmiotool.test.main.ResourceLocatorTest",
     "lsmiotool.test.main.RunCliParserTest",
     "lsmiotool.test.main.RunOrchestratorTest",
@@ -109,6 +113,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.VariantReverseResolverTest",
     "lsmiotool.test.main.VersionTest",
     "lsmiotool.test.main.WorkerEntryTest",
+    "lsmiotool.test.parse.BmtoolParityTest",
     "lsmiotool.test.parse.CompareArchiveMainTest",
     "lsmiotool.test.parse.LsmioAggOutputTest",
     "lsmiotool.test.parse.RunParseTest",
@@ -284,7 +289,7 @@ class LoaderTest(unittest.TestCase):
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
         self.assertEqual(len(preexisting_test_ids), 79)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 726)
+        self.assertEqual(len(all_test_ids), 853)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

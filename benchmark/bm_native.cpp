@@ -37,22 +37,26 @@ class BMNative : public BMBase {
   protected:
     lsmio::LSMIOStoreNative *_lc = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) {
+    bool doRead(const std::string key, std::string *value) override {
         return _lc->get(key, value);
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
     }
 
-    virtual int writePrepare(bool opt) {
+    bool doWrite(const std::string& key, std::string&& value) override {
+        return _lc->put(key, std::move(value), lsmio::gConfigLSMIO.alwaysFlush);
+    }
+
+    int writePrepare(bool opt) override {
         // Note: Native might not use BloomFilter, but we keep the path generation consistent
         _lc = new lsmio::LSMIOStoreNative(
             genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), true);
         return 0;
     }
 
-    virtual bool doWriteFinalize() {
+    bool doWriteFinalize() override {
         _lc->writeBarrier();
         _lc->close();
         return true;
@@ -61,7 +65,7 @@ class BMNative : public BMBase {
     // writeCleanup(): Skipped as LSM stores support concurrent R/W open (unlike ADIOS2 baseline).
 
     // close/open() is not needed for LSM store, but put in-place for safety as below is not measured in benchmarking anyway.
-    virtual int readPrepare(bool opt) {
+    int readPrepare(bool opt) override {
         if (_lc) {
             delete _lc;
             _lc = nullptr;
@@ -73,7 +77,7 @@ class BMNative : public BMBase {
         return 0;
     }
 
-    virtual int readCleanup() {
+    int readCleanup() override {
         delete _lc;
         _lc = nullptr;
         return 0;

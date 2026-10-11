@@ -384,18 +384,15 @@ sys.exit(0)
             self.assertIn("--key-count", f_argv)
             f_result_paths.append(f_rank_res_path)
 
-            # e) Output Database File
-            f_out_path = os.path.join(
-                f_layout.pointDataSubdir(f_point, f_stripe, f_block, f_ordinal=0),
-                "lsmio-rank-0-native-m.db",
+            # e) Output database was written to the combination's data dir (argv)
+            # and freed after the combination, like bmtool run_matrix_workload
+            f_data_dir = f_layout.pointDataSubdir(
+                f_point, f_stripe, f_block, f_ordinal=0
             )
-            self.assertTrue(
-                os.path.exists(f_out_path),
-                f"Missing output database file at {f_out_path}",
-            )
-            with open(f_out_path, "r", encoding="utf-8") as f_f:
-                f_db_content = f_f.read()
-            self.assertIn("MOCK_LSMIO_DATABASE_RECORDS", f_db_content)
+            f_out_path = os.path.join(f_data_dir, "lsmio-rank-0-native-m.db")
+            self.assertIn(f_out_path, f_argv)
+            self.assertTrue(os.path.isdir(f_data_dir))
+            self.assertEqual(os.listdir(f_data_dir), [])
             f_output_paths.append(f_out_path)
 
         # 4. Strict Uniqueness and Containment Proof (24 distinct combination-private files)
@@ -509,8 +506,39 @@ sys.exit(0)
             f_current_claim_data = json.load(f_f)
         self.assertEqual(f_orig_claim_data, f_current_claim_data)
 
-    def testOneRankFailureStopsCombinationAndLaterCombos(self) -> None:
-        """F-04b: Prove child benchmark failure immediately halts execution and prevents later combinations from running."""
+    def testAllocationGroupRunsEveryArmInOneWorker(self) -> None:
+        """The real worker's allocation-group mode runs each arm's allocation in order and
+        exits 0, leaving each arm's outcome in its own run's evidence."""
+        f_arms = [self._createManifest() for _ in range(2)]
+        f_cmd = [
+            sys.executable,
+            str(self.m_worker_executable),
+            "allocation-group",
+            "00-tasks-1",
+            "continue",
+        ] + [f_manifest for _, _, f_manifest in f_arms]
+        f_proc = subprocess.run(
+            f_cmd,
+            cwd=self.m_decoy_cwd,
+            env=self._buildSubprocessEnv({"MOCK_FAIL_COMBO": "c4_b1M"}),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_proc.returncode, 0, f_proc.stderr)
+        self.assertIn("failed with exit code", f_proc.stderr)
+        for f_plan, f_layout, _ in f_arms:
+            f_store = EvidenceStore(f_layout, f_plan=f_plan)
+            f_point = f_plan.scale_points[0]
+            for f_combo in f_plan.combinations:
+                f_res = f_store.readControllerResult(f_point, f_combo, f_ordinal=0)
+                self.assertIsNotNone(f_res)
+                self.assertEqual(
+                    f_res.payload["status"],
+                    "failed" if f_combo.name == "c4_b1M" else "success",
+                )
+
+    def testOneRankFailureFailsCombinationAndLaterCombosRun(self) -> None:
+        """F-04b: A child benchmark failure fails its combination; later combinations still run (bmtool parity)."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
             f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
         )
@@ -563,24 +591,19 @@ sys.exit(0)
         self.assertEqual(f_res2.payload["status"], "failed")
         self.assertEqual(f_res2.payload["exit_code"], 42)
 
-        # 3. Later combos 3 (c4_b8M), 4 (c4_b1M), 5 (c4_b64K) were NEVER executed
+        # 3. Later combos 3 (c4_b8M), 4 (c4_b1M), 5 (c4_b64K) still ran and succeeded
         for f_later_combo in ("c4_b8M", "c4_b1M", "c4_b64K"):
-            self.assertIsNone(
-                f_evidence_store.readControllerResult(
-                    f_point, f_later_combo, f_ordinal=0
-                ),
-                f"Combination {f_later_combo} should not have a controller result",
+            f_later_res = f_evidence_store.readControllerResult(
+                f_point, f_later_combo, f_ordinal=0
             )
-            self.assertIsNone(
+            self.assertIsNotNone(
+                f_later_res,
+                f"Combination {f_later_combo} should have a controller result",
+            )
+            self.assertEqual(f_later_res.payload["status"], "success")
+            self.assertIsNotNone(
                 f_evidence_store.readRankResult(f_point, 0, f_later_combo, f_ordinal=0),
-                f"Combination {f_later_combo} should not have a rank result",
-            )
-            f_later_claim = f_layout.pointRankClaimPath(
-                f_point, 0, f_later_combo, f_ordinal=0
-            )
-            self.assertFalse(
-                os.path.exists(f_later_claim),
-                f"Combination {f_later_combo} should not have a claim lock",
+                f"Combination {f_later_combo} should have a rank result",
             )
 
         # 4. StateReconciler derives PointRunState.FAILED
@@ -595,7 +618,7 @@ sys.exit(0)
         )
 
     def testMissingMalformedResultFailsLauncherControllerRun(self) -> None:
-        """F-04b: Proves missing or malformed rank evidence causes immediate combination failure."""
+        """F-04b: Proves missing or malformed rank evidence fails the combination."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
             f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
         )
@@ -625,10 +648,12 @@ sys.exit(0)
         self.assertEqual(f_ctrl_res.payload["stage"], "rank_evidence")
         self.assertIn("Missing rank result", f_ctrl_res.payload["error"])
 
-        # Subsequent combos were never executed
-        self.assertIsNone(
-            f_evidence_store.readControllerResult(f_point, "c16_b1M", f_ordinal=0)
+        # Subsequent combos still ran (and failed the same way)
+        f_next_res = f_evidence_store.readControllerResult(
+            f_point, "c16_b1M", f_ordinal=0
         )
+        self.assertIsNotNone(f_next_res)
+        self.assertEqual(f_next_res.payload["stage"], "rank_evidence")
 
         # 2. Corrupt / Malformed Rank Result Case
         f_plan2, f_layout2, f_manifest_path2 = self._createManifest(
@@ -665,12 +690,12 @@ sys.exit(0)
         self.assertEqual(f_ctrl_res2.payload["status"], "failed")
         self.assertEqual(f_ctrl_res2.payload["stage"], "rank_evidence")
         self.assertIn("Corrupt rank result", f_ctrl_res2.payload["error"])
-        self.assertIsNone(
+        self.assertIsNotNone(
             f_evidence_store2.readControllerResult(f_point2, "c16_b1M", f_ordinal=0)
         )
 
     def testSignalAndTimeoutChildHandling(self) -> None:
-        """F-04b: Proves signal termination of child benchmark records signal number in rank evidence and halts controller."""
+        """F-04b: Proves signal termination of child benchmark records signal number in rank evidence and fails the controller run."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
             f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
         )
@@ -717,10 +742,12 @@ sys.exit(0)
         self.assertIsNotNone(f_ctrl_res)
         self.assertEqual(f_ctrl_res.payload["status"], "failed")
 
-        # Subsequent combos were not run
-        self.assertIsNone(
-            f_evidence_store.readControllerResult(f_point, "c16_b1M", f_ordinal=0)
+        # Subsequent combos still ran and succeeded
+        f_next_res = f_evidence_store.readControllerResult(
+            f_point, "c16_b1M", f_ordinal=0
         )
+        self.assertIsNotNone(f_next_res)
+        self.assertEqual(f_next_res.payload["status"], "success")
 
 
 if __name__ == "__main__":
