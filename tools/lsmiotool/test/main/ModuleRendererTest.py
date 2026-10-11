@@ -90,6 +90,11 @@ class ModuleRendererTest(unittest.TestCase):
             self.assertEqual(f_script_prof, f_script_enum)
             self.assertEqual(f_script_prof, f_script_str)
 
+            if f_site_name == "DEV":
+                self.assertEqual(f_profile_modules, ())
+            else:
+                self.assertTrue(f_profile_modules, f"{f_site_name} has no modules")
+
             if not f_profile_modules:
                 self.assertEqual(f_cmds_prof, [])
                 self.assertEqual(f_script_prof, "")
@@ -100,36 +105,6 @@ class ModuleRendererTest(unittest.TestCase):
                     f_expected_cmd = f"module load {shlex.quote(f_mod)}"
                     self.assertEqual(f_cmds_prof[f_idx + 1], f_expected_cmd)
                 self.assertEqual(f_script_prof, "\n".join(f_cmds_prof))
-
-        # Site-specific golden checks
-        # Viking (9 modules)
-        f_viking_cmds = ModuleSetup.renderCommands("VIKING")
-        self.assertEqual(len(f_viking_cmds), 10)
-        self.assertEqual(f_viking_cmds[0], "module purge")
-        self.assertEqual(f_viking_cmds[1], "module load data/HDF5/1.10.7-gompi-2020b")
-        self.assertEqual(f_viking_cmds[-1], "module load numlib/FFTW/3.3.10-GCC-11.3.0")
-
-        # Viking2 (22 modules)
-        f_viking2_cmds = ModuleSetup.renderCommands("VIKING2")
-        self.assertEqual(len(f_viking2_cmds), 23)
-        self.assertEqual(f_viking2_cmds[0], "module purge")
-        self.assertEqual(f_viking2_cmds[1], "module load GCCcore/12.3.0")
-        self.assertEqual(f_viking2_cmds[8], "module load OpenMPI/4.1.5-GCC-12.3.0")
-        self.assertEqual(f_viking2_cmds[-1], "module load texlive/20230313-GCC-12.3.0")
-
-        # Archer2 (17 modules)
-        f_archer2_cmds = ModuleSetup.renderCommands("ARCHER2")
-        self.assertEqual(len(f_archer2_cmds), 18)
-        self.assertEqual(f_archer2_cmds[0], "module purge")
-        self.assertEqual(f_archer2_cmds[1], "module load PrgEnv-gnu")
-        self.assertEqual(f_archer2_cmds[-1], "module load matplotlib")
-
-        # Isambard (27 modules)
-        f_isambard_cmds = ModuleSetup.renderCommands("ISAMBARD")
-        self.assertEqual(len(f_isambard_cmds), 28)
-        self.assertEqual(f_isambard_cmds[0], "module purge")
-        self.assertEqual(f_isambard_cmds[1], "module load modules/3.2.11.4")
-        self.assertEqual(f_isambard_cmds[-1], "module load gdb4hpc/4.10.6")
 
         # DEV (0 modules)
         f_dev_cmds = ModuleSetup.renderCommands("DEV")

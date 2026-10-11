@@ -63,6 +63,24 @@ class ProfileSchemaTest(unittest.TestCase):
         )
         self.m_env_json_path = os.path.join(self.m_etc_dir, "environments.json")
 
+    def _assertModuleInventory(self, f_record: ProfileRecord) -> None:
+        """Assert a site's modules are loaded as listed in environments.json.
+
+        Module names change whenever a site is re-tooled, so only the shape is
+        checked: a non-empty tuple of unique non-empty strings, in file order.
+        """
+        with open(self.m_env_json_path, "r", encoding="utf-8") as f_file:
+            f_raw = json.load(f_file)
+        f_raw_modules = f_raw["RUN_PROFILES"]["profiles"][f_record.name]["modules"]
+
+        self.assertIsInstance(f_record.modules, tuple)
+        self.assertTrue(f_record.modules, f"{f_record.name} has no modules")
+        self.assertTrue(
+            all(isinstance(f_mod, str) and f_mod for f_mod in f_record.modules)
+        )
+        self.assertEqual(len(set(f_record.modules)), len(f_record.modules))
+        self.assertEqual(f_record.modules, tuple(f_raw_modules))
+
     def testLegacyProjectionValuesRemainExact(self) -> None:
         """Verify legacy top-level keys in environments.json retain exact values and ARCHER2 is added."""
         with open(self.m_env_json_path, "r", encoding="utf-8") as f_file:
@@ -246,8 +264,7 @@ class ProfileSchemaTest(unittest.TestCase):
             },
         )
         self.assertEqual(f_viking.install_prefix, "{home}/src/usr")
-        self.assertEqual(len(f_viking.modules), 9)
-        self.assertEqual(f_viking.modules[0], "data/HDF5/1.10.7-gompi-2020b")
+        self._assertModuleInventory(f_viking)
         self.assertEqual(
             f_viking.resources["small"],
             {
@@ -291,8 +308,7 @@ class ProfileSchemaTest(unittest.TestCase):
             },
         )
         self.assertEqual(f_viking2.install_prefix, "{home}/src/usr")
-        self.assertEqual(len(f_viking2.modules), 22)
-        self.assertEqual(f_viking2.modules[0], "GCCcore/12.3.0")
+        self._assertModuleInventory(f_viking2)
         self.assertEqual(
             f_viking2.lustre_pools,
             {"hdd": "scratch.disk", "ssd": "scratch.flash"},
@@ -313,8 +329,7 @@ class ProfileSchemaTest(unittest.TestCase):
             },
         )
         self.assertEqual(f_archer2.install_prefix, "/work/e281/e281/{user}/usr")
-        self.assertEqual(len(f_archer2.modules), 17)
-        self.assertEqual(f_archer2.modules[0], "PrgEnv-gnu")
+        self._assertModuleInventory(f_archer2)
         self.assertEqual(
             f_archer2.resources["small"],
             {
@@ -358,8 +373,7 @@ class ProfileSchemaTest(unittest.TestCase):
             },
         )
         self.assertEqual(f_isambard.install_prefix, "{home}/src/usr")
-        self.assertEqual(len(f_isambard.modules), 27)
-        self.assertEqual(f_isambard.modules[0], "modules/3.2.11.4")
+        self._assertModuleInventory(f_isambard)
         self.assertEqual(
             f_isambard.resources["small"],
             {

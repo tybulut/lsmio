@@ -40,77 +40,39 @@ class TestHpcModules(unittest.TestCase):
         self.m_hpc_modules = hpc.HpcModules()
         self.hpc_modules = self.m_hpc_modules
 
-    def testshell_commands_viking(self) -> None:
-        f_cmds = self.m_hpc_modules.shell_commands(env.HpcEnv.VIKING)
+    def _assertShellCommands(self, f_hpc_env: env.HpcEnv) -> None:
+        """Assert the commands are a purge followed by one load per profile module.
+
+        The modules come from environments.json, so site re-tooling needs no test change.
+        """
+        f_cmds = self.m_hpc_modules.shell_commands(f_hpc_env)
+        f_profile_modules = self.m_hpc_modules.getModules(f_hpc_env)
+        self.assertTrue(f_profile_modules)
         self.assertEqual(f_cmds[0], "module purge")
-        self.assertIn("module load data/HDF5/1.10.7-gompi-2020b", f_cmds)
-        self.assertTrue(any(f_cmd.startswith("module load") for f_cmd in f_cmds))
-        f_expected_modules = (
-            "data/HDF5/1.10.7-gompi-2020b",
-            "compiler/GCC/11.3.0",
-            "devel/CMake/3.24.3-GCCcore-11.3.0",
-            "mpi/OpenMPI/4.1.4-GCC-11.3.0",
-            "lib/zlib/1.2.12-GCCcore-11.3.0",
-            "lib/lz4/1.9.3-GCCcore-11.3.0",
-            "lib/libunwind/1.6.2-GCCcore-11.3.0",
-            "lib/OpenJPEG/2.5.0-GCCcore-11.3.0",
-            "numlib/FFTW/3.3.10-GCC-11.3.0",
-        )
         self.assertEqual(
             f_cmds,
-            ["module purge"] + [f"module load {f_m}" for f_m in f_expected_modules],
+            ["module purge"] + [f"module load {f_m}" for f_m in f_profile_modules],
         )
+
+    def testshell_commands_viking(self) -> None:
+        self._assertShellCommands(env.HpcEnv.VIKING)
 
     def testshell_commands_viking2(self) -> None:
-        f_cmds = self.m_hpc_modules.shell_commands(env.HpcEnv.VIKING2)
-        self.assertEqual(f_cmds[0], "module purge")
-        self.assertIn("module load GCCcore/12.3.0", f_cmds)
-        self.assertIn("module load OpenMPI/4.1.5-GCC-12.3.0", f_cmds)
-        f_expected_modules = (
-            "GCCcore/12.3.0",
-            "Clang/16.0.6-GCCcore-12.3.0",
-            "CMake/3.26.3-GCCcore-12.3.0",
-            "Automake/1.16.5-GCCcore-12.3.0",
-            "Autoconf/2.71-GCCcore-12.3.0",
-            "Autotools/20220317-GCCcore-12.3.0",
-            "libtool/2.4.7-GCCcore-12.3.0",
-            "OpenMPI/4.1.5-GCC-12.3.0",
-            "zlib/1.2.13-GCCcore-12.3.0",
-            "lz4/1.9.4-GCCcore-12.3.0",
-            "libunwind/1.6.2-GCCcore-11.3.0",  # wait, let's make sure exact Viking2 modules match
-            "OpenJPEG/2.5.0-GCCcore-12.3.0",
-            "FFTW/3.3.10-GCC-12.3.0",
-            "gflags/2.2.2-GCCcore-12.3.0",
-            "bzip2/1.0.8-GCCcore-12.3.0",
-            "HDF5/1.14.0-gompi-2023a",
-            "SciPy-bundle/2023.07-gfbf-2023a",
-            "matplotlib/3.7.2-gfbf-2023a",
-            "Perl/5.36.1-GCCcore-12.3.0",
-            "Perl-bundle-CPAN/5.36.1-GCCcore-12.3.0",
-            "gnuplot/5.4.8-GCCcore-12.3.0",
-            "texlive/20230313-GCC-12.3.0",
-        )
-        f_profile_modules = self.m_hpc_modules.getModules(env.HpcEnv.VIKING2)
-        self.assertEqual(
-            f_cmds,
-            ["module purge"] + [f"module load {f_m}" for f_m in f_profile_modules],
-        )
+        self._assertShellCommands(env.HpcEnv.VIKING2)
 
     def testshell_commands_isambard(self) -> None:
-        f_cmds = self.m_hpc_modules.shell_commands(env.HpcEnv.ISAMBARD)
-        self.assertEqual(f_cmds[0], "module purge")
-        self.assertIn("module load modules/3.2.11.4", f_cmds)
-        f_profile_modules = self.m_hpc_modules.getModules(env.HpcEnv.ISAMBARD)
-        self.assertEqual(
-            f_cmds,
-            ["module purge"] + [f"module load {f_m}" for f_m in f_profile_modules],
-        )
+        self._assertShellCommands(env.HpcEnv.ISAMBARD)
 
     @patch("builtins.print")
     def test_shell_output(self, f_mock_print) -> None:
         f_script = self.m_hpc_modules.shell_output(env.HpcEnv.VIKING)
+        f_first_module = self.m_hpc_modules.getModules(env.HpcEnv.VIKING)[0]
         self.assertIn("module purge", f_script)
-        self.assertIn("module load data/HDF5/1.10.7-gompi-2020b", f_script)
+        self.assertIn(f"module load {f_first_module}", f_script)
+        self.assertEqual(
+            f_script,
+            "\n".join(self.m_hpc_modules.shell_commands(env.HpcEnv.VIKING)),
+        )
 
     @patch("subprocess.run")
     def test_load(self, f_mock_run) -> None:
