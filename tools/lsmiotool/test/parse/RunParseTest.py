@@ -103,7 +103,7 @@ class RunParseTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_ssd: bool = False,
         f_variant: Optional[str] = None,
     ) -> RunPlan:
@@ -136,7 +136,7 @@ class RunParseTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_ssd: bool = False,
         f_variant: Optional[str] = None,
     ) -> Tuple[str, RunPlan, EvidenceStore]:
@@ -212,7 +212,7 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(f_resolved.runId, "run-lsmio-success-001")
         self.assertEqual(f_resolved.target, "lsmio")
         self.assertEqual(f_resolved.scale, "local")
-        self.assertEqual(f_resolved.setup, "NATIVE-M")
+        self.assertEqual(f_resolved.setup, "NATIVE")
         self.assertFalse(f_resolved.is_ssd)
         self.assertFalse(f_resolved.isSsd)
         self.assertTrue(f_resolved.is_success)
@@ -823,7 +823,7 @@ class RunParseTest(unittest.TestCase):
     def testLsmioLogExtractorWithFsumStability(self) -> None:
         """Tests iteration and summary metric extraction across multi-rank logs with math.fsum stability."""
         f_run_root, f_plan, _ = self._setupSucceededRun(
-            "run-lsmio-fsum-001", "lsmio", "bake", "NATIVE-M"
+            "run-lsmio-fsum-001", "lsmio", "bake", "NATIVE"
         )
         f_resolved = RunRootResolver.resolve(f_run_root)
         # Point 2 has 4 tasks
@@ -1084,7 +1084,7 @@ class RunParseTest(unittest.TestCase):
 
         # 2. LSMIO Stage 1 (bmtool 7-column agg files) & Stage 2 Master (10 columns)
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
-            "run-lsm-report-001", "lsmio", "local", "NATIVE-M"
+            "run-lsm-report-001", "lsmio", "local", "NATIVE"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_stage1_header = (
@@ -1189,7 +1189,7 @@ class RunParseTest(unittest.TestCase):
 
         # 2. LSMIO JSON
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
-            "run-lsm-json-001", "lsmio", "local", "NATIVE-M"
+            "run-lsm-json-001", "lsmio", "local", "NATIVE"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
@@ -1289,7 +1289,7 @@ class RunParseTest(unittest.TestCase):
 
         # 2. LSMIO Table
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
-            "run-lsm-table-001", "lsmio", "local", "NATIVE-M"
+            "run-lsm-table-001", "lsmio", "local", "NATIVE"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
@@ -1331,7 +1331,7 @@ class RunParseTest(unittest.TestCase):
             "run-lsm-table-var-001",
             "lsmio",
             "baseline",
-            "NATIVE-M",
+            "NATIVE",
             f_variant="footer-btree",
         )
         f_resolved_var = RunRootResolver.resolve(f_run_root_var)

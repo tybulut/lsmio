@@ -74,10 +74,10 @@ class ManifestTest(unittest.TestCase):
         # 1. Test across different targets, scales, storage classes, and profiles
         f_test_configs = [
             ("ior", "local", False, "BASE", self.m_viking_profile),
-            ("lsmio", "bake", True, "NATIVE-M", self.m_viking2_profile),
+            ("lsmio", "bake", True, "NATIVE", self.m_viking2_profile),
             ("lmp", "small", False, "LSMIO", self.m_isambard_profile),
             ("ior", "large", True, "HDF5", self.m_archer2_profile),
-            ("lsmio", "local", False, "ROCKSDB-M", self.m_dev_profile),
+            ("lsmio", "local", False, "ROCKSDB", self.m_dev_profile),
         ]
 
         for f_target, f_scale, f_ssd, f_setup, f_prof in f_test_configs:
@@ -705,10 +705,10 @@ class ManifestTest(unittest.TestCase):
             ("ior", "bake", self.m_viking2_profile, "HDF5"),
             ("ior", "small", self.m_isambard_profile, "COLLECTIVE"),
             ("ior", "large", self.m_archer2_profile, "REVERSE"),
-            ("lsmio", "local", self.m_dev_profile, "NATIVE-M"),
-            ("lsmio", "bake", self.m_viking_profile, "ROCKSDB-M"),
-            ("lsmio", "small", self.m_viking2_profile, "ADIOS-M"),
-            ("lsmio", "large", self.m_archer2_profile, "LEVELDB-M"),
+            ("lsmio", "local", self.m_dev_profile, "NATIVE"),
+            ("lsmio", "bake", self.m_viking_profile, "ROCKSDB"),
+            ("lsmio", "small", self.m_viking2_profile, "ADIOS"),
+            ("lsmio", "large", self.m_archer2_profile, "LEVELDB"),
         ]
 
         for f_target, f_scale, f_profile, f_setup in f_cases:

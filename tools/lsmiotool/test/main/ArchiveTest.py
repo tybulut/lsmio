@@ -49,7 +49,7 @@ from lsmiotool.lib.cli import (
     parseArchiveArguments,
 )
 from lsmiotool.lib.main import ArchiveMain
-from lsmiotool.lib.variants import UnknownVariantError
+from lsmiotool.lib.variants import UnknownSetupError, UnknownVariantError
 
 
 class ArchiveTest(unittest.TestCase):
@@ -60,13 +60,13 @@ class ArchiveTest(unittest.TestCase):
         req = ArchiveRequest(
             f_target="lsmio",
             f_scale="variants",
-            f_variant="footer",
+            f_variant="no-footer",
             f_dest="/tmp/archive",
         )
 
         self.assertEqual(req.target, "lsmio")
         self.assertEqual(req.scale, "variants")
-        self.assertEqual(req.variant, "footer")
+        self.assertEqual(req.variant, "no-footer")
         self.assertEqual(req.dest, "/tmp/archive")
 
         # Immutability enforcement
@@ -92,7 +92,7 @@ class ArchiveTest(unittest.TestCase):
             {
                 "target": "lsmio",
                 "scale": "variants",
-                "variant": "footer",
+                "variant": "no-footer",
                 "dest": "/tmp/archive",
             },
         )
@@ -102,7 +102,7 @@ class ArchiveTest(unittest.TestCase):
         req2 = ArchiveRequest(
             f_target="lsmio",
             f_scale="variants",
-            f_variant="footer",
+            f_variant="no-footer",
             f_dest="/tmp/archive",
         )
         self.assertEqual(req, req2)
@@ -131,18 +131,18 @@ class ArchiveTest(unittest.TestCase):
         """Tasks 4.5.2: Asserts valid argument sequences parsed into canonical ArchiveRequest."""
         # 1. Leading 'archive' command with all arguments
         req1 = parseArchiveArguments(
-            ["archive", "lsmio", "baseline", "footer", "--dest", "/tmp/archive"]
+            ["archive", "lsmio", "baseline", "no-footer", "--dest", "/tmp/archive"]
         )
         self.assertEqual(req1.target, "lsmio")
         self.assertEqual(req1.scale, "variants")
-        self.assertEqual(req1.variant, "footer")
+        self.assertEqual(req1.variant, "no-footer")
         self.assertEqual(req1.dest, "/tmp/archive")
 
         # 2. Without leading 'archive'
-        req2 = parseArchiveArguments(["lsmio", "baseline", "footer-btree"])
+        req2 = parseArchiveArguments(["lsmio", "baseline", "mmap-btree"])
         self.assertEqual(req2.target, "lsmio")
         self.assertEqual(req2.scale, "variants")
-        self.assertEqual(req2.variant, "footer-btree")
+        self.assertEqual(req2.variant, "mmap-btree")
         self.assertIsNone(req2.dest)
 
         # 3. Baseline scale with base/default normalizes to None
@@ -169,10 +169,10 @@ class ArchiveTest(unittest.TestCase):
         self.assertEqual(req6.dest, "/data/arc")
 
         # 7. Case insensitivity
-        req7 = parseArchiveArguments(["LSMIO", "BASELINE", "FOOTER-BTREE"])
+        req7 = parseArchiveArguments(["LSMIO", "BASELINE", "MMAP-BTREE"])
         self.assertEqual(req7.target, "lsmio")
         self.assertEqual(req7.scale, "variants")
-        self.assertEqual(req7.variant, "footer-btree")
+        self.assertEqual(req7.variant, "mmap-btree")
 
     def testArchiveCliParserRejections(self) -> None:
         """Tasks 4.5.3: Asserts invalid CLI sequences, unsupported benchmarks, and legacy positional rejection."""
@@ -213,7 +213,7 @@ class ArchiveTest(unittest.TestCase):
         # Legacy scales reject extra positional arguments
         for sc in ("local", "bake", "small", "large"):
             with self.assertRaises(ArchiveCliParseError) as ctx:
-                parseArchiveArguments(["lsmio", sc, "footer"])
+                parseArchiveArguments(["lsmio", sc, "no-footer"])
             self.assertIn("Unexpected extra positional argument", str(ctx.exception))
 
         # Baseline scale with unknown variant fails fast
@@ -221,9 +221,14 @@ class ArchiveTest(unittest.TestCase):
             parseArchiveArguments(["lsmio", "baseline", "nonexistent_variant"])
         self.assertIn("Invalid variant", str(ctx_u.exception))
 
+        # Retired variants and two-segment '<backend>-m-' prefixes are rejected too
+        for f_variant in ("footer", "footer-btree", "native-m-btree"):
+            with self.assertRaises(UnknownVariantError):
+                parseArchiveArguments(["lsmio", "baseline", f_variant])
+
         # Baseline scale rejects extra positional arguments after variant
         with self.assertRaises(ArchiveCliParseError):
-            parseArchiveArguments(["lsmio", "baseline", "footer", "unexpected"])
+            parseArchiveArguments(["lsmio", "baseline", "no-footer", "unexpected"])
 
         # Prohibit --dest=value syntax
         with self.assertRaises(ArchiveCliParseError) as ctx_eq:
@@ -256,37 +261,36 @@ class ArchiveTest(unittest.TestCase):
 
     def testArchiveEngineArmIdResolution(self) -> None:
         """Tasks 4.5.4: Asserts mechanical ARM_ID derivation per INV-ARCH-8."""
-        # NATIVE-M with variant
+        # NATIVE with variant
         self.assertEqual(
-            ArchiveEngine.resolveArmId("NATIVE-M", "footer-btree"),
-            "native-footer-btree",
+            ArchiveEngine.resolveArmId("NATIVE", "mmap-btree"),
+            "native-mmap-btree",
         )
         self.assertEqual(
-            ArchiveEngine.resolveArmId("NATIVE-M", "footer"),
-            "native-footer",
+            ArchiveEngine.resolveArmId("NATIVE", "no-footer"),
+            "native-no-footer",
         )
         self.assertEqual(
-            ArchiveEngine.resolveArmId("NATIVE-M", None),
+            ArchiveEngine.resolveArmId("NATIVE", None),
             "native",
         )
         self.assertEqual(
-            ArchiveEngine.resolveArmId("NATIVE-M", "default"),
+            ArchiveEngine.resolveArmId("NATIVE", "default"),
             "native",
         )
 
-        # lsmio setup normalization
-        self.assertEqual(
-            ArchiveEngine.resolveArmId("lsmio", "footer-btree"),
-            "lsmio-footer-btree",
-        )
-        self.assertEqual(
-            ArchiveEngine.resolveArmId("lsmio", None),
-            "lsmio",
-        )
+        # Only LSMIO setups name an arm: 'lsmio' and the removed '-M' names are rejected,
+        # so an old run root is never archived under a 'native-m' arm
+        for f_setup in ("lsmio", "NATIVE-M", "native-m", "ROCKSDB-M"):
+            with self.subTest(setup=f_setup):
+                with self.assertRaises(UnknownSetupError):
+                    ArchiveEngine.resolveArmId(f_setup, "mmap-btree")
+                with self.assertRaises(UnknownSetupError):
+                    ArchiveEngine.resolveArmId(f_setup, None)
 
         # Composite setups
         self.assertEqual(
-            ArchiveEngine.resolveArmId("ROCKSDB-M", "wbuf-512m"),
+            ArchiveEngine.resolveArmId("ROCKSDB", "wbuf-512m"),
             "rocksdb-wbuf-512m",
         )
         self.assertEqual(
@@ -300,31 +304,31 @@ class ArchiveTest(unittest.TestCase):
     def testArchiveEngineCollisionAvoidance(self) -> None:
         """Tasks 4.5.5: Asserts auto-increment suffix collision resolution per INV-ARCH-7."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            arm_id = "native-footer-btree"
+            arm_id = "native-mmap-btree"
 
             # Case 1: Target does not exist
             t0 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
-            self.assertEqual(t0, os.path.join(temp_dir, "outputs-native-footer-btree"))
+            self.assertEqual(t0, os.path.join(temp_dir, "outputs-native-mmap-btree"))
 
             # Case 2: Base target exists -> suffix -1
             os.makedirs(t0)
             t1 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
             self.assertEqual(
-                t1, os.path.join(temp_dir, "outputs-native-footer-btree-1")
+                t1, os.path.join(temp_dir, "outputs-native-mmap-btree-1")
             )
 
             # Case 3: -1 also exists -> suffix -2
             os.makedirs(t1)
             t2 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
             self.assertEqual(
-                t2, os.path.join(temp_dir, "outputs-native-footer-btree-2")
+                t2, os.path.join(temp_dir, "outputs-native-mmap-btree-2")
             )
 
             # Case 4: -2 also exists -> suffix -3
             os.makedirs(t2)
             t3 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
             self.assertEqual(
-                t3, os.path.join(temp_dir, "outputs-native-footer-btree-3")
+                t3, os.path.join(temp_dir, "outputs-native-mmap-btree-3")
             )
 
     def testArchiveEngineAtomicMoveAndRecreation(self) -> None:
@@ -343,9 +347,9 @@ class ArchiveTest(unittest.TestCase):
             target_1 = ArchiveEngine.executeArchive(
                 f_source_dir=source_dir,
                 f_dest_root=dest_root,
-                f_arm_id="native-footer",
+                f_arm_id="native-no-footer",
             )
-            expected_target_1 = os.path.join(dest_root, "outputs-native-footer")
+            expected_target_1 = os.path.join(dest_root, "outputs-native-no-footer")
             self.assertEqual(target_1, expected_target_1)
 
             # Verify files moved to target
@@ -367,9 +371,9 @@ class ArchiveTest(unittest.TestCase):
             target_2 = ArchiveEngine.executeArchive(
                 f_source_dir=source_dir,
                 f_dest_root=dest_root,
-                f_arm_id="native-footer",
+                f_arm_id="native-no-footer",
             )
-            expected_target_2 = os.path.join(dest_root, "outputs-native-footer-1")
+            expected_target_2 = os.path.join(dest_root, "outputs-native-no-footer-1")
             self.assertEqual(target_2, expected_target_2)
             self.assertTrue(os.path.isfile(os.path.join(target_2, "rank-1.db")))
             self.assertEqual(os.listdir(target_2), ["rank-1.db"])
@@ -419,7 +423,7 @@ class ArchiveTest(unittest.TestCase):
             dest_root = os.path.join(temp_root, "lsmio-archive")
             # bmtool outputs layout: <nodes>/<date>/out-*.txt
             payload_rel = os.path.join(
-                "8", "2026-10-10", "out-native-footer-4-1M-2026-10-10-node1-0.txt"
+                "8", "2026-10-10", "out-native-no-footer-4-1M-2026-10-10-node1-0.txt"
             )
             payload_file = os.path.join(source_dir, payload_rel)
             os.makedirs(os.path.dirname(payload_file))
@@ -453,7 +457,7 @@ class ArchiveTest(unittest.TestCase):
             req = ArchiveRequest(
                 f_target="lsmio",
                 f_scale="baseline",
-                f_variant="footer",
+                f_variant="no-footer",
                 f_dest=dest_root,
             )
             main_inst = ArchiveMain(
@@ -470,7 +474,7 @@ class ArchiveTest(unittest.TestCase):
             self.assertEqual(ret_code, 0)
 
             # Verify target directory created with payload
-            expected_target = os.path.join(dest_root, "outputs-native-footer")
+            expected_target = os.path.join(dest_root, "outputs-native-no-footer")
             self.assertTrue(os.path.isdir(expected_target))
             self.assertTrue(os.path.isfile(os.path.join(expected_target, payload_rel)))
 
@@ -484,12 +488,12 @@ class ArchiveTest(unittest.TestCase):
                 f.write("write,3,3,3,3,3,10\n")
 
             main_inst2 = ArchiveMain(
-                ["lsmio", "baseline", "footer", "--dest", dest_root],
+                ["lsmio", "baseline", "no-footer", "--dest", dest_root],
                 f_source_dir=source_dir,
             )
             ret_code2 = main_inst2.run()
             self.assertEqual(ret_code2, 0)
-            expected_target2 = os.path.join(dest_root, "outputs-native-footer-1")
+            expected_target2 = os.path.join(dest_root, "outputs-native-no-footer-1")
             self.assertTrue(os.path.isdir(expected_target2))
             self.assertEqual(os.listdir(source_dir), [])
 
@@ -696,7 +700,7 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
     def testSetupFromOptionThenBmSetup(self) -> None:
         self._bmtoolOutputs()
         f_code, f_err = self._archive(
-            ["lsmio", "small"], f_environ={"BM_SETUP": "ROCKSDB-M"}
+            ["lsmio", "small"], f_environ={"BM_SETUP": "ROCKSDB"}
         )
         self.assertEqual(f_code, 0, f_err)
         f_base = os.path.join(self.m_root, "lsmio-archive", "baseline")
@@ -704,10 +708,10 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
 
         self._bmtoolOutputs()
         f_code, f_err = self._archive(
-            ["lsmio", "small", "--setup", "adios"], f_environ={"BM_SETUP": "ROCKSDB-M"}
+            ["lsmio", "small", "--setup", "adios"], f_environ={"BM_SETUP": "ROCKSDB"}
         )
         self.assertEqual(f_code, 0, f_err)
-        self.assertTrue(os.path.isdir(os.path.join(f_base, "outputs-adios-nompi")))
+        self.assertTrue(os.path.isdir(os.path.join(f_base, "outputs-adios")))
 
         self._bmtoolOutputs()
         f_code, f_err = self._archive(
@@ -760,9 +764,33 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         f_code, f_err = self._archive(["lsmio", "variants", "autotune"])
         self.assertEqual(f_code, 1)
         self.assertIn("already archived", f_err)
-        f_code, f_err = self._archive(["lsmio", "variants", "footer"])
+        f_code, f_err = self._archive(["lsmio", "variants", "no-footer"])
         self.assertEqual(f_code, 1)
         self.assertIn("Nothing to archive", f_err)
+
+    def testRunRootWithRemovedSetupIsRefused(self) -> None:
+        """A run made before the '-M' setups were removed is not archived as 'native-m'."""
+        import json
+
+        f_run_root = self._lsmiotoolRun("run-20261010T000000Z-dddd", f_variant=None)
+        f_manifest = os.path.join(f_run_root, "manifest.json")
+        with open(f_manifest, "r", encoding="utf-8") as f_f:
+            f_doc = json.load(f_f)
+        f_doc["request"]["setup"] = "NATIVE-M"
+        with open(f_manifest, "w", encoding="utf-8") as f_f:
+            json.dump(f_doc, f_f)
+
+        f_code, f_err = self._archive(["lsmio", "variants", "--source", f_run_root])
+        self.assertEqual(f_code, 1)
+        self.assertIn("'NATIVE-M' is no longer supported", f_err)
+        # Without --source the run is not found, rather than archived under a new name
+        f_code, f_err = self._archive(["lsmio", "variants"])
+        self.assertEqual(f_code, 1)
+        f_dest = os.path.join(self.m_root, "lsmio-archive", "variants")
+        self.assertFalse(
+            os.path.exists(os.path.join(f_dest, "outputs-native-m"))
+        )
+        self.assertFalse(os.path.exists(os.path.join(f_dest, "outputs-native")))
 
     def testAmbiguousSourceNeedsExplicitSource(self) -> None:
         f_run_root = self._lsmiotoolRun("run-20261010T000000Z-bbbb", f_variant=None)
@@ -789,20 +817,22 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         )
         # An explicit run root must match the request
         f_code, f_err = self._archive(
-            ["lsmio", "variants", "--source", f_run_root, "--setup", "ROCKSDB-M"]
+            ["lsmio", "variants", "--source", f_run_root, "--setup", "ROCKSDB"]
         )
         self.assertEqual(f_code, 1)
         self.assertIn("does not match", f_err)
 
     def testCliSetupAndSource(self) -> None:
         f_req = parseArchiveArguments(
-            ["archive", "lsmio", "small", "--setup", "rocksdb-m", "--source", "/x/y"]
+            ["archive", "lsmio", "small", "--setup", "rocksdb", "--source", "/x/y"]
         )
-        self.assertEqual((f_req.setup, f_req.source), ("ROCKSDB-M", "/x/y"))
-        self.assertEqual(f_req.toDict()["setup"], "ROCKSDB-M")
+        self.assertEqual((f_req.setup, f_req.source), ("ROCKSDB", "/x/y"))
+        self.assertEqual(f_req.toDict()["setup"], "ROCKSDB")
         self.assertNotIn("setup", parseArchiveArguments(["lsmio", "small"]).toDict())
         for f_argv in (
             ["lsmio", "small", "--setup", "nope"],
+            ["lsmio", "small", "--setup", "rocksdb-m"],
+            ["lsmio", "small", "--setup", "NATIVE-M"],
             ["lsmio", "small", "--setup"],
             ["lsmio", "small", "--setup", "ADIOS", "--setup", "ADIOS"],
             ["lsmio", "small", "--source", "--setup"],

@@ -47,10 +47,10 @@ bmtool run lsmio backends <scale> [<backends>] [options]
 #### Multi-Variant Specification:
 When executing `bmtool run lsmio variants [<variants>]`:
 - **Omitted** or **`default`** / **`base`**: Executes default baseline configuration (empty variant).
-- **Single variant key**: e.g., `bmtool run lsmio variants footer`
-- **Comma-separated list**: e.g., `bmtool run lsmio variants footer,manoff,autotune`, executed sequentially in order.
+- **Single variant key**: e.g., `bmtool run lsmio variants btree`
+- **Comma-separated list**: e.g., `bmtool run lsmio variants btree,no-manoff,autotune`, executed sequentially in order.
 - **Keyword `most`**: Expands to the streamlined canonical sequence of 26 matrix variants (`default` followed by the 25 non-empty core variant keys).
-- **Keyword `all`**: Expands to the exhaustive matrix of all registered variants (`default` followed by all 60 non-empty variants, including historical composite variants).
+- **Keyword `all`**: The same 26 variants as `most`; the two keywords are synonyms.
 
 #### Paired Baseline & Variant Execution (`INV-PAIR-1`):
 When one or more non-empty variants are specified:
@@ -62,7 +62,7 @@ When one or more non-empty variants are specified:
 - **Symmetrical Paired Archive Naming (`INV-PAIR-2`)**: Automatic archiving produces twin directories for each variant run:
   - `outputs-native-<variant>:run`: The active variant benchmark output.
   - `outputs-native-<variant>:base`: The paired baseline output replicated from the pre-baseline run within the same allocation.
-- **Synchronized Suffix Locking**: If archive collision occurs (e.g. `outputs-native-footer:run` exists), synchronized `-N` collision resolution assigns an identical suffix to both twins simultaneously (`outputs-native-footer:run-1` and `outputs-native-footer:base-1`), preventing suffix divergence.
+- **Synchronized Suffix Locking**: If archive collision occurs (e.g. `outputs-native-btree:run` exists), synchronized `-N` collision resolution assigns an identical suffix to both twins simultaneously (`outputs-native-btree:run-1` and `outputs-native-btree:base-1`), preventing suffix divergence.
 - **Standalone Baseline Isolation (`INV-PAIR-3`)**: Invocations without variants or with `default`/`base` (e.g., `bmtool run lsmio variants`) archive strictly to unadorned `outputs-native` (or `outputs-native-N` upon collision) without role delimiters (`:run` or `:base`).
 
 #### Versioned Baseline Comparison (`--versioned`):
@@ -73,7 +73,7 @@ bmtool run lsmio variants --versioned
 
 # Compare active branch under specific engine variant(s) against golden reference (Variation B.1):
 bmtool run lsmio variants legacy --versioned
-bmtool run lsmio variants pread,footer-pread --versioned
+bmtool run lsmio variants mmap,no-pread --versioned
 ```
 - **Intra-Allocation Symmetrical Twin Execution**:
   - **Step 1 (Reference Baseline)**: Executes the compiled golden reference binary (`$SB_BIN/bm_native:main`) once within the compute node allocation and stages its outputs to `$STAGING_BASE`.
@@ -211,7 +211,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 #### Arguments & Options:
 - `<benchmark>` / `<workload>`: Benchmark suite to run. Supported values:
   - `ior`: IOR parallel I/O benchmark (default setup: `BASE`).
-  - `lsmio`: LSMIO storage engine benchmark (default setup: `NATIVE-M`).
+  - `lsmio`: LSMIO storage engine benchmark (default setup: `NATIVE`).
   - `lmp`: LAMMPS ReaxFF molecular dynamics benchmark (default setup: `LSMIO`).
 - `<scale>`: Execution scale. Supported values:
   - `local`: 1 task on 1 node (1 task/node).
@@ -231,10 +231,10 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
     $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{K}{3} \right\rfloor\right)\right)$$
 - `<variants>`: Optional variant specification for `lsmio variants`. Supported formats:
   - **Omitted** or **`default`** / **`base`**: Executes the default baseline configuration (empty variant).
-  - **Single variant key**: e.g., `footer`, `btree`, `manoff`, `autotune`.
-  - **Comma-separated list**: e.g., `footer,manoff,autotune`, executed sequentially in specified order.
+  - **Single variant key**: e.g., `btree`, `mmap`, `no-manoff`, `autotune`.
+  - **Comma-separated list**: e.g., `btree,no-manoff,autotune`, executed sequentially in specified order.
   - **Keyword `most`**: Expands to the streamlined canonical sequence of 26 matrix variants (`default` followed by the 25 non-empty core variant keys).
-  - **Keyword `all`**: Expands to all registered matrix variants in exhaustive order (`default` followed by all supported non-empty variant keys).
+  - **Keyword `all`**: The same 26 variants as `most`; the two keywords are synonyms.
   *(Note: Non-lsmio benchmarks or non-baseline scales reject variant specifications atomically before execution.)*
 - `--versioned`: Enables versioned baseline comparison for `lsmio variants`. Benchmarks the active working branch against the golden reference binary (`$SB_BIN/bm_native:main`). Supports execution with or without specific variants (e.g. `lsmiotool run lsmio variants legacy --versioned`). Automatically activates paired delta archiving and dynamically scales walltime allocation based on the variant count.
 - `--ssd`: Selects SSD storage class root. Default storage class is HDD.
@@ -260,7 +260,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 
 #### Benchmark Setups:
 - **IOR setups**: `BASE` (default), `HDF5`, `HDF5-C`, `COLLECTIVE`, `FSYNC`, `REVERSE`.
-- **LSMIO setups**: `NATIVE-M` (default), `ADIOS-M`, `PLUGIN-M`, `ROCKSDB-M`, `LEVELDB-M`, `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`.
+- **LSMIO setups**: `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`. Every setup runs its binary with `-m -g`: `-m` runs it under MPI with barriers around the timed phases, `-g` installs a SIGSEGV handler. The former `-M` names (`NATIVE-M`, …) and the non-MPI setups were removed; old names are rejected.
 - **LMP setups**: `LSMIO` (default), `LSMIO-MMAP`, `FS`.
 
 ---
@@ -705,7 +705,7 @@ lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name
 - `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `variants`; `baseline` is a deprecated alias of `variants`).
 - `[variant]`: Optional variant identifier for `variants` (resolved against `VariantCatalogue`); it names the arm, `outputs-<arm>`.
 - `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`).
-- `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE-M`; for an lsmiotool run, its own setup).
+- `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE`; for an lsmiotool run, its own setup).
 - `--source <path>`: What to archive. Without it: bmtool's `<benchmark_root>/lsmio/outputs`, else the latest standalone lsmiotool run of `lsmio <scale>` (and `<variant>`).
   - An lsmiotool run root: its succeeded points are copied in bmtool's layout with reports; the run root stays.
   - The run root of any arm of a `variants`, `--versioned` or `backends` run: the whole run is archived as `run` would have, each finished point not yet archived (`:run`/`:base` pairs, or `outputs-<backend>/<nodes>`), in the run's own destination unless `--dest` is given; `<variant>` is not used. A point counts as finished when every combination and every rank succeeded (bmtool keeps a run with a failed step out of the archive), whatever happened to the `run` process. Running it again archives nothing twice, and an existing backend `<nodes>` directory of another run is never replaced (only `run` replaces, as bmtool's jobs do). A run whose `run` process is still alive (its `control/orchestrator.pid`) is refused: it archives itself.
@@ -762,15 +762,15 @@ The canonical sequence evaluated by `most` (`lsmiotool run lsmio variants most` 
 | 24 | `sync` | `sync` | `--lsmio-no-autotune --sync` | Enforces synchronous write-through I/O. |
 | 25 | `autotune` | `autotune` | `--lsmio-autotune` | Autotune introspection flag. |
 
-### 6.2 Exhaustive Matrix (`all` — All Registered Variants) & Backwards-Compatible Historical Aliases
-All 49 historical composite keys (e.g. `footer-map-manoff-pread`, `footer-btree-manoff-mmap`, `footer-pool-8-mmap`, `footer-pread`, etc.) remain registered in `VariantCatalogue` and `resolve_variant()` to ensure existing benchmark archive folders (`outputs-*`) and legacy scripts resolve cleanly. All historical `mmap` variants include `--lsmio-no-pread` to eliminate dual-handle resource contention under the new defaults.
+### 6.2 `all` and Retired Variants
+`all` expands to the same 26 variants as `most` (`VariantCatalogue.allVariants()` / `$LSMIO_ALL_VARIANTS`).
 
-When `all` is specified (`lsmiotool run lsmio variants all` or `bmtool run lsmio variants all`), it expands to the exhaustive sequence of `default` followed by all 60 supported variant keys registered in `VariantCatalogue.allVariants()` / `$LSMIO_ALL_VARIANTS`.
+35 older composite keys were retired because each only re-enabled engine defaults (`footer`, `manoff`, `pread`, `map`) on top of another variant, so it ran the same configuration twice: for example `footer`, `map`, `manoff`, `pread` and `footer-map-manoff-pread` were the default; `footer-btree` was `btree`; `footer-pool-8-mmap` was `pool-8-mmap`. They can no longer be run (`run`, `archive` and bmtool reject them). Archive directories named after them (`outputs-native-footer:run`, …) are still read by `parse` and `compare` (`VariantCatalogue.archivedVariantNames()`).
 
 > [!NOTE]
 > The baseline variant (`base` or `default`) uses standard engine defaults (128MB write buffer, `std::map` memtable, dense footer indexing, manual byte offsets, persistent `pread()`, and auto-tuning non-mutating).
-> Together with `default`, these 25 variants form the canonical sequence of all 26 matrix variants (`VariantCatalogue.mostVariants()` / `VariantCatalogue.canonicalVariants()` in Python and `LSMIO_MOST_VARIANTS` in shell), which is expanded automatically via the `most` keyword in `lsmiotool run lsmio variants most` and `bmtool run lsmio variants most`. The `all` keyword expands to the exhaustive suite (`VariantCatalogue.allVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell).
+> Together with `default`, these 25 variants form the canonical sequence of all 26 matrix variants (`VariantCatalogue.mostVariants()` / `VariantCatalogue.canonicalVariants()` in Python and `LSMIO_MOST_VARIANTS` in shell), which is expanded automatically via the `most` keyword in `lsmiotool run lsmio variants most` and `bmtool run lsmio variants most`. The `all` keyword is a synonym (`VariantCatalogue.allVariants()` in Python and `LSMIO_ALL_VARIANTS` in shell).
 >
-> Variants 1 through 25 (except `autotune`) explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference.
+> `default` and variants 1 through 24 explicitly pass `--lsmio-no-autotune` (in both lsmiotool and bmtool) to ensure ablation study isolation without automatic parameter interference; `autotune` passes `--lsmio-autotune`.
 >
-> **Buffer Sizing Standard**: In accordance with experimental rigor, read-path optimization variants (`pread`, `mmap`, `mmap-vsort`, `mmap-btree`, etc.) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.
+> **Buffer Sizing Standard**: In accordance with experimental rigor, read-path variants (`no-pread`, `mmap`, `mmap-vsort`, `mmap-btree`, etc.) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.

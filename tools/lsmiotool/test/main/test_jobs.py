@@ -209,7 +209,7 @@ class TestLSMIOBenchmark(unittest.TestCase):
     @patch("builtins.open", create=True)
     def test_run(self, mock_open: Mock, mock_run: Mock) -> None:
         bench = jobs.LSMIOBenchmark(
-            bm_setup="ADIOS-M",
+            bm_setup="ADIOS",
             sb_bin="/bin",
             dirs_bm_base="/base",
             lsm_dir_output="/out",
@@ -226,9 +226,9 @@ class TestLSMIOBenchmark(unittest.TestCase):
     def test_run_plugin_passes_lsmio_plugin(
         self, mock_open: Mock, mock_run: Mock
     ) -> None:
-        # PLUGIN-M runs bm_adios with the LSMIO engine plugin; ADIOS-M runs plain ADIOS2
+        # PLUGIN runs bm_adios with the LSMIO engine plugin; ADIOS runs plain ADIOS2
         mock_open.return_value.__enter__.return_value = MagicMock()
-        for setup, expected in (("PLUGIN-M", True), ("ADIOS-M", False)):
+        for setup, expected in (("PLUGIN", True), ("ADIOS", False)):
             bench = jobs.LSMIOBenchmark(
                 bm_setup=setup,
                 sb_bin="/bin",

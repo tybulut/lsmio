@@ -1430,18 +1430,14 @@ class RunPlanner:
 
     DEFAULT_SETUPS: Dict[str, str] = {
         "ior": "BASE",
-        "lsmio": "NATIVE-M",
+        "lsmio": "NATIVE",
         "lmp": "LSMIO",
     }
 
     ALLOWED_SETUPS: Dict[str, Set[str]] = {
         "ior": {"BASE", "HDF5", "HDF5-C", "COLLECTIVE", "FSYNC", "REVERSE"},
         "lsmio": {
-            "NATIVE-M",
-            "ADIOS-M",
-            "PLUGIN-M",
-            "ROCKSDB-M",
-            "LEVELDB-M",
+            "NATIVE",
             "ADIOS",
             "PLUGIN",
             "ROCKSDB",
@@ -4014,7 +4010,7 @@ class RunOrchestrator:
                 f"Benchmark executable for arm '{f_arm.label}' is not usable: {f_err}.{f_hint}"
             ) from f_err
 
-        if f_arm.setup in ("PLUGIN", "PLUGIN-M"):
+        if f_arm.setup == "PLUGIN":
             from lsmiotool.lib.site import findAdiosPluginLibrary
 
             if findAdiosPluginLibrary(f_profile.install_prefix) is None:
@@ -4853,7 +4849,7 @@ class RunOrchestrator:
             f_req = f_plan.request
             f_arm = RunArm(
                 str(f_arm_doc.get("label") or f_run_id),
-                str(f_arm_doc.get("setup") or f_req.setup or "NATIVE-M"),
+                str(f_arm_doc.get("setup") or f_req.setup or "NATIVE"),
                 f_arm_doc.get("variant", f_req.variant),
                 f_arm_doc.get("arm_id"),
                 f_arm_doc.get("role"),

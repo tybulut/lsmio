@@ -74,14 +74,14 @@ Arguments:
   <scale>       Supported scales: local, bake, small, large, variants
                 ('baseline' is accepted as the deprecated spelling of 'variants')
   <variant>     Optional variant configuration for 'lsmio variants'
-                (e.g. footer, footer-btree, wbuf-512m). Only supported for 'lsmio variants'.
+                (e.g. btree, mmap-btree, wbuf-512m). Only supported for 'lsmio variants'.
 
 Options:
   --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
                 Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
   --setup <name>
-                LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE-M;
+                LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE;
                 for an lsmiotool run, the run's own setup).
   --source <path>
                 What to archive: an lsmiotool run root, or bmtool's live outputs directory
@@ -115,14 +115,14 @@ Arguments:
                 Each scale point is one job running the backends one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
   <variants>    Optional single variant, comma-separated list of variants
-                (e.g. footer,manoff,autotune), 'most' for 26 canonical variants,
-                or 'all' for all registered matrix variants.
+                (e.g. btree,no-manoff,autotune), or 'most' or 'all'
+                for the baseline and all 25 variants.
                 Only supported for 'lsmio variants'.
 
 Options:
   --ssd         Use SSD storage class (default: HDD).
   --setup <name>
-                Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE-M, ROCKSDB-M, LSMIO).
+                Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE, ROCKSDB, LSMIO).
                 Note: '--setup=value' syntax is strictly rejected; use '--setup <name>'.
   --archive     Archive each scale point when its job ends. On by default for 'backends', for
                 'variants' with one or more variants and for --versioned; a 'variants' run of
@@ -260,7 +260,7 @@ class RunCliParser:
 
     Options:
         --ssd: Storage class SSD (default HDD)
-        --setup <name>: Explicit environment / benchmark profile (e.g. BASE, NATIVE-M, LSMIO).
+        --setup <name>: Explicit environment / benchmark profile (e.g. BASE, NATIVE, LSMIO).
             Note: '--setup=value' is strictly rejected; use '--setup <name>'.
 
     Global Options:
@@ -671,6 +671,14 @@ class RunCliParser:
             and f_env.get("BM_SETUP", "").strip()
         ):
             f_setup_name = f_env["BM_SETUP"].strip().upper()
+        if f_benchmark == "lsmio" and f_setup_name is not None:
+            from lsmiotool.lib.benchmarks import LsmioAdapter
+
+            if f_setup_name not in LsmioAdapter.ALLOWED_SETUPS:
+                raise RunCliParseError(
+                    f"Invalid setup: {f_setup_name!r}. Must be one of: "
+                    f"{list(LsmioAdapter.ALLOWED_SETUPS)}"
+                )
         if (
             f_wallhour is None
             and f_walltime is None
@@ -1026,7 +1034,7 @@ class ArchiveCliParser:
     Options:
         --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
-        --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE-M;
+        --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE;
             for an lsmiotool run, the run's own setup).
         --source <path>: What to archive: an lsmiotool run root or a bmtool outputs
             directory (default: resolved from the benchmark root, see ArchiveMain).

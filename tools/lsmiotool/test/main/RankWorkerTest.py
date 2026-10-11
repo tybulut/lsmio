@@ -431,7 +431,7 @@ class RankWorkerTest(unittest.TestCase):
     def testSameRankAcrossAllSixCombinations(self) -> None:
         """F-04a: Prove rank 0 executes sequentially across all six combinations without claim collisions."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_mock_runner = MockProcessRunner(
             f_default_returncode=0,
@@ -470,7 +470,7 @@ class RankWorkerTest(unittest.TestCase):
             f_log_path = f_layout.pointRankLogPath("00-tasks-1", 0, f_combo_name)
             f_out_path = os.path.join(
                 f_layout.pointDataSubdir("00-tasks-1", f_stripe, f_block),
-                "lsmio-rank-0-native-m.db",
+                "lsmio-rank-0-native.db",
             )
 
             f_claim_paths.append(f_claim_path)
@@ -517,7 +517,7 @@ class RankWorkerTest(unittest.TestCase):
     def testDuplicateSameRankCombinationRaceOneWinner(self) -> None:
         """F-04a: Prove duplicate rank worker for identical rank and combination has exactly one winner."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_mock_runner = MockProcessRunner(f_default_returncode=0)
         f_env = {"LSMIO_RANK": "0", "LSMIO_NODE": "node0"}
@@ -551,7 +551,7 @@ class RankWorkerTest(unittest.TestCase):
     def testCombinationValidatedBeforeClaim(self) -> None:
         """F-04a: Prove combination descriptor is strictly validated against planned matrix before any claim lock is created."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_mock_runner = MockProcessRunner(f_default_returncode=0)
         f_env = {"LSMIO_RANK": "0", "LSMIO_NODE": "node0"}
@@ -601,7 +601,7 @@ class RankWorkerTest(unittest.TestCase):
     def testClaimLogOutputResultAllCombinationPrivate(self) -> None:
         """F-04a: Prove all claim locks, logs, outputs, and results are combination-private and rank-private."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="bake", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="bake", f_setup="NATIVE"
         )
         f_adapter = LsmioAdapter()
         f_point = ScalePoint(f_tasks=4, f_ppn=1, f_nodes=4)
@@ -618,7 +618,7 @@ class RankWorkerTest(unittest.TestCase):
 
         for f_c in f_combos:
             f_spec = f_adapter.createLaunchSpec(
-                f_request=RunRequest("lsmio", "bake", f_setup="NATIVE-M"),
+                f_request=RunRequest("lsmio", "bake", f_setup="NATIVE"),
                 f_combination=f_c,
                 f_point=f_point,
                 f_executable="bm_native",
@@ -647,7 +647,7 @@ class RankWorkerTest(unittest.TestCase):
                 )
                 self.assertTrue(
                     f_bound.output_path.endswith(
-                        f"data/c{f_c.stripe_count}/b{f_c.block_size}/lsmio-rank-{f_rank}-native-m.db"
+                        f"data/c{f_c.stripe_count}/b{f_c.block_size}/lsmio-rank-{f_rank}-native.db"
                     )
                 )
 
@@ -673,7 +673,7 @@ class RankWorkerTest(unittest.TestCase):
     def testRankIdentityMissingOrOutOfBoundsValidatedBeforeClaim(self) -> None:
         """Prove rank identity is validated before any claim lock is created."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_mock_runner = MockProcessRunner(f_default_returncode=0)
 
@@ -712,7 +712,7 @@ class RankWorkerTest(unittest.TestCase):
         f_point = ScalePoint(f_tasks=4, f_ppn=1, f_nodes=4)
         f_adapter = LsmioAdapter()
         f_launch_spec = f_adapter.createLaunchSpec(
-            f_request=RunRequest("lsmio", "bake", f_setup="NATIVE-M"),
+            f_request=RunRequest("lsmio", "bake", f_setup="NATIVE"),
             f_combination=Combination(16, "8M", 16, 8388608, 1024, 128),
             f_point=f_point,
             f_executable="bm_native",
@@ -808,7 +808,7 @@ class RankWorkerTest(unittest.TestCase):
     def testChildLogResultOrderAndStatus(self) -> None:
         """Test child process execution, output log capture, and rank result record creation."""
         _, f_manifest_path, f_layout = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_mock_runner = MockProcessRunner(
             f_default_returncode=0,
@@ -983,7 +983,7 @@ class RankWorkerTest(unittest.TestCase):
         _, f_manifest_path, f_layout = self._createManifest(
             f_target="lsmio",
             f_scale="local",
-            f_setup="PLUGIN-M",
+            f_setup="PLUGIN",
             f_run_id="test-run-inst",
         )
         f_mock_runner = MockProcessRunner(f_default_returncode=0)

@@ -50,7 +50,7 @@ from lsmiotool.lib.worker import AllocationControllerError, AllocationGroupRunne
 
 
 class ArmResolutionTest(unittest.TestCase):
-    def _group(self, f_request: RunRequest, f_setup: str = "NATIVE-M") -> Any:
+    def _group(self, f_request: RunRequest, f_setup: str = "NATIVE") -> Any:
         return resolveArmGroup(
             f_request, f_setup, "/opt/usr", f_version_tag="br-1a2b3c4"
         )
@@ -60,6 +60,12 @@ class ArmResolutionTest(unittest.TestCase):
         self.assertEqual(f_group.kind, "single")
         self.assertEqual(len(f_group.arms), 1)
         self.assertFalse(f_group.archive)
+
+    def testRemovedSetupNamesAreRejected(self) -> None:
+        for f_setup in ("NATIVE-M", "rocksdb-m", "ENV"):
+            with self.subTest(setup=f_setup):
+                with self.assertRaises(ArmError):
+                    self._group(RunRequest("lsmio", "small"), f_setup)
 
     def testIorNeverArchives(self) -> None:
         f_group = self._group(RunRequest("ior", "local", f_archive=True), "BASE")
@@ -74,7 +80,9 @@ class ArmResolutionTest(unittest.TestCase):
 
     def testPairedVariants(self) -> None:
         f_group = self._group(
-            RunRequest("lsmio", "variants", f_variants=["default", "footer", "manoff"])
+            RunRequest(
+                "lsmio", "variants", f_variants=["default", "no-footer", "no-manoff"]
+            )
         )
         self.assertEqual(f_group.kind, "paired")
         self.assertTrue(f_group.archive)
@@ -82,13 +90,15 @@ class ArmResolutionTest(unittest.TestCase):
             [(f_a.label, f_a.variant, f_a.arm_id, f_a.role) for f_a in f_group.arms],
             [
                 ("baseline", None, None, "base"),
-                ("footer", "footer", "native-footer", "run"),
-                ("manoff", "manoff", "native-manoff", "run"),
+                ("no-footer", "no-footer", "native-no-footer", "run"),
+                ("no-manoff", "no-manoff", "native-no-manoff", "run"),
             ],
         )
         self.assertFalse(
             self._group(
-                RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False)
+                RunRequest(
+                    "lsmio", "variants", f_variants=["no-footer"], f_archive=False
+                )
             ).archive
         )
 
@@ -122,7 +132,7 @@ class ArmResolutionTest(unittest.TestCase):
         self.assertTrue(f_group.archive)
         self.assertEqual(
             [(f_a.setup, f_a.arm_id) for f_a in f_group.arms],
-            [("ADIOS-M", "adios"), ("LEVELDB-M", "leveldb")],
+            [("ADIOS", "adios"), ("LEVELDB", "leveldb")],
         )
         with self.assertRaises(ArmError):
             self._group(
@@ -195,7 +205,7 @@ class ExportPointTest(unittest.TestCase):
 
     def testWritesBmtoolLayoutAndReplacesNodeDir(self) -> None:
         f_node_dir = os.path.join(
-            self.m_tmp, "archive", "outputs-native-footer:run", "2"
+            self.m_tmp, "archive", "outputs-native-no-footer:run", "2"
         )
         os.makedirs(os.path.join(f_node_dir, "stale"))
         f_n = exportPoint(
@@ -204,7 +214,7 @@ class ExportPointTest(unittest.TestCase):
             self.m_sp,
             0,
             self.m_combos,
-            "native-footer",
+            "native-no-footer",
             f_node_dir,
         )
         self.assertEqual(f_n, 4)
@@ -212,7 +222,7 @@ class ExportPointTest(unittest.TestCase):
         self.assertEqual(
             sorted(os.listdir(os.path.join(f_node_dir, "2026-10-10"))),
             sorted(
-                f"out-native-footer-{f_s}-{f_b}-2026-10-10-node{f_r}-0.txt"
+                f"out-native-no-footer-{f_s}-{f_b}-2026-10-10-node{f_r}-0.txt"
                 for f_s, f_b in ((16, "8M"), (4, "64K"))
                 for f_r in range(2)
             ),
@@ -221,7 +231,7 @@ class ExportPointTest(unittest.TestCase):
             os.path.join(
                 f_node_dir,
                 "2026-10-10",
-                "out-native-footer-16-8M-2026-10-10-node1-0.txt",
+                "out-native-no-footer-16-8M-2026-10-10-node1-0.txt",
             )
         ) as f_f:
             self.assertEqual(f_f.read(), "write,2,1,1,1,1,10\n")

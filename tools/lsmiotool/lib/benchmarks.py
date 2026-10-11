@@ -978,13 +978,9 @@ class LsmioAdapter(BenchmarkAdapter):
     """Adapter for constructing pure exact LSMIO late-binding rank commands and probing LSMIO capabilities."""
 
     TARGET: str = "lsmio"
-    DEFAULT_SETUP: str = "NATIVE-M"
+    DEFAULT_SETUP: str = "NATIVE"
     ALLOWED_SETUPS: Tuple[str, ...] = (
-        "NATIVE-M",
-        "ADIOS-M",
-        "PLUGIN-M",
-        "ROCKSDB-M",
-        "LEVELDB-M",
+        "NATIVE",
         "ADIOS",
         "PLUGIN",
         "ROCKSDB",
@@ -992,17 +988,15 @@ class LsmioAdapter(BenchmarkAdapter):
         "MANAGER",
     )
 
+    # Every setup runs under MPI with barriers around its timed phases
+    MPI_FLAGS: Tuple[str, ...] = ("-m", "-g")
+
     EXECUTABLE_MAP: Dict[str, str] = {
         "NATIVE": "bm_native",
-        "NATIVE-M": "bm_native",
         "ADIOS": "bm_adios",
-        "ADIOS-M": "bm_adios",
         "PLUGIN": "bm_adios",
-        "PLUGIN-M": "bm_adios",
         "ROCKSDB": "bm_rocksdb",
-        "ROCKSDB-M": "bm_rocksdb",
         "LEVELDB": "bm_leveldb",
-        "LEVELDB-M": "bm_leveldb",
         "MANAGER": "bm_manager",
     }
 
@@ -1276,10 +1270,9 @@ class LsmioAdapter(BenchmarkAdapter):
         f_exe = str(f_spec.executable).strip()
         f_argv: List[str] = [f_exe]
 
-        if f_setup.endswith("-M"):
-            f_argv.extend(["-m", "-g"])
+        f_argv.extend(self.MPI_FLAGS)
 
-        if f_setup in ("PLUGIN", "PLUGIN-M"):
+        if f_setup == "PLUGIN":
             f_argv.append("--lsmio-plugin")
 
         if f_variant_rec.flags:
@@ -1315,7 +1308,7 @@ class LsmioAdapter(BenchmarkAdapter):
     def buildCommand(
         self,
         f_executable: str,
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_block_size: Optional[str] = None,
         f_working_dir: str = "/tmp",
         f_output_path: Optional[str] = None,
@@ -1448,9 +1441,8 @@ class LsmioAdapter(BenchmarkAdapter):
             f_norm_stderr = f_norm_stdout
 
         f_argv: List[str] = [f_norm_executable]
-        if f_norm_setup.endswith("-M"):
-            f_argv.extend(["-m", "-g"])
-        if f_norm_setup in ("PLUGIN", "PLUGIN-M"):
+        f_argv.extend(self.MPI_FLAGS)
+        if f_norm_setup == "PLUGIN":
             f_argv.append("--lsmio-plugin")
         if f_variant_rec.flags:
             f_argv.extend(f_variant_rec.flags)

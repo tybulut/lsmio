@@ -187,7 +187,7 @@ sys.exit(0)
         self,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_run_id: Optional[str] = None,
     ) -> Tuple[RunPlan, ArtifactLayout, str]:
         """Helper to create a canonical RunPlan, allocate run on disk, and return plan, layout, manifest path."""
@@ -261,7 +261,7 @@ sys.exit(0)
     def testSourceWorkerRunsOneRealPointAcrossExactSixCombinations(self) -> None:
         """F-04b: Proves real private worker subprocess completes one scale point across all six combinations."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point_id = "00-tasks-1"
         f_point = f_plan.scale_points[0]
@@ -389,7 +389,7 @@ sys.exit(0)
             f_data_dir = f_layout.pointDataSubdir(
                 f_point, f_stripe, f_block, f_ordinal=0
             )
-            f_out_path = os.path.join(f_data_dir, "lsmio-rank-0-native-m.db")
+            f_out_path = os.path.join(f_data_dir, "lsmio-rank-0-native.db")
             self.assertIn(f_out_path, f_argv)
             self.assertTrue(os.path.isdir(f_data_dir))
             self.assertEqual(os.listdir(f_data_dir), [])
@@ -447,7 +447,7 @@ sys.exit(0)
     def testDuplicateSameRankCombinationSubprocessLoser(self) -> None:
         """F-04b: Prove second duplicate rank worker subprocess fails closed with RankClaimError and preserves lock."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point_id = "00-tasks-1"
         f_combo_name = "c16_b8M"
@@ -540,7 +540,7 @@ sys.exit(0)
     def testOneRankFailureFailsCombinationAndLaterCombosRun(self) -> None:
         """F-04b: A child benchmark failure fails its combination; later combinations still run (bmtool parity)."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point_id = "00-tasks-1"
         f_point = f_plan.scale_points[0]
@@ -620,7 +620,7 @@ sys.exit(0)
     def testMissingMalformedResultFailsLauncherControllerRun(self) -> None:
         """F-04b: Proves missing or malformed rank evidence fails the combination."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_evidence_store = EvidenceStore(f_layout, f_plan=f_plan)
@@ -657,7 +657,7 @@ sys.exit(0)
 
         # 2. Corrupt / Malformed Rank Result Case
         f_plan2, f_layout2, f_manifest_path2 = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point2 = f_plan2.scale_points[0]
         f_evidence_store2 = EvidenceStore(f_layout2, f_plan=f_plan2)
@@ -697,7 +697,7 @@ sys.exit(0)
     def testSignalAndTimeoutChildHandling(self) -> None:
         """F-04b: Proves signal termination of child benchmark records signal number in rank evidence and fails the controller run."""
         f_plan, f_layout, f_manifest_path = self._createManifest(
-            f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point_id = "00-tasks-1"
         f_point = f_plan.scale_points[0]

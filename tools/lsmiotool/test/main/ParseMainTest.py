@@ -78,7 +78,7 @@ class ParseMainTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_ssd: bool = False,
     ) -> RunPlan:
         f_req = RunRequest(
@@ -109,7 +109,7 @@ class ParseMainTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_ssd: bool = False,
         f_base_dir: str = "",
     ) -> Tuple[str, RunPlan]:
@@ -218,7 +218,7 @@ class ParseMainTest(unittest.TestCase):
         """Tests successful end-to-end execution of ParseMain across LSMIO, IOR, and LAMMPS returning exit code 0."""
         # 1. LSMIO end-to-end parse
         f_run_root_lsm, f_plan_lsm = self._setupSucceededRun(
-            "run-e2e-lsm-001", "lsmio", "local", "NATIVE-M"
+            "run-e2e-lsm-001", "lsmio", "local", "NATIVE"
         )
         self._writeMockLogs(f_run_root_lsm, f_plan_lsm)
         f_out_dir_lsm = os.path.join(self.m_temp_dir, "out_lsm")
@@ -477,7 +477,7 @@ class ParseMainTest(unittest.TestCase):
         """Tests that missing or malformed output log files return exit code 5."""
         # 1. Missing log files in a succeeded LSMIO run
         f_run_root_lsm, _ = self._setupSucceededRun(
-            "run-ext-err-lsm-001", "lsmio", "local", "NATIVE-M"
+            "run-ext-err-lsm-001", "lsmio", "local", "NATIVE"
         )
         # Do NOT write mock logs
         f_inst1 = ParseMain(f_run_root_lsm, "--output-dir", self.m_temp_dir)

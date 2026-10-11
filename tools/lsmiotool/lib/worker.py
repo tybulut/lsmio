@@ -3815,9 +3815,9 @@ class RankWorker:
 
         f_lsmio_adapter = LsmioAdapter()
         f_setup = (
-            f_manifest.plan.get("setup", "NATIVE-M")
+            f_manifest.plan.get("setup", "NATIVE")
             if hasattr(f_manifest, "plan") and isinstance(f_manifest.plan, dict)
-            else (f_manifest.request.setup or "NATIVE-M")
+            else (f_manifest.request.setup or "NATIVE")
         )
         f_exe_name = f_lsmio_adapter.getExecutableName(f_setup)
         if hasattr(f_manifest.site.executables, "getExecutable"):

@@ -47,7 +47,7 @@ class ArchiveRequest:
     """Immutable parsed and validated archive request value object.
 
     setup: LSMIO setup naming the arm (bmtool BM_SETUP); None means BM_SETUP from
-    the environment, else NATIVE-M (or, for an lsmiotool run root, the run's own).
+    the environment, else NATIVE (or, for an lsmiotool run root, the run's own).
     source: explicit source (an lsmiotool run root or a bmtool outputs directory);
     None means resolve it from the benchmark root.
     """
@@ -447,7 +447,7 @@ class ArchiveEngine:
     @classmethod
     def resolveArmId(
         cls,
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_variant: Optional[str] = None,
     ) -> str:
         """Derives mechanical arm identifier string matching bmtool archive.in.sh.
@@ -457,11 +457,8 @@ class ArchiveEngine:
         from lsmiotool.lib.variants import VariantCatalogue
 
         if not isinstance(f_setup, str) or not f_setup.strip():
-            f_setup = "NATIVE-M"
-        clean_setup = f_setup.strip()
-        if clean_setup.lower() == "lsmio":
-            clean_setup = "LSMIO-M"
-        return VariantCatalogue.getInfix(clean_setup, f_variant)
+            f_setup = "NATIVE"
+        return VariantCatalogue.getInfix(f_setup.strip(), f_variant)
 
     @classmethod
     def resolvePairTargetDirectories(

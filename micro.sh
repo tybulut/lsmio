@@ -90,7 +90,7 @@ fi
 if [ "$RUN_ROCKSDB" = true ]; then
     echo "Running RocksDB benchmark..."
     ~/src/usr/bin/bm_rocksdb \
-        -v -g -o ${BM_DIR}/lsmio-rocksdb-m.db \
+        -v -g -o ${BM_DIR}/lsmio-rocksdb.db \
         --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
 #        --lsmio-batch-size 1 \
 fi
@@ -98,7 +98,7 @@ fi
 if [ "$RUN_LEVELDB" = true ]; then
     echo "Running LevelDB benchmark..."
     ~/src/usr/bin/bm_leveldb \
-        -v -g -o ${BM_DIR}/lsmio-leveldb-m.db \
+        -v -g -o ${BM_DIR}/lsmio-leveldb.db \
         --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
 #        --lsmio-batch-size 1 \
 fi
@@ -106,6 +106,6 @@ fi
 if [ "$RUN_NATIVE" = true ]; then
     echo "Running Native benchmark..."
     ~/src/usr/bin/bm_native \
-        -v -g -o ${BM_DIR}/lsmio-native-m.db \
+        -v -g -o ${BM_DIR}/lsmio-native.db \
         --lsmio-ts 1024 --lsmio-bs 1024 --key-count 2048 -i "$ITER"
 fi

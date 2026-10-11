@@ -695,7 +695,7 @@ class EndToEndRunTest(unittest.TestCase):
     def testLsmioUniqueRanks(self) -> None:
         """2. testLsmioUniqueRanks: Runs LSMIO multi-rank scale, verifies rank worker launching, individual rank claim locks, unique rank results per combination, and controller result validation."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE"
         )
         f_fake_runner = FakeSchedulerCommandRunner()
 
@@ -2350,7 +2350,7 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(len(f_view_ior_ssd.point_states), 4)
 
         # 2. LSMIO on PBS (Isambard Profile) - Multi-rank & Storage setups
-        # --- HDD: LSMIO bake with NATIVE-M setup ---
+        # --- HDD: LSMIO bake with NATIVE setup ---
         f_runner_lsmio = FakeSchedulerCommandRunner()
         f_runner_lsmio.m_submit_job_ids = [
             "20101.isambard-pbs",
@@ -2388,7 +2388,7 @@ class EndToEndRunTest(unittest.TestCase):
         f_runner_lsmio.m_on_submit_callback = on_submit_lsmio
 
         f_view_lsmio = f_orch_lsmio.execute(
-            f_request=RunRequest("lsmio", "bake", f_ssd=False, f_setup="NATIVE-M"),
+            f_request=RunRequest("lsmio", "bake", f_ssd=False, f_setup="NATIVE"),
             f_site=self.m_isambard_profile,
             f_worker_executable=self.m_worker_path,
         )

@@ -601,14 +601,14 @@ print("LAZY_IMPORT_OK")
             "lsmio",
             "small",
             ssd=True,
-            setup="NATIVE-M",
+            setup="NATIVE",
             f_orchestrator_factory=mock_factory,
             f_worker_validator=f_mock_validator,
         )
         self.assertEqual(f_run_main_pos.request.target, "lsmio")
         self.assertEqual(f_run_main_pos.request.scale, "small")
         self.assertTrue(f_run_main_pos.request.ssd)
-        self.assertEqual(f_run_main_pos.request.setup, "NATIVE-M")
+        self.assertEqual(f_run_main_pos.request.setup, "NATIVE")
 
         # 3. Test non-zero, 130, and 143 statuses
         for f_expected_status in (1, 130, 143):
@@ -983,7 +983,9 @@ print("LAZY_IMPORT_OK")
 
         # 4. Default setups
         self.assertIn("BASE", f_readme)
-        self.assertIn("NATIVE-M", f_readme)
+        self.assertIn("default setup: `NATIVE`", f_readme)
+        self.assertIn("`NATIVE` (default)", f_readme)
+        self.assertNotIn("`NATIVE-M` (default)", f_readme)
         self.assertIn("LSMIO", f_readme)
 
         # 5. PBS directives: walltime=06:00:00, -m abe, -q arm, select=, pmem=8G, pvmem=8G
@@ -1091,8 +1093,8 @@ print("LAZY_IMPORT_OK")
             self.assertIn(f_scale, RUN_HELP_TEXT)
             self.assertIn(f_scale, LSMIOTOOL_HELP)
 
-        for f_setup in ("BASE", "NATIVE-M", "LSMIO"):
-            self.assertIn(f_setup, f_readme)
+        for f_setup in ("BASE", "NATIVE", "LSMIO"):
+            self.assertIn(f"`{f_setup}`", f_readme)
             self.assertIn(f_setup, RUN_HELP_TEXT)
 
         # 2. Syntax rules: --setup <name> accepted, --setup=value strictly rejected

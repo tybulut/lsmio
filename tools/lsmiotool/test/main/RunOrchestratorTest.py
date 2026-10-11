@@ -2086,7 +2086,7 @@ class RunOrchestratorTest(unittest.TestCase):
         self.m_fake_runner.m_on_submit_callback = on_sub_lsmio
 
         f_view_lsmio = f_orch_lsmio.execute(
-            RunRequest("lsmio", "local", f_setup="NATIVE-M"),
+            RunRequest("lsmio", "local", f_setup="NATIVE"),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
         )
@@ -2891,7 +2891,7 @@ class RunOrchestratorTest(unittest.TestCase):
         f_fake_runner.m_submit_job_ids = ["9001"]
 
         f_req = RunRequest(
-            "lsmio", "baseline", f_variants=["footer", "manoff"], f_archive=False
+            "lsmio", "baseline", f_variants=["no-footer", "no-manoff"], f_archive=False
         )
         f_view = f_orch.execute(
             f_req,
@@ -2903,11 +2903,11 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(len(f_fake_runner.m_submit_calls), 1)
         self.assertEqual(
             [f_r["arm"].label for f_r in f_orch.groupRuns],
-            ["baseline", "footer", "manoff"],
+            ["baseline", "no-footer", "no-manoff"],
         )
         self.assertEqual(
             [f_r["plan"].request.variant for f_r in f_orch.groupRuns],
-            [None, "footer", "manoff"],
+            [None, "no-footer", "no-manoff"],
         )
         (f_script,) = self._submittedScripts(f_fake_runner)
         f_tail = f_script.strip().splitlines()[-1]
@@ -2933,21 +2933,24 @@ class RunOrchestratorTest(unittest.TestCase):
             f_poll_interval=0.01,
         )
         f_fake_runner.m_on_submit_callback = self._groupOnSubmit(
-            f_orch, f_fail_labels=("footer",)
+            f_orch, f_fail_labels=("no-footer",)
         )
         f_fake_runner.m_submit_job_ids = ["9002"]
 
         f_orch.execute(
             RunRequest(
-                "lsmio", "variants", f_variants=["footer", "manoff"], f_archive=False
+                "lsmio",
+                "variants",
+                f_variants=["no-footer", "no-manoff"],
+                f_archive=False,
             ),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
         )
         f_states = {f_r["arm"].label: f_r["view"].state for f_r in f_orch.groupRuns}
         self.assertEqual(f_states["baseline"], OverallRunState.SUCCEEDED)
-        self.assertEqual(f_states["manoff"], OverallRunState.SUCCEEDED)
-        self.assertNotEqual(f_states["footer"], OverallRunState.SUCCEEDED)
+        self.assertEqual(f_states["no-manoff"], OverallRunState.SUCCEEDED)
+        self.assertNotEqual(f_states["no-footer"], OverallRunState.SUCCEEDED)
         self.assertEqual(f_orch.exitCode, 1)
 
     def testResumptionSkipsExistingArchive(self) -> None:
@@ -2964,14 +2967,14 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_reporter=f_reporter,
             )
 
-            f_arm_id = ArchiveEngine.resolveArmId("NATIVE-M", "footer")
+            f_arm_id = ArchiveEngine.resolveArmId("NATIVE", "no-footer")
             os.makedirs(os.path.join(f_tmpdir, f"outputs-{f_arm_id}:run"))
 
             f_view = f_orch.execute(
                 RunRequest(
                     "lsmio",
                     "baseline",
-                    f_variants=["footer"],
+                    f_variants=["no-footer"],
                     f_resume=True,
                     f_out_dir=f_tmpdir,
                 ),
@@ -2985,7 +2988,7 @@ class RunOrchestratorTest(unittest.TestCase):
             self.assertEqual(f_orch.exitCode, 0)
             self.assertTrue(
                 any(
-                    "[RESUME] Skipping variant 'footer'" in f_l
+                    "[RESUME] Skipping variant 'no-footer'" in f_l
                     for f_l in f_reporter.lines
                 )
             )
@@ -3005,7 +3008,7 @@ class RunOrchestratorTest(unittest.TestCase):
             os.makedirs(
                 os.path.join(
                     f_tmpdir,
-                    f"outputs-{ArchiveEngine.resolveArmId('NATIVE-M', 'footer')}:run",
+                    f"outputs-{ArchiveEngine.resolveArmId('NATIVE', 'no-footer')}:run",
                 )
             )
             with (
@@ -3016,7 +3019,7 @@ class RunOrchestratorTest(unittest.TestCase):
                     RunRequest(
                         "lsmio",
                         "variants",
-                        f_variants=["footer", "manoff"],
+                        f_variants=["no-footer", "no-manoff"],
                         f_resume=True,
                         f_out_dir=f_tmpdir,
                     ),
@@ -3024,7 +3027,8 @@ class RunOrchestratorTest(unittest.TestCase):
                     f_worker_executable=self.m_worker_path,
                 )
             self.assertEqual(
-                [f_r["arm"].label for f_r in f_orch.groupRuns], ["baseline", "manoff"]
+                [f_r["arm"].label for f_r in f_orch.groupRuns],
+                ["baseline", "no-manoff"],
             )
             self.assertEqual(len(f_fake_runner.m_submit_calls), 1)
             self.assertEqual(f_orch.exitCode, 0)
@@ -3051,7 +3055,7 @@ class RunOrchestratorTest(unittest.TestCase):
                     RunRequest(
                         "lsmio",
                         "baseline",
-                        f_variants=["footer", "manoff"],
+                        f_variants=["no-footer", "no-manoff"],
                         f_out_dir=f_tmpdir,
                     ),
                     f_site=self.m_viking_profile,
@@ -3067,7 +3071,7 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_node_dirs,
                 sorted(
                     os.path.join(f"outputs-native-{f_v}:{f_role}", f_nodes)
-                    for f_v in ("footer", "manoff")
+                    for f_v in ("no-footer", "no-manoff")
                     for f_role in ("run", "base")
                 ),
             )
@@ -3078,8 +3082,10 @@ class RunOrchestratorTest(unittest.TestCase):
                 ]
                 for f_c in f_export.call_args_list
             }
-            self.assertEqual(f_infixes["outputs-native-footer:base"], "native")
-            self.assertEqual(f_infixes["outputs-native-footer:run"], "native-footer")
+            self.assertEqual(f_infixes["outputs-native-no-footer:base"], "native")
+            self.assertEqual(
+                f_infixes["outputs-native-no-footer:run"], "native-no-footer"
+            )
             self.assertEqual(f_reports.call_count, 4)
             self.assertEqual(f_orch.exitCode, 0)
 
@@ -3283,7 +3289,7 @@ class RunOrchestratorTest(unittest.TestCase):
             )
             self.assertEqual(
                 [f_r["plan"].request.setup for f_r in f_runs],
-                ["ADIOS-M", "NATIVE-M", "PLUGIN-M", "ROCKSDB-M"],
+                ["ADIOS", "NATIVE", "PLUGIN", "ROCKSDB"],
             )
             f_points = f_runs[0]["plan"].scale_points
             self.assertEqual(len(f_fake_runner.m_submit_calls), len(f_points))
@@ -3332,9 +3338,9 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_command_runner=f_fake_runner,
                 f_poll_interval=0.01,
             )
-            # manoff was still running when the job died
+            # no-manoff was still running when the job died
             f_fake_runner.m_on_submit_callback = self._groupOnSubmit(
-                f_orch, f_missing_labels=("manoff",)
+                f_orch, f_missing_labels=("no-manoff",)
             )
             with (
                 patch("lsmiotool.lib.export.exportPoint") as f_export,
@@ -3344,7 +3350,7 @@ class RunOrchestratorTest(unittest.TestCase):
                     RunRequest(
                         "lsmio",
                         "variants",
-                        f_variants=["footer", "manoff"],
+                        f_variants=["no-footer", "no-manoff"],
                         f_out_dir=f_tmpdir,
                     ),
                     f_site=self.m_viking_profile,
@@ -3352,14 +3358,15 @@ class RunOrchestratorTest(unittest.TestCase):
                 )
             f_states = {f_r["arm"].label: f_r["view"].state for f_r in f_orch.groupRuns}
             self.assertEqual(f_states["baseline"], OverallRunState.SUCCEEDED)
-            self.assertEqual(f_states["footer"], OverallRunState.SUCCEEDED)
-            self.assertEqual(f_states["manoff"], OverallRunState.FAILED)
+            self.assertEqual(f_states["no-footer"], OverallRunState.SUCCEEDED)
+            self.assertEqual(f_states["no-manoff"], OverallRunState.FAILED)
             f_dirs = sorted(
                 os.path.basename(os.path.dirname(f_c.kwargs["f_node_dir"]))
                 for f_c in f_export.call_args_list
             )
             self.assertEqual(
-                f_dirs, ["outputs-native-footer:base", "outputs-native-footer:run"]
+                f_dirs,
+                ["outputs-native-no-footer:base", "outputs-native-no-footer:run"],
             )
             self.assertEqual(f_orch.exitCode, 1)
 
@@ -3378,7 +3385,7 @@ class RunOrchestratorTest(unittest.TestCase):
             f_poll_interval=0.01,
         )
         f_orch.execute(
-            RunRequest("lsmio", "variants", f_variants=["footer", "manoff"]),
+            RunRequest("lsmio", "variants", f_variants=["no-footer", "no-manoff"]),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
         )
@@ -3506,7 +3513,7 @@ class RunOrchestratorTest(unittest.TestCase):
             patch("lsmiotool.lib.export.generateReports", return_value=True),
         ):
             f_orch.execute(
-                RunRequest("lsmio", "variants", f_variants=["footer"]),
+                RunRequest("lsmio", "variants", f_variants=["no-footer"]),
                 f_site=self.m_viking_profile,
                 f_worker_executable=self.m_worker_path,
             )
@@ -3541,7 +3548,10 @@ class RunOrchestratorTest(unittest.TestCase):
             ):
                 f_orch.execute(
                     RunRequest(
-                        "lsmio", "variants", f_variants=["footer"], f_out_dir=f_tmpdir
+                        "lsmio",
+                        "variants",
+                        f_variants=["no-footer"],
+                        f_out_dir=f_tmpdir,
                     ),
                     f_site=self.m_viking_profile,
                     f_worker_executable=self.m_worker_path,
@@ -3553,11 +3563,11 @@ class RunOrchestratorTest(unittest.TestCase):
                 self.assertEqual(f_marker["label"], f_r["arm"].label)
             self.assertEqual(
                 ArchiveEngine.findArchivedRun(f_tmpdir, f_footer["plan"].run_id),
-                os.path.join(f_tmpdir, "outputs-native-footer:run"),
+                os.path.join(f_tmpdir, "outputs-native-no-footer:run"),
             )
             self.assertEqual(
                 ArchiveEngine.findArchivedRun(f_tmpdir, f_base["plan"].run_id),
-                os.path.join(f_tmpdir, "outputs-native-footer:base"),
+                os.path.join(f_tmpdir, "outputs-native-no-footer:base"),
             )
             f_archive = ArchiveMain(["lsmio", "variants", "--dest", f_tmpdir])
             self.assertIsNone(
@@ -3584,14 +3594,14 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_poll_interval=0.01,
             )
             f_runner.m_on_submit_callback = self._groupOnSubmit(
-                f_orch, f_fail_labels=("manoff",)
+                f_orch, f_fail_labels=("no-manoff",)
             )
             with patch("lsmiotool.lib.export.exportPoint") as f_export:
                 f_orch.execute(
                     RunRequest(
                         "lsmio",
                         "variants",
-                        f_variants=["footer", "manoff"],
+                        f_variants=["no-footer", "no-manoff"],
                         f_archive=False,
                     ),
                     f_site=self.m_viking_profile,
@@ -3618,7 +3628,7 @@ class RunOrchestratorTest(unittest.TestCase):
                     ).run()
 
             self.assertEqual(archive(), 0)
-            f_pair = ["outputs-native-footer:base", "outputs-native-footer:run"]
+            f_pair = ["outputs-native-no-footer:base", "outputs-native-no-footer:run"]
             self.assertEqual(sorted(os.listdir(f_dest)), f_pair)
             # Archived points are not archived again
             self.assertEqual(archive(), 0)
@@ -3697,7 +3707,7 @@ class RunOrchestratorTest(unittest.TestCase):
         )
         f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
         f_orch.execute(
-            RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False),
+            RunRequest("lsmio", "variants", f_variants=["no-footer"], f_archive=False),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
             f_on_ready=on_ready,
@@ -3723,7 +3733,7 @@ class RunOrchestratorTest(unittest.TestCase):
         )
         f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
         f_orch.execute(
-            RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False),
+            RunRequest("lsmio", "variants", f_variants=["no-footer"], f_archive=False),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
         )
@@ -3742,7 +3752,7 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(f_result, (True, []))
         self.assertEqual(f_export.call_count, 0)
         self.assertTrue(
-            any(f_l.startswith("Not archived: arm 'footer'") for f_l in f_lines)
+            any(f_l.startswith("Not archived: arm 'no-footer'") for f_l in f_lines)
         )
 
     def testArchiveGroupRunNeverReplacesAnotherRunsBackendPoint(self) -> None:
@@ -3819,7 +3829,7 @@ class RunOrchestratorTest(unittest.TestCase):
         )
         f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
         f_orch.execute(
-            RunRequest("lsmio", "variants", f_variants=["footer"], f_archive=False),
+            RunRequest("lsmio", "variants", f_variants=["no-footer"], f_archive=False),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
             f_on_ready=on_ready,
@@ -3859,7 +3869,7 @@ class RunOrchestratorTest(unittest.TestCase):
             f_marked,
             bmtoolOutputs(
                 os.path.join(
-                    f_root, "lsmio-archive", "variants", "outputs-native-footer:run"
+                    f_root, "lsmio-archive", "variants", "outputs-native-no-footer:run"
                 )
             ),
             bmtoolOutputs(os.path.join(f_root, "lsmio", "outputs-failed", "job-1")),
@@ -3872,7 +3882,7 @@ class RunOrchestratorTest(unittest.TestCase):
                         [
                             "lsmio",
                             "variants",
-                            "footer",
+                            "no-footer",
                             "--source",
                             f_src,
                             "--dest",
@@ -3895,7 +3905,7 @@ class RunOrchestratorTest(unittest.TestCase):
         f_fake_runner.m_submit_error = "Slurm sbatch rejection"
 
         f_view = f_orch.execute(
-            RunRequest("lsmio", "baseline", f_variants=["footer", "manoff"]),
+            RunRequest("lsmio", "baseline", f_variants=["no-footer", "no-manoff"]),
             f_site=self.m_viking_profile,
             f_worker_executable=self.m_worker_path,
         )

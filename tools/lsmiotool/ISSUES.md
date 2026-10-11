@@ -19,11 +19,9 @@ Status: `[ ]` open.
 - [ ] **L1.** `--opt=value` forms rejected (`cli.py:571-588`); bmtool documents `--dest=`, `--time=`.
 - [ ] **L2.** Backend list not validated (unknown, duplicate, `adios`+`adios2`, empty) (`cli.py:371-379`
   vs `bmtool:245-266`).
-- [ ] **L3.** `NATIVE` (non-MPI) and `ENV` setups rejected (`benchmarks.py:982-993`,
-  `run.py:1435-1446`).
-- [ ] **L4.** Default variant omits `--lsmio-no-autotune` (`variants.py:647-661`); no effect today
-  (binary default is false).
-- [ ] **L5.** `.db` naming `lsmio-rank-N-native-m…` vs bmtool `lsmio-<node>-<local>-native…`.
+- [ ] **L3.** The `ENV` setup (bmtool's environment dump) is rejected (`benchmarks.py` `ALLOWED_SETUPS`,
+  `run.py` `ALLOWED_SETUPS`).
+- [ ] **L5.** `.db` naming `lsmio-rank-N-native…` vs bmtool `lsmio-<uid>-native…`.
 - [ ] **L7.** Submit-ID parsing requires `^[0-9]+$` (`scheduler.py:1229`); `id;cluster` reports
   failure while the job is queued.
 - [ ] **L8.** `ARCHER2_WORK_ROOT` override ignored (`etc/environments.json`).

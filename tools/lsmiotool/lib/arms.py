@@ -47,12 +47,12 @@ DEFAULT_VARIANT_TOKENS = (None, "", "default", "base")
 
 # Backend token -> (setup, arm ID), as in batch.in.sh's backends loop
 BACKEND_ARMS: Dict[str, Tuple[str, str]] = {
-    "adios2": ("ADIOS-M", "adios"),
-    "adios": ("ADIOS-M", "adios"),
-    "native": ("NATIVE-M", "native"),
-    "plugin": ("PLUGIN-M", "plugin"),
-    "rocksdb": ("ROCKSDB-M", "rocksdb"),
-    "leveldb": ("LEVELDB-M", "leveldb"),
+    "adios2": ("ADIOS", "adios"),
+    "adios": ("ADIOS", "adios"),
+    "native": ("NATIVE", "native"),
+    "plugin": ("PLUGIN", "plugin"),
+    "rocksdb": ("ROCKSDB", "rocksdb"),
+    "leveldb": ("LEVELDB", "leveldb"),
 }
 
 # Reference baseline binary installed by `./build.sh install:main`
@@ -137,10 +137,17 @@ def resolveArmGroup(
     """Resolve a RunRequest into the arms bmtool would run in one allocation."""
     from lsmiotool.lib.archive import ArchiveEngine
 
+    from lsmiotool.lib.benchmarks import LsmioAdapter
+
     f_target = getattr(f_request, "target", "").lower()
     f_scale = getattr(f_request, "scale", "").lower()
     f_mode = getattr(f_request, "mode", "standard")
     f_archive_flag = getattr(f_request, "archive", None)
+
+    if f_target == "lsmio" and str(f_setup).strip().upper() not in LsmioAdapter.ALLOWED_SETUPS:
+        raise ArmError(
+            f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
+        )
 
     if f_target == "lsmio" and f_mode == "backends":
         f_arms: List[RunArm] = []

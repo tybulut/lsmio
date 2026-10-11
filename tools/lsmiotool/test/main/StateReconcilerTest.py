@@ -89,7 +89,7 @@ class StateReconcilerTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
     ) -> RunPlan:
         f_req = RunRequest(
             f_target=f_target, f_scale=f_scale, f_ssd=False, f_setup=f_setup
@@ -116,7 +116,7 @@ class StateReconcilerTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
     ):
         f_plan = self._createTestPlan(
             f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup
@@ -166,7 +166,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 1: Overall success requires terminal scheduler success, complete evidence, and success marker."""
         f_run_id = "run-state-001"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1001")
@@ -232,7 +232,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 1: Asserts rank evidence completeness for all planned tasks in LSMIO setups."""
         f_run_id = "run-state-002"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="bake", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="bake", f_setup="NATIVE"
         )
         # Point 2 has tasks=4
         f_point_4 = f_plan.scale_points[2]
@@ -291,7 +291,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 2: Specific failure outranks scheduler success; missing evidence after terminal is incomplete."""
         f_run_id = "run-state-003"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1003")
@@ -340,7 +340,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 3: Confirmed cancellation applies unless an earlier independent failure exists."""
         f_run_id = "run-state-004"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1004")
@@ -361,7 +361,7 @@ class StateReconcilerTest(unittest.TestCase):
         # Scenario B: Prior Failure precedes Cancel Request
         f_run_id_b = "run-state-004b"
         f_plan_b, f_art_store_b, f_store_b = self._setupRunEnvironment(
-            f_run_id_b, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id_b, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point_b = f_plan_b.scale_points[0]
 
@@ -402,7 +402,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 5: Unconfirmed cancellation, corrupt evidence, or ambiguous causality resolves to INDETERMINATE."""
         f_run_id = "run-state-005"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1005")
@@ -448,7 +448,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 4: Interruption before marker permanently yields INTERRUPTED even if points subsequently succeed."""
         f_run_id = "run-state-006"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1006")
@@ -493,7 +493,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 4: Success marker recorded before interruption retains overall SUCCEEDED."""
         f_run_id = "run-state-007"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1007")
@@ -538,7 +538,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 5: Conflicting job handles or UNKNOWN scheduler terminal accounting yield INDETERMINATE."""
         f_run_id = "run-state-008"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1008")
@@ -574,7 +574,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Rule 6: Stale active observations cannot regress an established terminal fact."""
         f_run_id = "run-state-009"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point = f_plan.scale_points[0]
         f_handle = JobHandle("slurm", "1009")
@@ -620,7 +620,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Determinism: Reconciliation result is invariant under permutation of evidence reading."""
         f_run_id = "run-state-010"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="bake", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="bake", f_setup="NATIVE"
         )
         f_point0 = f_plan.scale_points[0]
         f_handle0 = JobHandle("slurm", "1010")
@@ -686,7 +686,7 @@ class StateReconcilerTest(unittest.TestCase):
         """Tests multi-point sequential execution lifecycle and active point tracking."""
         f_run_id = "run-state-012"
         f_plan, f_art_store, f_store = self._setupRunEnvironment(
-            f_run_id, f_target="lsmio", f_scale="bake", f_setup="NATIVE-M"
+            f_run_id, f_target="lsmio", f_scale="bake", f_setup="NATIVE"
         )
         # Point 0: SUCCEEDED
         f_p0 = f_plan.scale_points[0]
@@ -815,7 +815,7 @@ class StateReconcilerTest(unittest.TestCase):
         # 3. LSMIO Rank Identity Mismatch (rank 1 payload recorded for rank 0)
         f_run_id3 = "run-state-rank-mismatch"
         f_plan3, _, f_store3 = self._setupRunEnvironment(
-            f_run_id3, f_target="lsmio", f_scale="local", f_setup="NATIVE-M"
+            f_run_id3, f_target="lsmio", f_scale="local", f_setup="NATIVE"
         )
         f_point3 = f_plan3.scale_points[0]
         f_store3.recordSubmissionRecorded(

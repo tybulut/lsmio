@@ -144,7 +144,7 @@ class RunPlanTest(unittest.TestCase):
 
         f_lsmio_req = RunRequest(f_target="lsmio", f_scale="small")
         f_lsmio_plan = RunPlanner.createPlan(f_lsmio_req, self.m_viking_profile)
-        self.assertEqual(f_lsmio_plan.request.setup, "NATIVE-M")
+        self.assertEqual(f_lsmio_plan.request.setup, "NATIVE")
 
         f_lmp_req = RunRequest(f_target="lmp", f_scale="small")
         f_lmp_plan = RunPlanner.createPlan(f_lmp_req, self.m_viking_profile)
@@ -157,23 +157,19 @@ class RunPlanTest(unittest.TestCase):
             self.assertEqual(f_plan.request.setup, f_setup)
 
         # Explicit LSMIO setups
-        for f_setup in [
-            "NATIVE-M",
-            "ADIOS-M",
-            "PLUGIN-M",
-            "ROCKSDB-M",
-            "LEVELDB-M",
-            "ADIOS",
-            "PLUGIN",
-            "ROCKSDB",
-            "LEVELDB",
-            "MANAGER",
-        ]:
+        for f_setup in ["NATIVE", "ADIOS", "PLUGIN", "ROCKSDB", "LEVELDB", "MANAGER"]:
             f_req = RunRequest(
                 f_target="lsmio", f_scale="local", f_setup=f_setup.lower()
             )
             f_plan = RunPlanner.createPlan(f_req, self.m_viking_profile)
             self.assertEqual(f_plan.request.setup, f_setup)
+
+        # The removed '-M' setup names are rejected
+        for f_setup in ["NATIVE-M", "adios-m", "ROCKSDB-M", "ENV"]:
+            with self.subTest(setup=f_setup):
+                f_req = RunRequest(f_target="lsmio", f_scale="local", f_setup=f_setup)
+                with self.assertRaises(PlanValidationError):
+                    RunPlanner.createPlan(f_req, self.m_viking_profile)
 
         # Explicit LMP setups
         for f_setup in ["LSMIO", "LSMIO-MMAP", "FS"]:
@@ -465,7 +461,7 @@ class RunPlanTest(unittest.TestCase):
         # Setup invalid for IOR
         with self.assertRaises(PlanValidationError):
             RunPlanner.createPlan(
-                RunRequest("ior", "local", f_setup="NATIVE-M"), self.m_viking_profile
+                RunRequest("ior", "local", f_setup="NATIVE"), self.m_viking_profile
             )
 
         # Setup invalid for LSMIO
@@ -597,7 +593,7 @@ class RunPlanTest(unittest.TestCase):
 
     def testBaselinePlanShapeIsSmall(self) -> None:
         """Tasks 2.4.1 (INV-ARCH-1): Asserts baseline scale resolves to resource shape 'small'."""
-        f_req = RunRequest("lsmio", "baseline", False, "NATIVE-M")
+        f_req = RunRequest("lsmio", "baseline", False, "NATIVE")
         f_plan = RunPlanner.createPlan(f_req, self.m_viking_profile)
         self.assertEqual(len(f_plan.scale_points), 1)
         self.assertEqual(f_plan.scale_points[0], ScalePoint(8, 1, 8))
@@ -620,7 +616,7 @@ class RunPlanTest(unittest.TestCase):
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
             f_variant="footer-btree",
         )
         self.assertEqual(f_req.variant, "footer-btree")

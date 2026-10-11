@@ -1928,7 +1928,7 @@ class ArchiveMain(BaseMain):
     <root>/lsmio-archive/{variants|baseline}. An inherited BM_ARCHIVE_DEST is ignored:
     bmtool clears it before resolving the archive command's destination.
     Arm: outputs-<arm>, arm = resolveArmId(setup, variant) with setup from --setup,
-    else $BM_SETUP, else NATIVE-M (an lsmiotool run root: the run's own setup).
+    else $BM_SETUP, else NATIVE (an lsmiotool run root: the run's own setup).
     Source (--source, else resolved from the root):
       - <root>/lsmio/outputs ($LSM_DIR_OBASE) holding bmtool outputs is moved like
         bmtool does (reports generated first, an empty directory recreated);
@@ -2109,7 +2109,12 @@ class ArchiveMain(BaseMain):
         if f_scale != self.m_request.scale:
             mismatch(f"scale {f_scale!r}, not {self.m_request.scale!r}")
             return None
-        f_run_setup = str(f_req.get("setup") or "NATIVE-M").strip().upper()
+        from lsmiotool.lib.benchmarks import LsmioAdapter
+
+        f_run_setup = str(f_req.get("setup") or "NATIVE").strip().upper()
+        if f_run_setup not in LsmioAdapter.ALLOWED_SETUPS:
+            mismatch(f"setup {f_run_setup!r} is no longer supported")
+            return None
         if f_setup and f_setup != f_run_setup:
             mismatch(f"setup {f_run_setup!r}, not {f_setup!r}")
             return None
@@ -2279,7 +2284,7 @@ class ArchiveMain(BaseMain):
 
             # bmtool outputs directory: include/archive.in.sh move-on-archive
             f_arm_id = ArchiveEngine.resolveArmId(
-                f_setup=f_setup or "NATIVE-M",
+                f_setup=f_setup or "NATIVE",
                 f_variant=self.m_request.variant,
             )
             f_target_dir = ArchiveEngine.executeArchive(

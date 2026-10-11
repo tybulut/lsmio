@@ -74,9 +74,9 @@ Scales:
 Variants / Backends:
   For 'lsmio variants':
     omitted / base  Execute default baseline configuration
-    <variant>       Single variant key (e.g. footer, btree, mmap, autotune)
-    <v1>,<v2>,...   Comma-separated list (e.g. footer,manoff,autotune)
-    all             Canonical sequence of all 60 matrix variants
+    <variant>       Single variant key (e.g. btree, mmap, no-footer, autotune)
+    <v1>,<v2>,...   Comma-separated list (e.g. btree,no-manoff,autotune)
+    all / most      The baseline followed by all 25 variants
   For 'lsmio backends <scale>':
     omitted         Default canonical sequence: adios2,native,plugin,rocksdb
     <b1>,<b2>,...   Comma-separated backend list (e.g. adios2,native,plugin,rocksdb)
@@ -199,6 +199,17 @@ fi
 
 if [ "$PASS_CMD" = "archive" -a "$JOB_TOOL" != "lsmio" ]; then
   fatal_error "archive command is currently only supported for lsmio."
+fi
+
+# LSMIO setup (BM_SETUP from the environment), checked before any other argument
+: "${BM_SETUP:=NATIVE}"
+if [ "$JOB_TOOL" = "lsmio" ]; then
+  # Setup names are case-insensitive, as in lsmiotool
+  BM_SETUP=$(echo "$BM_SETUP" | tr '[:lower:]' '[:upper:]')
+  case "$BM_SETUP" in
+    NATIVE|ADIOS|PLUGIN|ROCKSDB|LEVELDB|MANAGER|ENV) ;;
+    *) fatal_error "Unknown LSMIO setup BM_SETUP=[$BM_SETUP]: use NATIVE, ADIOS, PLUGIN, ROCKSDB, LEVELDB, MANAGER or ENV" ;;
+  esac
 fi
 
 # Canonicalise the scale token: 'baseline' is the deprecated spelling of 'variants'
@@ -518,7 +529,6 @@ fi
 
 # Execute
 # Export: BM_CMD,BM_TYPE,BM_SCALE,BM_MODE,BM_BACKENDS,BM_SSD,BM_VARIANT,BM_ARCHIVE_DEST,BM_SETUP,BM_WALLHOUR_OVERRIDE,BM_RESUME
-: "${BM_SETUP:=NATIVE-M}"
 export BM_SETUP
 export BM_CMD="$PASS_CMD"
 export BM_TYPE="$JOB_TOOL"

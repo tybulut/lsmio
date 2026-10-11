@@ -4,12 +4,8 @@
 resolve_variant() {
   var="$1"
 
-  # Task 2.2.1: Strip optional backend prefix if present (e.g. native-footer -> footer)
+  # Task 2.2.1: Strip optional backend prefix if present (e.g. native-btree -> btree)
   case "$var" in
-    native-m-*|NATIVE-M-*|rocksdb-m-*|ROCKSDB-M-*|leveldb-m-*|LEVELDB-M-*|adios-m-*|ADIOS-M-*|plugin-m-*|PLUGIN-M-*)
-      var="${var#*-}"
-      var="${var#*-}"
-      ;;
     native-*|NATIVE-*|rocksdb-*|ROCKSDB-*|leveldb-*|LEVELDB-*|adios-*|ADIOS-*|plugin-*|PLUGIN-*|manager-*|MANAGER-*)
       var="${var#*-}"
       ;;
@@ -22,24 +18,55 @@ resolve_variant() {
       BM_VARIANT_FLAGS="--lsmio-no-autotune"
       ;;
     version-*)
+      # version-<branch>-<hash>-<retired variant> is rejected like the bare key (no-pread,
+      # no-footer and no-manoff end in a retired key but are valid, so they match first)
+      case "$var" in
+        version-*-*-no-pread|version-*-*-no-footer|version-*-*-no-manoff) ;;
+        version-*-*-footer-wbuf-512m-manoff-prealloc \
+        | version-*-*-footer-vsort-manoff-prealloc \
+        | version-*-*-footer-pread-manoff-pool-8 \
+        | version-*-*-wbuf-512m-manoff-prealloc \
+        | version-*-*-footer-manoff-pool-8-mmap \
+        | version-*-*-footer-btree-manoff-pread \
+        | version-*-*-footer-vsort-manoff-mmap \
+        | version-*-*-footer-btree-manoff-mmap \
+        | version-*-*-footer-map-manoff-pread \
+        | version-*-*-footer-map-manoff-mmap \
+        | version-*-*-footer-btree-prealloc \
+        | version-*-*-footer-manoff-pool-8 \
+        | version-*-*-footer-vsort-manoff \
+        | version-*-*-footer-pread-pool-8 \
+        | version-*-*-footer-pread-manoff \
+        | version-*-*-footer-pool-8-mmap \
+        | version-*-*-footer-btree-pread \
+        | version-*-*-footer-vsort-pread \
+        | version-*-*-footer-map-manoff \
+        | version-*-*-footer-wbuf-512m \
+        | version-*-*-footer-map-pread \
+        | version-*-*-footer-prealloc \
+        | version-*-*-manoff-prealloc \
+        | version-*-*-footer-wbuf-32m \
+        | version-*-*-footer-manoff \
+        | version-*-*-footer-pool-8 \
+        | version-*-*-manoff-pool-8 \
+        | version-*-*-footer-btree \
+        | version-*-*-footer-pread \
+        | version-*-*-footer-mmap \
+        | version-*-*-footer-map \
+        | version-*-*-footer \
+        | version-*-*-manoff \
+        | version-*-*-pread \
+        | version-*-*-map)
+          echo "Error: Unknown variant '$1' (retired variant)." >&2
+          return 1
+          ;;
+      esac
       BM_VARIANT_TOKENS="$var"
       BM_VARIANT_FLAGS="--lsmio-no-autotune"
-      ;;
-    footer)
-      BM_VARIANT_TOKENS="footer"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index"
       ;;
     btree)
       BM_VARIANT_TOKENS="btree"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-memtable btree"
-      ;;
-    footer-btree)
-      BM_VARIANT_TOKENS="footer-btree"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree"
-      ;;
-    map)
-      BM_VARIANT_TOKENS="map"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-memtable map"
       ;;
     vsort)
       BM_VARIANT_TOKENS="vsort"
@@ -49,18 +76,6 @@ resolve_variant() {
       BM_VARIANT_TOKENS="prealloc"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-prealloc"
       ;;
-    footer-prealloc)
-      BM_VARIANT_TOKENS="footer-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-prealloc"
-      ;;
-    manoff)
-      BM_VARIANT_TOKENS="manoff"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-manual-offset"
-      ;;
-    footer-manoff)
-      BM_VARIANT_TOKENS="footer-manoff"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset"
-      ;;
     wbuf-512m)
       BM_VARIANT_TOKENS="wbuf-512m"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wbuffer 536870912"
@@ -68,14 +83,6 @@ resolve_variant() {
     wbuf-32m)
       BM_VARIANT_TOKENS="wbuf-32m"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wbuffer 33554432"
-      ;;
-    footer-wbuf-512m)
-      BM_VARIANT_TOKENS="footer-wbuf-512m"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 536870912"
-      ;;
-    footer-btree-prealloc)
-      BM_VARIANT_TOKENS="footer-btree-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-prealloc"
       ;;
     bfilter)
       BM_VARIANT_TOKENS="bfilter"
@@ -88,18 +95,6 @@ resolve_variant() {
     mmap)
       BM_VARIANT_TOKENS="mmap"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-mmap --lsmio-no-pread"
-      ;;
-    pread)
-      BM_VARIANT_TOKENS="pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-pread"
-      ;;
-    footer-mmap)
-      BM_VARIANT_TOKENS="footer-mmap"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-mmap --lsmio-no-pread"
-      ;;
-    footer-pread)
-      BM_VARIANT_TOKENS="footer-pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pread"
       ;;
     compress)
       BM_VARIANT_TOKENS="compress"
@@ -120,102 +115,6 @@ resolve_variant() {
     batch-2048)
       BM_VARIANT_TOKENS="batch-2048"
       BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-batch-size 2048"
-      ;;
-    manoff-prealloc)
-      BM_VARIANT_TOKENS="manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-manual-offset --lsmio-prealloc"
-      ;;
-    wbuf-512m-manoff-prealloc)
-      BM_VARIANT_TOKENS="wbuf-512m-manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc"
-      ;;
-    footer-wbuf-32m)
-      BM_VARIANT_TOKENS="footer-wbuf-32m"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 33554432"
-      ;;
-    footer-pool-8)
-      BM_VARIANT_TOKENS="footer-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pool 8"
-      ;;
-    footer-wbuf-512m-manoff-prealloc)
-      BM_VARIANT_TOKENS="footer-wbuf-512m-manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-wbuffer 536870912 --lsmio-manual-offset --lsmio-prealloc"
-      ;;
-    footer-vsort-manoff-prealloc)
-      BM_VARIANT_TOKENS="footer-vsort-manoff-prealloc"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-prealloc"
-      ;;
-    footer-vsort-manoff-mmap)
-      BM_VARIANT_TOKENS="footer-vsort-manoff-mmap"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset --lsmio-mmap --lsmio-no-pread"
-      ;;
-    footer-vsort-manoff)
-      BM_VARIANT_TOKENS="footer-vsort-manoff"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-manual-offset"
-      ;;
-    footer-pool-8-mmap)
-      BM_VARIANT_TOKENS="footer-pool-8-mmap"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pool 8 --lsmio-mmap --lsmio-no-pread"
-      ;;
-    footer-manoff-pool-8-mmap)
-      BM_VARIANT_TOKENS="footer-manoff-pool-8-mmap"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8 --lsmio-mmap --lsmio-no-pread"
-      ;;
-    footer-btree-manoff-mmap)
-      BM_VARIANT_TOKENS="footer-btree-manoff-mmap"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-mmap --lsmio-no-pread"
-      ;;
-    footer-manoff-pool-8)
-      BM_VARIANT_TOKENS="footer-manoff-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-manual-offset --lsmio-pool 8"
-      ;;
-    footer-pread-pool-8)
-      BM_VARIANT_TOKENS="footer-pread-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pread --lsmio-pool 8"
-      ;;
-    footer-pread-manoff)
-      BM_VARIANT_TOKENS="footer-pread-manoff"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pread --lsmio-manual-offset"
-      ;;
-    footer-pread-manoff-pool-8)
-      BM_VARIANT_TOKENS="footer-pread-manoff-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-pread --lsmio-manual-offset --lsmio-pool 8"
-      ;;
-    footer-map-pread)
-      BM_VARIANT_TOKENS="footer-map-pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-pread"
-      ;;
-    footer-btree-pread)
-      BM_VARIANT_TOKENS="footer-btree-pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-pread"
-      ;;
-    footer-vsort-pread)
-      BM_VARIANT_TOKENS="footer-vsort-pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable vector-sort --lsmio-pread"
-      ;;
-    footer-btree-manoff-pread)
-      BM_VARIANT_TOKENS="footer-btree-manoff-pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable btree --lsmio-manual-offset --lsmio-pread"
-      ;;
-    footer-map-manoff-pread)
-      BM_VARIANT_TOKENS="footer-map-manoff-pread"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-manual-offset --lsmio-pread"
-      ;;
-    footer-map-manoff-mmap)
-      BM_VARIANT_TOKENS="footer-map-manoff-mmap"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-manual-offset --lsmio-mmap --lsmio-no-pread"
-      ;;
-    footer-map)
-      BM_VARIANT_TOKENS="footer-map"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map"
-      ;;
-    footer-map-manoff)
-      BM_VARIANT_TOKENS="footer-map-manoff"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-footer-index --lsmio-memtable map --lsmio-manual-offset"
-      ;;
-    manoff-pool-8)
-      BM_VARIANT_TOKENS="manoff-pool-8"
-      BM_VARIANT_FLAGS="--lsmio-no-autotune --lsmio-manual-offset --lsmio-pool 8"
       ;;
     vnosort)
       BM_VARIANT_TOKENS="vnosort"
@@ -274,7 +173,6 @@ resolve_variant() {
       echo "  prealloc-vsort, prealloc-btree, prealloc-wbuf-512m" >&2
       echo "  mmap-vsort, mmap-btree, pool-8-mmap" >&2
       echo "  flush, batch-2048, bfilter, wal, compress, sync, autotune" >&2
-      echo "  (Historical composite aliases are also accepted for backwards compatibility)" >&2
       return 1
       ;;
   esac
@@ -286,8 +184,8 @@ resolve_variant() {
 LSMIO_MOST_VARIANTS="default,vsort,btree,vnosort,mmap,no-pread,no-footer,no-manoff,legacy,prealloc,wbuf-512m,wbuf-32m,pool-8,prealloc-vsort,prealloc-btree,prealloc-wbuf-512m,mmap-vsort,mmap-btree,pool-8-mmap,flush,batch-2048,bfilter,wal,compress,sync,autotune"
 export LSMIO_MOST_VARIANTS
 
-# Exhaustive sequence of all 61 matrix variants (base default + all 60 registered non-empty keys)
-LSMIO_ALL_VARIANTS="default,footer,btree,footer-btree,map,vsort,prealloc,footer-prealloc,manoff,footer-manoff,wbuf-512m,wbuf-32m,footer-wbuf-512m,footer-btree-prealloc,bfilter,wal,mmap,pread,footer-mmap,footer-pread,compress,sync,pool-8,flush,batch-2048,manoff-prealloc,wbuf-512m-manoff-prealloc,footer-wbuf-32m,footer-pool-8,footer-wbuf-512m-manoff-prealloc,footer-vsort-manoff-prealloc,footer-vsort-manoff-mmap,footer-vsort-manoff,footer-pool-8-mmap,footer-manoff-pool-8-mmap,footer-btree-manoff-mmap,footer-manoff-pool-8,footer-pread-pool-8,footer-pread-manoff,footer-pread-manoff-pool-8,footer-map-pread,footer-btree-pread,footer-vsort-pread,footer-btree-manoff-pread,footer-map-manoff-pread,footer-map-manoff-mmap,footer-map,footer-map-manoff,manoff-pool-8,vnosort,no-pread,no-footer,no-manoff,legacy,prealloc-vsort,prealloc-btree,prealloc-wbuf-512m,mmap-vsort,mmap-btree,pool-8-mmap,autotune"
+# Every registered variant: the same 26 as LSMIO_MOST_VARIANTS ('most' and 'all' are synonyms)
+LSMIO_ALL_VARIANTS="$LSMIO_MOST_VARIANTS"
 export LSMIO_ALL_VARIANTS
 
 # Expands and validates a raw variant argument into a canonical comma-separated list.
@@ -357,25 +255,14 @@ bm_expand_variants() {
 # Derives mechanical arm identifier matching lsmiotool and archive.in.sh
 bm_resolve_arm_id() {
   if [ $# -ge 2 ]; then
-    _setup="${1:-NATIVE-M}"
+    _setup="${1:-NATIVE}"
     _var="$2"
   else
-    _setup="${BM_SETUP:-NATIVE-M}"
+    _setup="${BM_SETUP:-NATIVE}"
     _var="$1"
   fi
 
-  case "$_setup" in
-    *-M)
-      _base="${_setup%-M}"
-      _backend=$(echo "$_base" | tr '[:upper:]' '[:lower:]')
-      ;;
-    MANAGER)
-      _backend="manager"
-      ;;
-    *)
-      _backend="$(echo "$_setup" | tr '[:upper:]' '[:lower:]')-nompi"
-      ;;
-  esac
+  _backend=$(echo "$_setup" | tr '[:upper:]' '[:lower:]')
 
   resolve_variant "$_var" >/dev/null 2>&1 || return 1
 

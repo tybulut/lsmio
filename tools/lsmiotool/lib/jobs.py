@@ -451,7 +451,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
 
     def __init__(
         self,
-        bm_setup: str = "ADIOS-M",
+        bm_setup: str = "ADIOS",
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
         lsm_dir_output: Optional[str] = None,
@@ -492,7 +492,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
             f"{self.ds}-{self.bm_unique_uid}.txt"
         )
 
-        if self.bm_setup == "ADIOS-M":
+        if self.bm_setup == "ADIOS":
             cmd = [
                 f"{self.sb_bin}/bm_adios",
                 "-m",
@@ -508,7 +508,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
                 "--key-count",
                 sg,
             ]
-        elif self.bm_setup == "PLUGIN-M":
+        elif self.bm_setup == "PLUGIN":
             cmd = [
                 f"{self.sb_bin}/bm_adios",
                 "-m",

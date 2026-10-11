@@ -101,7 +101,7 @@ class EvidenceStoreTest(unittest.TestCase):
 
     def _createTestPlan(self, f_run_id: str) -> RunPlan:
         f_req = RunRequest(
-            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE"
         )
         f_tokens = [f"lm-{f_i:024d}" for f_i in range(1, 10)]
         f_tok_idx = 0

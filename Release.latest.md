@@ -1,3 +1,6 @@
+- Breaking: LSMIO setups lose the `-M` suffix and every setup runs under MPI (`-m -g`): `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`; the non-MPI setups and the old `-M` names (`NATIVE-M`, `native-m-<variant>`, `*-nompi` arms) are rejected by bmtool and lsmiotool
+- Breaking: 35 duplicate variants (e.g. `footer`, `map`, `manoff`, `pread`, `footer-btree`) are retired, so `variants all` runs the same 26 variants as `most`; archives named after them are still read by `parse` and `compare`
+- lsmiotool's `default` variant passes `--lsmio-no-autotune`, as bmtool's does
 - Breaking: `variants all` now runs all 61 variants; the new `most` set is the 26 canonical variants that `all` ran before
 - Breaking: benchmark archives are partitioned under `lsmio-archive/{backends/<scale>,variants,baseline}/`
 - The `baseline` scale is renamed `variants`; `baseline` still works with a deprecation warning
