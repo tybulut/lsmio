@@ -37,7 +37,7 @@ load_modules_viking2() {
   MODULES="
 GCCcore/12.3.0
 Clang/16.0.6-GCCcore-12.3.0
-CMake/3.26.3-GCCcore-12.3.0
+CMake/3.31.8-GCCcore-12.3.0
 Automake/1.16.5-GCCcore-12.3.0
 Autoconf/2.71-GCCcore-12.3.0
 Autotools/20220317-GCCcore-12.3.0
