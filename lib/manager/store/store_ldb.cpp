@@ -38,7 +38,7 @@
 
 namespace lsmio {
 
-LSMIOStoreLDB::LSMIOStoreLDB(const std::string &dbPath, const bool overWrite)
+LSMIOStoreLDB::LSMIOStoreLDB(const std::string& dbPath, const bool overWrite)
     : LSMIOStore(dbPath, overWrite) {
     leveldb::Status status;
 
@@ -121,7 +121,7 @@ void LSMIOStoreLDB::close() {
     }
 }
 
-bool LSMIOStoreLDB::get(const std::string key, std::string *value) {
+bool LSMIOStoreLDB::get(const std::string key, std::string* value) {
     leveldb::Status s;
 
     LOG(INFO) << "LSMIOStoreLDB::get(): key: " << key << std::endl;
@@ -130,11 +130,11 @@ bool LSMIOStoreLDB::get(const std::string key, std::string *value) {
 }
 
 bool LSMIOStoreLDB::getPrefix(const std::string key,
-                              std::vector<std::tuple<std::string, std::string>> *values) {
+                              std::vector<std::tuple<std::string, std::string>>* values) {
     leveldb::Status s;
 
     LOG(INFO) << "LSMIOStoreLDB::getPrefix(): key: " << key << std::endl;
-    leveldb::Iterator *it = _db->NewIterator(_rOptions);
+    leveldb::Iterator* it = _db->NewIterator(_rOptions);
 
     it->Seek(key);
     while (it->Valid() && it->key().starts_with(key)) {
@@ -148,8 +148,8 @@ bool LSMIOStoreLDB::getPrefix(const std::string key,
     return s.ok();
 }
 
-bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
-                                   const std::string value, bool flush) {
+bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key,
+                                   const std::string& value, bool flush) {
     leveldb::Status s;
     bool retValue;
     std::string origValue, finalValue;
@@ -206,6 +206,11 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string key,
     return retValue;
 }
 
+bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key, std::string&& value,
+                                   bool flush) {
+    return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
+}
+
 bool LSMIOStoreLDB::startBatch() {
     LOG(INFO) << "LSMIOStoreLDB::startBatch(): " << std::endl;
 
@@ -221,7 +226,7 @@ bool LSMIOStoreLDB::startBatch() {
 
 bool LSMIOStoreLDB::stopBatch() {
     leveldb::Status s;
-    leveldb::WriteBatch *oldBatch = _batch;
+    leveldb::WriteBatch* oldBatch = _batch;
 
     LOG(INFO) << "LSMIOStoreRDB::stopBatch(): " << std::endl;
 

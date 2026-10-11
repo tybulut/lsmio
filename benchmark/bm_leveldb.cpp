@@ -37,21 +37,21 @@ class BMLeveldb : public BMBase {
   protected:
     lsmio::LSMIOStoreLDB *_lc = nullptr;
 
-    virtual bool doRead(const std::string key, std::string *value) {
+    bool doRead(const std::string key, std::string *value) override {
         return _lc->get(key, value);
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         return _lc->put(key, value, lsmio::gConfigLSMIO.alwaysFlush);
     }
 
-    virtual int writePrepare(bool opt) {
+    int writePrepare(bool opt) override {
         _lc = new lsmio::LSMIOStoreLDB(
             genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), true);
         return 0;
     }
 
-    virtual bool doWriteFinalize() {
+    bool doWriteFinalize() override {
         _lc->writeBarrier();
         _lc->close();
         return true;
@@ -60,7 +60,7 @@ class BMLeveldb : public BMBase {
     // writeCleanup(): Skipped as LSM stores support concurrent R/W open (unlike ADIOS2 baseline).
 
     // close/open() is not needed for LSM store, but put in-place for safety as below is not measured in benchmarking anyway.
-    virtual int readPrepare(bool opt) {
+    int readPrepare(bool opt) override {
         if (_lc) {
             delete _lc;
             _lc = nullptr;
@@ -70,7 +70,7 @@ class BMLeveldb : public BMBase {
         return 0;
     }
 
-    virtual int readCleanup() {
+    int readCleanup() override {
         delete _lc;
         _lc = nullptr;
         return 0;

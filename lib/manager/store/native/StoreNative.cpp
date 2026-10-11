@@ -137,6 +137,7 @@ void LSMIOStoreNative::autoTuneParameters(uint64_t f_fs_magic) {
 
     LOG(INFO) << "[NATIVE] Tuning parameters for filesystem: " << fs_type << " (Magic: 0x"
               << std::hex << f_fs_magic << std::dec << ")";
+
     // Autotune is kept as an introspection hook but does not mutate configuration;
     // optimal engine settings (footerIndex, manualOffset, enablePread, memtable=map)
     // are now the global engine defaults in LSMIOConfig.
@@ -157,13 +158,17 @@ void LSMIOStoreNative::close() {
         return;
     }
 
-    m_flush_cv.notify_one();  // Wake up the flush thread
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+    }
+
+    m_flush_cv.notify_one();
     if (m_flush_thread.joinable()) {
         m_flush_thread.join();
     }
 
     std::unique_lock<std::mutex> lock(m_state_mutex);
-    // Final flush of any remaining in-memory data.
+
     if (!m_active_memtable->empty()) {
         m_immutable_memtables.push_back(std::move(m_active_memtable));
     }
@@ -180,7 +185,6 @@ void LSMIOStoreNative::close() {
         lock.lock();
     }
 
-    // Ensure all background file operations are finished
     if (m_sstable_manager) {
         m_sstable_manager->close();
     }
@@ -196,7 +200,7 @@ void LSMIOStoreNative::FlushWorkLoop() {
                 lock, [this] { return m_shutting_down.load() || !m_immutable_memtables.empty(); });
 
             if (m_shutting_down.load() && m_immutable_memtables.empty()) {
-                return;  // Shutdown complete
+                return;
             }
 
             if (!m_immutable_memtables.empty()) {
@@ -233,8 +237,6 @@ void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable) 
         return;
     }
 
-    // Delegate to SSTableManager
-    // We pass m_flush_buffer for reuse
     try {
         if (!m_sstable_manager || !m_sstable_manager->flushMemtable(*f_memtable, m_flush_buffer)) {
             m_bg_error.store(true, std::memory_order_release);
@@ -256,42 +258,74 @@ bool LSMIOStoreNative::stopBatch() {
     return writeBarrier();
 }
 
-bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string f_key,
-                                      const std::string f_value, bool f_flush) {
+bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& f_key,
+                                      const std::string& f_value, bool f_flush) {
     if (m_read_only) return false;
     if (m_bg_error.load(std::memory_order_relaxed)) return false;
-    std::string actual_value = f_value;
-    if (f_m_type == MutationType::Del) {
-        actual_value = MEMTABLE_TOMBSTONE;
-    }
-    // Validate what will actually be stored: for deletes that is the
-    // tombstone sentinel, not the caller-supplied value.
-    if (f_key.size() > m_max_key_len || actual_value.size() > m_max_value_len) return false;
 
-    size_t entry_size = f_key.size() + actual_value.size();
+    const bool is_del = (f_m_type == MutationType::Del);
+    const size_t val_size = is_del ? MEMTABLE_TOMBSTONE.size() : f_value.size();
+    if (f_key.size() > m_max_key_len || val_size > m_max_value_len) return false;
+
+    const size_t entry_size = f_key.size() + val_size;
 
     std::unique_lock<std::mutex> lock(m_state_mutex);
 
-    // --- 1. Check if active memtable needs to be rotated ---
     if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
         m_active_memtable->sizeBytes() > 0) {
-        // --- 2. Apply Backpressure ---
+
         if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
             m_backpressure_cv.wait(
                 lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });
         }
 
-        // --- 3. Rotate Memtables ---
         auto next_memtable = createMemtable();
         m_immutable_memtables.push_back(std::move(m_active_memtable));
         m_active_memtable = std::move(next_memtable);
 
-        // Notify the flush thread that there is new work
         m_flush_cv.notify_one();
     }
 
-    // --- 4. Write to active memtable ---
-    m_active_memtable->add(f_key, actual_value);
+    if (is_del) {
+        m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
+    } else {
+        m_active_memtable->add(f_key, f_value);
+    }
+
+    return true;
+}
+
+bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& f_key,
+                                      std::string&& f_value, bool f_flush) {
+    if (m_read_only) return false;
+    if (m_bg_error.load(std::memory_order_relaxed)) return false;
+    const bool is_del = (f_m_type == MutationType::Del);
+    const size_t val_size = is_del ? MEMTABLE_TOMBSTONE.size() : f_value.size();
+    if (f_key.size() > m_max_key_len || val_size > m_max_value_len) return false;
+    const size_t entry_size = f_key.size() + val_size;
+
+    std::unique_lock<std::mutex> lock(m_state_mutex);
+
+    if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
+        m_active_memtable->sizeBytes() > 0) {
+
+        if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
+            m_backpressure_cv.wait(
+                lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });
+        }
+
+        auto next_memtable = createMemtable();
+        m_immutable_memtables.push_back(std::move(m_active_memtable));
+        m_active_memtable = std::move(next_memtable);
+
+        m_flush_cv.notify_one();
+    }
+
+    if (is_del) {
+        m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
+    } else {
+        m_active_memtable->add(f_key, std::move(f_value));
+    }
 
     return true;
 }
@@ -312,13 +346,11 @@ bool LSMIOStoreNative::get(const std::string f_key, std::string* f_value) {
     {
         std::unique_lock<std::mutex> lock(m_state_mutex);
 
-        // --- 1. Check active memtable ---
         if (m_active_memtable->get(f_key, result)) {
             found = true;
         }
 
         if (!found) {
-            // --- 2. Check immutable memtables (Newest to oldest) ---
             for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend();
                  ++it) {
                 if ((*it)->get(f_key, result)) {
@@ -327,16 +359,14 @@ bool LSMIOStoreNative::get(const std::string f_key, std::string* f_value) {
                 }
             }
         }
-    }  // Release lock
+    }
 
-    // --- 3. Check SSTables ---
     if (!found) {
         if (m_sstable_manager->get(f_key, result)) {
             found = true;
         }
     }
 
-    // --- 4. Final result processing ---
     if (found && result != MEMTABLE_TOMBSTONE) {
         *f_value = result;
         return true;
@@ -355,16 +385,13 @@ bool LSMIOStoreNative::getPrefix(const std::string f_prefix_key,
     {
         std::unique_lock<std::mutex> lock(m_state_mutex);
 
-        // --- 1. Check active memtable ---
         m_active_memtable->scan(f_prefix_key, results, deleted_keys);
 
-        // --- 2. Immutable memtables ---
         for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend(); ++it) {
             (*it)->scan(f_prefix_key, results, deleted_keys);
         }
     }
 
-    // --- 3. Check SSTables ---
     m_sstable_manager->scan(f_prefix_key, results, deleted_keys);
 
     for (const auto& [key, value] : results) {
@@ -373,15 +400,12 @@ bool LSMIOStoreNative::getPrefix(const std::string f_prefix_key,
         }
     }
 
-    // If we found anything in map, found_any should be true
     if (!results.empty()) found_any = true;
 
     return found_any;
 }
 
 bool LSMIOStoreNative::readBarrier() {
-    // Reads themselves stay valid after a background flush failure, but the
-    // barrier contract ("everything written is now visible") does not hold.
     return !m_bg_error.load(std::memory_order_relaxed);
 }
 
@@ -396,9 +420,6 @@ bool LSMIOStoreNative::writeBarrier() {
         m_flush_cv.notify_one();
     }
 
-    // m_bg_error is part of the predicate: a flush that fails while this
-    // barrier is already waiting must wake it AND make it report failure,
-    // not satisfy it via the cleared m_flush_in_progress.
     m_barrier_cv.wait(lock, [this] {
         return m_bg_error.load(std::memory_order_relaxed) ||
                (m_immutable_memtables.empty() && !m_flush_in_progress);

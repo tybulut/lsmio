@@ -30,9 +30,13 @@
 
 import fnmatch
 import importlib
+import os
 import pkgutil
 import unittest
 
+
+# The worker pauses 3 s between benchmark steps like bmtool; tests do not need it
+os.environ.setdefault("LSMIO_STEP_SETTLE_SECONDS", "0")
 
 _TEST_FILENAME_PATTERNS = ("test*.py", "*Test.py", "Test*.py")
 _EXCLUDED_PATH_COMPONENTS = frozenset(("example", "fixtures"))

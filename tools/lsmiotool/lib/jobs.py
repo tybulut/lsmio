@@ -196,7 +196,7 @@ class JobScriptGenerator(debuggable.DebuggableObject):
     @staticmethod
     def generate_sbatch_script(
         mail_type: str = "END,FAIL",
-        mem: str = "8gb",
+        mem: str = "16gb",
         ntasks_per_node: int = 4,
         ntasks_per_socket: int = 2,
         ntasks_per_core: int = 1,
@@ -451,7 +451,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
 
     def __init__(
         self,
-        bm_setup: str = "ADIOS-M",
+        bm_setup: str = "ADIOS",
         sb_bin: Optional[str] = None,
         dirs_bm_base: Optional[str] = None,
         lsm_dir_output: Optional[str] = None,
@@ -492,7 +492,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
             f"{self.ds}-{self.bm_unique_uid}.txt"
         )
 
-        if self.bm_setup == "ADIOS-M":
+        if self.bm_setup == "ADIOS":
             cmd = [
                 f"{self.sb_bin}/bm_adios",
                 "-m",
@@ -508,7 +508,7 @@ class LSMIOBenchmark(debuggable.DebuggableObject):
                 "--key-count",
                 sg,
             ]
-        elif self.bm_setup == "PLUGIN-M":
+        elif self.bm_setup == "PLUGIN":
             cmd = [
                 f"{self.sb_bin}/bm_adios",
                 "-m",
@@ -603,7 +603,7 @@ class JobsRunner(debuggable.DebuggableObject):
             raise RuntimeError(f"Unknown HPC manager: '{self.hpc_manager}'")
         sbh = [
             "#SBATCH --mail-type=END,FAIL",
-            "#SBATCH --mem=8gb",
+            "#SBATCH --mem=16gb",
             "#SBATCH --distribution=cyclic:cyclic",
             "#SBATCH --output=logs/sbatch-lsmio-%j.log",
             "#SBATCH --error=logs/sbatch-lsmio-%j.err",

@@ -126,7 +126,7 @@ install(
 
 # Install LMP benchmark assets
 install(
-  DIRECTORY "${CMAKE_SOURCE_DIR}/tools/bmtool/lmp-reaxff/"
+  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/share/lmp-reaxff/"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/lsmio/lmp-reaxff"
   FILES_MATCHING PATTERN "*"
 )

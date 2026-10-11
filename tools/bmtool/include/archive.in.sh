@@ -37,7 +37,7 @@ if [ "${BM_TYPE:-lsmio}" = "lsmio" ] && [ ! -f "${LSM_DIR_OBASE}/lsm-report.csv"
 fi
 
 # Task 4.2.4: Mechanical Arm Identifier Derivation
-: "${BM_SETUP:=NATIVE-M}"
+: "${BM_SETUP:=NATIVE}"
 if [ -z "$ARM_ID" ]; then
   ARM_ID="$(bm_resolve_arm_id "$BM_SETUP" "$BM_VARIANT")" || fatal_error "Invalid variant: [$BM_VARIANT]"
 fi

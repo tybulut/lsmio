@@ -96,14 +96,10 @@ class LsmioAdapterTest(unittest.TestCase):
             f_segment_count=16384,
         )
 
-    def testExactThirtyMappings(self) -> None:
-        """Validate all 30 exact setup/block permutations (10 setups x 3 block sizes)."""
+    def testExactEighteenMappings(self) -> None:
+        """Validate all 18 exact setup/block permutations (6 setups x 3 block sizes)."""
         f_setups = [
-            "NATIVE-M",
-            "ADIOS-M",
-            "PLUGIN-M",
-            "ROCKSDB-M",
-            "LEVELDB-M",
+            "NATIVE",
             "ADIOS",
             "PLUGIN",
             "ROCKSDB",
@@ -112,11 +108,7 @@ class LsmioAdapterTest(unittest.TestCase):
         ]
         f_combos = [self.m_combo_64k, self.m_combo_1m, self.m_combo_8m]
         f_expected_executables = {
-            "NATIVE-M": "bm_native",
-            "ADIOS-M": "bm_adios",
-            "PLUGIN-M": "bm_adios",
-            "ROCKSDB-M": "bm_rocksdb",
-            "LEVELDB-M": "bm_leveldb",
+            "NATIVE": "bm_native",
             "ADIOS": "bm_adios",
             "PLUGIN": "bm_adios",
             "ROCKSDB": "bm_rocksdb",
@@ -166,13 +158,12 @@ class LsmioAdapterTest(unittest.TestCase):
                 )
 
                 # Assemble expected argv
-                f_expected_argv_list: List[str] = [f_expected_exe]
-                if f_setup.endswith("-M"):
-                    f_expected_argv_list.extend(["-m", "-g"])
-                if f_setup in ("PLUGIN", "PLUGIN-M"):
+                f_expected_argv_list: List[str] = [f_expected_exe, "-m", "-g"]
+                if f_setup == "PLUGIN":
                     f_expected_argv_list.append("--lsmio-plugin")
                 f_expected_argv_list.extend(
                     [
+                        "--lsmio-no-autotune",
                         "-i",
                         "10",
                         "-o",
@@ -199,12 +190,12 @@ class LsmioAdapterTest(unittest.TestCase):
                 self.assertTrue(f_bound.isRankLocal)
                 f_tested_count += 1
 
-        self.assertEqual(f_tested_count, 30)
+        self.assertEqual(f_tested_count, 18)
 
     def testTemplateUnbound(self) -> None:
         """Confirm template from createLaunchSpec is unbound and rank-local."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE"
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -216,7 +207,7 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertTrue(f_spec.isRankLocal)
         self.assertFalse(f_spec.is_bound)
         self.assertFalse(f_spec.isBound)
-        self.assertEqual(f_spec.setup, "NATIVE-M")
+        self.assertEqual(f_spec.setup, "NATIVE")
         self.assertEqual(f_spec.executable, "bm_native")
         self.assertEqual(f_spec.combination, self.m_combo_8m)
         self.assertEqual(f_spec.point, self.m_point)
@@ -227,7 +218,7 @@ class LsmioAdapterTest(unittest.TestCase):
     def testPureBindDistinctGlobals(self) -> None:
         """Confirm distinct global ranks yield distinct rank-private paths."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="ROCKSDB-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="ROCKSDB"
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -255,7 +246,7 @@ class LsmioAdapterTest(unittest.TestCase):
         # All 4 output paths must be distinct
         self.assertEqual(len(set(f_output_paths)), 4)
         for f_r, f_out in enumerate(f_output_paths):
-            self.assertTrue(f_out.endswith(f"lsmio-rank-{f_r}-rocksdb-m.db"))
+            self.assertTrue(f_out.endswith(f"lsmio-rank-{f_r}-rocksdb.db"))
 
         # All 4 log paths must be distinct
         self.assertEqual(len(set(f_log_paths)), 4)
@@ -301,7 +292,7 @@ class LsmioAdapterTest(unittest.TestCase):
     def testRangeAndContainment(self) -> None:
         """Assert negative or out-of-range global ranks fail with BenchmarkConfigurationError."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE"
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -472,7 +463,7 @@ class LsmioAdapterTest(unittest.TestCase):
         f_state_with_runner = self.m_adapter.probeCapability(
             f_executable="/bin/bm_native",
             f_runner=mockRunner,
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
         )
         self.assertFalse(
             f_runner_called,
@@ -485,7 +476,7 @@ class LsmioAdapterTest(unittest.TestCase):
     def testCommandImmutability(self) -> None:
         """Verify that LsmioLaunchSpec and LsmioBoundCommand are immutable."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE"
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -493,7 +484,7 @@ class LsmioAdapterTest(unittest.TestCase):
             f_point=self.m_point,
         )
         with self.assertRaises(AttributeError):
-            f_spec.m_setup = "ADIOS-M"
+            f_spec.m_setup = "ADIOS"
         with self.assertRaises(AttributeError):
             del f_spec.m_setup
 
@@ -514,7 +505,7 @@ class LsmioAdapterTest(unittest.TestCase):
         """Verify argv tokens with spaces remain discrete arguments and are not word-split."""
         f_exe_with_spaces = "/opt/lsmio tools/bin/bm native executable"
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE"
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -532,15 +523,16 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertEqual(f_bound.argv[0], f_exe_with_spaces)
         self.assertEqual(f_bound.argv[1], "-m")
         self.assertEqual(f_bound.argv[2], "-g")
-        self.assertEqual(f_bound.argv[3], "-i")
-        self.assertEqual(f_bound.argv[4], "10")
-        self.assertEqual(f_bound.argv[5], "-o")
-        self.assertEqual(f_bound.argv[6], f_bound.output_path)
+        self.assertEqual(f_bound.argv[3], "--lsmio-no-autotune")
+        self.assertEqual(f_bound.argv[4], "-i")
+        self.assertEqual(f_bound.argv[5], "10")
+        self.assertEqual(f_bound.argv[6], "-o")
+        self.assertEqual(f_bound.argv[7], f_bound.output_path)
 
     def testNulByteRejection(self) -> None:
         """Verify that NUL bytes in arguments or paths raise BenchmarkConfigurationError."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE"
         )
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.createLaunchSpec(
@@ -553,22 +545,18 @@ class LsmioAdapterTest(unittest.TestCase):
         with self.assertRaises(BenchmarkConfigurationError):
             self.m_adapter.buildCommand(
                 f_executable="/bin/bm_native\0",
-                f_setup="NATIVE-M",
+                f_setup="NATIVE",
                 f_block_size="8M",
             )
 
     def testAdapterProperties(self) -> None:
         """Verify adapter metadata properties and helper methods."""
         self.assertEqual(self.m_adapter.target, "lsmio")
-        self.assertEqual(self.m_adapter.defaultSetup, "NATIVE-M")
+        self.assertEqual(self.m_adapter.defaultSetup, "NATIVE")
         self.assertEqual(
             set(self.m_adapter.allowedSetups),
             {
-                "NATIVE-M",
-                "ADIOS-M",
-                "PLUGIN-M",
-                "ROCKSDB-M",
-                "LEVELDB-M",
+                "NATIVE",
                 "ADIOS",
                 "PLUGIN",
                 "ROCKSDB",
@@ -579,17 +567,17 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertEqual(LsmioAdapter.getBlockParameters("64K"), (65536, 32768))
         self.assertEqual(LsmioAdapter.getBlockParameters("1M"), (1048576, 4096))
         self.assertEqual(LsmioAdapter.getBlockParameters("8M"), (8388608, 1024))
-        self.assertEqual(LsmioAdapter.getExecutableName("NATIVE-M"), "bm_native")
-        self.assertEqual(LsmioAdapter.getExecutableName("ADIOS-M"), "bm_adios")
-        self.assertEqual(LsmioAdapter.getExecutableName("PLUGIN-M"), "bm_adios")
-        self.assertEqual(LsmioAdapter.getExecutableName("ROCKSDB-M"), "bm_rocksdb")
-        self.assertEqual(LsmioAdapter.getExecutableName("LEVELDB-M"), "bm_leveldb")
+        self.assertEqual(LsmioAdapter.getExecutableName("NATIVE"), "bm_native")
+        self.assertEqual(LsmioAdapter.getExecutableName("ADIOS"), "bm_adios")
+        self.assertEqual(LsmioAdapter.getExecutableName("PLUGIN"), "bm_adios")
+        self.assertEqual(LsmioAdapter.getExecutableName("ROCKSDB"), "bm_rocksdb")
+        self.assertEqual(LsmioAdapter.getExecutableName("LEVELDB"), "bm_leveldb")
         self.assertEqual(LsmioAdapter.getExecutableName("MANAGER"), "bm_manager")
 
     def testEqualityHashAndDict(self) -> None:
         """Verify equality, hashing, and dict conversion of LsmioLaunchSpec and LsmioBoundCommand."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="small", f_ssd=False, f_setup="NATIVE"
         )
         f_spec1 = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -613,7 +601,7 @@ class LsmioAdapterTest(unittest.TestCase):
 
         f_dict = f_spec1.toDict()
         self.assertEqual(f_dict["target"], "lsmio")
-        self.assertEqual(f_dict["setup"], "NATIVE-M")
+        self.assertEqual(f_dict["setup"], "NATIVE")
         self.assertEqual(f_dict["executable"], "bm_native")
         self.assertEqual(f_dict["is_rank_local"], True)
         self.assertEqual(f_dict["is_bound"], False)
@@ -648,20 +636,20 @@ class LsmioAdapterTest(unittest.TestCase):
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="NATIVE-M",
-            f_variant="footer-btree",
+            f_setup="NATIVE",
+            f_variant="mmap-btree",
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
             f_combination=self.m_combo_8m,
             f_point=self.m_point,
         )
-        self.assertEqual(f_spec.variant, "footer-btree")
-        self.assertIn("variant='footer-btree'", repr(f_spec))
+        self.assertEqual(f_spec.variant, "mmap-btree")
+        self.assertIn("variant='mmap-btree'", repr(f_spec))
 
         # Dict serialization with variant
         f_dict = f_spec.toDict()
-        self.assertEqual(f_dict.get("variant"), "footer-btree")
+        self.assertEqual(f_dict.get("variant"), "mmap-btree")
 
         # Immutability enforcement (INV-ARCH-6)
         with self.assertRaises(AttributeError):
@@ -677,7 +665,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 f_request=f_req,
                 f_combination=self.m_combo_8m,
                 f_point=self.m_point,
-                f_setup="NATIVE-M",
+                f_setup="NATIVE",
                 f_executable="bm_native",
                 f_variant="",  # non-empty or None
             )
@@ -686,7 +674,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 f_request=f_req,
                 f_combination=self.m_combo_8m,
                 f_point=self.m_point,
-                f_setup="NATIVE-M",
+                f_setup="NATIVE",
                 f_executable="bm_native",
                 f_variant="bad\0variant",
             )
@@ -695,7 +683,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 f_request=f_req,
                 f_combination=self.m_combo_8m,
                 f_point=self.m_point,
-                f_setup="NATIVE-M",
+                f_setup="NATIVE",
                 f_executable="bm_native",
                 f_variant=12345,  # type: ignore
             )
@@ -710,7 +698,7 @@ class LsmioAdapterTest(unittest.TestCase):
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
             f_variant="wbuf-512m",
         )
         f_spec_diff = self.m_adapter.createLaunchSpec(
@@ -728,8 +716,8 @@ class LsmioAdapterTest(unittest.TestCase):
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="NATIVE-M",
-            f_variant="footer-btree",
+            f_setup="NATIVE",
+            f_variant="mmap-btree",
         )
         f_spec = self.m_adapter.createLaunchSpec(
             f_request=f_req,
@@ -745,29 +733,47 @@ class LsmioAdapterTest(unittest.TestCase):
 
         # Infix DB naming (INV-ARCH-8)
         self.assertTrue(
-            f_bound.output_path.endswith("lsmio-rank-0-native-m-footer-btree.db"),
-            f"Expected output_path to end with lsmio-rank-0-native-m-footer-btree.db, got: {f_bound.output_path}",
+            f_bound.output_path.endswith("lsmio-rank-0-native-mmap-btree.db"),
+            f"Expected output_path to end with lsmio-rank-0-native-mmap-btree.db, got: {f_bound.output_path}",
         )
 
         # Flag injection in argv (INV-ARCH-4)
-        f_expected_flags = ("--lsmio-footer-index", "--lsmio-memtable", "btree")
+        f_expected_flags = (
+            "--lsmio-no-autotune",
+            "--lsmio-memtable",
+            "btree",
+            "--lsmio-mmap",
+            "--lsmio-no-pread",
+        )
         for f_flag in f_expected_flags:
             self.assertIn(f_flag, f_bound.argv)
 
         # Flag ordering: -m, -g before variant flags, before -i 10 -o ...
         idx_m = f_bound.argv.index("-m")
-        idx_footer = f_bound.argv.index("--lsmio-footer-index")
+        idx_mmap = f_bound.argv.index("--lsmio-mmap")
         idx_iter = f_bound.argv.index("-i")
-        self.assertLess(idx_m, idx_footer)
-        self.assertLess(idx_footer, idx_iter)
+        self.assertLess(idx_m, idx_mmap)
+        self.assertLess(idx_mmap, idx_iter)
+        self.assertEqual(
+            f_bound.argv[1:8],
+            (
+                "-m",
+                "-g",
+                "--lsmio-no-autotune",
+                "--lsmio-memtable",
+                "btree",
+                "--lsmio-mmap",
+                "--lsmio-no-pread",
+            ),
+        )
 
-        # Also test a complex variant with 4 flags
+        # Also test a complex variant with 3 flags after --lsmio-no-autotune
         f_req_complex = RunRequest(
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="NATIVE-M",
-            f_variant="wbuf-512m-manoff-prealloc",
+            f_setup="NATIVE",
+            f_variant="prealloc-wbuf-512m",
         )
         f_spec_complex = self.m_adapter.createLaunchSpec(
             f_request=f_req_complex,
@@ -781,24 +787,23 @@ class LsmioAdapterTest(unittest.TestCase):
         )
         self.assertTrue(
             f_bound_complex.output_path.endswith(
-                "lsmio-rank-0-native-m-wbuf-512m-manoff-prealloc.db"
+                "lsmio-rank-0-native-prealloc-wbuf-512m.db"
             )
         )
         for f_flag in (
             "--lsmio-wbuffer",
             "536870912",
-            "--lsmio-manual-offset",
             "--lsmio-prealloc",
         ):
             self.assertIn(f_flag, f_bound_complex.argv)
 
-        # Test PLUGIN-M setup ordering: --lsmio-plugin immediately followed by variant flags
+        # Test PLUGIN setup ordering: --lsmio-plugin immediately followed by variant flags
         f_req_plugin = RunRequest(
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="PLUGIN-M",
-            f_variant="footer",
+            f_setup="PLUGIN",
+            f_variant="no-footer",
         )
         f_spec_plugin = self.m_adapter.createLaunchSpec(
             f_request=f_req_plugin,
@@ -811,11 +816,11 @@ class LsmioAdapterTest(unittest.TestCase):
             f_layout=self.m_layout,
         )
         self.assertTrue(
-            f_bound_plugin.output_path.endswith("lsmio-rank-0-plugin-m-footer.db")
+            f_bound_plugin.output_path.endswith("lsmio-rank-0-plugin-no-footer.db")
         )
         idx_plugin = f_bound_plugin.argv.index("--lsmio-plugin")
         idx_no_autotune = f_bound_plugin.argv.index("--lsmio-no-autotune")
-        idx_footer_plugin = f_bound_plugin.argv.index("--lsmio-footer-index")
+        idx_footer_plugin = f_bound_plugin.argv.index("--lsmio-no-footer-index")
         self.assertEqual(idx_no_autotune, idx_plugin + 1)
         self.assertEqual(idx_footer_plugin, idx_plugin + 2)
 
@@ -825,7 +830,7 @@ class LsmioAdapterTest(unittest.TestCase):
             f_target="lsmio",
             f_scale="baseline",
             f_ssd=False,
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
             f_variant="flush",
         )
         f_spec = self.m_adapter.createLaunchSpec(
@@ -842,40 +847,41 @@ class LsmioAdapterTest(unittest.TestCase):
         # Critical assertion: --lsmio-always-flush, not --lsmo-
         self.assertIn("--lsmio-always-flush", f_bound.argv)
         self.assertNotIn("--lsmo-always-flush", f_bound.argv)
-        self.assertTrue(f_bound.output_path.endswith("lsmio-rank-0-native-m-flush.db"))
+        self.assertTrue(f_bound.output_path.endswith("lsmio-rank-0-native-flush.db"))
 
     def testBuildCommandWithVariant(self) -> None:
         """Tasks 3.2.4: Verify buildCommand injects variant flags and generates infix DB name."""
         # 1. Default output path with variant
         f_cmd = self.m_adapter.buildCommand(
             f_executable="bm_native",
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
             f_block_size="8M",
-            f_variant="footer-btree",
+            f_variant="mmap-btree",
         )
-        self.assertIn("--lsmio-footer-index", f_cmd.argv)
+        self.assertIn("--lsmio-mmap", f_cmd.argv)
+        self.assertIn("--lsmio-no-pread", f_cmd.argv)
         self.assertIn("--lsmio-memtable", f_cmd.argv)
         self.assertIn("btree", f_cmd.argv)
         self.assertEqual(
-            f_cmd.output_path, "/tmp/lsmio-rank-0-native-m-footer-btree.db"
+            f_cmd.output_path, "/tmp/lsmio-rank-0-native-mmap-btree.db"
         )
-        self.assertIn("/tmp/lsmio-rank-0-native-m-footer-btree.db", f_cmd.argv)
+        self.assertIn("/tmp/lsmio-rank-0-native-mmap-btree.db", f_cmd.argv)
 
         # 2. Flush variant with exact flag
         f_cmd_flush = self.m_adapter.buildCommand(
             f_executable="bm_native",
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
             f_block_size="8M",
             f_variant="flush",
         )
         self.assertIn("--lsmio-always-flush", f_cmd_flush.argv)
         self.assertNotIn("--lsmo-always-flush", f_cmd_flush.argv)
-        self.assertEqual(f_cmd_flush.output_path, "/tmp/lsmio-rank-0-native-m-flush.db")
+        self.assertEqual(f_cmd_flush.output_path, "/tmp/lsmio-rank-0-native-flush.db")
 
         # 3. Explicit output path preserves custom path while injecting variant flags
         f_cmd_custom = self.m_adapter.buildCommand(
             f_executable="bm_native",
-            f_setup="NATIVE-M",
+            f_setup="NATIVE",
             f_block_size="8M",
             f_output_path="/custom/dir/my-output.db",
             f_variant="wbuf-512m",
@@ -885,8 +891,8 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertEqual(f_cmd_custom.output_path, "/custom/dir/my-output.db")
         self.assertIn("/custom/dir/my-output.db", f_cmd_custom.argv)
 
-    def testBaseVariantHasNoExtraFlags(self) -> None:
-        """Tasks 3.2.5: Verify default, base, and omitted variants produce clean command matching legacy behavior."""
+    def testBaseVariantHasOnlyNoAutotuneFlag(self) -> None:
+        """Tasks 3.2.5: Verify default, base, and omitted variants add only --lsmio-no-autotune, matching bmtool."""
         f_id = RankIdentity(f_global_rank=0, f_node_rank="node01", f_local_rank=0)
 
         for f_variant_input in (None, "base", "default", ""):
@@ -895,7 +901,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 f_request=None,
                 f_combination=self.m_combo_8m,
                 f_point=self.m_point,
-                f_setup="NATIVE-M",
+                f_setup="NATIVE",
                 f_executable="bm_native",
                 f_variant=f_variant_input if f_variant_input else None,
             )
@@ -905,7 +911,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 f_layout=self.m_layout,
             )
             self.assertTrue(
-                f_bound.output_path.endswith("lsmio-rank-0-native-m.db"),
+                f_bound.output_path.endswith("lsmio-rank-0-native.db"),
                 f"Expected clean DB path for variant={f_variant_input!r}, got: {f_bound.output_path}",
             )
             self.assertEqual(
@@ -914,6 +920,7 @@ class LsmioAdapterTest(unittest.TestCase):
                     "bm_native",
                     "-m",
                     "-g",
+                    "--lsmio-no-autotune",
                     "-i",
                     "10",
                     "-o",
@@ -930,21 +937,22 @@ class LsmioAdapterTest(unittest.TestCase):
             # Test via buildCommand
             f_cmd = self.m_adapter.buildCommand(
                 f_executable="bm_native",
-                f_setup="NATIVE-M",
+                f_setup="NATIVE",
                 f_block_size="8M",
                 f_variant=f_variant_input,
             )
-            self.assertEqual(f_cmd.output_path, "/tmp/lsmio-rank-0-native-m.db")
+            self.assertEqual(f_cmd.output_path, "/tmp/lsmio-rank-0-native.db")
             self.assertEqual(
                 f_cmd.argv,
                 (
                     "bm_native",
                     "-m",
                     "-g",
+                    "--lsmio-no-autotune",
                     "-i",
                     "10",
                     "-o",
-                    "/tmp/lsmio-rank-0-native-m.db",
+                    "/tmp/lsmio-rank-0-native.db",
                     "--lsmio-ts",
                     "8388608",
                     "--lsmio-bs",

@@ -103,7 +103,7 @@ class RunParseTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_ssd: bool = False,
         f_variant: Optional[str] = None,
     ) -> RunPlan:
@@ -136,7 +136,7 @@ class RunParseTest(unittest.TestCase):
         f_run_id: str,
         f_target: str = "lsmio",
         f_scale: str = "local",
-        f_setup: str = "NATIVE-M",
+        f_setup: str = "NATIVE",
         f_ssd: bool = False,
         f_variant: Optional[str] = None,
     ) -> Tuple[str, RunPlan, EvidenceStore]:
@@ -212,7 +212,7 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(f_resolved.runId, "run-lsmio-success-001")
         self.assertEqual(f_resolved.target, "lsmio")
         self.assertEqual(f_resolved.scale, "local")
-        self.assertEqual(f_resolved.setup, "NATIVE-M")
+        self.assertEqual(f_resolved.setup, "NATIVE")
         self.assertFalse(f_resolved.is_ssd)
         self.assertFalse(f_resolved.isSsd)
         self.assertTrue(f_resolved.is_success)
@@ -584,9 +584,12 @@ class RunParseTest(unittest.TestCase):
         # manifest has run-real-001, but folder is folder-name-different-001
         with open(os.path.join(f_mismatched_root, "manifest.json"), "w") as f_f:
             json.dump(f_man_dict, f_f)
+        # An archived (moved/renamed) root is accepted; this copy holds only the
+        # manifest, so it fails on run state instead of on its location
         with self.assertRaises(RunRootResolutionError) as f_ctx:
             RunRootResolver.resolve(f_mismatched_root)
-        self.assertIn("does not match manifest run_id", str(f_ctx.exception))
+        self.assertNotIn("does not match manifest run_id", str(f_ctx.exception))
+        self.assertIn("did not succeed", str(f_ctx.exception))
 
         # 9. Run root not under a 'runs' directory
         f_non_runs_root = os.path.join(self.m_temp_dir, "custom_folder", "run-real-001")
@@ -595,7 +598,8 @@ class RunParseTest(unittest.TestCase):
             json.dump(f_man_dict, f_f)
         with self.assertRaises(RunRootResolutionError) as f_ctx:
             RunRootResolver.resolve(f_non_runs_root)
-        self.assertIn("not located in a 'runs' directory", str(f_ctx.exception))
+        self.assertNotIn("not located in a 'runs' directory", str(f_ctx.exception))
+        self.assertIn("did not succeed", str(f_ctx.exception))
 
         # 10. Path containing NUL byte
         with self.assertRaises(RunRootResolutionError) as f_ctx:
@@ -819,7 +823,7 @@ class RunParseTest(unittest.TestCase):
     def testLsmioLogExtractorWithFsumStability(self) -> None:
         """Tests iteration and summary metric extraction across multi-rank logs with math.fsum stability."""
         f_run_root, f_plan, _ = self._setupSucceededRun(
-            "run-lsmio-fsum-001", "lsmio", "bake", "NATIVE-M"
+            "run-lsmio-fsum-001", "lsmio", "bake", "NATIVE"
         )
         f_resolved = RunRootResolver.resolve(f_run_root)
         # Point 2 has 4 tasks
@@ -1078,25 +1082,24 @@ class RunParseTest(unittest.TestCase):
                 len(f_cols), 30, f"Expected 30 columns in IOR row: {f_row}"
             )
 
-        # 2. LSMIO Stage 1 (9 columns) & Stage 2 Master (12 columns)
+        # 2. LSMIO Stage 1 (bmtool 7-column agg files) & Stage 2 Master (10 columns)
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
-            "run-lsm-report-001", "lsmio", "local", "NATIVE-M"
+            "run-lsm-report-001", "lsmio", "local", "NATIVE"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
+        f_stage1_header = (
+            "access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration"
+        )
         f_extracted_lsm = {
             f_resolved_lsm.points[0].pointId: {
                 f_c.name: {
-                    "write": {
-                        "first_line": "write,1200.0,0.85,1024,1024,5",
-                        "max": 1300.0,
-                        "min": 1100.0,
-                        "mean": 1200.0,
-                    },
-                    "read": {
-                        "first_line": "read,2400.0,0.42,1024,1024,5",
-                        "max": 2500.0,
-                        "min": 2300.0,
-                        "mean": 2400.0,
+                    "bmtool_agg": {
+                        "lines": [
+                            f_stage1_header,
+                            "write,1300,1100,1200,2559.96,40960,10",
+                            "read,2500,2300,2400,2559.96,40960,10",
+                        ],
+                        "ranks": 1,
                     },
                 }
                 for f_c in f_plan_lsm.combinations
@@ -1108,7 +1111,6 @@ class RunParseTest(unittest.TestCase):
         self.assertIn("lsm-report.csv", f_lsm_files)
 
         # Verify Stage 1 files (agg-<stripe_count>-<stripe_size>-report.csv)
-        f_stage1_header = "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter,max(MiB/s),min(MiB/s),mean(MiB/s)"
         for f_c in f_plan_lsm.combinations:
             f_stage1_path = os.path.join(
                 f_out_dir, "1", f"agg-{f_c.stripe_count}-{f_c.block_size}-report.csv"
@@ -1120,11 +1122,10 @@ class RunParseTest(unittest.TestCase):
                 f_lines = [l.strip() for l in f_f if l.strip()]
             self.assertEqual(len(f_lines), 3)
             self.assertEqual(f_lines[0], f_stage1_header)
-            self.assertEqual(len(f_lines[0].split(",")), 9)
-            self.assertEqual(len(f_lines[1].split(",")), 9)
-            self.assertEqual(len(f_lines[2].split(",")), 9)
+            self.assertEqual(len(f_lines[1].split(",")), 7)
+            self.assertEqual(len(f_lines[2].split(",")), 7)
 
-        # Verify Stage 2 master file (lsm-report.csv)
+        # Verify Stage 2 master file (lsm-report.csv): no header, bmtool row format
         f_lsm_csv_path = f_lsm_files["lsm-report.csv"]
         with open(f_lsm_csv_path, "r") as f_f:
             f_lsm_rows = [line.strip() for line in f_f if line.strip()]
@@ -1132,8 +1133,9 @@ class RunParseTest(unittest.TestCase):
         for f_row in f_lsm_rows:
             f_cols = f_row.split(",")
             self.assertEqual(
-                len(f_cols), 12, f"Expected 12 columns in LSMIO row: {f_row}"
+                len(f_cols), 10, f"Expected 10 columns in LSMIO row: {f_row}"
             )
+        self.assertIn("1,16,1M,write,1300,1100,1200,2559.96,40960,10", f_lsm_rows)
 
         # 3. LAMMPS Master Report CSV (4 columns)
         f_run_root_lmp, f_plan_lmp, _ = self._setupSucceededRun(
@@ -1187,7 +1189,7 @@ class RunParseTest(unittest.TestCase):
 
         # 2. LSMIO JSON
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
-            "run-lsm-json-001", "lsmio", "local", "NATIVE-M"
+            "run-lsm-json-001", "lsmio", "local", "NATIVE"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
@@ -1287,7 +1289,7 @@ class RunParseTest(unittest.TestCase):
 
         # 2. LSMIO Table
         f_run_root_lsm, f_plan_lsm, _ = self._setupSucceededRun(
-            "run-lsm-table-001", "lsmio", "local", "NATIVE-M"
+            "run-lsm-table-001", "lsmio", "local", "NATIVE"
         )
         f_resolved_lsm = RunRootResolver.resolve(f_run_root_lsm)
         f_extracted_lsm = {
@@ -1329,7 +1331,7 @@ class RunParseTest(unittest.TestCase):
             "run-lsm-table-var-001",
             "lsmio",
             "baseline",
-            "NATIVE-M",
+            "NATIVE",
             f_variant="footer-btree",
         )
         f_resolved_var = RunRootResolver.resolve(f_run_root_var)

@@ -140,31 +140,16 @@ class ModuleAuthorityTest(unittest.TestCase):
         with open(self.m_hpc_py_path, "r", encoding="utf-8") as f_file:
             f_source_code = f_file.read()
 
-        # Representative modules from each site that must NOT appear as literals in hpc.py
-        f_forbidden_literals = (
-            "GCCcore/12.3.0",
-            "GCCcore/13.2.0",
-            "Clang/16.0.6",
-            "CMake/3.26.3",
-            "OpenMPI/4.1.5",
-            "OpenMPI/4.1.6",
-            "data/HDF5/1.10.7",
-            "HDF5/1.14.0",
-            "HDF5/1.14.3",
-            "modules/3.2.11.4",
-            "system-config/3.6.3070",
-            "craype-network-aries",
-            "cray-mpich/7.7.17",
-            "cray-mpich/8.1.27",
-            "PrgEnv-gnu",
-            "load-epcc-module",
-            "extra-compilers",
-            "SciPy-bundle",
-            "matplotlib/3.7.2",
-            "matplotlib/3.8.2",
-        )
+        # No module of any site profile may appear as a literal in hpc.py
+        f_doc = ProfileLoader.load(self.m_env_json_path)
+        f_forbidden_literals = {
+            f_mod
+            for f_site in f_doc.profiles
+            for f_mod in f_doc.getProfile(f_site).modules
+        }
+        self.assertTrue(f_forbidden_literals)
 
-        for f_forbidden in f_forbidden_literals:
+        for f_forbidden in sorted(f_forbidden_literals):
             self.assertNotIn(
                 f_forbidden,
                 f_source_code,
@@ -206,32 +191,46 @@ class ModuleAuthorityTest(unittest.TestCase):
         with self.assertRaises((ProfileSchemaError, SiteResolutionError)):
             self.m_hpc_modules.shellCommands("NONEXISTENT_SITE_XYZ")
 
-    def testAllFourExactModuleInventoriesMatchDesignAndBmtool(self) -> None:
-        """Assert exact module counts and ordering match normative specifications."""
-        # Viking (9 modules)
-        f_viking_mods = self.m_hpc_modules.getModules("VIKING")
-        self.assertEqual(len(f_viking_mods), 9)
-        self.assertEqual(f_viking_mods[0], "data/HDF5/1.10.7-gompi-2020b")
-        self.assertEqual(f_viking_mods[-1], "numlib/FFTW/3.3.10-GCC-11.3.0")
+    def testAllFourModuleInventoriesMatchBmtool(self) -> None:
+        """Assert every site's module inventory matches bmtool's load-modules.in.sh.
 
-        # Viking2 (22 modules, GCCcore 12.3.0 / OpenMPI 4.1.5-GCC-12.3.0)
-        f_viking2_mods = self.m_hpc_modules.getModules("VIKING2")
-        self.assertEqual(len(f_viking2_mods), 22)
-        self.assertEqual(f_viking2_mods[0], "GCCcore/12.3.0")
-        self.assertEqual(f_viking2_mods[7], "OpenMPI/4.1.5-GCC-12.3.0")
-        self.assertEqual(f_viking2_mods[-1], "texlive/20230313-GCC-12.3.0")
+        Both inventories are read from their files, so a site re-tooling only has to
+        keep the two in step; no module name is pinned here.
+        """
+        f_load_modules_path = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "bmtool",
+                "include",
+                "load-modules.in.sh",
+            )
+        )
+        with open(f_load_modules_path, "r", encoding="utf-8") as f_file:
+            f_shell_source = f_file.read()
 
-        # Isambard (27 modules)
-        f_isambard_mods = self.m_hpc_modules.getModules("ISAMBARD")
-        self.assertEqual(len(f_isambard_mods), 27)
-        self.assertEqual(f_isambard_mods[0], "modules/3.2.11.4")
-        self.assertEqual(f_isambard_mods[-1], "gdb4hpc/4.10.6")
+        # load_modules_<site>() { MODULES="<one module per line>" ... }
+        f_bmtool_inventories = {
+            f_match.group(1).upper(): tuple(
+                f_line for f_line in f_match.group(2).split("\n") if f_line
+            )
+            for f_match in re.finditer(
+                r'^load_modules_(\w+)\(\) \{\n  MODULES="\n(.*?)"$',
+                f_shell_source,
+                re.MULTILINE | re.DOTALL,
+            )
+        }
+        self.assertEqual(
+            set(f_bmtool_inventories), {"VIKING", "VIKING2", "ISAMBARD", "ARCHER2"}
+        )
 
-        # Archer2 (17 modules)
-        f_archer2_mods = self.m_hpc_modules.getModules("ARCHER2")
-        self.assertEqual(len(f_archer2_mods), 17)
-        self.assertEqual(f_archer2_mods[0], "PrgEnv-gnu")
-        self.assertEqual(f_archer2_mods[-1], "matplotlib")
+        for f_site_name, f_bmtool_mods in f_bmtool_inventories.items():
+            f_mods = self.m_hpc_modules.getModules(f_site_name)
+            self.assertTrue(f_mods, f"{f_site_name} has no modules")
+            self.assertEqual(len(set(f_mods)), len(f_mods), f"{f_site_name} duplicates")
+            self.assertEqual(f_mods, f_bmtool_mods, f"{f_site_name} differs from bmtool")
 
         # DEV (0 modules)
         f_dev_mods = self.m_hpc_modules.getModules("DEV")

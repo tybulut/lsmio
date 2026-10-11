@@ -61,6 +61,7 @@ class IMemtable {
     virtual ~IMemtable() = default;
 
     virtual void add(const std::string& f_key, const std::string& f_value) = 0;
+    virtual void add(const std::string& f_key, std::string&& f_value) = 0;
     virtual bool get(const std::string& f_key, std::string& f_value) const = 0;
     virtual void scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
                       std::set<std::string>& f_deleted_keys) const = 0;

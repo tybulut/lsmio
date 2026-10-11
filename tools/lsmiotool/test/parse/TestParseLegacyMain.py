@@ -59,22 +59,31 @@ class TestParseLegacyMain(TestCase):
     @patch.object(main.ParseLegacyMain, "parseIor")
     def testDispatchIor(self, mock_parse_ior: MagicMock) -> None:
         """Test run() dispatches to parseIor."""
-        pm = main.ParseLegacyMain("ior", "small", ssd=False)
-        pm.run()
+        pm = main.ParseLegacyMain(
+            "ior", "small", ssd=False, f_benchmark_root="/nonexistent-bm"
+        )
+        with patch("sys.stderr"):
+            pm.run()
         mock_parse_ior.assert_called_once_with("small", False)
 
     @patch.object(main.ParseLegacyMain, "parseLsmio")
     def testDispatchLsmio(self, mock_parse_lsmio: MagicMock) -> None:
         """Test run() dispatches to parseLsmio."""
-        pm = main.ParseLegacyMain("lsmio", "large", ssd=True)
-        pm.run()
+        pm = main.ParseLegacyMain(
+            "lsmio", "large", ssd=True, f_benchmark_root="/nonexistent-bm"
+        )
+        with patch("sys.stderr"):
+            pm.run()
         mock_parse_lsmio.assert_called_once_with("large", True)
 
     @patch.object(main.ParseLegacyMain, "parseLmp")
     def testDispatchLmp(self, mock_parse_lmp: MagicMock) -> None:
         """Test run() dispatches to parseLmp."""
-        pm = main.ParseLegacyMain("lmp", "bake", ssd=False)
-        pm.run()
+        pm = main.ParseLegacyMain(
+            "lmp", "bake", ssd=False, f_benchmark_root="/nonexistent-bm"
+        )
+        with patch("sys.stderr"):
+            pm.run()
         mock_parse_lmp.assert_called_once_with("bake", False)
 
     @patch("lsmiotool.lib.output.IorAggOutput")
@@ -82,24 +91,30 @@ class TestParseLegacyMain(TestCase):
         """Test parseIor instantiates IorAggOutput and calls generateReports."""
         mock_agg = MagicMock()
         mock_agg_class.return_value = mock_agg
-        pm = main.ParseLegacyMain("ior", "small")
-        pm.parseIor("small", False)
-        mock_agg.generateReports.assert_called_once()
+        with tempfile.TemporaryDirectory() as f_dir:
+            pm = main.ParseLegacyMain("ior", "small", f_dir)
+            pm.parseIor("small", False)
+            mock_agg_class.assert_called_once_with(f_dir)
+            mock_agg.generateReports.assert_called_once_with(f_dir)
 
     @patch("lsmiotool.lib.output.LsmioAggOutput")
     def testParseLsmioExecution(self, mock_agg_class: MagicMock) -> None:
         """Test parseLsmio instantiates LsmioAggOutput and calls generateReports."""
         mock_agg = MagicMock()
         mock_agg_class.return_value = mock_agg
-        pm = main.ParseLegacyMain("lsmio", "small")
-        pm.parseLsmio("small", False)
-        mock_agg.generateReports.assert_called_once()
+        with tempfile.TemporaryDirectory() as f_dir:
+            pm = main.ParseLegacyMain("lsmio", "small", f_dir)
+            pm.parseLsmio("small", False)
+            mock_agg_class.assert_called_once_with(f_dir, f_scale="small")
+            mock_agg.generateReports.assert_called_once_with(f_dir)
 
     @patch("lsmiotool.lib.output.LmpAggOutput")
     def testParseLmpExecution(self, mock_agg_class: MagicMock) -> None:
         """Test parseLmp instantiates LmpAggOutput and calls generateReports."""
         mock_agg = MagicMock()
         mock_agg_class.return_value = mock_agg
-        pm = main.ParseLegacyMain("lmp", "small")
-        pm.parseLmp("small", False)
-        mock_agg.generateReports.assert_called_once()
+        with tempfile.TemporaryDirectory() as f_dir:
+            pm = main.ParseLegacyMain("lmp", "small", f_dir)
+            pm.parseLmp("small", False)
+            mock_agg_class.assert_called_once_with(f_dir)
+            mock_agg.generateReports.assert_called_once_with(f_dir)

@@ -36,6 +36,16 @@ from typing import Any, Dict, NamedTuple, Optional, Sequence, Tuple
 from lsmiotool.lib.cli import CliParseError
 
 
+class UnknownSetupError(CliParseError):
+    """Raised when a setup is not one of the LSMIO setups (e.g. a removed '-M' name)."""
+
+    def __init__(self, f_setup: str, f_supported: Sequence[str]) -> None:
+        super().__init__(
+            f"Invalid setup: {f_setup!r}. Supported setups are: {list(f_supported)}"
+        )
+        self.m_setup = f_setup
+
+
 class UnknownVariantError(CliParseError):
     """Raised when an unknown variant token is encountered at CLI or configuration boundaries."""
 
@@ -138,13 +148,9 @@ class VariantRecord:
 class VariantCatalogue:
     """Pure declarative catalogue mapping variant keys to tokens and engine CLI flags."""
 
-    _TWO_SEGMENT_PREFIXES: Tuple[str, ...] = (
-        "native-m-",
-        "rocksdb-m-",
-        "leveldb-m-",
-        "adios-m-",
-        "plugin-m-",
-    )
+    # Flags of the default (baseline) variant; every other variant except 'autotune'
+    # starts with the same flag, as bmtool's resolve_variant does
+    _DEFAULT_FLAGS: Tuple[str, ...] = ("--lsmio-no-autotune",)
 
     _ONE_SEGMENT_PREFIXES: Tuple[str, ...] = (
         "native-",
@@ -155,326 +161,16 @@ class VariantCatalogue:
         "manager-",
     )
 
-    # Exhaustive mapping of all 60 non-empty variant keys to (tokens, engine_flags)
+    # Every non-empty variant key mapped to (tokens, engine_flags), in canonical order.
+    # Each one changes the engine from its defaults in a different way.
     _VARIANT_SPECS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
-        "footer": ("footer", ("--lsmio-no-autotune", "--lsmio-footer-index")),
-        "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
-        "footer-btree": (
-            "footer-btree",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "btree",
-            ),
-        ),
-        "map": ("map", ("--lsmio-no-autotune", "--lsmio-memtable", "map")),
         "vsort": ("vsort", ("--lsmio-no-autotune", "--lsmio-memtable", "vector-sort")),
-        "prealloc": ("prealloc", ("--lsmio-no-autotune", "--lsmio-prealloc")),
-        "footer-prealloc": (
-            "footer-prealloc",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-prealloc"),
-        ),
-        "manoff": ("manoff", ("--lsmio-no-autotune", "--lsmio-manual-offset")),
-        "footer-manoff": (
-            "footer-manoff",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-manual-offset"),
-        ),
-        "wbuf-512m": (
-            "wbuf-512m",
-            ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912"),
-        ),
-        "wbuf-32m": (
-            "wbuf-32m",
-            ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432"),
-        ),
-        "footer-wbuf-512m": (
-            "footer-wbuf-512m",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-wbuffer",
-                "536870912",
-            ),
-        ),
-        "footer-btree-prealloc": (
-            "footer-btree-prealloc",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "btree",
-                "--lsmio-prealloc",
-            ),
-        ),
-        "bfilter": ("bfilter", ("--lsmio-no-autotune", "--lsmio-bfilter")),
-        "wal": ("wal", ("--lsmio-no-autotune", "--lsmio-wal")),
-        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap", "--lsmio-no-pread")),
-        "pread": ("pread", ("--lsmio-no-autotune", "--lsmio-pread")),
-        "footer-mmap": (
-            "footer-mmap",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-mmap",
-                "--lsmio-no-pread",
-            ),
-        ),
-        "footer-pread": (
-            "footer-pread",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pread"),
-        ),
-        "compress": ("compress", ("--lsmio-no-autotune", "--lsmio-compress")),
-        "sync": ("sync", ("--lsmio-no-autotune", "--sync")),
-        "pool-8": ("pool-8", ("--lsmio-no-autotune", "--lsmio-pool", "8")),
-        # INV-ARCH-4: exact CLI11 spelling --lsmio-always-flush
-        "flush": ("flush", ("--lsmio-no-autotune", "--lsmio-always-flush")),
-        "batch-2048": (
-            "batch-2048",
-            ("--lsmio-no-autotune", "--lsmio-batch-size", "2048"),
-        ),
-        "manoff-prealloc": (
-            "manoff-prealloc",
-            ("--lsmio-no-autotune", "--lsmio-manual-offset", "--lsmio-prealloc"),
-        ),
-        "wbuf-512m-manoff-prealloc": (
-            "wbuf-512m-manoff-prealloc",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-wbuffer",
-                "536870912",
-                "--lsmio-manual-offset",
-                "--lsmio-prealloc",
-            ),
-        ),
-        "footer-wbuf-32m": (
-            "footer-wbuf-32m",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-wbuffer",
-                "33554432",
-            ),
-        ),
-        "footer-pool-8": (
-            "footer-pool-8",
-            ("--lsmio-no-autotune", "--lsmio-footer-index", "--lsmio-pool", "8"),
-        ),
-        "footer-wbuf-512m-manoff-prealloc": (
-            "footer-wbuf-512m-manoff-prealloc",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-wbuffer",
-                "536870912",
-                "--lsmio-manual-offset",
-                "--lsmio-prealloc",
-            ),
-        ),
-        "footer-vsort-manoff-prealloc": (
-            "footer-vsort-manoff-prealloc",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "vector-sort",
-                "--lsmio-manual-offset",
-                "--lsmio-prealloc",
-            ),
-        ),
-        "footer-vsort-manoff-mmap": (
-            "footer-vsort-manoff-mmap",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "vector-sort",
-                "--lsmio-manual-offset",
-                "--lsmio-mmap",
-                "--lsmio-no-pread",
-            ),
-        ),
-        "footer-vsort-manoff": (
-            "footer-vsort-manoff",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "vector-sort",
-                "--lsmio-manual-offset",
-            ),
-        ),
-        "footer-pool-8-mmap": (
-            "footer-pool-8-mmap",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-pool",
-                "8",
-                "--lsmio-mmap",
-                "--lsmio-no-pread",
-            ),
-        ),
-        "footer-manoff-pool-8-mmap": (
-            "footer-manoff-pool-8-mmap",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-manual-offset",
-                "--lsmio-pool",
-                "8",
-                "--lsmio-mmap",
-                "--lsmio-no-pread",
-            ),
-        ),
-        "footer-btree-manoff-mmap": (
-            "footer-btree-manoff-mmap",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "btree",
-                "--lsmio-manual-offset",
-                "--lsmio-mmap",
-                "--lsmio-no-pread",
-            ),
-        ),
-        "footer-manoff-pool-8": (
-            "footer-manoff-pool-8",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-manual-offset",
-                "--lsmio-pool",
-                "8",
-            ),
-        ),
-        "footer-pread-pool-8": (
-            "footer-pread-pool-8",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-pread",
-                "--lsmio-pool",
-                "8",
-            ),
-        ),
-        "footer-pread-manoff": (
-            "footer-pread-manoff",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-pread",
-                "--lsmio-manual-offset",
-            ),
-        ),
-        "footer-pread-manoff-pool-8": (
-            "footer-pread-manoff-pool-8",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-pread",
-                "--lsmio-manual-offset",
-                "--lsmio-pool",
-                "8",
-            ),
-        ),
-        "footer-map-pread": (
-            "footer-map-pread",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "map",
-                "--lsmio-pread",
-            ),
-        ),
-        "footer-btree-pread": (
-            "footer-btree-pread",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "btree",
-                "--lsmio-pread",
-            ),
-        ),
-        "footer-vsort-pread": (
-            "footer-vsort-pread",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "vector-sort",
-                "--lsmio-pread",
-            ),
-        ),
-        "footer-btree-manoff-pread": (
-            "footer-btree-manoff-pread",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "btree",
-                "--lsmio-manual-offset",
-                "--lsmio-pread",
-            ),
-        ),
-        "footer-map-manoff-pread": (
-            "footer-map-manoff-pread",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "map",
-                "--lsmio-manual-offset",
-                "--lsmio-pread",
-            ),
-        ),
-        "footer-map-manoff-mmap": (
-            "footer-map-manoff-mmap",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "map",
-                "--lsmio-manual-offset",
-                "--lsmio-mmap",
-                "--lsmio-no-pread",
-            ),
-        ),
-        "footer-map": (
-            "footer-map",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "map",
-            ),
-        ),
-        "footer-map-manoff": (
-            "footer-map-manoff",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-footer-index",
-                "--lsmio-memtable",
-                "map",
-                "--lsmio-manual-offset",
-            ),
-        ),
-        "manoff-pool-8": (
-            "manoff-pool-8",
-            (
-                "--lsmio-no-autotune",
-                "--lsmio-manual-offset",
-                "--lsmio-pool",
-                "8",
-            ),
-        ),
+        "btree": ("btree", ("--lsmio-no-autotune", "--lsmio-memtable", "btree")),
         "vnosort": (
             "vnosort",
             ("--lsmio-no-autotune", "--lsmio-memtable", "vector-no-sort"),
         ),
+        "mmap": ("mmap", ("--lsmio-no-autotune", "--lsmio-mmap", "--lsmio-no-pread")),
         "no-pread": (
             "no-pread",
             ("--lsmio-no-autotune", "--lsmio-no-pread"),
@@ -498,6 +194,16 @@ class VariantCatalogue:
                 "vector-no-sort",
             ),
         ),
+        "prealloc": ("prealloc", ("--lsmio-no-autotune", "--lsmio-prealloc")),
+        "wbuf-512m": (
+            "wbuf-512m",
+            ("--lsmio-no-autotune", "--lsmio-wbuffer", "536870912"),
+        ),
+        "wbuf-32m": (
+            "wbuf-32m",
+            ("--lsmio-no-autotune", "--lsmio-wbuffer", "33554432"),
+        ),
+        "pool-8": ("pool-8", ("--lsmio-no-autotune", "--lsmio-pool", "8")),
         "prealloc-vsort": (
             "prealloc-vsort",
             (
@@ -555,11 +261,62 @@ class VariantCatalogue:
                 "--lsmio-no-pread",
             ),
         ),
+        # INV-ARCH-4: exact CLI11 spelling --lsmio-always-flush
+        "flush": ("flush", ("--lsmio-no-autotune", "--lsmio-always-flush")),
+        "batch-2048": (
+            "batch-2048",
+            ("--lsmio-no-autotune", "--lsmio-batch-size", "2048"),
+        ),
+        "bfilter": ("bfilter", ("--lsmio-no-autotune", "--lsmio-bfilter")),
+        "wal": ("wal", ("--lsmio-no-autotune", "--lsmio-wal")),
+        "compress": ("compress", ("--lsmio-no-autotune", "--lsmio-compress")),
+        "sync": ("sync", ("--lsmio-no-autotune", "--sync")),
         "autotune": (
             "autotune",
             ("--lsmio-autotune",),
         ),
     }
+
+    # Variant keys dropped because they re-enable engine defaults (footer index, manual
+    # offset, pread, map memtable) and so duplicate another variant. They cannot be run;
+    # they are kept only so that archive directories named after them still resolve.
+    _RETIRED_VARIANTS: Tuple[str, ...] = (
+        "footer",
+        "footer-btree",
+        "map",
+        "footer-prealloc",
+        "manoff",
+        "footer-manoff",
+        "footer-wbuf-512m",
+        "footer-btree-prealloc",
+        "pread",
+        "footer-mmap",
+        "footer-pread",
+        "manoff-prealloc",
+        "wbuf-512m-manoff-prealloc",
+        "footer-wbuf-32m",
+        "footer-pool-8",
+        "footer-wbuf-512m-manoff-prealloc",
+        "footer-vsort-manoff-prealloc",
+        "footer-vsort-manoff-mmap",
+        "footer-vsort-manoff",
+        "footer-pool-8-mmap",
+        "footer-manoff-pool-8-mmap",
+        "footer-btree-manoff-mmap",
+        "footer-manoff-pool-8",
+        "footer-pread-pool-8",
+        "footer-pread-manoff",
+        "footer-pread-manoff-pool-8",
+        "footer-map-pread",
+        "footer-btree-pread",
+        "footer-vsort-pread",
+        "footer-btree-manoff-pread",
+        "footer-map-manoff-pread",
+        "footer-map-manoff-mmap",
+        "footer-map",
+        "footer-map-manoff",
+        "manoff-pool-8",
+    )
 
     _CANONICAL_VARIANTS: Tuple[str, ...] = (
         "vsort",
@@ -593,16 +350,11 @@ class VariantCatalogue:
     def stripBackendPrefix(cls, f_key: str) -> str:
         """Strips composite backend setup prefixes from a variant key string.
 
-        Patterns handled:
-        - Two segments: native-m-*, rocksdb-m-*, leveldb-m-*, adios-m-*, plugin-m-*
-        - One segment: native-*, rocksdb-*, leveldb-*, adios-*, plugin-*, manager-*
+        Patterns handled: native-*, rocksdb-*, leveldb-*, adios-*, plugin-*, manager-*
         """
         if not isinstance(f_key, str):
             raise TypeError(f"f_key must be a string, got: {type(f_key).__name__}")
         k = f_key.strip().lower()
-        for prefix in cls._TWO_SEGMENT_PREFIXES:
-            if k.startswith(prefix):
-                return k[len(prefix) :]
         for prefix in cls._ONE_SEGMENT_PREFIXES:
             if k.startswith(prefix):
                 return k[len(prefix) :]
@@ -619,6 +371,14 @@ class VariantCatalogue:
         return cls.supportedVariants()
 
     @classmethod
+    def archivedVariantNames(cls) -> Tuple[str, ...]:
+        """Returns every variant key an archive directory may be named after.
+
+        That is the supported keys plus the retired ones, which can no longer be run.
+        """
+        return cls.supportedVariants() + cls._RETIRED_VARIANTS
+
+    @classmethod
     def canonicalVariants(cls) -> Tuple[str, ...]:
         """Returns tuple of all 26 streamlined matrix variant keys in canonical order ('default' followed by 25 variants)."""
         return ("default",) + cls._CANONICAL_VARIANTS
@@ -630,35 +390,36 @@ class VariantCatalogue:
 
     @classmethod
     def allVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all variants in exhaustive catalog ('default' followed by all supported non-empty variants)."""
-        return ("default",) + cls.supportedVariants()
+        """Returns tuple of all variants ('default' followed by every supported variant); the same as mostVariants()."""
+        return cls.canonicalVariants()
 
     @classmethod
     def resolve(cls, f_key: Optional[str] = None) -> VariantRecord:
         """Resolves variant key into a canonical VariantRecord.
 
         Handles:
-        - None, "", "base", "default" -> empty variant (base run).
+        - None, "", "base", "default" -> the default variant (base run), flags
+          --lsmio-no-autotune.
         - Strips backend prefix.
-        - Canonical lookup against 37 discrete non-empty keys.
+        - Canonical lookup against 25 discrete non-empty keys; retired keys are rejected.
         - Raises UnknownVariantError on unrecognized keys.
         """
         if f_key is None:
-            return VariantRecord("", "", ())
+            return VariantRecord("", "", cls._DEFAULT_FLAGS)
 
         if not isinstance(f_key, str):
             raise UnknownVariantError(str(f_key), cls.supportedVariants())
 
         stripped_raw = f_key.strip()
         if stripped_raw == "":
-            return VariantRecord("", "", ())
+            return VariantRecord("", "", cls._DEFAULT_FLAGS)
 
         if stripped_raw.lower() in ("base", "default"):
-            return VariantRecord("", "", ())
+            return VariantRecord("", "", cls._DEFAULT_FLAGS)
 
         stripped = cls.stripBackendPrefix(stripped_raw)
         if stripped in ("", "base", "default"):
-            return VariantRecord("", "", ())
+            return VariantRecord("", "", cls._DEFAULT_FLAGS)
 
         if stripped in cls._VARIANT_SPECS:
             spec_tokens, spec_flags = cls._VARIANT_SPECS[stripped]
@@ -666,13 +427,20 @@ class VariantCatalogue:
 
         if stripped.startswith("version-"):
             payload = stripped[len("version-") :]
-            for cand_var in sorted(cls.supportedVariants(), key=len, reverse=True):
+            # The longest variant name the key ends with decides, as in bmtool:
+            # version-<branch>-<hash>-<retired variant> is rejected like the bare key
+            # (footer-btree is not read as btree), no-pread is not read as pread
+            for cand_var in sorted(
+                cls.archivedVariantNames(), key=len, reverse=True
+            ):
                 if payload.endswith(f"-{cand_var}"):
                     prefix = payload[: -len(cand_var) - 1]
                     if "-" in prefix:
+                        if cand_var not in cls._VARIANT_SPECS:
+                            raise UnknownVariantError(f_key, cls.supportedVariants())
                         spec = cls._VARIANT_SPECS[cand_var]
                         return VariantRecord(stripped, stripped, spec[1])
-            return VariantRecord(stripped, stripped, ("--lsmio-no-autotune",))
+            return VariantRecord(stripped, stripped, cls._DEFAULT_FLAGS)
 
         raise UnknownVariantError(f_key, cls.supportedVariants())
 
@@ -696,10 +464,10 @@ class VariantCatalogue:
     ) -> str:
         """Derives mechanical backend-variant infix token for log and DB naming.
 
-        Backend tokens:
-        - Setup ending in '-M': base setup without '-M' lowercased (e.g. 'NATIVE-M' -> 'native')
-        - Setup == 'MANAGER': 'manager'
-        - Other setups: setup lowercased with '-nompi' (e.g. 'ROCKSDB' -> 'rocksdb-nompi')
+        Backend token: the setup lowercased (e.g. 'NATIVE' -> 'native', 'MANAGER' -> 'manager').
+
+        Raises:
+            UnknownSetupError: For a setup that is not an LSMIO setup (e.g. 'NATIVE-M').
 
         Returns:
             f"{backend_token}-{variant_tokens}" if variant_tokens else backend_token.
@@ -708,17 +476,13 @@ class VariantCatalogue:
         variant_val = f_key if f_key is not None else f_variant
 
         if not isinstance(setup_val, str) or not setup_val.strip():
-            setup_val = "NATIVE-M"
+            setup_val = "NATIVE"
 
-        setup_clean = setup_val.strip()
-        setup_upper = setup_clean.upper()
+        from lsmiotool.lib.benchmarks import LsmioAdapter
 
-        if setup_upper.endswith("-M"):
-            backend_token = setup_upper[:-2].lower()
-        elif setup_upper == "MANAGER":
-            backend_token = "manager"
-        else:
-            backend_token = f"{setup_clean.lower()}-nompi"
+        if setup_val.strip().upper() not in LsmioAdapter.ALLOWED_SETUPS:
+            raise UnknownSetupError(setup_val, LsmioAdapter.ALLOWED_SETUPS)
+        backend_token = setup_val.strip().lower()
 
         rec = cls.resolve(variant_val)
         if rec.tokens:
@@ -759,7 +523,7 @@ class VariantReverseResolver:
             payload = f_variant[len("version-") :]
             sub_variant = None
             for cand_var in sorted(
-                VariantCatalogue.supportedVariants(), key=len, reverse=True
+                VariantCatalogue.archivedVariantNames(), key=len, reverse=True
             ):
                 if payload.endswith(f"-{cand_var}"):
                     prefix = payload[: -len(cand_var) - 1]
@@ -825,12 +589,12 @@ class VariantReverseResolver:
         # Step 4: Disambiguate hyphenated variants ending in digits (e.g. footer-pool-8)
         if role is None and collision is not None and variant != "default":
             combined_candidate = f"{variant}-{collision}"
-            if combined_candidate in VariantCatalogue.supportedVariants():
+            if combined_candidate in VariantCatalogue.archivedVariantNames():
                 variant = combined_candidate
                 collision = None
             elif variant.startswith("version-"):
                 sub_cand = combined_candidate[len("version-") :]
-                for v in VariantCatalogue.supportedVariants():
+                for v in VariantCatalogue.archivedVariantNames():
                     if sub_cand.endswith(f"-{v}"):
                         prefix = sub_cand[: -len(v) - 1]
                         if "-" in prefix:

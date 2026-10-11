@@ -55,8 +55,9 @@ class TestEndToEndParse(TestCase):
                 "lsmio-data",
                 "synthetic",
                 "viking",
-                "lsmio-small-hdd",
+                "lsmio-small-ssd",
                 "lsmio-adios",
+                "outputs",
             ),
             os.path.join(
                 os.path.dirname(__file__),
@@ -67,12 +68,13 @@ class TestEndToEndParse(TestCase):
                 "lsmio-data",
                 "synthetic",
                 "viking",
-                "lsmio-small-hdd",
+                "lsmio-small-ssd",
                 "lsmio-adios",
+                "outputs",
             ),
-            "/Users/sbulut/src/bulut/lsmio-data/synthetic/viking/lsmio-small-hdd/lsmio-adios",
+            "/Users/sbulut/src/bulut/lsmio-data/synthetic/viking/lsmio-small-ssd/lsmio-adios/outputs",
             os.path.expanduser(
-                "~/src/lsmio-data/synthetic/viking/lsmio-small-hdd/lsmio-adios"
+                "~/src/lsmio-data/synthetic/viking/lsmio-small-ssd/lsmio-adios/outputs"
             ),
         ]
         self.m_ground_truth_dir = ""

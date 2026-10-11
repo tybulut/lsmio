@@ -34,8 +34,8 @@ $0 <cmd> <benchmark> <scale> [<variants>] [options]
 $0 <run|parse> lsmio backends <scale> [<backends>] [options]
 
 cmds:
-  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>] [--versioned]
-  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>] [--versioned] [--fast]
+  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--dest=<path>] [--time=<hours>] [--fast]
   parse <ior|lsmio|lmp> <local|bake|small|large|variants> [<variant>] [--ssd]
   parse lsmio backends <local|bake|small|large>
   archive <lsmio> <local|bake|small|large|variants> [<variant>] [--dest=<path>]
@@ -44,6 +44,8 @@ cmds:
 "
 
 BM_HELP_TEXT="LSMIO Benchmark Suite Orchestration CLI (bmtool)
+
+DEPRECATED: bmtool is frozen; use tools/lsmiotool/lsmiotool (see tools/bmtool/DEPRECATED.md).
 
 Usage:
   $0 <cmd> <benchmark> <scale> [<variants>] [options]
@@ -72,9 +74,9 @@ Scales:
 Variants / Backends:
   For 'lsmio variants':
     omitted / base  Execute default baseline configuration
-    <variant>       Single variant key (e.g. footer, btree, mmap, autotune)
-    <v1>,<v2>,...   Comma-separated list (e.g. footer,manoff,autotune)
-    all             Canonical sequence of all 60 matrix variants
+    <variant>       Single variant key (e.g. btree, mmap, no-footer, autotune)
+    <v1>,<v2>,...   Comma-separated list (e.g. btree,no-manoff,autotune)
+    all / most      The baseline followed by all 25 variants
   For 'lsmio backends <scale>':
     omitted         Default canonical sequence: adios2,native,plugin,rocksdb
     <b1>,<b2>,...   Comma-separated backend list (e.g. adios2,native,plugin,rocksdb)
@@ -91,6 +93,7 @@ Options:
                   Aliases: --output-dir <dir>, --dest <dir>, --dest=<dir>
   --time <hours>  Explicit job walltime limit in hours (aliases: --walltime, --wallhour)
   --versioned     Execute versioned comparison run against reference baseline
+  --fast          Halve calculated walltime and cap at 23h to stay within qos=standard on ARCHER2
   -h, --help      Display this comprehensive help guide and exit 0
 "
 
@@ -156,6 +159,9 @@ for _arg in "$@"; do
   esac
 done
 
+# Deprecated: frozen as the reference lsmiotool's parity tests run against
+echo "WARNING: bmtool is deprecated; use tools/lsmiotool/lsmiotool (see tools/bmtool/DEPRECATED.md)" >&2
+
 # SBatch settings
 if [ -z "$SB_EMAIL" ]; then
   fatal_error "Email for SBATCH is not set using SB_EMAIL: $SB_EMAIL"
@@ -195,6 +201,17 @@ if [ "$PASS_CMD" = "archive" -a "$JOB_TOOL" != "lsmio" ]; then
   fatal_error "archive command is currently only supported for lsmio."
 fi
 
+# LSMIO setup (BM_SETUP from the environment), checked before any other argument
+: "${BM_SETUP:=NATIVE}"
+if [ "$JOB_TOOL" = "lsmio" ]; then
+  # Setup names are case-insensitive, as in lsmiotool
+  BM_SETUP=$(echo "$BM_SETUP" | tr '[:lower:]' '[:upper:]')
+  case "$BM_SETUP" in
+    NATIVE|ADIOS|PLUGIN|ROCKSDB|LEVELDB|MANAGER|ENV) ;;
+    *) fatal_error "Unknown LSMIO setup BM_SETUP=[$BM_SETUP]: use NATIVE, ADIOS, PLUGIN, ROCKSDB, LEVELDB, MANAGER or ENV" ;;
+  esac
+fi
+
 # Canonicalise the scale token: 'baseline' is the deprecated spelling of 'variants'
 bm_canonical_scale() {
   if [ "$1" = "baseline" ]; then
@@ -214,6 +231,7 @@ BM_ARCHIVE_OVERRIDE=""
 BM_RESUME="no"
 DO_ARCHIVE="no"
 BM_VERSIONED="no"
+BM_FAST="no"
 EXPANDED_VARIANTS="default"
 
 if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
@@ -331,6 +349,10 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
           [ $# -gt 0 ] || fatal_error "Option $_opt requires an argument"
           BM_ARCHIVE_DEST="$1"
           ;;
+        --fast)
+          [ "$BM_FAST" != "yes" ] || fatal_error "Duplicate '--fast' option specified"
+          BM_FAST="yes"
+          ;;
         *)
           fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
           ;;
@@ -447,6 +469,10 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
             [ $# -gt 0 ] || fatal_error "Option $_opt requires an argument"
             BM_ARCHIVE_DEST="$1"
             ;;
+          --fast)
+            [ "$BM_FAST" != "yes" ] || fatal_error "Duplicate '--fast' option specified"
+            BM_FAST="yes"
+            ;;
           *)
             fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
             ;;
@@ -462,17 +488,21 @@ if [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ] || [ "$PASS_CMD" = "arch
         esac
       fi
     elif [ "$PASS_CMD" = "run" ] || [ "$PASS_CMD" = "parse" ]; then
-      if [ $# -gt 0 ]; then
-        if [ "$1" = "--ssd" ]; then
-          LUSTRE_SSD=on
-        else
-          fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
-        fi
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --ssd)
+            LUSTRE_SSD=on
+            ;;
+          --fast)
+            [ "$BM_FAST" != "yes" ] || fatal_error "Duplicate '--fast' option specified"
+            BM_FAST="yes"
+            ;;
+          *)
+            fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
+            ;;
+        esac
         shift
-      fi
-      if [ $# -gt 0 ]; then
-        fatal_error "Unknown argument for $PASS_CMD cmd: [$1]"
-      fi
+      done
     elif [ "$PASS_CMD" = "archive" ]; then
       while [ $# -gt 0 ]; do
         case "$1" in
@@ -499,7 +529,6 @@ fi
 
 # Execute
 # Export: BM_CMD,BM_TYPE,BM_SCALE,BM_MODE,BM_BACKENDS,BM_SSD,BM_VARIANT,BM_ARCHIVE_DEST,BM_SETUP,BM_WALLHOUR_OVERRIDE,BM_RESUME
-: "${BM_SETUP:=NATIVE-M}"
 export BM_SETUP
 export BM_CMD="$PASS_CMD"
 export BM_TYPE="$JOB_TOOL"
@@ -510,6 +539,7 @@ export BM_SSD="$LUSTRE_SSD"
 export BM_VARIANT="$BM_VARIANT"
 export BM_WALLHOUR_OVERRIDE="$BM_WALLHOUR_OVERRIDE"
 export BM_RESUME="$BM_RESUME"
+export BM_FAST="$BM_FAST"
 
 . $BM_DIRNAME/include/vars.in.sh
 
@@ -552,6 +582,7 @@ echo "Entered cmd summary:
 - Cmd optional param: SSD=$LUSTRE_SSD
 - Cmd optional param: Variant=$BM_VARIANT
 - Cmd optional param: Archive Dest=$BM_ARCHIVE_DEST
+- Cmd optional param: Fast Simulation=$BM_FAST
 
 Environment settings:
 - Email: $SB_EMAIL

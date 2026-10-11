@@ -14,7 +14,7 @@ To navigate the detailed architectural, testing, and operational guides across t
 
 - [**Benchmark Subsystem Guide**](benchmark/README.md): Comprehensive reference for synthetic benchmark targets (`bm_native`, `bm_adios`, `bm_rocksdb`, `bm_leveldb`, `bm_manager`), CLI flag catalog, high-performance read flags (`--lsmio-mmap`, `--lsmio-pread`), scaling models, and the `micro.sh` runner.
 - [**Testing & Verification Guide**](test/README.md): Exhaustive documentation covering CTest orchestration, GoogleTest suites, MPI multi-rank integration fixtures, execution protocols (`test`, `xtest`, `ptest`), and debugging workflows (`gdb`, `lldb`, AddressSanitizer).
-- [**Tools & Orchestration Guide**](tools/README.md): User and architectural manual for the `lsmiotool` framework, HPC batch scheduler orchestration (Slurm & PBS), report parsing (`lsmiotool parse`), scaling and variant comparison (`lsmiotool compare`), and the canonical 37-variant catalog.
+- [**Tools & Orchestration Guide**](tools/README.md): User and architectural manual for the `lsmiotool` framework, HPC batch scheduler orchestration (Slurm & PBS), report parsing (`lsmiotool parse`), scaling and variant comparison (`lsmiotool compare`), and the canonical 26-variant catalog.
 
 ---
 
@@ -75,8 +75,6 @@ On HPC systems such as Viking, ARCHER2, or Isambard:
 - **Operating System**: Rocky Linux release 8 / RedHat Enterprise Linux 8.
 - **HPC Modules**: Automatically load required compiler and MPI modules:
   ```bash
-  ./tools/bmtool/bmtool load-modules
-  # Or via modern lsmiotool:
   ./tools/lsmiotool/lsmiotool load-modules
   ```
 - **Custom Dependencies**: Packages listed under `doc/dependencies/` provide standalone installation scripts targeting `$HOME/src` as the default prefix. Dependencies with filenames starting with `9` are optional.

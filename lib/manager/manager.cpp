@@ -36,6 +36,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace lsmio {
@@ -294,23 +295,53 @@ bool LSMIOManager::put(const std::string& key, const std::string& value, bool fl
     return retValue;
 }
 
+bool LSMIOManager::put(const std::string& key, std::string&& value, bool flush) {
+    bool retValue = true;
+
+    // Diagnostic logging MUST evaluate value.length() strictly BEFORE std::move(value)
+    LOG(INFO) << "LSMIOManager::put:flush: rank: " << _aggRank << " key: " << key << "("
+              << key.length() << ")"
+              << " value.len: " << value.length() << " flush: " << flush << std::endl;
+
+    // INV-ZCP-2: Cache length and increment ops prior to move!
+    _counterWriteBytes += value.length();
+    _counterWriteOps++;
+
+    if (_isOpenLocal()) {
+        LOG(INFO) << "LSMIOManager::put: LOCAL for rank: " << _aggRank << std::endl;
+        return _lcStore->put(_rankedKey(key), std::move(value), flush);
+    }
+
+    if (_isOpenRemote()) {
+        // MPI remote serialization takes const reference
+        retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::PUT, key, value);
+    }
+
+    return retValue;
+}
+
 bool LSMIOManager::put(const std::string& key, const std::string& value) {
     LOG(INFO) << "LSMIOManager::put: for rank: " << _aggRank << " key: " << key << std::endl;
     return put(key, value, gConfigLSMIO.alwaysFlush);
+}
+
+bool LSMIOManager::put(const std::string& key, std::string&& value) {
+    LOG(INFO) << "LSMIOManager::put: for rank: " << _aggRank << " key: " << key << std::endl;
+    return put(key, std::move(value), gConfigLSMIO.alwaysFlush);
 }
 
 bool LSMIOManager::put(const std::string& key, const char* value, std::streamsize n) {
     LOG(INFO) << "LSMIOManager::put: for char* for rank: " << _aggRank << " key: " << key
               << std::endl;
     std::string nValue(value, n);
-    return put(key, nValue, gConfigLSMIO.alwaysFlush);
+    return put(key, std::move(nValue), gConfigLSMIO.alwaysFlush);
 }
 
 bool LSMIOManager::put(const std::string& key, const void* value, size_t size, size_t count) {
     LOG(INFO) << "LSMIOManager::put: for void* for rank: " << _aggRank << " key: " << key
               << std::endl;
     std::string nValue(static_cast<const char*>(value), size * count);
-    return put(key, nValue, gConfigLSMIO.alwaysFlush);
+    return put(key, std::move(nValue), gConfigLSMIO.alwaysFlush);
 }
 
 bool LSMIOManager::del(const std::string& key, bool flush) {

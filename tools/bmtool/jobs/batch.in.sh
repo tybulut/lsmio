@@ -90,7 +90,7 @@ run_matrix_workload() {
     for bs in 1M 64K 8M; do
       if [ "$BM_TYPE" = "lmp" ]; then
         rm ~/scratch/benchmark/lmp/outputs/*
-        cp -r lmp-reaxff $DIRS_BM_BASE/c$rf/b$bs/
+        cp -r "$BM_DIRNAME/../lsmiotool/share/lmp-reaxff" $DIRS_BM_BASE/c$rf/b$bs/
       fi
 
       # --kill-on-bad-exit: one failed rank ends the step; otherwise the
@@ -183,28 +183,28 @@ if [ "$BM_MODE" = "backends" ] && [ "$BM_TYPE" = "lsmio" ]; then
 
     case "$_b" in
       adios2|adios)
-        BM_SETUP="ADIOS-M"
+        BM_SETUP="ADIOS"
         BM_BIN_NAME="bm_adios"
         ARM_ID="adios"
         ;;
       native)
-        BM_SETUP="NATIVE-M"
+        BM_SETUP="NATIVE"
         BM_BIN_NAME="bm_native"
         ARM_ID="native"
         ;;
       plugin)
         # ADIOS2 with the LSMIO engine plugin (bm_adios --lsmio-plugin)
-        BM_SETUP="PLUGIN-M"
+        BM_SETUP="PLUGIN"
         BM_BIN_NAME="bm_adios"
         ARM_ID="plugin"
         ;;
       rocksdb)
-        BM_SETUP="ROCKSDB-M"
+        BM_SETUP="ROCKSDB"
         BM_BIN_NAME="bm_rocksdb"
         ARM_ID="rocksdb"
         ;;
       leveldb)
-        BM_SETUP="LEVELDB-M"
+        BM_SETUP="LEVELDB"
         BM_BIN_NAME="bm_leveldb"
         ARM_ID="leveldb"
         ;;

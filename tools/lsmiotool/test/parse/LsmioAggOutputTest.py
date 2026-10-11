@@ -140,8 +140,11 @@ class LsmioAggOutputTest(unittest.TestCase):
         f1 = os.path.join(n_dir, "out-lsmio-4-64K-2026-09-09-node000-0.txt.8")
         self.m_mock_gen.generateLsmioFile(f1, 8, 4, "64K")
 
+        # Construction stays lazy so report generation never raises; the strict
+        # per-node map does
+        agg = output.LsmioAggOutput(base, f_scale="baseline")
         with self.assertRaises(output.MissingDataError):
-            output.LsmioAggOutput(base, f_scale="baseline")
+            agg.getMap()
 
 
 if __name__ == "__main__":

@@ -695,7 +695,7 @@ class EndToEndRunTest(unittest.TestCase):
     def testLsmioUniqueRanks(self) -> None:
         """2. testLsmioUniqueRanks: Runs LSMIO multi-rank scale, verifies rank worker launching, individual rank claim locks, unique rank results per combination, and controller result validation."""
         f_req = RunRequest(
-            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE-M"
+            f_target="lsmio", f_scale="bake", f_ssd=False, f_setup="NATIVE"
         )
         f_fake_runner = FakeSchedulerCommandRunner()
 
@@ -959,7 +959,7 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertIn("#PBS -q arm", f_pbs_large)
         self.assertIn("#PBS -m abe", f_pbs_large)
         self.assertIn("#PBS -l walltime=06:00:00", f_pbs_large)
-        self.assertIn("#PBS -l select=4:ncpus=4:mpiprocs=4:mem=32GB", f_pbs_large)
+        self.assertIn("#PBS -l select=4:ncpus=4:mpiprocs=4:mem=128GB", f_pbs_large)
         # Large shape omits pmem and pvmem
         self.assertFalse(any("pmem" in f_line for f_line in f_pbs_large))
         self.assertFalse(any("pvmem" in f_line for f_line in f_pbs_large))
@@ -2064,9 +2064,9 @@ class EndToEndRunTest(unittest.TestCase):
 
         self.assertEqual(f_view_err.state, OverallRunState.INDETERMINATE)
         self.assertEqual(f_view_err.point_states[0].state, PointRunState.INDETERMINATE)
-        self.assertEqual(
-            len(f_sleep_records), 0, "No busy loop or sleep on query timeout"
-        )
+        # Each timed-out query is retried after one poll interval (no busy loop)
+        # until the UNKNOWN budget is spent
+        self.assertEqual(f_sleep_records, [8.0] * RunOrchestrator.UNKNOWN_POLL_LIMIT)
 
     def testEndToEndConflictAndCorruptObservations(self) -> None:
         """Chunk 018: End-to-end validation of corrupt observations, missing accounting, conflicting handles, cancel causality, and repeated observations."""
@@ -2350,7 +2350,7 @@ class EndToEndRunTest(unittest.TestCase):
         self.assertEqual(len(f_view_ior_ssd.point_states), 4)
 
         # 2. LSMIO on PBS (Isambard Profile) - Multi-rank & Storage setups
-        # --- HDD: LSMIO bake with NATIVE-M setup ---
+        # --- HDD: LSMIO bake with NATIVE setup ---
         f_runner_lsmio = FakeSchedulerCommandRunner()
         f_runner_lsmio.m_submit_job_ids = [
             "20101.isambard-pbs",
@@ -2388,7 +2388,7 @@ class EndToEndRunTest(unittest.TestCase):
         f_runner_lsmio.m_on_submit_callback = on_submit_lsmio
 
         f_view_lsmio = f_orch_lsmio.execute(
-            f_request=RunRequest("lsmio", "bake", f_ssd=False, f_setup="NATIVE-M"),
+            f_request=RunRequest("lsmio", "bake", f_ssd=False, f_setup="NATIVE"),
             f_site=self.m_isambard_profile,
             f_worker_executable=self.m_worker_path,
         )

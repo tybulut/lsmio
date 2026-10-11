@@ -299,21 +299,36 @@ class IorAggOutput(DebuggableObject):
         """
         super().__init__()
         self.m_out_dir = f_output_dir
+        # Built on first use (getMap), so report generation never traverses for it
+        self.m_agg_data = None  # type: ignore[assignment]
+
+    def _lazyAggData(self) -> AggData:
+        """Build (once) and return the per-node aggregate map."""
+        if self.m_agg_data is None:
+            self.m_agg_data = self._buildAggData()
+        return self.m_agg_data
+
+    def _buildAggData(self) -> AggData:
+        """Traverse the output directory and aggregate every node/stripe combination.
+
+        Returns:
+            Aggregated data keyed by node count, stripe count and stripe size.
+        """
         ior_dir = IorOutputDir(self.m_out_dir)
         dir_map = ior_dir.getMap()
-        self.m_agg_data = {}
+        agg_data: AggData = {}
 
         # Process data for each node count
         for n_count in self._node_counts:
-            self.m_agg_data[n_count] = {}
+            agg_data[n_count] = {}
 
             # Process data for each stripe configuration
             for s_count in self._stripe_counts:
-                self.m_agg_data[n_count][s_count] = {}
+                agg_data[n_count][s_count] = {}
 
                 # Process data for each stripe size
                 for s_size in self._stripe_sizes:
-                    self.m_agg_data[n_count][s_count][s_size] = []
+                    agg_data[n_count][s_count][s_size] = []
 
                     # Validate directory structure
                     if n_count not in dir_map:
@@ -337,9 +352,11 @@ class IorAggOutput(DebuggableObject):
                         )
 
                     # Process aggregated files
-                    self.m_agg_data[n_count][s_count][s_size] = self._processAggFiles(
+                    agg_data[n_count][s_count][s_size] = self._processAggFiles(
                         dir_map[n_count][s_count][s_size], n_count
                     )
+
+        return agg_data
 
     @property
     def out_dir(self) -> str:
@@ -347,7 +364,7 @@ class IorAggOutput(DebuggableObject):
 
     @property
     def agg_data(self) -> AggData:
-        return self.m_agg_data
+        return self._lazyAggData()
 
     def _processAggFiles(
         self, f_files: Dict[str, FileMetadata], f_count: str
@@ -388,7 +405,7 @@ class IorAggOutput(DebuggableObject):
         Returns:
             Complete mapping of aggregated performance data
         """
-        return self.m_agg_data
+        return self._lazyAggData()
 
     get_map = getMap
 
@@ -412,96 +429,65 @@ class IorAggOutput(DebuggableObject):
                 f.write(f_agg_data)
 
     def generateReports(self, f_out_dir: Optional[str] = None) -> None:
-        """Generate IOR master CSV report.
+        """Generate ior-report.csv exactly like tools/bmtool/parse/ior-parse.sh.
+
+        Every non-empty file <outputs>/*/*/* contributes its last two write/read lines
+        (IOR's summary rows) verbatim: 'n,rf,bs,' from the path, then the line with
+        runs of spaces turned into commas. A report without rows is not written.
 
         Args:
-            f_out_dir: Destination directory for report (defaults to m_out_dir).
+            f_out_dir: Destination directory for the report (defaults to m_out_dir).
+                IOR outputs are always read from m_out_dir.
         """
-        target_dir = f_out_dir or self.m_out_dir
-        report_file = os.path.join(target_dir, "ior-report.csv")
-        ior_dir = IorOutputDir(target_dir)
-        dir_map = ior_dir.getMap()
-        rows: List[str] = []
-
-        for n_count in sorted(
-            dir_map.keys(), key=lambda x: int(x) if x.isdigit() else 0
-        ):
-            for s_count in ["16", "4"]:
-                if s_count not in dir_map[n_count]:
-                    continue
-                for s_size in ["1M", "64K", "8M"]:
-                    if s_size not in dir_map[n_count][s_count]:
-                        continue
-                    files_dict = dir_map[n_count][s_count][s_size]
-                    for key in sorted(files_dict.keys()):
-                        f_path = files_dict[key]["path"]
-                        if not os.path.exists(f_path) or os.path.getsize(f_path) == 0:
-                            continue
-                        sr = data.IorSingleRunData(f_path)
-                        r_map = sr.getMap()
-                        node_str = (
-                            f"{int(n_count):02d}" if n_count.isdigit() else n_count
-                        )
-                        for op in ["write", "read"]:
-                            if op in r_map and r_map[op]:
-                                vals = [
-                                    str(r_map[op].get(k, ""))
-                                    for k in [
-                                        "Max(MiB)",
-                                        "Min(MiB)",
-                                        "Mean(MiB)",
-                                        "StdDev",
-                                        "Max(OPs)",
-                                        "Min(OPs)",
-                                        "Mean(OPs)",
-                                        "StdDev",
-                                        "Mean(s)",
-                                        "Stonewall(s)",
-                                        "Stonewall(MiB)",
-                                        "Test#",
-                                        "#Tasks",
-                                        "tPN",
-                                        "reps",
-                                        "fPP",
-                                        "reord",
-                                        "reordoff",
-                                        "reordrand",
-                                        "seed",
-                                        "segcnt",
-                                        "blksiz",
-                                        "xsize",
-                                        "aggs(MiB)",
-                                        "API",
-                                        "RefNum",
-                                    ]
-                                ]
-                                row_str = (
-                                    f"{node_str},{s_count},{s_size},{op},"
-                                    + ",".join(vals)
-                                )
-                                rows.append(row_str)
-
-        self.exportCsv(rows, report_file)
-        Console.debug(f"Generated IOR master report: {report_file}")
+        report_file = data.generateBmtoolIorReport(
+            self.m_out_dir, f_report_dir=f_out_dir or self.m_out_dir
+        )
+        if report_file:
+            Console.debug(f"Generated IOR master report: {report_file}")
 
 
 class LsmioAggOutput(IorAggOutput):
     """Aggregate LSMIO output data processor."""
 
+    m_scale: Optional[str]
+
     def __init__(self, f_output_dir: str, f_scale: Optional[str] = None) -> None:
         """Initialize LSMIO output data processor.
+
+        The per-node map behind getMap() is built on first use, so report generation
+        on a partial run never raises MissingDataError.
 
         Args:
             f_output_dir: Directory containing LSMIO output files
             f_scale: Optional benchmark scale (e.g. 'variants'; 'baseline' is the
                 deprecated spelling of the same scale)
         """
-        if f_scale is not None and str(f_scale).strip().lower() in (
-            "variants",
-            "baseline",
-        ):
+        self.m_scale = (
+            str(f_scale).strip().lower() if f_scale is not None else None
+        ) or None
+        if self.m_scale in ("variants", "baseline"):
             self._node_counts = ["8"]
-        super().__init__(f_output_dir)
+        DebuggableObject.__init__(self)
+        self.m_out_dir = f_output_dir
+        self.m_agg_data = None  # type: ignore[assignment]
+
+    @property
+    def agg_data(self) -> AggData:
+        return self._lazyAggData()
+
+    @property
+    def scale(self) -> Optional[str]:
+        return self.m_scale
+
+    def getMap(self) -> AggData:
+        """Get the aggregated data map.
+
+        Raises:
+            MissingDataError: If a node directory holds fewer rank files than nodes.
+        """
+        return self._lazyAggData()
+
+    get_map = getMap
 
     def _processAggFiles(
         self, f_files: Dict[str, FileMetadata], f_count: str
@@ -656,124 +642,174 @@ class LsmioAggOutput(IorAggOutput):
     _process_agg_files = _processAggFiles
 
     def generateReports(self, f_out_dir: Optional[str] = None) -> None:
-        """Generate Stage 1 aggregate reports and Stage 2 master lsm-report.csv.
+        """Generate bmtool-identical agg-<rf>-<bs>-report.csv files and lsm-report.csv.
+
+        Mirrors tools/bmtool/parse/lsmio-parse.sh: for each node count N of the scale
+        (every numeric node directory present when no scale was given), the
+        'write,'/'read,' lines of all rank logs N/*/out-*-<rf>-<bs>-*.txt* are summed
+        (columns 2-6) and their iteration maximised (column 7) into
+        N/agg-<rf>-<bs>-report.csv; lsm-report.csv then collects the rows of every
+        */agg-*-report.csv. Missing node directories and combinations without rank
+        logs are skipped with a warning, and an lsm-report.csv without rows is not
+        written.
 
         Args:
             f_out_dir: Destination directory for reports (defaults to m_out_dir).
+                Rank logs are always read from m_out_dir.
         """
+        source_dir = self.m_out_dir
         target_dir = f_out_dir or self.m_out_dir
-        lsm_dir = LsmioOutputDir(target_dir)
-        dir_map = lsm_dir.getMap()
 
-        # Stage 1: Generate agg-{stripe_count}-{stripe_size}-report.csv in each node directory
-        for n_count in dir_map:
-            for s_count in dir_map[n_count]:
-                for s_size in dir_map[n_count][s_count]:
-                    files_dict = dir_map[n_count][s_count][s_size]
-                    if not files_dict:
-                        continue
-
-                    # Collect first file's summary and all iteration values
-                    sorted_files = sorted(files_dict.keys())
-                    first_file_meta = files_dict[sorted_files[0]]
-                    first_path = first_file_meta["path"]
-
-                    first_w_line = ""
-                    first_r_line = ""
-                    header_line = (
-                        "access,bw(MiB/s),Latency(ms),block(KiB),xfer(KiB),iter"
-                    )
-
-                    w_iters: List[float] = []
-                    r_iters: List[float] = []
-
-                    for f_key in sorted_files:
-                        f_meta = files_dict[f_key]
-                        sr = data.LsmioSingleRunData(f_meta["path"])
-                        it_data = sr.getIterData()
-                        w_iters.extend(it_data["write"])
-                        r_iters.extend(it_data["read"])
-
-                        if not first_w_line or not first_r_line:
-                            try:
-                                with open(f_meta["path"], "r") as inf:
-                                    for line in inf:
-                                        l_s = line.strip()
-                                        if (
-                                            l_s.startswith("write,")
-                                            and not first_w_line
-                                        ):
-                                            first_w_line = l_s
-                                        elif (
-                                            l_s.startswith("read,") and not first_r_line
-                                        ):
-                                            first_r_line = l_s
-                            except (IOError, OSError):
-                                pass
-
-                    if not first_w_line:
-                        first_w_line = "write,0.0,0.0,0,0,0"
-                    if not first_r_line:
-                        first_r_line = "read,0.0,0.0,0,0,0"
-
-                    max_w = max(w_iters) if w_iters else 0.0
-                    min_w = min(w_iters) if w_iters else 0.0
-                    sum_w = 0.0
-                    for w in w_iters:
-                        sum_w += w
-                    mean_w = (sum_w / len(w_iters)) if w_iters else 0.0
-
-                    max_r = max(r_iters) if r_iters else 0.0
-                    min_r = min(r_iters) if r_iters else 0.0
-                    sum_r = 0.0
-                    for r in r_iters:
-                        sum_r += r
-                    mean_r = (sum_r / len(r_iters)) if r_iters else 0.0
-
-                    agg_out_lines = [
-                        header_line,
-                        f"{first_w_line},{max_w:.2f},{min_w:.2f},{mean_w:.6g}",
-                        f"{first_r_line},{max_r:.2f},{min_r:.2f},{mean_r:.6g}",
+        # Stage 1: N/agg-<rf>-<bs>-report.csv (generate_aggregates)
+        for n_count in self._reportNodeCounts():
+            node_dir = os.path.join(source_dir, n_count)
+            if not os.path.isdir(node_dir):
+                Console.warning(
+                    f"Output directory '{node_dir}' not found; skipping node {n_count}"
+                )
+                continue
+            for s_count in data.BMTOOL_STRIPE_COUNTS:
+                for s_size in data.BMTOOL_BLOCK_SIZES:
+                    rank_files = [
+                        path
+                        for path in data.bmtoolGlob(
+                            node_dir,
+                            os.path.join("*", f"out-*-{s_count}-{s_size}-*.txt*"),
+                        )
+                        if os.path.isfile(path)
                     ]
-
-                    agg_file_path = os.path.join(
-                        target_dir, str(n_count), f"agg-{s_count}-{s_size}-report.csv"
+                    if not rank_files:
+                        Console.warning(
+                            f"No rank logs for {s_count}-{s_size} in '{node_dir}'; "
+                            f"skipping {data.aggReportFileName(s_count, s_size)}"
+                        )
+                        continue
+                    agg = data.LsmioBmtoolAggregate()
+                    for path in rank_files:
+                        agg.addFile(path)
+                    data.writeBmtoolLines(
+                        os.path.join(
+                            target_dir,
+                            n_count,
+                            data.aggReportFileName(s_count, s_size),
+                        ),
+                        agg.aggLines(),
                     )
-                    self.exportCsv(agg_out_lines, agg_file_path)
 
-        # Stage 2: Master lsm-report.csv
-        master_file = os.path.join(target_dir, "lsm-report.csv")
-        master_rows: List[str] = []
+        # Stage 2: lsm-report.csv (generate_report)
+        master_file = data.writeBmtoolMasterReport(target_dir)
+        if master_file:
+            Console.debug(f"Generated LSMIO master report: {master_file}")
 
-        agg_files = sorted(
-            glob.glob(os.path.join(target_dir, "*", "agg-*-report.csv")),
-            key=lambda p: re.sub(r"[^a-zA-Z0-9]", "", os.path.relpath(p, target_dir)),
+    def _reportNodeCounts(self) -> List[str]:
+        """Node counts generate_aggregates visits: the scale's list, else those present."""
+        if self.m_scale in data.BMTOOL_SCALE_NODES:
+            return list(data.BMTOOL_SCALE_NODES[self.m_scale])
+        try:
+            entries = os.listdir(self.m_out_dir)
+        except OSError as err:
+            Console.warning(f"Cannot list output directory '{self.m_out_dir}': {err}")
+            return []
+        return sorted(
+            (
+                entry
+                for entry in entries
+                if entry.isdigit()
+                and os.path.isdir(os.path.join(self.m_out_dir, entry))
+            ),
+            key=int,
         )
-        for agg_file in agg_files:
-            rel = os.path.relpath(agg_file, target_dir)
-            parts = rel.split(os.sep)
-            if len(parts) != 2:
-                continue
-            n_part = parts[0]
-            file_part = parts[1]  # agg-16-1M-report.csv
-            pattern = r"agg-(\d+)-(\d+[KMGTB])-report\.csv"
-            m = re.match(pattern, file_part)
-            if not m:
-                continue
-            rf = m.group(1)
-            bs = m.group(2)
 
-            try:
-                with open(agg_file, "r") as inf:
-                    for line in inf:
-                        l_s = line.strip()
-                        if l_s.startswith("write,") or l_s.startswith("read,"):
-                            master_rows.append(f"{n_part},{rf},{bs},{l_s}")
-            except (IOError, OSError):
-                pass
 
-        self.exportCsv(master_rows, master_file)
-        Console.debug(f"Generated LSMIO master report: {master_file}")
+def isBmtoolOutputDir(f_dir: str) -> bool:
+    """True when f_dir has bmtool's outputs layout: <nodes>/<date>/out-*.txt* rank logs
+    or <nodes>/agg-*-report.csv aggregates."""
+    for f_pattern in (
+        os.path.join("*", "*", "out-*.txt*"),
+        os.path.join("*", "agg-*-report.csv"),
+    ):
+        for f_path in glob.iglob(os.path.join(glob.escape(f_dir), f_pattern)):
+            f_rel = os.path.relpath(f_path, f_dir)
+            if f_rel.split(os.sep)[0].isdigit() and os.path.isfile(f_path):
+                return True
+    return False
+
+
+def regenerateLsmioReports(
+    f_output_dir: str, f_scale: Optional[str] = None
+) -> Optional[str]:
+    """(Re)generate lsm-report.csv and its agg files in an LSMIO output directory.
+
+    A bmtool-layout directory is aggregated with LsmioAggOutput; a run root holding
+    manifest.json (pristine or archived, complete or partial) goes through the run
+    parser, which skips incomplete points/combinations with a warning. Reports are
+    written into f_output_dir itself, as bmtool does; an empty report is never
+    written.
+
+    Args:
+        f_output_dir: bmtool-layout outputs directory or lsmiotool run root.
+        f_scale: Scale whose node counts are aggregated (None: every node dir present).
+
+    Returns:
+        Path of the non-empty lsm-report.csv, or None when none could be produced.
+
+    Raises:
+        Exception: Whatever the underlying parser raises (MissingDataError, OSError,
+            RunParseError, ...); callers decide whether that is fatal.
+    """
+    f_report = os.path.join(f_output_dir, data.LSM_REPORT_FILE)
+    if os.path.isfile(os.path.join(f_output_dir, "manifest.json")):
+        from lsmiotool.lib.runparse import (
+            RunRootResolver,
+            extractRun,
+            generateReports,
+        )
+
+        # Like bmtool, report whatever completed: points/combinations without
+        # complete output are skipped with a warning
+        f_resolved = RunRootResolver.resolve(f_output_dir, f_allow_partial=True)
+        generateReports(
+            f_resolved,
+            extractRun(f_resolved, f_skip_incomplete=True),
+            f_output_dir,
+        )
+    else:
+        LsmioAggOutput(f_output_dir, f_scale=f_scale).generateReports(
+            f_out_dir=f_output_dir
+        )
+    return f_report if data.isUsableReport(f_report) else None
+
+
+def ensureLsmioReports(
+    f_output_dir: str,
+    f_scale: Optional[str] = None,
+    f_require_logs: bool = True,
+) -> bool:
+    """Make sure f_output_dir holds a non-empty lsm-report.csv (parse-on-demand).
+
+    A zero-byte lsm-report.csv counts as missing. Mirrors bmtool include/archive.in.sh
+    when f_require_logs is set: reports are generated only when rank logs
+    '*/*/out-*.txt*' (or a manifest.json) exist. Failures are logged, never raised.
+
+    Returns:
+        True when a non-empty lsm-report.csv exists afterwards.
+    """
+    f_report = os.path.join(f_output_dir, data.LSM_REPORT_FILE)
+    if data.isUsableReport(f_report):
+        return True
+    if (
+        f_require_logs
+        and not os.path.isfile(os.path.join(f_output_dir, "manifest.json"))
+        and not glob.glob(
+            os.path.join(glob.escape(f_output_dir), "*", "*", "out-*.txt*")
+        )
+    ):
+        return False
+    try:
+        return regenerateLsmioReports(f_output_dir, f_scale=f_scale) is not None
+    except Exception as err:
+        Console.warning(f"Failed to generate report for {f_output_dir}: {err}")
+        return False
 
 
 class LmpAggOutput(IorAggOutput):
@@ -782,30 +818,52 @@ class LmpAggOutput(IorAggOutput):
     def __init__(self, f_output_dir: str) -> None:
         """Initialize LMP output data processor.
 
+        The per-node map behind getMap() is built on first use, so report generation
+        on a partial run never raises MissingDataError.
+
         Args:
             f_output_dir: Directory containing LMP output files
         """
         super(IorAggOutput, self).__init__()
         self.m_out_dir = f_output_dir
+        self.m_agg_data = None  # type: ignore[assignment]
+
+    def _buildAggData(self) -> AggData:
+        """Aggregate every node/stripe combination present (strict file counts)."""
         lmp_dir = LmpOutputDir(self.m_out_dir)
         dir_map = lmp_dir.getMap()
-        self.m_agg_data = {}
+        agg_data: AggData = {}
 
         for n_count in self._node_counts:
-            self.m_agg_data[n_count] = {}
+            agg_data[n_count] = {}
             for s_count in self._stripe_counts:
-                self.m_agg_data[n_count][s_count] = {}
+                agg_data[n_count][s_count] = {}
                 for s_size in self._stripe_sizes:
-                    self.m_agg_data[n_count][s_count][s_size] = []
+                    agg_data[n_count][s_count][s_size] = []
                     if (
                         n_count not in dir_map
                         or s_count not in dir_map[n_count]
                         or s_size not in dir_map[n_count][s_count]
                     ):
                         continue
-                    self.m_agg_data[n_count][s_count][s_size] = self._processAggFiles(
+                    agg_data[n_count][s_count][s_size] = self._processAggFiles(
                         dir_map[n_count][s_count][s_size], n_count
                     )
+        return agg_data
+
+    @property
+    def agg_data(self) -> AggData:
+        return self._lazyAggData()
+
+    def getMap(self) -> AggData:
+        """Get the aggregated data map.
+
+        Raises:
+            MissingDataError: If a node directory holds fewer files than nodes.
+        """
+        return self._lazyAggData()
+
+    get_map = getMap
 
     def _processAggFiles(
         self, f_files: Dict[str, FileMetadata], f_count: str
@@ -860,35 +918,22 @@ class LmpAggOutput(IorAggOutput):
     _process_agg_files = _processAggFiles
 
     def generateReports(self, f_out_dir: Optional[str] = None) -> None:
-        """Generate LMP master CSV report (lmp-report.csv).
+        """Generate lmp-report.csv exactly like tools/bmtool/parse/lmp-parse.sh.
+
+        One row per node count (1..48), stripe count and block size that has output:
+        'n,rf,bs,' followed by the last '^.write,' line of
+        <outputs>/n/*/out-*-rf-bs-*.txt up to its first colon. Missing combinations are
+        skipped and a report without rows is not written.
 
         Args:
-            f_out_dir: Destination directory for report (defaults to m_out_dir).
+            f_out_dir: Destination directory for the report (defaults to m_out_dir).
+                LMP outputs are always read from m_out_dir.
         """
-        target_dir = f_out_dir or self.m_out_dir
-        report_file = os.path.join(target_dir, "lmp-report.csv")
-        lmp_dir = LmpOutputDir(target_dir)
-        dir_map = lmp_dir.getMap()
-        rows: List[str] = []
-
-        for n in self._node_counts:
-            if n not in dir_map:
-                continue
-            for rf in self._stripe_counts:
-                if rf not in dir_map[n]:
-                    continue
-                for bs in self._stripe_sizes:
-                    if bs not in dir_map[n][rf]:
-                        continue
-                    files_dict = dir_map[n][rf][bs]
-                    for key in sorted(files_dict.keys()):
-                        f_path = files_dict[key]["path"]
-                        sr = data.LmpSingleRunData(f_path)
-                        tp = sr.getMap()["write"].get("throughput", 0.0)
-                        rows.append(f"{n},{rf},{bs},{tp}")
-
-        self.exportCsv(rows, report_file)
-        Console.debug(f"Generated LMP master report: {report_file}")
+        report_file = data.generateBmtoolLmpReport(
+            self.m_out_dir, f_report_dir=f_out_dir or self.m_out_dir
+        )
+        if report_file:
+            Console.debug(f"Generated LMP master report: {report_file}")
 
 
 class IorFullOutput(IorAggOutput):
@@ -900,7 +945,7 @@ class IorFullOutput(IorAggOutput):
         Returns:
             Complete mapping of aggregated performance data
         """
-        return self.m_agg_data
+        return self._lazyAggData()
 
     get_map = getMap
 
@@ -941,7 +986,7 @@ class LsmioFullOutput(LsmioAggOutput):
         Returns:
             Complete mapping of aggregated performance data
         """
-        return self.m_agg_data
+        return self._lazyAggData()
 
     get_map = getMap
 
@@ -982,7 +1027,7 @@ class LmpFullOutput(LmpAggOutput):
         Returns:
             Complete mapping of aggregated performance data
         """
-        return self.m_agg_data
+        return self._lazyAggData()
 
     get_map = getMap
 

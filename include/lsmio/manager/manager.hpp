@@ -177,6 +177,8 @@ class LSMIOManager {
      */
     bool put(const std::string &key, const std::string &value, bool flush);
     bool put(const std::string &key, const std::string &value);
+    bool put(const std::string &key, std::string &&value, bool flush);
+    bool put(const std::string &key, std::string &&value);
     bool put(const std::string &key, const char *value, std::streamsize n);
     bool put(const std::string &key, const void *ptr, size_t size, size_t count);
 

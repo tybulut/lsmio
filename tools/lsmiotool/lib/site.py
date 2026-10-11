@@ -99,6 +99,87 @@ class SiteResolutionError(Exception):
     pass
 
 
+# -------------------------------------------------------------------------
+# bmtool-compatible site helpers (tools/bmtool/include/vars.in.sh)
+# -------------------------------------------------------------------------
+
+# Default ARCHER2 work root when ARCHER2_WORK_ROOT is unset (bmtool vars.in.sh)
+ARCHER2_DEFAULT_WORK_ROOT_PARENT = "/work/e281/e281"
+
+# File names bm_adios --lsmio-plugin loads from ADIOS2_PLUGIN_PATH (bmtool:535, batch.in.sh:164)
+ADIOS_PLUGIN_LIBRARY_NAMES: Tuple[str, ...] = (
+    "liblsmio_adios.so",
+    "liblsmio_adios.dylib",
+)
+
+
+def _containsWord(f_text: str, f_word: str) -> bool:
+    """Match f_word in f_text with `grep -w` semantics (word constituents are [A-Za-z0-9_])."""
+    return (
+        re.search(
+            r"(?<![A-Za-z0-9_])" + re.escape(f_word) + r"(?![A-Za-z0-9_])", f_text
+        )
+        is not None
+    )
+
+
+def resolveArcher2WorkRoot(f_environ: Optional[Mapping[str, str]] = None) -> str:
+    """
+    Resolve the ARCHER2 work root exactly like bmtool:
+    ``${ARCHER2_WORK_ROOT:=/work/e281/e281/${USER:-$(id -un)}}``.
+
+    A non-empty ARCHER2_WORK_ROOT override is honoured; it must be an absolute path
+    without control characters.
+    """
+    f_env = os.environ if f_environ is None else f_environ
+    f_override = f_env.get("ARCHER2_WORK_ROOT")
+    if f_override is not None and f_override.strip():
+        f_root = f_override.strip()
+        if any(ord(f_c) < 32 or ord(f_c) == 127 for f_c in f_root):
+            raise SiteResolutionError(
+                f"ARCHER2_WORK_ROOT contains control characters: {f_root!r}"
+            )
+        if not f_root.startswith("/"):
+            raise SiteResolutionError(
+                f"ARCHER2_WORK_ROOT must be an absolute path, got: {f_root!r}"
+            )
+        return os.path.normpath(f_root)
+
+    f_user = (f_env.get("USER") or "").strip()
+    if not f_user:
+        try:
+            import getpass
+
+            f_user = getpass.getuser()
+        except Exception as f_err:
+            raise SiteResolutionError(
+                "Cannot resolve ARCHER2 work root: USER is unset and the login name is unknown"
+            ) from f_err
+    if not f_user or "/" in f_user or f_user in (".", "..") or "\0" in f_user:
+        raise SiteResolutionError(
+            f"Invalid user name for ARCHER2 work root: {f_user!r}"
+        )
+    return os.path.join(ARCHER2_DEFAULT_WORK_ROOT_PARENT, f_user)
+
+
+def findAdiosPluginLibrary(f_install_prefix: str) -> Optional[str]:
+    """
+    Return the path of the LSMIO ADIOS2 plugin (liblsmio_adios.so or .dylib) below
+    <install_prefix>/lib, which is what the job script exports as ADIOS2_PLUGIN_PATH,
+    or None if neither exists (bmtool preflight, bmtool:535-537 / batch.in.sh:164-166).
+    """
+    if not isinstance(f_install_prefix, str) or not f_install_prefix.strip():
+        raise SiteResolutionError(
+            f"install_prefix must be a non-empty string, got: {f_install_prefix!r}"
+        )
+    f_lib_dir = os.path.join(f_install_prefix.strip(), "lib")
+    for f_name in ADIOS_PLUGIN_LIBRARY_NAMES:
+        f_candidate = os.path.join(f_lib_dir, f_name)
+        if os.path.exists(f_candidate):
+            return f_candidate
+    return None
+
+
 class LauncherPolicy:
     """Immutable policy defining the MPI/job launcher configuration."""
 
@@ -926,13 +1007,13 @@ class EnvironmentResolver:
           - "DEV" requires explicit f_test_mode=True.
           - Known production sites: "VIKING", "VIKING2", "ARCHER2", "ISAMBARD".
           - Unknown values raise SiteResolutionError.
-        - If LSMIO_ENV is not set:
-          - Hostname & group inspection:
-            - Viking2: "viking2" in hostname
-            - Viking: "viking" in hostname and not "viking2" in hostname
-            - Isambard: hostname starts with "xci" or "nid"
-            - Archer2: "archer2" in hostname or "archer2" in groups
-          - Ambiguous sightings (multiple matches) fail closed.
+        - If LSMIO_ENV is not set, the first matching rule wins, in bmtool's fixed order
+          (tools/bmtool/include/vars.in.sh):
+            1. Viking: hostname contains the word "viking" (grep -w)
+            2. Viking2: hostname contains the word "viking2" (grep -w)
+            3. Archer2: groups contain the word "archer2" (grep -w), or "archer2" in hostname
+            4. Isambard: hostname starts with "xci" or "nid"
+          - e.g. an ARCHER2 compute node (nid001234) in group archer2 is ARCHER2.
           - Unknown production sightings fail closed unless f_test_mode is True (yielding "DEV").
         """
         f_environ = os.environ if f_env is None else f_env
@@ -956,27 +1037,15 @@ class EnvironmentResolver:
         f_raw_groups = cls._getSystemGroups() if f_groups is None else list(f_groups)
         f_grps = [str(g).strip().lower() for g in f_raw_groups]
 
-        f_is_isambard = f_hn.startswith("xci") or f_hn.startswith("nid")
-        f_is_viking2 = "viking2" in f_hn
-        f_is_viking = "viking" in f_hn and not f_is_viking2
-        f_is_archer2 = "archer2" in f_hn or "archer2" in f_grps
-
-        f_matches: List[str] = []
-        if f_is_isambard:
-            f_matches.append("ISAMBARD")
-        if f_is_viking2:
-            f_matches.append("VIKING2")
-        if f_is_viking:
-            f_matches.append("VIKING")
-        if f_is_archer2:
-            f_matches.append("ARCHER2")
-
-        if len(f_matches) > 1:
-            raise SiteResolutionError(
-                f"Ambiguous site detection: matched {f_matches} for hostname={f_hn!r}, groups={f_grps!r}"
-            )
-        if len(f_matches) == 1:
-            return f_matches[0]
+        # First match wins, in bmtool's order: viking, viking2, archer2, isambard
+        if _containsWord(f_hn, "viking"):
+            return "VIKING"
+        if _containsWord(f_hn, "viking2"):
+            return "VIKING2"
+        if _containsWord(" ".join(f_grps), "archer2") or "archer2" in f_hn:
+            return "ARCHER2"
+        if f_hn.startswith("xci") or f_hn.startswith("nid"):
+            return "ISAMBARD"
 
         if f_test_mode:
             return "DEV"

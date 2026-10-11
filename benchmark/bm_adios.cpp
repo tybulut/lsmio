@@ -48,23 +48,23 @@ class BMAdios : public BMBase {
     adios2::Engine _writer;
     std::string _ioName;
 
-    virtual bool doRead(const std::string key, std::string *value) {
+    bool doRead(const std::string key, std::string *value) override {
         adios2::Variable<std::string> varKey = _io.InquireVariable<std::string>(key);
         _reader.Get(varKey, value);
         return true;
     }
 
-    virtual bool doWrite(const std::string key, const std::string value) {
+    bool doWrite(const std::string& key, const std::string& value) override {
         adios2::Variable<std::string> varKey = _io.DefineVariable<std::string>(key);
         if (lsmio::gConfigLSMIO.alwaysFlush) {
             _writer.Put(varKey, value, adios2::Mode::Sync);
         } else {
-            _writer.Put(varKey, &value);  // deferred
+            _writer.Put(varKey, &value);
         }
         return true;
     }
 
-    virtual int writePrepare(bool opt) {
+    int writePrepare(bool opt) override {
         std::string fnPrefix = std::string("bm:plugin:") + std::to_string(gConfigBM.useLSMIOPlugin);
         _ioName = fnPrefix + "-writer";
 
@@ -98,7 +98,7 @@ class BMAdios : public BMBase {
         return 0;
     }
 
-    virtual bool doWriteFinalize() {
+    bool doWriteFinalize() override {
         LOG(INFO) << "benchWrite: measured before FLUSH: " << _bm.sofar() << std::endl;
         _benchResultsWrite += std::string("/-- before FLUSH: ") +
                               " ----> MICROSECONDS: " + std::to_string(_bm.sofar()) + "\n";
@@ -110,7 +110,7 @@ class BMAdios : public BMBase {
         return true;
     }
 
-    int writeCleanup() {
+    int writeCleanup() override {
         _adios->RemoveIO(_ioName);
         delete _adios;
         _adios = nullptr;
@@ -118,7 +118,7 @@ class BMAdios : public BMBase {
         return 0;
     }
 
-    virtual int readPrepare(bool opt) {
+    int readPrepare(bool opt) override {
         std::string fnPrefix = std::string("bm:plugin:") + std::to_string(gConfigBM.useLSMIOPlugin);
         _ioName = fnPrefix + "-reader";
 
@@ -152,13 +152,13 @@ class BMAdios : public BMBase {
         return 0;
     }
 
-    virtual bool doReadFinalize() {
+    bool doReadFinalize() override {
         _reader.EndStep();
         _reader.Close();
         return true;
     }
 
-    int readCleanup() {
+    int readCleanup() override {
         _adios->RemoveIO(_ioName);
         delete _adios;
         _adios = nullptr;

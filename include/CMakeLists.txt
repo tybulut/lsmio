@@ -11,6 +11,7 @@ message(STATUS "Include module: LSMIO_INCLUDE_DIR=${LSMIO_INCLUDE_DIR}")
 set(INC_BASE_HPP_FILES
   ${LSMIO_INCLUDE_DIR}/lsmio/lsmio.hpp
   ${LSMIO_INCLUDE_DIR}/lsmio/benchmark.hpp
+  ${LSMIO_INCLUDE_DIR}/lsmio/Version.hpp
   PARENT_SCOPE
 )
 

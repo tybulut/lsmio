@@ -58,7 +58,9 @@ class BmtoolRunTeeTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.m_temp_dir, ignore_errors=True)
 
-    def _runTee(self, f_cmd: str, f_shell_flags: str = "") -> subprocess.CompletedProcess:
+    def _runTee(
+        self, f_cmd: str, f_shell_flags: str = ""
+    ) -> subprocess.CompletedProcess:
         """Source the helper in POSIX sh and run `run_tee LOG sh -c f_cmd`; print its status."""
         f_script = '. "$1"; run_tee "$2" sh -c "$3"; echo "rc=$?"'
         f_argv = ["sh"]

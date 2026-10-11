@@ -80,13 +80,20 @@ class BmtoolBackendsTest(unittest.TestCase):
         self.assertIn(f"ERROR: {f_error}", f_res.stdout)
 
     def testUnknownBackendIsRejected(self) -> None:
-        for f_backends, f_token in (("native,foo", "foo"), ("*", "*"), ("Native", "Native")):
+        for f_backends, f_token in (
+            ("native,foo", "foo"),
+            ("*", "*"),
+            ("Native", "Native"),
+        ):
             with self.subTest(backends=f_backends):
                 self._assertFailsWith(f_backends, f"Unknown backend: [{f_token}].")
 
     def testDuplicateBackendIsRejected(self) -> None:
         """adios and adios2 are the same backend, so listing both is a duplicate."""
-        for f_backends, f_token in (("plugin,plugin", "plugin"), ("adios,adios2", "adios2")):
+        for f_backends, f_token in (
+            ("plugin,plugin", "plugin"),
+            ("adios,adios2", "adios2"),
+        ):
             with self.subTest(backends=f_backends):
                 self._assertFailsWith(
                     f_backends, f"Backend listed twice: [{f_token}] in [{f_backends}]"

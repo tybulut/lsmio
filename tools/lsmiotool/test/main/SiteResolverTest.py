@@ -48,6 +48,8 @@ from lsmiotool.lib.site import (
     SiteResolutionError,
     SlurmMailMode,
     StorageClass,
+    findAdiosPluginLibrary,
+    resolveArcher2WorkRoot,
 )
 
 
@@ -436,7 +438,7 @@ class SiteResolverTest(unittest.TestCase):
             self.assertIsNone(f_pol.memory)
             self.assertEqual(f_pol.walltime_policy, "slurm_nodes")
 
-        # Viking / Viking2 shapes: memory 8gb, partition None, qos None
+        # Viking / Viking2 shapes: memory 16gb, partition None, qos None
         for f_vk in ("VIKING", "VIKING2"):
             f_vk_prof = EnvironmentResolver.resolveProfile(
                 f_vk,
@@ -446,7 +448,7 @@ class SiteResolverTest(unittest.TestCase):
             )
             for f_shp in ("small", "large"):
                 f_pol = f_vk_prof.getResourcePolicy(f_shp)
-                self.assertEqual(f_pol.memory, "8gb")
+                self.assertEqual(f_pol.memory, "16gb")
                 self.assertIsNone(f_pol.partition)
                 self.assertIsNone(f_pol.qos)
                 self.assertEqual(f_pol.walltime_policy, "slurm_nodes")
@@ -600,14 +602,119 @@ class SiteResolverTest(unittest.TestCase):
         with self.assertRaises(SiteResolutionError):
             EnvironmentResolver.detect(f_env={"LSMIO_ENV": "UNKNOWN_SITE"})
 
-        # 4. Ambiguous hostname matching multiple sites must fail closed
-        with self.assertRaises(SiteResolutionError):
-            EnvironmentResolver.detect(f_hostname="xci-archer2-login", f_env={})
-
-        with self.assertRaises(SiteResolutionError):
+    def testDetectionIsFirstMatchInBmtoolOrder(self) -> None:
+        """Hosts matching several rules resolve first-match: viking, viking2, archer2, isambard (H12)."""
+        # ARCHER2 compute/login nodes: nid* in group archer2 is ARCHER2, not ISAMBARD/ambiguous
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="nid001234", f_groups=["e281", "archer2"], f_env={}
+            ),
+            "ARCHER2",
+        )
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="ln01", f_groups=["e281", "archer2"], f_env={}
+            ),
+            "ARCHER2",
+        )
+        # Without the archer2 group, nid*/xci* stays ISAMBARD
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="nid001234", f_groups=["e281"], f_env={}
+            ),
+            "ISAMBARD",
+        )
+        # archer2 hostname beats the xci prefix; viking beats the archer2 group
+        self.assertEqual(
+            EnvironmentResolver.detect(f_hostname="xci-archer2-login", f_env={}),
+            "ARCHER2",
+        )
+        self.assertEqual(
             EnvironmentResolver.detect(
                 f_hostname="viking-login", f_groups=["archer2"], f_env={}
-            )
+            ),
+            "VIKING",
+        )
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="login1.viking2.york.ac.uk", f_groups=["archer2"], f_env={}
+            ),
+            "VIKING2",
+        )
+        # grep -w semantics: group/host words, not substrings
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="workstation",
+                f_groups=["archer2x"],
+                f_env={},
+                f_test_mode=True,
+            ),
+            "DEV",
+        )
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="vikingfoo", f_env={}, f_test_mode=True
+            ),
+            "DEV",
+        )
+        # LSMIO_ENV still overrides detection
+        self.assertEqual(
+            EnvironmentResolver.detect(
+                f_hostname="nid001234",
+                f_groups=["archer2"],
+                f_env={"LSMIO_ENV": "ISAMBARD"},
+            ),
+            "ISAMBARD",
+        )
+
+    def testResolveArcher2WorkRoot(self) -> None:
+        """ARCHER2_WORK_ROOT override is honoured; default is /work/e281/e281/$USER."""
+        self.assertEqual(
+            resolveArcher2WorkRoot({"USER": "alice"}), "/work/e281/e281/alice"
+        )
+        self.assertEqual(
+            resolveArcher2WorkRoot({"USER": "alice", "ARCHER2_WORK_ROOT": ""}),
+            "/work/e281/e281/alice",
+        )
+        self.assertEqual(
+            resolveArcher2WorkRoot(
+                {"USER": "alice", "ARCHER2_WORK_ROOT": "/work/x/y/alice/"}
+            ),
+            "/work/x/y/alice",
+        )
+        with self.assertRaises(SiteResolutionError):
+            resolveArcher2WorkRoot({"ARCHER2_WORK_ROOT": "relative/path"})
+        with self.assertRaises(SiteResolutionError):
+            resolveArcher2WorkRoot({"ARCHER2_WORK_ROOT": "/work/a\nb"})
+        with self.assertRaises(SiteResolutionError):
+            resolveArcher2WorkRoot({"USER": "../evil"})
+
+    def testFindAdiosPluginLibrary(self) -> None:
+        """findAdiosPluginLibrary finds liblsmio_adios.so/.dylib under <prefix>/lib or returns None."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as f_prefix:
+            self.assertIsNone(findAdiosPluginLibrary(f_prefix))
+            os.makedirs(os.path.join(f_prefix, "lib"))
+            self.assertIsNone(findAdiosPluginLibrary(f_prefix))
+
+            f_dylib = os.path.join(f_prefix, "lib", "liblsmio_adios.dylib")
+            open(f_dylib, "w").close()
+            self.assertEqual(findAdiosPluginLibrary(f_prefix), f_dylib)
+
+            f_so = os.path.join(f_prefix, "lib", "liblsmio_adios.so")
+            open(f_so, "w").close()
+            self.assertEqual(findAdiosPluginLibrary(f_prefix), f_so)
+
+            # lib64 is not where ADIOS2_PLUGIN_PATH points
+            os.remove(f_so)
+            os.remove(f_dylib)
+            os.makedirs(os.path.join(f_prefix, "lib64"))
+            open(os.path.join(f_prefix, "lib64", "liblsmio_adios.so"), "w").close()
+            self.assertIsNone(findAdiosPluginLibrary(f_prefix))
+
+        with self.assertRaises(SiteResolutionError):
+            findAdiosPluginLibrary("")
 
     def testUnresolvedTemplateFails(self) -> None:
         """Assert rejection of unresolved placeholders, escaping paths (..), and invalid username/home."""

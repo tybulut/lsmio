@@ -1,11 +1,7 @@
 #!/bin/sh -x
 
 # No spaces allowed in BM_SETUP
-: "${BM_SETUP:=NATIVE-M}"
-#BM_SETUP="ADIOS-M"
-#BM_SETUP="PLUGIN-M"
-#BM_SETUP="ROCKSDB-M"
-#BM_SETUP="LEVELDB-M"
+: "${BM_SETUP:=NATIVE}"
 #BM_SETUP="ADIOS"
 #BM_SETUP="PLUGIN"
 #BM_SETUP="ROCKSDB"
@@ -44,23 +40,10 @@ else
   sg="1024"
 fi
 
-case "$BM_SETUP" in
-  *-M)
-    MPI_FLAGS="-m -g"
-    BASE_BACKEND="${BM_SETUP%-M}"
-    BACKEND_TOKEN=$(echo "$BASE_BACKEND" | tr '[:upper:]' '[:lower:]')
-    ;;
-  MANAGER)
-    MPI_FLAGS=""
-    BASE_BACKEND="MANAGER"
-    BACKEND_TOKEN="manager"
-    ;;
-  *)
-    MPI_FLAGS=""
-    BASE_BACKEND="$BM_SETUP"
-    BACKEND_TOKEN="$(echo "$BASE_BACKEND" | tr '[:upper:]' '[:lower:]')-nompi"
-    ;;
-esac
+# Every benchmark runs under MPI with barriers around its timed phases
+MPI_FLAGS="-m -g"
+BASE_BACKEND="$BM_SETUP"
+BACKEND_TOKEN=$(echo "$BASE_BACKEND" | tr '[:upper:]' '[:lower:]')
 
 if [ -n "$BM_VARIANT_TOKENS" ]; then
   INFIX="${BACKEND_TOKEN}-${BM_VARIANT_TOKENS}"

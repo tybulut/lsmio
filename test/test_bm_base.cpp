@@ -49,7 +49,9 @@ class MockBM : public BMBase {
     int readCleanupCalls = 0;
     std::unordered_map<std::string, std::string> kvStore;
 
-    virtual bool doWrite(const std::string key, const std::string value) override {
+    using BMBase::doWrite;
+
+    bool doWrite(const std::string &key, const std::string &value) override {
         if (failWrite) {
             writeFailureCount++;
             return false;
@@ -181,6 +183,12 @@ TEST_F(BMBaseTest, MemorySafetyNoLeak) {
     EXPECT_EQ(bm.writePrepareCalls, 10);
     EXPECT_EQ(bm.readPrepareCalls, 10);
     EXPECT_EQ(bm.getRandomKeyIndex(), nullptr);
+}
+
+TEST_F(BMBaseTest, VirtualFallbackRvalueForwarding) {
+    MockBM bm;
+    bm.doWrite("test_key", std::string("test_val"));
+    EXPECT_EQ(bm.kvStore["test_key"], "test_val");
 }
 
 TEST(BMBaseVersionTest, CleanExitOnVersionFlag) {

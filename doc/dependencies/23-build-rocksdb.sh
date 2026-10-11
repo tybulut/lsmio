@@ -6,7 +6,7 @@ cd $HOME/src/packages/23-rocksdb
 git clone https://github.com/facebook/rocksdb.git
 
 cd rocksdb
-git checkout v10.10.1
+git checkout v10.6.2
 git submodule update --init
 cd ..
 

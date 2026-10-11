@@ -74,10 +74,10 @@ class ManifestTest(unittest.TestCase):
         # 1. Test across different targets, scales, storage classes, and profiles
         f_test_configs = [
             ("ior", "local", False, "BASE", self.m_viking_profile),
-            ("lsmio", "bake", True, "NATIVE-M", self.m_viking2_profile),
+            ("lsmio", "bake", True, "NATIVE", self.m_viking2_profile),
             ("lmp", "small", False, "LSMIO", self.m_isambard_profile),
             ("ior", "large", True, "HDF5", self.m_archer2_profile),
-            ("lsmio", "local", False, "ROCKSDB-M", self.m_dev_profile),
+            ("lsmio", "local", False, "ROCKSDB", self.m_dev_profile),
         ]
 
         for f_target, f_scale, f_ssd, f_setup, f_prof in f_test_configs:
@@ -705,10 +705,10 @@ class ManifestTest(unittest.TestCase):
             ("ior", "bake", self.m_viking2_profile, "HDF5"),
             ("ior", "small", self.m_isambard_profile, "COLLECTIVE"),
             ("ior", "large", self.m_archer2_profile, "REVERSE"),
-            ("lsmio", "local", self.m_dev_profile, "NATIVE-M"),
-            ("lsmio", "bake", self.m_viking_profile, "ROCKSDB-M"),
-            ("lsmio", "small", self.m_viking2_profile, "ADIOS-M"),
-            ("lsmio", "large", self.m_archer2_profile, "LEVELDB-M"),
+            ("lsmio", "local", self.m_dev_profile, "NATIVE"),
+            ("lsmio", "bake", self.m_viking_profile, "ROCKSDB"),
+            ("lsmio", "small", self.m_viking2_profile, "ADIOS"),
+            ("lsmio", "large", self.m_archer2_profile, "LEVELDB"),
         ]
 
         for f_target, f_scale, f_profile, f_setup in f_cases:
@@ -924,3 +924,25 @@ class ManifestTest(unittest.TestCase):
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestSerializer.deserialize(f_d)
         self.assertIn("match", str(f_ctx.exception))
+
+    def testFastOptionManifestSerializationRoundTrip(self) -> None:
+        """Asserts RunPlan with fast=True serializes fast in request and round-trips byte-stably."""
+        f_req = RunRequest("lsmio", "local", f_fast=True)
+        f_plan = RunPlanner.createPlan(
+            f_request=f_req,
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-fast-test",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        f_json_str = ManifestSerializer.serialize(f_plan)
+        f_dict = json.loads(f_json_str)
+        self.assertIn("fast", f_dict["request"])
+        self.assertTrue(f_dict["request"]["fast"])
+
+        f_doc = ManifestSerializer.deserialize(f_json_str)
+        self.assertTrue(f_doc.request.fast)
+        f_reconstructed = f_doc.toRunPlan()
+        self.assertTrue(f_reconstructed.request.fast)
+        self.assertEqual(f_reconstructed, f_plan)
+        self.assertEqual(ManifestSerializer.serialize(f_reconstructed), f_json_str)

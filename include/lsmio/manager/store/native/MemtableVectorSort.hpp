@@ -47,6 +47,7 @@ class MemtableVectorSort : public IMemtable {
     ~MemtableVectorSort() override = default;
 
     void add(const std::string& f_key, const std::string& f_value) override;
+    void add(const std::string& f_key, std::string&& f_value) override;
     bool get(const std::string& f_key, std::string& f_value) const override;
     void scan(const std::string& f_prefix, std::map<std::string, std::string>& f_results,
               std::set<std::string>& f_deleted_keys) const override;

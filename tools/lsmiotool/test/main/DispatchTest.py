@@ -601,14 +601,14 @@ print("LAZY_IMPORT_OK")
             "lsmio",
             "small",
             ssd=True,
-            setup="NATIVE-M",
+            setup="NATIVE",
             f_orchestrator_factory=mock_factory,
             f_worker_validator=f_mock_validator,
         )
         self.assertEqual(f_run_main_pos.request.target, "lsmio")
         self.assertEqual(f_run_main_pos.request.scale, "small")
         self.assertTrue(f_run_main_pos.request.ssd)
-        self.assertEqual(f_run_main_pos.request.setup, "NATIVE-M")
+        self.assertEqual(f_run_main_pos.request.setup, "NATIVE")
 
         # 3. Test non-zero, 130, and 143 statuses
         for f_expected_status in (1, 130, 143):
@@ -657,7 +657,7 @@ print("LAZY_IMPORT_OK")
         )
         self.assertEqual(
             f_layout.asset_root,
-            str(self.m_package_root.parent / "bmtool" / "lmp-reaxff"),
+            str(self.m_package_root / "share" / "lmp-reaxff"),
         )
         self.assertEqual(
             f_layout.worker_executable, str(self.m_package_root / "lsmiotool-worker")
@@ -712,7 +712,7 @@ print("LAZY_IMPORT_OK")
                 self.assertIn("How to run", f_out)
                 self.assertIn("common cmds:", f_out)
                 self.assertIn(
-                    "run <ior|lsmio|lmp> <local|bake|small|large|baseline>", f_out
+                    "run <ior|lsmio|lmp> <local|bake|small|large|variants>", f_out
                 )
 
         # 2. -h
@@ -983,7 +983,9 @@ print("LAZY_IMPORT_OK")
 
         # 4. Default setups
         self.assertIn("BASE", f_readme)
-        self.assertIn("NATIVE-M", f_readme)
+        self.assertIn("default setup: `NATIVE`", f_readme)
+        self.assertIn("`NATIVE` (default)", f_readme)
+        self.assertNotIn("`NATIVE-M` (default)", f_readme)
         self.assertIn("LSMIO", f_readme)
 
         # 5. PBS directives: walltime=06:00:00, -m abe, -q arm, select=, pmem=8G, pvmem=8G
@@ -994,11 +996,11 @@ print("LAZY_IMPORT_OK")
         self.assertIn("#PBS -l pmem=8G", f_readme)
         self.assertIn("#PBS -l pvmem=8G", f_readme)
 
-        # 6. Slurm directives: --mail-type=END,FAIL, cyclic:cyclic, mem=8gb
+        # 6. Slurm directives: --mail-type=END,FAIL, cyclic:cyclic, mem=16gb
         self.assertIn("#SBATCH --mail-type=END,FAIL", f_readme)
         self.assertIn("#SBATCH --time=", f_readme)
         self.assertIn("#SBATCH --distribution=cyclic:cyclic", f_readme)
-        self.assertIn("#SBATCH --mem=8gb", f_readme)
+        self.assertIn("#SBATCH --mem=16gb", f_readme)
 
         # 7. Configured certification state
         self.assertIn("configured", f_readme)
@@ -1059,7 +1061,7 @@ print("LAZY_IMPORT_OK")
         # Source layout paths
         self.assertIn("tools/lsmiotool/lsmiotool", f_readme)
         self.assertIn("tools/lsmiotool/lsmiotool-worker", f_readme)
-        self.assertIn("tools/bmtool/lmp-reaxff", f_readme)
+        self.assertIn("tools/lsmiotool/share/lmp-reaxff", f_readme)
 
         # State precedence & markers
         self.assertIn("WHOLE_RUN_SUCCEEDED", f_readme)
@@ -1091,8 +1093,8 @@ print("LAZY_IMPORT_OK")
             self.assertIn(f_scale, RUN_HELP_TEXT)
             self.assertIn(f_scale, LSMIOTOOL_HELP)
 
-        for f_setup in ("BASE", "NATIVE-M", "LSMIO"):
-            self.assertIn(f_setup, f_readme)
+        for f_setup in ("BASE", "NATIVE", "LSMIO"):
+            self.assertIn(f"`{f_setup}`", f_readme)
             self.assertIn(f_setup, RUN_HELP_TEXT)
 
         # 2. Syntax rules: --setup <name> accepted, --setup=value strictly rejected
@@ -1121,7 +1123,7 @@ print("LAZY_IMPORT_OK")
         self.assertIn("tools/lsmiotool/lsmiotool", f_readme)
         self.assertIn("tools/lsmiotool/lsmiotool-worker", f_readme)
         self.assertIn("tools/lsmiotool/etc/environments.json", f_readme)
-        self.assertIn("tools/bmtool/lmp-reaxff", f_readme)
+        self.assertIn("tools/lsmiotool/share/lmp-reaxff", f_readme)
 
         # 5. Standardized printed identity lines
         self.assertIn("Run ID:", f_readme)

@@ -82,15 +82,13 @@ class CleanupForbiddenError(ArtifactError):
     pass
 
 
-STANDARD_STRIPES: Tuple[int, ...] = (16, 4)
-STANDARD_BLOCK_SIZES: Tuple[str, ...] = ("8M", "1M", "64K")
-STANDARD_COMBINATION_TUPLES: Tuple[Tuple[int, str], ...] = (
-    (16, "8M"),
-    (16, "1M"),
-    (16, "64K"),
-    (4, "8M"),
-    (4, "1M"),
-    (4, "64K"),
+# Execution order matches bmtool's run_matrix_workload: for rf in 4 16; for bs in 1M 64K 8M
+STANDARD_STRIPES: Tuple[int, ...] = (4, 16)
+STANDARD_BLOCK_SIZES: Tuple[str, ...] = ("1M", "64K", "8M")
+STANDARD_COMBINATION_TUPLES: Tuple[Tuple[int, str], ...] = tuple(
+    (f_stripe, f_block)
+    for f_stripe in STANDARD_STRIPES
+    for f_block in STANDARD_BLOCK_SIZES
 )
 
 

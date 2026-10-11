@@ -177,8 +177,8 @@ bool LSMIOStoreRDB::getPrefix(const std::string key,
     return s.ok();
 }
 
-bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string key,
-                                   const std::string value, bool flush) {
+bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key,
+                                   const std::string& value, bool flush) {
     rocksdb::Status s;
     bool retValue;
 
@@ -201,6 +201,11 @@ bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string key,
 
     retValue = s.ok();
     return retValue;
+}
+
+bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key, std::string&& value,
+                                   bool flush) {
+    return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
 }
 
 bool LSMIOStoreRDB::startBatch() {

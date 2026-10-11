@@ -42,6 +42,12 @@ void MemtableVectorNoSort::add(const std::string& f_key, const std::string& f_va
     m_size_bytes += f_key.size() + f_value.size();
 }
 
+void MemtableVectorNoSort::add(const std::string& f_key, std::string&& f_value) {
+    const size_t val_bytes = f_value.size();
+    m_data.emplace_back(f_key, std::move(f_value));
+    m_size_bytes += f_key.size() + val_bytes;
+}
+
 bool MemtableVectorNoSort::get(const std::string& f_key, std::string& f_value) const {
     // Reverse scan (newest first)
     for (auto it = m_data.rbegin(); it != m_data.rend(); ++it) {

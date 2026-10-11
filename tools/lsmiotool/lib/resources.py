@@ -479,7 +479,7 @@ class ResourceLocator:
             os.path.join(f_package_root, "etc", "environments.json")
         )
         f_asset_root = os.path.normpath(
-            os.path.join(f_repo_root, "tools", "bmtool", "lmp-reaxff")
+            os.path.join(f_package_root, "share", "lmp-reaxff")
         )
         f_worker_executable = os.path.normpath(
             os.path.join(f_package_root, "lsmiotool-worker")
