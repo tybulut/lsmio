@@ -1,14 +1,5 @@
-- Breaking: LSMIO setups lose the `-M` suffix and every setup runs under MPI (`-m -g`): `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`; the non-MPI setups and the old `-M` names (`NATIVE-M`, `native-m-<variant>`, `*-nompi` arms) are rejected by bmtool and lsmiotool
-- Breaking: 35 duplicate variants (e.g. `footer`, `map`, `manoff`, `pread`, `footer-btree`) are retired, so `variants all` runs the same 26 variants as `most`; archives named after them are still read by `parse` and `compare`
-- lsmiotool's `default` variant passes `--lsmio-no-autotune`, as bmtool's does
-- Breaking: `variants all` now runs all 61 variants; the new `most` set is the 26 canonical variants that `all` ran before
-- Breaking: benchmark archives are partitioned under `lsmio-archive/{backends/<scale>,variants,baseline}/`
-- The `baseline` scale is renamed `variants`; `baseline` still works with a deprecation warning
-- New backends mode: runs several storage backends back-to-back in one allocation (bmtool), with `plugin` (ADIOS2 with the LSMIO engine plugin, `bm_adios --lsmio-plugin`) as a new backend
-- Backends mode runs `adios2,native,plugin,rocksdb` by default in bmtool; lsmiotool uses the same default list for its plan and walltime
-- bmtool rejects unknown, duplicate or empty backend lists, and checks every backend binary and the plugin library before submitting and before running any backend
-- Plots and parsed reports include the plugin backend; plots also label and order leveldb
-- ADIOS2 v2.11.0 is now required (was v2.9.2); an older system ADIOS2 is ignored and v2.11.0 is fetched
-- Improved ARCHER2 support and fail-fast error handling in benchmarks
-- Build: lld is used by default when available (`LSMIO_USE_LLD`); CI runs on ubuntu-26.04
-- build.sh: new `itest <regex> [target]` command, optional out-of-tree build directory, quiet test runs, failure logging and symlink-safe cleaning
+- Improved memory management in LSMIO backends
+- Started formal bmtool deprecation in favor of lsmiotool
+- Fast incremental builds
+- Removed unused benchmark code paths
+- Various bug fixes
