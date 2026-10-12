@@ -31,19 +31,14 @@
 #ifndef _LSMIO_PLUGIN_TCC_
 #define _LSMIO_PLUGIN_TCC_
 
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <vector>
+
 #include "lsmio_plugin.hpp"
 
 namespace lsmio {
-
-void commaSplit(std::string const &str, std::vector<std::string> &out) {
-    const char delimiter = ',';
-    std::stringstream ss(str);
-    std::string s;
-
-    while (std::getline(ss, s, delimiter)) {
-        out.push_back(s);
-    }
-}
 
 template <typename T>
 void LsmioPlugin::AddVariable(const std::string &name, Dims shape, Dims start, Dims count) {
@@ -55,169 +50,125 @@ void LsmioPlugin::AddVariable(const std::string &name, Dims shape, Dims start, D
     }
 }
 
+// Attribute values are stored as raw bytes (strings: a length-prefixed string per element)
+template <typename T>
+void LsmioPlugin::EncodeAttribute(std::string &entry, const core::AttributeBase &attribute) {
+    const auto &a = static_cast<const core::Attribute<T> &>(attribute);
+    const T *data = a.m_IsSingleValue ? &a.m_DataSingleValue : a.m_DataArray.data();
+    entry.append(reinterpret_cast<const char *>(data), a.m_Elements * sizeof(T));
+}
+
+template <>
+inline void LsmioPlugin::EncodeAttribute<std::string>(std::string &entry,
+                                                      const core::AttributeBase &attribute) {
+    const auto &a = static_cast<const core::Attribute<std::string> &>(attribute);
+    const std::string *data = a.m_IsSingleValue ? &a.m_DataSingleValue : a.m_DataArray.data();
+    for (size_t i = 0; i < a.m_Elements; ++i) {
+        const uint64_t len = data[i].size();
+        entry.append(reinterpret_cast<const char *>(&len), sizeof(len));
+        entry.append(data[i]);
+    }
+}
+
+template <typename T>
+void LsmioPlugin::DefineAttribute(const std::string &name, bool singleValue, size_t elements,
+                                  const char *data, size_t size) {
+    // elements is checked by division first: a corrupt count must not overflow the product
+    if (elements > size / sizeof(T) || size != elements * sizeof(T) ||
+        (singleValue && elements != 1)) {
+        throw std::runtime_error("ERROR: LsmioPlugin: corrupt metadata for attribute " + name);
+    }
+    std::vector<T> values(elements);
+    if (size) std::memcpy(values.data(), data, size);
+    if (singleValue) {
+        m_IO.DefineAttribute<T>(name, values.at(0), "", "/", true);
+    } else {
+        m_IO.DefineAttribute<T>(name, values.data(), elements, "", "/", true);
+    }
+}
+
+template <>
+inline void LsmioPlugin::DefineAttribute<std::string>(const std::string &name, bool singleValue,
+                                                      size_t elements, const char *data,
+                                                      size_t size) {
+    std::vector<std::string> values;
+    size_t pos = 0;
+    for (size_t i = 0; i < elements; ++i) {
+        uint64_t len = 0;
+        if (size - pos < sizeof(len)) break;
+        std::memcpy(&len, data + pos, sizeof(len));
+        pos += sizeof(len);
+        if (size - pos < len) break;
+        values.emplace_back(data + pos, len);
+        pos += len;
+    }
+    if (values.size() != elements || pos != size || (singleValue && elements != 1)) {
+        throw std::runtime_error("ERROR: LsmioPlugin: corrupt metadata for attribute " + name);
+    }
+    if (singleValue) {
+        m_IO.DefineAttribute<std::string>(name, values.at(0), "", "/", true);
+    } else {
+        m_IO.DefineAttribute<std::string>(name, values.data(), elements, "", "/", true);
+    }
+}
+
+// Values are stored as the raw bytes of the selection, in the writer's byte order (a long
+// double keeps its ABI padding bytes, as BP5 does)
 template <class T>
 inline void LsmioPlugin::ReadVariable(core::Variable<T> &variable, T *values) {
     LOG(INFO) << "LsmioPlugin::ReadVariable<T>: " << variable.m_Name << std::endl;
-    std::string vals;
-    bool success = _lm->get(variable.m_Name, &vals);
-    if (vals.find(",") == vals.npos) {
-        values[0] = helper::StringTo<T>(vals, "");
-    } else {
-        std::istringstream ss(vals);
-        std::string val;
-        int i = 0;
+    CheckMemorySelection(variable);
+    CheckSelection(variable);
 
-        while (std::getline(ss, val, ',')) {
-            values[i] = helper::StringTo<T>(val, "");
-            i++;
-        }
+    std::string bytes;
+    if (!_lm->get(variable.m_Name, &bytes)) {
+        throw std::runtime_error("ERROR: LsmioPlugin: could not read variable " + variable.m_Name);
     }
+
+    const size_t size = variable.SelectionSize() * sizeof(T);
+    if (bytes.size() != size) {
+        throw std::runtime_error("ERROR: LsmioPlugin: variable " + variable.m_Name + " holds " +
+                                 std::to_string(bytes.size()) + " bytes, the selection needs " +
+                                 std::to_string(size));
+    }
+    if (size) std::memcpy(values, bytes.data(), size);
 }
 
 template <>
 inline void LsmioPlugin::ReadVariable(core::Variable<std::string> &variable, std::string *values) {
     LOG(INFO) << "LsmioPlugin::ReadVariable<string>: " << variable.m_Name << std::endl;
-    bool success = _lm->get(variable.m_Name, &(values[0]));
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<char> &variable, char *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<char>: " << variable.m_Name << std::endl;
-    std::string value;
-    bool success = _lm->get(variable.m_Name, &value);
-    std::vector<std::string> valueArray;
-    commaSplit(value, valueArray);
-
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        values[i] = static_cast<char>(valueArray[i][0]);
+    if (!_lm->get(variable.m_Name, &(values[0]))) {
+        throw std::runtime_error("ERROR: LsmioPlugin: could not read variable " + variable.m_Name);
     }
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<unsigned char> &variable,
-                                      unsigned char *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<unsigned char>: " << variable.m_Name << std::endl;
-    std::string value;
-    bool success = _lm->get(variable.m_Name, &value);
-    std::vector<std::string> valueArray;
-    commaSplit(value, valueArray);
-
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        values[i] = static_cast<unsigned char>(valueArray[i][0]);
-    }
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<signed char> &variable, signed char *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<signed char>: " << variable.m_Name << std::endl;
-    std::string value;
-    bool success = _lm->get(variable.m_Name, &value);
-    std::vector<std::string> valueArray;
-    commaSplit(value, valueArray);
-
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        values[i] = static_cast<signed char>(valueArray[i][0]);
-    }
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<short> &variable, short *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<short>: " << variable.m_Name << std::endl;
-    std::string value;
-    bool success = _lm->get(variable.m_Name, &value);
-    std::vector<std::string> valueArray;
-    commaSplit(value, valueArray);
-
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        values[i] = static_cast<short>(std::stoi(valueArray[i]));
-    }
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<unsigned short> &variable,
-                                      unsigned short *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<unsigned short>: " << variable.m_Name << std::endl;
-    std::string value;
-    bool success = _lm->get(variable.m_Name, &value);
-    std::vector<std::string> valueArray;
-    commaSplit(value, valueArray);
-
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        values[i] = static_cast<unsigned short>(std::stoi(valueArray[i]));
-    }
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<long double> &variable, long double *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<long double>: " << variable.m_Name << std::endl;
-    std::string value;
-    bool success = _lm->get(variable.m_Name, &value);
-    std::vector<std::string> valueArray;
-    commaSplit(value, valueArray);
-
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        try {
-            values[i] = std::strtold(valueArray[i].data(), nullptr);
-        } catch (...) {
-            std::throw_with_nested(std::invalid_argument("ERROR: could not cast " + valueArray[i] +
-                                                         " to long double "));
-        }
-    }
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<std::complex<float>> &variable,
-                                      std::complex<float> *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<float>: " << variable.m_Name << std::endl;
-    throw std::invalid_argument("ERROR: std::complex<float> not supported in this engine");
-}
-
-template <>
-inline void LsmioPlugin::ReadVariable(core::Variable<std::complex<double>> &variable,
-                                      std::complex<double> *values) {
-    LOG(INFO) << "LsmioPlugin::ReadVariable<double>: " << variable.m_Name << std::endl;
-    throw std::invalid_argument("ERROR: std::complex<double> not supported in this engine");
-}
-
-template <typename T>
-std::string LsmioPlugin::WriteVariableInfo(core::Variable<T> &variable) {
-    std::ostringstream valueStream;
-
-    valueStream << variable.m_Name << ";" << variable.m_Type << ";" << variable.m_Shape << ";"
-                << variable.m_Start << ";" << variable.m_Count;
-
-    LOG(INFO) << "LsmioPlugin::WriteVariableInfo(): key: " << _variableStoreKey << ": "
-              << valueStream.str() << std::endl;
-
-    return valueStream.str();
 }
 
 template <typename T>
 inline void LsmioPlugin::WriteVariable(core::Variable<T> &variable, const T *values,
                                        const Mode launch) {
-    std::ostringstream valueStream;
     bool isSync = (launch == Mode::Sync) ? true : false;
+    CheckMemorySelection(variable);
+    std::string bytes(reinterpret_cast<const char *>(values), variable.SelectionSize() * sizeof(T));
 
-    for (size_t i = 0; i < variable.SelectionSize(); ++i) {
-        valueStream << values[i];
-        if (i < variable.SelectionSize() - 1) {
-            valueStream << ",";
-        }
+    LOG(INFO) << "LsmioPlugin::WriteVariable<T>: key: " << variable.m_Name
+              << " bytes: " << bytes.size() << std::endl;
+
+    // A failed put (e.g. a value over LSMIO's maximum value length) must not be lost silently
+    if (!_lm->put(variable.m_Name, std::move(bytes), isSync)) {
+        throw std::runtime_error("ERROR: LsmioPlugin: could not write variable " + variable.m_Name);
     }
-
-    LOG(INFO) << "LsmioPlugin::WriteVariable<T>: key: " << variable.m_Name << ": "
-              << valueStream.str() << std::endl;
-
-    bool success = _lm->put(variable.m_Name, valueStream.str(), isSync);
+    RecordVariable(variable);
 }
 
 template <>
 inline void LsmioPlugin::WriteVariable(core::Variable<std::string> &variable,
                                        const std::string *values, const Mode launch) {
     bool isSync = (launch == Mode::Sync) ? true : false;
-    LOG(INFO) << "LsmioPlugin::WriteVariable<string>: key: " << variable.m_Name << ": " << values[0]
-              << std::endl;
-    bool success = _lm->put(variable.m_Name, values[0], isSync);
+    LOG(INFO) << "LsmioPlugin::WriteVariable<string>: key: " << variable.m_Name
+              << " bytes: " << values[0].size() << std::endl;
+    if (!_lm->put(variable.m_Name, values[0], isSync)) {
+        throw std::runtime_error("ERROR: LsmioPlugin: could not write variable " + variable.m_Name);
+    }
+    RecordVariable(variable);
 }
 
 }  // namespace lsmio

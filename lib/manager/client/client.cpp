@@ -60,7 +60,9 @@ const std::string KV_CMD::READ_BARRIER = "rBarrier";
 const std::string KV_CMD::WRITE_BARRIER = "wBarrier";
 
 const std::string KV_CMD_RETURN::GET = "getBack";
+const std::string KV_CMD_RETURN::GET_FAIL = "getFail";
 const std::string KV_CMD_RETURN::META_GET = "metaGetBack";
+const std::string KV_CMD_RETURN::META_GET_FAIL = "metaGetFail";
 const std::string KV_CMD_RETURN::META_GET_ALL = "metaGetAllBack";
 const std::string KV_CMD_RETURN::READ_BARRIER = "rBarrierBack";
 const std::string KV_CMD_RETURN::WRITE_BARRIER = "wBarrierBack";
@@ -103,7 +105,7 @@ bool LSMIOClient::checkThreadSupport() {
               << " thread support: " << MPI_THREAD_TO_STR(provided)
               << " thread id: " << (is_main_thread ? "main" : "not main") << std::endl;
 
-    return (provided != MPI_THREAD_MULTIPLE);
+    return (provided == MPI_THREAD_MULTIPLE);
 }
 
 void LSMIOClient::serializeCmd(std::string *buf, const std::string &command, const std::string &key,
@@ -136,7 +138,7 @@ void LSMIOClient::deSerializeCmd(const char *buf, const int &len, std::string *c
               << std::endl;
 }
 
-bool LSMIOClient::stopCollectiveIOServer() {
+bool LSMIOClient::stopCollectiveIOServer(const std::function<bool()> &finish) {
     std::thread::id main_thread_id = std::this_thread::get_id();
     LOG(INFO) << "LSMIOClient::stopCollectiveIOServer: waiting for the server thread to join..."
               << std::endl;
@@ -147,9 +149,12 @@ bool LSMIOClient::stopCollectiveIOServer() {
     _serverThread.join();
     LOG(INFO) << "LSMIOClient::stopCollectiveIOServer: the server thread has joined." << std::endl;
 
-    _barrier();  // B99: server/client: End Process
+    // B99: server/client: End Process. The barrier carries the error flag: every rank of the
+    // group learns whether the aggregator failed to store any data, at no extra message
+    const int failed = finish() ? 0 : 1;
+    const bool success = (_allreduceMax(failed) == 0);
     LOG(INFO) << "LSMIOClient::stopCollectiveIOServer: Barrier reached." << std::endl;
-    return true;
+    return success;
 }
 
 bool LSMIOClient::stopCollectiveIOClient(int rank) {
@@ -157,10 +162,10 @@ bool LSMIOClient::stopCollectiveIOClient(int rank) {
     std::string retValue;
     sendCommand(rank, _EOL_COMMAND, KV_DUMMY, retValue);
     LOG(INFO) << "LSMIOClient::stopCollectiveIOClient: sent for _EOL_COMMAND: " << std::endl;
-    _barrier();  // B99: server/client: End Process
+    const bool success = (_allreduceMax(0) == 0);  // B99: server/client: End Process
     LOG(INFO) << "LSMIOClient::stopCollectiveIOClient(): Barrier reached. Cleaning up client..."
               << std::endl;
-    return true;
+    return success;
 }
 
 bool LSMIOClient::startCollectiveIOClient() {
@@ -222,11 +227,13 @@ void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
 
         LOG(INFO) << "LSMIOClient::_waitForCommand: Waiting for buffers to be filled..."
                   << std::endl;
+        // A round takes one command from every rank still running: ranks may send different
+        // numbers of commands (e.g. one put more), and a rank that has ended sends nothing more
         int *bufSizes = new int[_size];
-        char **recvBuf = _recvToBuffer(bufSizes);
+        char **recvBuf = _recvToBuffer(bufSizes, eolRanks);
 
         for (recv_i = 0, req_count = 0; recv_i < _size; recv_i++) {
-            if (recv_i == _rank) continue;
+            if (recv_i == _rank || eolRanks[recv_i]) continue;
 
             std::string str_cmd, str_key, str_val;
             deSerializeCmd(recvBuf[recv_i], bufSizes[recv_i], &str_cmd, &str_key, &str_val);
@@ -237,7 +244,7 @@ void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
                       << " val: " << (str_val.size() > 80 ? str_val.substr(0, 80) + "..." : str_val)
                       << std::endl;
 
-            delete recvBuf[recv_i];
+            delete[] recvBuf[recv_i];
 
             if (str_cmd == _EOL_COMMAND) {
                 eolRanks[recv_i] = 1;
@@ -246,12 +253,17 @@ void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
 
             // callback time
             std::string retValue;
-            (lm->*func)(recv_i, str_cmd, str_key, &retValue, str_val);
+            const bool success = (lm->*func)(recv_i, str_cmd, str_key, &retValue, str_val);
 
+            // A failed get answers in the reply it already has; failed puts are kept by the
+            // manager and reported to every rank of the group at close
             if (str_cmd == KV_CMD::GET) {
-                sendCommand(recv_i, KV_CMD_RETURN::GET, str_key, retValue);
+                sendCommand(recv_i, success ? KV_CMD_RETURN::GET : KV_CMD_RETURN::GET_FAIL, str_key,
+                            retValue);
             } else if (str_cmd == KV_CMD::META_GET) {
-                sendCommand(recv_i, KV_CMD_RETURN::META_GET, str_key, retValue);
+                sendCommand(recv_i,
+                            success ? KV_CMD_RETURN::META_GET : KV_CMD_RETURN::META_GET_FAIL,
+                            str_key, retValue);
             } else if (str_cmd == KV_CMD::META_GET_ALL) {
                 sendCommand(recv_i, KV_CMD_RETURN::META_GET_ALL, str_key, retValue);
             } else if (str_cmd == KV_CMD::READ_BARRIER) {
@@ -261,7 +273,8 @@ void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
             }
         }
 
-        delete recvBuf;
+        delete[] recvBuf;
+        delete[] bufSizes;
 
         LOG(INFO) << "LSMIOClient::_waitForCommand: Completed loop: " << loopCounter++ << std::endl;
     }

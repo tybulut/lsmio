@@ -45,7 +45,8 @@ class LSMIOClientAdios : public LSMIOClient {
 
   protected:
     void _barrier();
-    char **_recvToBuffer(int *bufSizes);
+    int _allreduceMax(int value) override;
+    char **_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks);
 
   public:
     LSMIOClientAdios(adios2::helper::Comm *comm);

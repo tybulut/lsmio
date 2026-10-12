@@ -32,10 +32,12 @@
 #define _LSMIO_CLIENT_HPP_
 
 #include <atomic>
+#include <functional>
 #include <future>  // NOLINT [build/c++11]
 #include <lsmio/lsmio.hpp>
 #include <string>
 #include <thread>  // NOLINT [build/c++11]
+#include <vector>
 
 namespace lsmio {
 
@@ -75,7 +77,11 @@ class KV_CMD_RETURN {
   public:
     /// @brief Return command after a "get" operation.
     static const std::string GET;
+    /// A GET whose key was not found or could not be read
+    static const std::string GET_FAIL;
     static const std::string META_GET;
+    /// A META_GET whose key was not found or could not be read
+    static const std::string META_GET_FAIL;
     static const std::string META_GET_ALL;
     /// @brief Return command after a read barrier.
     static const std::string READ_BARRIER;
@@ -95,7 +101,7 @@ class LSMIOManager;
  * This callback function type represents the method signature for
  * handling responses or events within the LSMIO client.
  */
-using LSMIOClientCallback = void (LSMIOManager::*)(int, const std::string &, const std::string &,
+using LSMIOClientCallback = bool (LSMIOManager::*)(int, const std::string &, const std::string &,
                                                    std::string *, std::string);
 
 /**
@@ -161,12 +167,18 @@ class LSMIOClient {
     /// @brief Virtual function to implement a barrier mechanism.
     virtual void _barrier() = 0;
 
+    /// @brief Virtual function returning the maximum of value over the ranks of this client's
+    /// communicator, i.e. the aggregation group (a barrier that carries a value).
+    virtual int _allreduceMax(int value) = 0;
+
     /**
      * @brief Virtual function to receive data into a buffer.
      * @param bufSizes Pointer to an integer storing the size of the received buffer.
+     * @param eolRanks Ranks that have sent their end-of-life command: nothing is received from
+     * them (their buffer is null).
      * @return A pointer to the received data.
      */
-    virtual char **_recvToBuffer(int *bufSizes) = 0;
+    virtual char **_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks) = 0;
 
   public:
     /// @brief Default constructor for LSMIOClient.
@@ -185,8 +197,8 @@ class LSMIOClient {
     static void helperThread(LSMIOClient *ctx, LSMIOClientCallback func, LSMIOManager *lm,
                              std::promise<void> threadBarrier);
 
-    /// @brief Checks if the client supports multi-threading.
-    bool checkThreadSupport();
+    /// @brief Returns whether MPI provides MPI_THREAD_MULTIPLE, which aggregated I/O needs.
+    static bool checkThreadSupport();
 
     /**
      * @brief Starts the server thread for collective IO operations.
@@ -201,14 +213,16 @@ class LSMIOClient {
 
     /**
      * @brief Stops the server thread for collective IO operations.
-     * @return True if the server was stopped successfully, false otherwise.
+     * @param finish Called once every client's commands are processed: flushes the store and
+     * returns false if any of them failed.
+     * @return False if finish or any rank reported a failure.
      */
-    bool stopCollectiveIOServer();
+    bool stopCollectiveIOServer(const std::function<bool()> &finish);
 
     /**
      * @brief Stops the client for collective IO operations.
      * @param rank The rank of the client to be stopped.
-     * @return True if the client was stopped successfully, false otherwise.
+     * @return False if any rank reported a failure (e.g. a put the aggregator could not store).
      */
     bool stopCollectiveIOClient(int rank);
 

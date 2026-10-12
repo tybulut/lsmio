@@ -158,6 +158,20 @@ add_lsmio_posix_test(test_posix)
 add_lsmio_mpi_test(test_mpi_base lsmio::base_static)
 add_lsmio_mpi_test(test_mpi_manager lsmio::store_static)
 
+# Below MPI_THREAD_MULTIPLE aggregation must be refused on every rank, not hang
+add_test(
+  NAME lsmioTest/managerMPIThreadTests.ThreadSerialized
+  COMMAND ${mpi_cmd} ${test_parameters} $<TARGET_FILE:test_mpi_manager>
+    --mpi-thread-serialized --gtest_filter=managerMPIThreadTests.*
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(lsmioTest/managerMPIThreadTests.ThreadSerialized PROPERTIES
+  SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+  ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  TIMEOUT 30
+  PROCESSORS ${mpi_processes}
+)
+
 # GTest: Adios and Plugin
 add_executable(test_adios test_adios.cpp test_plugin.cpp)
 target_include_directories(test_adios PRIVATE ${LSMIO_INCLUDE_DIR})
@@ -190,6 +204,23 @@ gtest_discover_tests(
     TIMEOUT 30
     PROCESSORS ${mpi_processes}
   DISCOVERY_TIMEOUT 30
+)
+
+# The plugin's MPI tests again with 3 ranks: with 2 there is a single client, so ranks never
+# send different numbers of commands, and Split and Shared form the same group as Entire
+set(test_parameters_3 ${test_parameters})
+list(POP_BACK test_parameters_3)
+list(APPEND test_parameters_3 3)
+add_test(
+  NAME lsmioTest/pluginMPITests.ThreeRanks
+  COMMAND ${mpi_cmd} ${test_parameters_3} $<TARGET_FILE:test_mpi_adios>
+    --gtest_filter=lsmioTest/pluginMPITests.*
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(lsmioTest/pluginMPITests.ThreeRanks PROPERTIES
+  ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  TIMEOUT 120
+  PROCESSORS 3
 )
 
 if(LSMIO_ENABLE_COVERAGE)
