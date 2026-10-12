@@ -40,7 +40,6 @@ _PREEXISTING_MODULE_NAMES = (
     "lsmiotool.test.main.BaselineGateTest",
     "lsmiotool.test.main.test_dirs",
     "lsmiotool.test.main.test_hpc",
-    "lsmiotool.test.main.test_jobs",
     "lsmiotool.test.parse.TestCompareMain",
     "lsmiotool.test.parse.TestEndToEndParse",
     "lsmiotool.test.parse.TestLmpData",
@@ -288,9 +287,9 @@ class LoaderTest(unittest.TestCase):
             _PREEXISTING_MODULE_NAMES,
         )
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
-        self.assertEqual(len(preexisting_test_ids), 79)
+        self.assertEqual(len(preexisting_test_ids), 61)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 858)
+        self.assertEqual(len(all_test_ids), 842)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

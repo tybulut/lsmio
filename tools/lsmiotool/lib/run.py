@@ -2095,6 +2095,8 @@ class ManifestSerializer:
         "cancellation",
         "lustre_pools",
     }
+    # srun_mpi: srun --mpi type, written only when the site profile sets it
+    OPTIONAL_SITE_KEYS: Set[str] = {"srun_mpi"}
     REQUIRED_BENCHMARK_ROOT_KEYS: Set[str] = {"hdd", "ssd"}
     REQUIRED_LUSTRE_POOL_KEYS: Set[str] = {"hdd", "ssd"}
     REQUIRED_RESOURCE_SHAPES: Set[str] = {"small", "large"}
@@ -2562,7 +2564,7 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 f"Missing keys in site: {sorted(f_missing_site)}"
             )
-        f_extra_site = f_site_keys - cls.REQUIRED_SITE_KEYS
+        f_extra_site = f_site_keys - cls.REQUIRED_SITE_KEYS - cls.OPTIONAL_SITE_KEYS
         if f_extra_site:
             raise ManifestValidationError(
                 f"Unexpected extra keys in site: {sorted(f_extra_site)}"
@@ -2793,7 +2795,9 @@ class ManifestSerializer:
             f_site = SiteProfile(
                 f_name=f_site_raw["name"],
                 f_scheduler=SchedulerKind(f_site_raw["scheduler"]),
-                f_launcher=LauncherPolicy(f_site_raw["launcher"]),
+                f_launcher=LauncherPolicy(
+                    f_site_raw["launcher"], f_site_raw.get("srun_mpi")
+                ),
                 f_certification=CertificationState(f_site_raw["certification"]),
                 f_test_only=f_site_raw["test_only"],
                 f_benchmark_roots=f_bm_roots,

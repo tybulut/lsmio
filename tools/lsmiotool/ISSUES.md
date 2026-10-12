@@ -34,7 +34,6 @@ Status: `[ ]` open.
   variant dirs when any `:run` exists (`main.py:1049-1052`).
 - [ ] **L13.** MPI child spawned with `close_fds=True` (`worker.py:415`); breaks PMI2 fd handoff on
   sites using `--mpi=pmi2` (not Viking2).
-- [ ] **L14.** `lib/jobs.py` is dead code that has drifted from bmtool.
 - [ ] **L15.** On interruption, arms that already finished in the interrupted point become
   CANCELLED (H13's completion override is not applied on the cancel path) and are not archived.
 - [ ] **L16.** `parse … --ssd` is rejected though bmtool documents it; the global `--ssd` does
@@ -97,10 +96,9 @@ Status: `[ ]` open.
   `tools/lsmiotool`, assets included, and run the relocated worker) is not described.
 - [ ] **L41.** The first `run` line of `lsmiotool --help` (`lib/cli.py` LSMIOTOOL_HELP / RUN_HELP_TEXT)
   omits `--time`, which `variants` runs accept (plain scaling runs reject it).
-- [ ] **L42.** Stale asset paths: `lib/worker.py` falls back to `<install_prefix>/share/lmp-reaxff`
+- [ ] **L42.** Stale asset path: `lib/worker.py` falls back to `<install_prefix>/share/lmp-reaxff`
   (the installed layout is `share/lsmio/lmp-reaxff`; reached only if `ResourceLocator.forSource`
-  raises), and `lib/jobs.py` `batch_job_orchestration` copies `<bm_path>/lmp-reaxff` (dead code,
-  only called from `test/main/test_jobs.py`).
+  raises).
 - [ ] **L43.** On ARCHER2 a source-mode relocation (lsmiotool, or bmtool's rsync of `tools/`) runs
   `rsync --delete` over `<work>/tools/lsmiotool`, which removes an installed-mode mirror kept under
   it; a queued installed-mode job could lose its worker. Predates the bmtool deprecation.

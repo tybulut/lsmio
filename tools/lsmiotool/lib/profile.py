@@ -31,6 +31,7 @@
 import copy
 import json
 import os
+import re
 import stat
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
@@ -39,6 +40,10 @@ class ProfileSchemaError(Exception):
     """Exception raised when profile schema validation fails."""
 
     pass
+
+
+# An srun --mpi plugin type: "pmix", "pmix_v5", "pmi2", "cray_shasta", "none"
+SRUN_MPI_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 
 
 class ProfileRecord:
@@ -58,6 +63,7 @@ class ProfileRecord:
         "m_rank_identity",
         "m_cancellation",
         "m_lustre_pools",
+        "m_srun_mpi",
         "_frozen",
     )
 
@@ -76,6 +82,7 @@ class ProfileRecord:
         f_rank_identity: Dict[str, Optional[str]],
         f_cancellation: Dict[str, int],
         f_lustre_pools: Dict[str, Optional[str]],
+        f_srun_mpi: Optional[str] = None,
     ) -> None:
         super().__setattr__("m_name", f_name)
         super().__setattr__("m_scheduler", f_scheduler)
@@ -90,6 +97,7 @@ class ProfileRecord:
         super().__setattr__("m_rank_identity", dict(copy.deepcopy(f_rank_identity)))
         super().__setattr__("m_cancellation", dict(copy.deepcopy(f_cancellation)))
         super().__setattr__("m_lustre_pools", dict(copy.deepcopy(f_lustre_pools)))
+        super().__setattr__("m_srun_mpi", f_srun_mpi)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -156,9 +164,13 @@ class ProfileRecord:
     def lustre_pools(self) -> Dict[str, Optional[str]]:
         return copy.deepcopy(self.m_lustre_pools)
 
+    @property
+    def srun_mpi(self) -> Optional[str]:
+        return self.m_srun_mpi
+
     def toDict(self) -> Dict[str, Any]:
-        """Convert record to canonical dictionary structure."""
-        return {
+        """Convert record to canonical dictionary structure (srun_mpi only when set)."""
+        f_out: Dict[str, Any] = {
             "scheduler": self.m_scheduler,
             "launcher": self.m_launcher,
             "certification": self.m_certification,
@@ -172,6 +184,9 @@ class ProfileRecord:
             "cancellation": copy.deepcopy(self.m_cancellation),
             "lustre_pools": copy.deepcopy(self.m_lustre_pools),
         }
+        if self.m_srun_mpi is not None:
+            f_out["srun_mpi"] = self.m_srun_mpi
+        return f_out
 
 
 class ProfileDocument:
@@ -245,6 +260,9 @@ class ProfileLoader:
         "cancellation",
         "lustre_pools",
     }
+    # srun_mpi: the srun --mpi plugin type (e.g. "pmix"), which overrides a module's
+    # SLURM_MPI_TYPE; absent or null leaves srun to the environment and the cluster default
+    _OPTIONAL_PROFILE_KEYS: Set[str] = {"srun_mpi"}
     _REQUIRED_ROOT_KEYS: Set[str] = {"hdd", "ssd"}
     _REQUIRED_EXECUTABLE_KEYS: Set[str] = {
         "ior",
@@ -373,9 +391,13 @@ class ProfileLoader:
             raise ProfileSchemaError(f"Profile '{f_site_name}' must be a dictionary")
 
         f_keys = set(f_site_dict.keys())
-        if f_keys != cls._REQUIRED_PROFILE_KEYS:
+        if not (
+            cls._REQUIRED_PROFILE_KEYS
+            <= f_keys
+            <= cls._REQUIRED_PROFILE_KEYS | cls._OPTIONAL_PROFILE_KEYS
+        ):
             f_missing = cls._REQUIRED_PROFILE_KEYS - f_keys
-            f_extra = f_keys - cls._REQUIRED_PROFILE_KEYS
+            f_extra = f_keys - cls._REQUIRED_PROFILE_KEYS - cls._OPTIONAL_PROFILE_KEYS
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}' keys mismatch: missing={sorted(f_missing)}, extra={sorted(f_extra)}"
             )
@@ -393,6 +415,21 @@ class ProfileLoader:
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}'.launcher must be a non-empty string"
             )
+
+        # srun_mpi (optional)
+        f_srun_mpi = f_site_dict.get("srun_mpi")
+        if f_srun_mpi is not None:
+            if f_launcher != "srun":
+                raise ProfileSchemaError(
+                    f"Profile '{f_site_name}'.srun_mpi is set but the launcher is {f_launcher!r}"
+                )
+            if not isinstance(f_srun_mpi, str) or not SRUN_MPI_PATTERN.fullmatch(
+                f_srun_mpi
+            ):
+                raise ProfileSchemaError(
+                    f"Profile '{f_site_name}'.srun_mpi must be an srun --mpi type such as "
+                    f"'pmix', got: {f_srun_mpi!r}"
+                )
 
         # certification
         f_certification = f_site_dict["certification"]
@@ -579,4 +616,5 @@ class ProfileLoader:
             f_rank_identity=f_rank_identity,
             f_cancellation=f_cancellation,
             f_lustre_pools=f_lustre_pools,
+            f_srun_mpi=f_srun_mpi,
         )

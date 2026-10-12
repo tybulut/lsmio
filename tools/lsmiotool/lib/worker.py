@@ -1241,6 +1241,8 @@ class Launcher:
     - Builds direct execution argv for shared benchmark workloads and rank workers.
     - Slurm (SchedulerKind.SLURM):
         ['srun', '--export=ALL', '--kill-on-bad-exit=1', '-n', str(point.tasks), '-N', str(point.nodes)]
+        Adds '--mpi=<type>' after '--kill-on-bad-exit=1' if the site profile sets srun_mpi
+        (VIKING2: pmix, since its Open MPI 5 module sets SLURM_MPI_TYPE=none).
         Appends ['-p', partition] if site profile defines a partition (e.g. Archer2 '-p standard').
         --kill-on-bad-exit ends the step when one rank fails; otherwise the surviving ranks
         block in MPI until the allocation's time limit.
@@ -1336,6 +1338,52 @@ class Launcher:
             )
 
         return f_tasks, f_ppn, f_nodes
+
+    @classmethod
+    def _resolveSrunMpi(cls, f_profile: Any) -> Optional[str]:
+        """Return the profile's srun --mpi type (e.g. 'pmix'), or None to leave srun to
+        SLURM_MPI_TYPE and the cluster default. Accepts the same profile forms as
+        _resolveSchedulerAndPartition."""
+        from lsmiotool.lib.profile import SRUN_MPI_PATTERN
+        from lsmiotool.lib.site import EnvironmentResolver, LauncherPolicy
+
+        if isinstance(f_profile, LauncherPolicy):
+            return f_profile.srun_mpi
+        if isinstance(f_profile, dict):
+            f_srun_mpi = f_profile.get("srun_mpi")
+            if f_srun_mpi is not None and (
+                not isinstance(f_srun_mpi, str)
+                or not SRUN_MPI_PATTERN.fullmatch(f_srun_mpi)
+            ):
+                raise LauncherError(
+                    f"srun_mpi must be an srun --mpi type such as 'pmix', got: {f_srun_mpi!r}"
+                )
+            return f_srun_mpi
+        if isinstance(f_profile, str):
+            if f_profile.strip().lower() in (
+                "slurm",
+                "srun",
+                "pbs",
+                "aprun",
+                "fake",
+                "direct",
+            ):
+                return None
+            try:
+                f_profile = EnvironmentResolver.resolveProfile(
+                    f_profile,
+                    f_user=os.environ.get("USER") or "user",
+                    f_home=os.environ.get("HOME") or "/tmp",
+                )
+            except Exception as f_err:
+                raise LauncherError(
+                    f"Failed to resolve site profile '{f_profile}': {f_err}"
+                ) from f_err
+        f_launcher = getattr(f_profile, "launcher", None)
+        if isinstance(f_launcher, LauncherPolicy):
+            return f_launcher.srun_mpi
+        f_srun_mpi = getattr(f_profile, "srun_mpi", None)
+        return f_srun_mpi if isinstance(f_srun_mpi, str) else None
 
     @classmethod
     def _resolveSchedulerAndPartition(
@@ -1651,11 +1699,11 @@ class Launcher:
                 "srun",
                 "--export=ALL",
                 "--kill-on-bad-exit=1",
-                "-n",
-                str(f_tasks),
-                "-N",
-                str(f_nodes),
             ]
+            f_srun_mpi = cls._resolveSrunMpi(f_profile)
+            if f_srun_mpi:
+                f_argv.append(f"--mpi={f_srun_mpi}")
+            f_argv.extend(["-n", str(f_tasks), "-N", str(f_nodes)])
             if f_partition:
                 f_argv.extend(["-p", f_partition])
             f_argv.extend(f_cmd_argv)
@@ -1728,11 +1776,11 @@ class Launcher:
                 "srun",
                 "--export=ALL",
                 "--kill-on-bad-exit=1",
-                "-n",
-                str(f_tasks),
-                "-N",
-                str(f_nodes),
             ]
+            f_srun_mpi = cls._resolveSrunMpi(f_profile)
+            if f_srun_mpi:
+                f_argv.append(f"--mpi={f_srun_mpi}")
+            f_argv.extend(["-n", str(f_tasks), "-N", str(f_nodes)])
             if f_partition:
                 f_argv.extend(["-p", f_partition])
             f_argv.extend(f_tail)

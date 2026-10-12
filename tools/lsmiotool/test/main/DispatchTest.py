@@ -542,7 +542,6 @@ with patch("os.getlogin", side_effect=AssertionError("os.getlogin was called")):
         "matplotlib.pyplot",
         "lsmiotool.lib.plot",
         "lsmiotool.lib.dirs",
-        "lsmiotool.lib.jobs",
         "lsmiotool.lib.env",
     ):
         assert mod_name not in sys.modules, f"Module '{mod_name}' was eagerly imported into sys.modules"

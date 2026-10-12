@@ -338,7 +338,7 @@ LMP benchmark runs adhere strictly to upstream asset naming, tuning parameters, 
 Environment configurations are loaded from `RUN_PROFILES` in `etc/environments.json`.
 - **Supported profiles**:
   - `viking`: Slurm scheduler (`srun` launcher, `END,FAIL` mail, computed walltime)
-  - `viking2`: Slurm scheduler (`srun` launcher, `END,FAIL` mail, pool configuration)
+  - `viking2`: Slurm scheduler (`srun --mpi=pmix` launcher, `END,FAIL` mail, pool configuration); the profile's optional `srun_mpi` key sets `--mpi` because its Open MPI 5 module sets `SLURM_MPI_TYPE=none`, which leaves ranks without PMIx
   - `archer2`: Slurm scheduler (`srun` launcher, `standard` partition/QoS)
   - `isambard`: PBS scheduler (`aprun` launcher, `abe` mail, fixed 6-hour walltime)
   - `dev`: Fake scheduler & launcher (test-only profile)

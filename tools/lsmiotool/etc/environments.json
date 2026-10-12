@@ -173,6 +173,7 @@
       "VIKING2": {
         "scheduler": "slurm",
         "launcher": "srun",
+        "srun_mpi": "pmix",
         "certification": "configured",
         "test_only": false,
         "benchmark_roots": {
