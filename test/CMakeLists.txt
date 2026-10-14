@@ -33,8 +33,6 @@ else()
   endif()
 endif()
 
-# Disable RTTI
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
 include(CMakeParseArguments)
 
