@@ -41,10 +41,18 @@ from typing import Any, List
 from lsmiotool.lib.arms import (
     ArmError,
     RunArm,
+    iorArmToken,
+    isIorArmId,
     resolveArmGroup,
     sanitizeBranch,
 )
-from lsmiotool.lib.export import ExportError, exportPoint
+from lsmiotool.lib.export import (
+    IOR_UNKNOWN_HOST,
+    ExportError,
+    exportIorPoint,
+    exportPoint,
+    generateIorReports,
+)
 from lsmiotool.lib.run import RunOrchestrator, RunRequest
 from lsmiotool.lib.worker import AllocationControllerError, AllocationGroupRunner
 
@@ -138,6 +146,45 @@ class ArmResolutionTest(unittest.TestCase):
             self._group(
                 RunRequest("lsmio", "small", f_mode="backends", f_backends=["bogus"])
             )
+
+    def testIorSetupsAreBackendsArms(self) -> None:
+        """An ior scaling run: one archived arm per IOR setup, outputs-ior[-<setup>]."""
+        f_group = self._group(RunRequest("ior", "small", f_mode="backends"), "BASE")
+        self.assertEqual(f_group.kind, "backends")
+        self.assertTrue(f_group.archive)
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.arm_id) for f_a in f_group.arms],
+            [
+                ("base", "BASE", "ior"),
+                ("collective", "COLLECTIVE", "ior-collective"),
+                ("hdf5", "HDF5", "ior-hdf5"),
+                ("hdf5-collective", "HDF5-C", "ior-hdf5-collective"),
+            ],
+        )
+        self.assertFalse(
+            self._group(
+                RunRequest("ior", "small", f_mode="backends", f_archive=False), "BASE"
+            ).archive
+        )
+        for f_backends in (["bogus"], ["hdf5-c", "hdf5-collective"], ["native"]):
+            with self.subTest(backends=f_backends):
+                with self.assertRaises(ArmError):
+                    self._group(
+                        RunRequest(
+                            "ior", "small", f_mode="backends", f_backends=f_backends
+                        ),
+                        "BASE",
+                    )
+
+    def testIorArmHelpers(self) -> None:
+        self.assertEqual(iorArmToken("hdf5-c"), "hdf5-collective")
+        self.assertEqual(iorArmToken("BASE"), "base")
+        with self.assertRaises(ArmError):
+            iorArmToken("NATIVE")
+        for f_id in ("ior", "ior-collective", "ior-hdf5-collective"):
+            self.assertTrue(isIorArmId(f_id))
+        for f_id in (None, "native", "adios", "iorx", "native-ior"):
+            self.assertFalse(isIorArmId(f_id))
 
     def testSanitizeBranchMatchesBmtool(self) -> None:
         self.assertEqual(sanitizeBranch("tybulut/str-overhead"), "tybulut-str-overhead")
@@ -295,6 +342,174 @@ class ExportPointTest(unittest.TestCase):
             )
         self.assertEqual(os.listdir(f_node_dir), ["keep"])
         self.assertFalse(os.path.exists(f_node_dir + ".partial"))
+
+
+IOR_SUMMARY = (
+    "Summary of all tests:\n"
+    "Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)\n"
+    "write        1650.38    1434.73    1573.37      62.47    1650.38    1434.73    1573.37"
+    "      62.47    1.30379         NA            NA     0      2   1   10   0     0"
+    "        1         0    0   1024  1048576  1048576    2048.0 POSIX      0\n"
+    "read        12824.95    8741.74   10846.96    1061.25   12824.95    8741.74   10846.96"
+    "    1061.25    0.19070         NA            NA     0      2   1   10   0     0"
+    "        1         0    0   1024  1048576  1048576    2048.0 POSIX      0\n"
+)
+
+
+class _IorLayout(_Layout):
+    def pointLogsDir(self, f_sp: Any, f_ordinal: int = 0) -> str:
+        return os.path.join(self.m_root, "logs")
+
+
+class _IorEvidence:
+    def __init__(self, f_payload: Any) -> None:
+        self.m_payload = f_payload
+
+    def readControllerResult(self, f_sp: Any, f_combo: Any, f_ordinal: int = 0) -> Any:
+        return SimpleNamespace(
+            created_at_utc="2026-10-14T21:51:53Z", payload=dict(self.m_payload)
+        )
+
+
+class ExportIorPointTest(unittest.TestCase):
+    """IOR points: one shared output per combination, in bmtool's IOR layout."""
+
+    def setUp(self) -> None:
+        self.m_tmp = tempfile.mkdtemp()
+        self.m_layout = _IorLayout(os.path.join(self.m_tmp, "run"))
+        self.m_combos = [
+            SimpleNamespace(stripe_count=4, block_size="1M"),
+            SimpleNamespace(stripe_count=16, block_size="64K"),
+        ]
+        self.m_sp = SimpleNamespace(tasks=2, nodes=2)
+        os.makedirs(self.m_layout.pointLogsDir(self.m_sp))
+        for f_c in self.m_combos:
+            with open(
+                os.path.join(
+                    self.m_layout.pointLogsDir(self.m_sp),
+                    f"ior_{self.m_layout.combinationName(f_c)}.stdout",
+                ),
+                "w",
+            ) as f_f:
+                f_f.write(IOR_SUMMARY)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.m_tmp, ignore_errors=True)
+
+    def _export(self, f_payload: Any, f_infix: str = "hdf5-c") -> str:
+        f_arm_dir = os.path.join(self.m_tmp, "archive", "outputs-ior-hdf5-collective")
+        f_n = exportIorPoint(
+            self.m_layout,
+            _IorEvidence(f_payload),
+            self.m_sp,
+            0,
+            self.m_combos,
+            f_infix,
+            os.path.join(f_arm_dir, "2"),
+        )
+        self.assertEqual(f_n, 2)
+        return f_arm_dir
+
+    def testWritesBmtoolIorLayoutAndReport(self) -> None:
+        f_arm_dir = self._export({"status": "success", "host": "node097"})
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(f_arm_dir, "2", "2026-10-14"))),
+            [
+                "out-hdf5-c-16-64K-2026-10-14-node097-0.txt",
+                "out-hdf5-c-4-1M-2026-10-14-node097-0.txt",
+            ],
+        )
+        self.assertTrue(generateIorReports(f_arm_dir))
+        with open(os.path.join(f_arm_dir, "ior-report.csv")) as f_f:
+            f_rows = sorted(f_line.split(",")[:5] for f_line in f_f.read().split())
+        # ior-parse.sh: node count, stripes and block size from the path, then the line
+        self.assertEqual(
+            f_rows,
+            [
+                ["2", "16", "64K", "read", "12824.95"],
+                ["2", "16", "64K", "write", "1650.38"],
+                ["2", "4", "1M", "read", "12824.95"],
+                ["2", "4", "1M", "write", "1650.38"],
+            ],
+        )
+
+    def testHostlessResultsKeepTheReportParseable(self) -> None:
+        """A controller result written before 'host' was recorded still gives
+        ior-parse.sh's node... host token."""
+        f_arm_dir = self._export({"status": "success"}, "base")
+        self.assertIn(
+            f"out-base-4-1M-2026-10-14-{IOR_UNKNOWN_HOST}-0.txt",
+            os.listdir(os.path.join(f_arm_dir, "2", "2026-10-14")),
+        )
+        self.assertTrue(generateIorReports(f_arm_dir))
+        with open(os.path.join(f_arm_dir, "ior-report.csv")) as f_f:
+            self.assertTrue(all(f_l.startswith("2,") for f_l in f_f.read().split()))
+
+    def testUnparseableHostIsReplaced(self) -> None:
+        """A host ior-parse.sh cannot strip (ARCHER2's nid + 6 digits) would leave the date
+        and host in ior-report.csv's block size column: the file gets the fallback host."""
+        from unittest.mock import patch
+
+        from lsmiotool.lib import export
+
+        export._IOR_WARNED_HOSTS.discard("nid001234")
+        with patch("lsmiotool.lib.log.Console.warning") as f_warn:
+            f_arm_dir = self._export({"status": "success", "host": "nid001234"}, "base")
+        # Once per host, not once per output
+        self.assertEqual(f_warn.call_count, 1)
+        self.assertIn(
+            f"out-base-4-1M-2026-10-14-{IOR_UNKNOWN_HOST}-0.txt",
+            os.listdir(os.path.join(f_arm_dir, "2", "2026-10-14")),
+        )
+        self.assertTrue(generateIorReports(f_arm_dir))
+        with open(os.path.join(f_arm_dir, "ior-report.csv")) as f_f:
+            self.assertEqual(
+                sorted({tuple(f_l.split(",")[:3]) for f_l in f_f.read().split()}),
+                [("2", "16", "64K"), ("2", "4", "1M")],
+            )
+        # A PBS nid with five digits is kept, as ior-parse.sh strips it
+        f_arm_dir = self._export({"status": "success", "host": "nid00123"}, "fsync")
+        self.assertIn(
+            "out-fsync-4-1M-2026-10-14-nid00123-0.txt",
+            os.listdir(os.path.join(f_arm_dir, "2", "2026-10-14")),
+        )
+
+    def testMissingOutputLeavesTargetUntouched(self) -> None:
+        os.unlink(
+            os.path.join(self.m_layout.pointLogsDir(self.m_sp), "ior_c16_b64K.stdout")
+        )
+        f_node_dir = os.path.join(self.m_tmp, "archive", "outputs-ior", "2")
+        os.makedirs(os.path.join(f_node_dir, "keep"))
+        with self.assertRaises(ExportError):
+            exportIorPoint(
+                self.m_layout,
+                _IorEvidence({"status": "success"}),
+                self.m_sp,
+                0,
+                self.m_combos,
+                "base",
+                f_node_dir,
+            )
+        self.assertEqual(os.listdir(f_node_dir), ["keep"])
+        self.assertFalse(os.path.exists(f_node_dir + ".partial"))
+
+    def testIorPointSucceedsWithoutRankResults(self) -> None:
+        """A shared IOR launch records no rank results: its controller results decide."""
+        f_ctx = {
+            "arm": RunArm("base", "BASE", None, "ior", None),
+            "plan": SimpleNamespace(
+                scale_points=[self.m_sp], combinations=self.m_combos
+            ),
+            "evidence": SimpleNamespace(
+                readControllerResult=lambda *f_a, **f_k: SimpleNamespace(
+                    payload={"status": "success"}
+                ),
+                readRankResult=lambda *f_a, **f_k: None,
+            ),
+        }
+        self.assertTrue(RunOrchestrator._armPointSucceeded(f_ctx, 0))
+        f_ctx["arm"] = RunArm("native", "NATIVE", None, "native", None)
+        self.assertFalse(RunOrchestrator._armPointSucceeded(f_ctx, 0))
 
 
 class AllocationGroupRunnerTest(unittest.TestCase):

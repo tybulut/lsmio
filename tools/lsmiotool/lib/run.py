@@ -458,6 +458,14 @@ class RunRequest:
             )
         m_mode = f_mode.strip().lower()
 
+        from lsmiotool.lib.arms import DEFAULT_IOR_SETUPS, DEFAULT_LSMIO_BACKENDS
+
+        # The arms of backends mode: LSMIO backends, or IOR setups for an ior run
+        f_default_backends = (
+            DEFAULT_IOR_SETUPS
+            if f_target.strip().lower() == "ior"
+            else DEFAULT_LSMIO_BACKENDS
+        )
         if f_backends is not None:
             if not isinstance(f_backends, (list, tuple)):
                 raise PlanValidationError("backends must be a sequence of strings")
@@ -467,9 +475,9 @@ class RunRequest:
                 if isinstance(b, str) and b.strip()
             )
             if not m_backends and m_mode == "backends":
-                m_backends = ("adios2", "native", "plugin", "rocksdb")
+                m_backends = f_default_backends
         elif m_mode == "backends":
-            m_backends = ("adios2", "native", "plugin", "rocksdb")
+            m_backends = f_default_backends
         else:
             m_backends = None
 
@@ -1336,6 +1344,42 @@ class RunPlan:
         return False
 
 
+def groupRunCount(f_request: Any) -> int:
+    """Runs one job of f_request executes: one per backend or IOR setup (backends mode),
+    the baseline and each variant (paired variants), the reference and each variant or
+    the branch (--versioned); 1 otherwise."""
+    f_target = getattr(f_request, "target", "")
+    if getattr(f_request, "mode", "standard") == "backends" and f_target in (
+        "lsmio",
+        "ior",
+    ):
+        return max(1, len(getattr(f_request, "backends", None) or ()))
+    f_scale = getattr(f_request, "scale", "")
+    f_scale = RunPlanner.SCALE_ALIASES.get(f_scale, f_scale)
+    if f_target == "lsmio" and f_scale == "variants":
+        f_var_cnt = sum(
+            1
+            for f_v in getattr(f_request, "variants", (None,))
+            if f_v not in (None, "", "default", "base")
+        )
+        if getattr(f_request, "versioned", False):
+            return 1 + f_var_cnt if f_var_cnt else 2
+        return 1 + f_var_cnt
+    return 1
+
+
+def scaleFixedWalltime(f_walltime: str, f_runs: int, f_max_hours: int = 48) -> str:
+    """A fixed per-run walltime (HH:MM:SS) times f_runs, capped at the largest whole
+    multiple of it within f_max_hours (PbsScriptRenderer.fixedWalltimes)."""
+    from lsmiotool.lib.scheduler import parseWalltimeToSeconds
+
+    f_fixed = parseWalltimeToSeconds(f_walltime)
+    if f_fixed <= 0:
+        raise ValueError(f"fixed walltime must be positive: {f_walltime!r}")
+    f_sec = f_fixed * max(1, min(f_runs, f_max_hours * 3600 // f_fixed))
+    return f"{f_sec // 3600:02d}:{f_sec % 3600 // 60:02d}:{f_sec % 60:02d}"
+
+
 class RunPlanner:
     """Pure planner that validates domain constraints and creates immutable RunPlan records."""
 
@@ -1572,9 +1616,10 @@ class RunPlanner:
                 getattr(f_request, "mode", "standard") == "backends"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
             ):
+                from lsmiotool.lib.arms import DEFAULT_LSMIO_BACKENDS
+
                 n_backends = len(
-                    getattr(f_request, "backends", None)
-                    or ("adios2", "native", "plugin", "rocksdb")
+                    getattr(f_request, "backends", None) or DEFAULT_LSMIO_BACKENDS
                 )
                 time_per_backend = max(1, f_sp.nodes // 3)
                 calc_hours = 2 + (n_backends * time_per_backend)
@@ -1638,12 +1683,19 @@ class RunPlanner:
                 else:
                     f_wallhour = raw_hours
                 f_walltime = f"{f_wallhour:02d}:00:00"
-            elif f_resource_policy.walltime_policy == "fixed_06:00:00":
-                f_walltime = "06:00:00"
-            elif isinstance(
-                f_resource_policy.walltime_policy, str
-            ) and f_resource_policy.walltime_policy.startswith("fixed_"):
-                f_walltime = f_resource_policy.walltime_policy[len("fixed_") :]
+            elif f_fixed_walltime:
+                # A fixed walltime (PBS job templates) is per run: a job that runs several
+                # arms (backends, IOR setups, a baseline and its variants) gets it once per
+                # arm, capped at 48 hours. bmtool gave the whole job one fixed 6 hours.
+                try:
+                    f_walltime = scaleFixedWalltime(
+                        f_resource_policy.walltime_policy[len("fixed_") :],
+                        groupRunCount(f_request),
+                    )
+                except ValueError as f_err:
+                    raise PlanValidationError(
+                        f"Invalid walltime policy {f_resource_policy.walltime_policy!r}: {f_err}"
+                    ) from f_err
             else:
                 f_walltime = "00:00:00"
 
@@ -2049,7 +2101,16 @@ class ManifestSerializer:
 
     REQUIRED_REQUEST_KEYS: Set[str] = {"target", "scale", "ssd", "setup"}
     OPTIONAL_REQUEST_KEYS: FrozenSet[str] = frozenset(
-        {"variant", "variants", "archive", "resume", "out_dir", "fast"}
+        {
+            "variant",
+            "variants",
+            "archive",
+            "resume",
+            "out_dir",
+            "wallhour",
+            "walltime",
+            "fast",
+        }
     )
     REQUIRED_PLAN_KEYS: Set[str] = {
         "target",
@@ -2278,6 +2339,15 @@ class ManifestSerializer:
         f_fast_raw = f_req_raw.get("fast", False)
         if f_fast_raw is not None and not isinstance(f_fast_raw, bool):
             raise ManifestValidationError("request.fast must be a boolean")
+        # --time: a run given one records it (RunRequest.toDict)
+        f_wallhour_raw = f_req_raw.get("wallhour")
+        if f_wallhour_raw is not None and (
+            isinstance(f_wallhour_raw, bool) or not isinstance(f_wallhour_raw, int)
+        ):
+            raise ManifestValidationError("request.wallhour must be an integer or null")
+        f_walltime_raw = f_req_raw.get("walltime")
+        if f_walltime_raw is not None and not isinstance(f_walltime_raw, str):
+            raise ManifestValidationError("request.walltime must be a string or null")
 
         try:
             f_request = RunRequest(
@@ -2290,6 +2360,8 @@ class ManifestSerializer:
                 f_archive=f_archive_raw,
                 f_resume=f_resume_raw,
                 f_out_dir=f_out_dir_raw,
+                f_wallhour=f_wallhour_raw,
+                f_walltime=f_walltime_raw,
                 f_fast=bool(f_fast_raw),
             )
         except Exception as f_err:
@@ -4622,7 +4694,13 @@ class RunOrchestrator:
         of the same run land in the same pair; f_succeeded replaces the reconciled point
         state as the test of an (arm, point). Returns False when an archive step failed."""
         from lsmiotool.lib.archive import ArchiveEngine
-        from lsmiotool.lib.export import exportPoint, generateReports
+        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib.export import (
+            exportIorPoint,
+            exportPoint,
+            generateIorReports,
+            generateReports,
+        )
         from lsmiotool.lib.state import PointRunState
 
         f_ok = True
@@ -4640,6 +4718,18 @@ class RunOrchestrator:
         def _export(f_ctx: Dict[str, Any], f_idx: int, f_dir: str) -> None:
             f_arm = f_ctx["arm"]
             f_sp = f_ctx["plan"].scale_points[f_idx]
+            if isIorArmId(f_arm.arm_id):
+                # One shared IOR output per combination, named by its IOR setup
+                exportIorPoint(
+                    f_layout=f_ctx["store"].layout,
+                    f_evidence_store=f_ctx["evidence"],
+                    f_scale_point=f_sp,
+                    f_ordinal=f_idx,
+                    f_combinations=f_ctx["plan"].combinations,
+                    f_infix=f_arm.setup.lower(),
+                    f_node_dir=os.path.join(f_dir, str(f_sp.nodes)),
+                )
+                return
             exportPoint(
                 f_layout=f_ctx["store"].layout,
                 f_evidence_store=f_ctx["evidence"],
@@ -4664,10 +4754,12 @@ class RunOrchestrator:
             )
 
         def _reports(f_dir: str) -> None:
+            f_ior = isIorArmId(os.path.basename(f_dir)[len("outputs-") :])
             try:
-                if not generateReports(f_dir):
+                if not (generateIorReports(f_dir) if f_ior else generateReports(f_dir)):
                     self._reportProgress(
-                        f_reporter, f"WARNING: no lsm-report.csv rows for {f_dir}"
+                        f_reporter,
+                        f"WARNING: no {'ior' if f_ior else 'lsm'}-report.csv rows for {f_dir}",
                     )
             except Exception as f_err:
                 self._reportProgress(
@@ -4738,7 +4830,7 @@ class RunOrchestrator:
                     f_ok = False
                     self._reportProgress(
                         f_reporter,
-                        f"ERROR: archiving backend {f_ctx['arm'].label!r} failed: {f_err}",
+                        f"ERROR: archiving arm {f_ctx['arm'].label!r} failed: {f_err}",
                     )
         else:
             for f_ctx in f_ctxs:
@@ -4777,14 +4869,20 @@ class RunOrchestrator:
             f_status = str((f_rec.payload or {}).get("status") or "") if f_rec else ""
             return f_status.strip().lower() in f_ok
 
+        from lsmiotool.lib.arms import isIorArmId
+
         f_evidence = f_ctx["evidence"]
         f_sp = f_ctx["plan"].scale_points[f_idx]
+        # A shared IOR launch records only its controller result, no rank results
+        f_shared = isIorArmId(f_ctx["arm"].arm_id)
         try:
             for f_combo in f_ctx["plan"].combinations:
                 if not succeeded(
                     f_evidence.readControllerResult(f_sp, f_combo, f_ordinal=f_idx)
                 ):
                     return False
+                if f_shared:
+                    continue
                 for f_rank in range(f_sp.tasks):
                     if not succeeded(
                         f_evidence.readRankResult(
@@ -4853,7 +4951,12 @@ class RunOrchestrator:
             f_req = f_plan.request
             f_arm = RunArm(
                 str(f_arm_doc.get("label") or f_run_id),
-                str(f_arm_doc.get("setup") or f_req.setup or "NATIVE"),
+                str(
+                    f_arm_doc.get("setup")
+                    or f_req.setup
+                    # The target's default setup: an IOR arm's outputs are named by it
+                    or ("BASE" if f_req.target == "ior" else "NATIVE")
+                ),
                 f_arm_doc.get("variant", f_req.variant),
                 f_arm_doc.get("arm_id"),
                 f_arm_doc.get("role"),
@@ -4894,6 +4997,7 @@ class RunOrchestrator:
                 f_mode="backends" if f_kind == "backends" else None,
                 f_scale=f_scale,
                 f_versioned=f_versioned,
+                f_target=f_ctxs[0]["plan"].request.target,
             )
 
         # Points already archived (per run arm; a paired baseline is archived with each)
@@ -5470,6 +5574,7 @@ class RunOrchestrator:
                 f_scale=getattr(f_request, "scale", None),
                 f_explicit=f_explicit_dest,
                 f_versioned=bool(getattr(f_request, "versioned", False)),
+                f_target=getattr(f_request, "target", None),
             )
 
             f_planner_obj = self.m_planner or RunPlanner
@@ -5541,7 +5646,10 @@ class RunOrchestrator:
                             f_skip.add((f_arm_idx, f_pt_idx))
                     if all((f_arm_idx, f_p) in f_skip for f_p in range(f_n_points)):
                         self._reportProgress(
-                            f_eff_reporter, f"[RESUME] Skipping variant {f_arm.label!r}"
+                            f_eff_reporter,
+                            f"[RESUME] Skipping "
+                            f"{'variant' if f_group.kind == 'paired' else 'arm'} "
+                            f"{f_arm.label!r}",
                         )
                 if f_group.is_paired:
                     # The baseline only runs when some variant still needs it

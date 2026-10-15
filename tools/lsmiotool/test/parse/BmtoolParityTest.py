@@ -1070,6 +1070,82 @@ class ParseArchiveModeTest(unittest.TestCase):
             self.assertEqual(len(f_rows), 24)
             self.assertTrue(f_rows[0].startswith("1,16,1M,write,"))
 
+    def testParseIorRegeneratesIorArchiveOnly(self) -> None:
+        """'parse ior <scale>' rebuilds ior-report.csv (ior-parse.sh) in every IOR setup
+        'run ior' archived to lsmio-archive/ior/<scale>; 'parse lsmio backends' never
+        reads IOR outputs, even one moved next to the backends."""
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+
+        def iorArm(f_dir: str) -> str:
+            f_day = os.path.join(f_dir, "2", "2026-10-14")
+            os.makedirs(f_day)
+            with open(
+                os.path.join(f_day, "out-collective-16-8M-2026-10-14-node097-0.txt"),
+                "w",
+            ) as f_f:
+                f_f.write(IOR_SUMMARY)
+            return f_dir
+
+        f_archive = os.path.join(self.m_temp_dir, "lsmio-archive")
+        f_ior = iorArm(
+            os.path.join(f_archive, "ior", "small", "outputs-ior-collective")
+        )
+        self.assertEqual(self._run(["ior", "small"]), 0)
+        with open(os.path.join(f_ior, data.IOR_REPORT_FILE)) as f_f:
+            f_rows = f_f.read().splitlines()
+        self.assertEqual(
+            [f_r.split(",")[:5] for f_r in f_rows],
+            [
+                ["2", "16", "8M", "write", "1650.38"],
+                ["2", "16", "8M", "read", "12824.95"],
+            ],
+        )
+        self.assertFalse(os.path.exists(os.path.join(f_ior, data.LSM_REPORT_FILE)))
+
+        f_dest = os.path.join(f_archive, "backends", "small")
+        writeBmtoolLayout(os.path.join(f_dest, "outputs-native"), ["1"], "native")
+        f_stray = iorArm(os.path.join(f_dest, "outputs-ior"))
+        self.assertEqual(self._run(["lsmio", "backends", "small"]), 0)
+        self.assertEqual(os.listdir(f_stray), ["2"])
+        self.assertTrue(
+            data.isUsableReport(
+                os.path.join(f_dest, "outputs-native", data.LSM_REPORT_FILE)
+            )
+        )
+        # An archive with no IOR setup has nothing for 'parse ior'
+        self.assertEqual(self._run(["ior", "large"]), 3)
+
+        # Path form: an IOR arm, or a folder holding one, gets ior-report.csv only
+        os.remove(os.path.join(f_ior, data.IOR_REPORT_FILE))
+        self.assertEqual(self._run([os.path.dirname(f_ior)]), 0)
+        self.assertTrue(data.isUsableReport(os.path.join(f_ior, data.IOR_REPORT_FILE)))
+        os.remove(os.path.join(f_ior, data.IOR_REPORT_FILE))
+        self.assertEqual(self._run([f_ior]), 0)
+        self.assertTrue(data.isUsableReport(os.path.join(f_ior, data.IOR_REPORT_FILE)))
+        self.assertEqual(self._run([f_dest]), 0)
+        self.assertTrue(
+            data.isUsableReport(os.path.join(f_stray, data.IOR_REPORT_FILE))
+        )
+        # --output-dir: the report goes there, the arm is left as it is
+        f_out = os.path.join(self.m_temp_dir, "reports")
+        os.remove(os.path.join(f_ior, data.IOR_REPORT_FILE))
+        self.assertEqual(self._run([f_ior, "--output-dir", f_out]), 0)
+        self.assertTrue(data.isUsableReport(os.path.join(f_out, data.IOR_REPORT_FILE)))
+        self.assertFalse(os.path.exists(os.path.join(f_ior, data.IOR_REPORT_FILE)))
+        # IOR outputs are reported as csv only, like 'parse ior <scale>'
+        for f_target in (f_ior, os.path.dirname(f_ior), f_dest):
+            self.assertEqual(self._run([f_target, "--format", "json"]), 2)
+        for f_dir in (f_ior, f_stray):
+            self.assertFalse(os.path.exists(os.path.join(f_dir, data.LSM_REPORT_FILE)))
+            self.assertEqual(
+                [
+                    f_n
+                    for f_n in os.listdir(os.path.join(f_dir, "2"))
+                    if f_n.startswith("agg-")
+                ],
+                [],
+            )
+
     def testBareBenchmarkNameIsNeverACwdDirectory(self) -> None:
         """M17: 'parse lsmio <scale>' resolves runs even when the cwd has a lsmio/ dir with
         outputs-* children (bmtool leaves $BM_PATH/lsmio/outputs-failed); './lsmio' parses it."""

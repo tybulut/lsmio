@@ -35,12 +35,18 @@ bmtool archives the raw rank outputs of a run as
 plus <nodes>/agg-<rf>-<bs>-report.csv and a top-level lsm-report.csv, which is what
 `parse` and `compare` read. lsmiotool keeps each rank's output in the run root as
 points/<point>/logs/c<rf>_b<bs>/rank_<n>.log; this module copies those into that layout.
+
+IOR runs one shared launch per combination, so an IOR point has one output per
+combination, points/<point>/logs/ior_c<rf>_b<bs>.stdout. bmtool's jobs/ior-benchmark.sh
+names it out-<setup>-<rf>-<bs>-<YYYY-MM-DD>-<host>-<local>.txt under <nodes>/<date>, and
+parse/ior-parse.sh turns the archive into ior-report.csv.
 """
 
 import os
+import re
 import shutil
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 
 
 class ExportError(Exception):
@@ -122,6 +128,107 @@ def exportPoint(
         shutil.rmtree(f_tmp_dir, ignore_errors=True)
         raise
     return f_written
+
+
+# <host> of an IOR output whose controller result predates the recorded host, or whose
+# host parse/ior-parse.sh cannot strip from the row: still 'node' and three characters
+IOR_UNKNOWN_HOST = "nodeunk"
+# Hosts ior-parse.sh strips (its 'node...' and 'nid.....' seds, lib/data.py); any other
+# (ARCHER2's nid + 6 digits, a PBS MOM node) would leave the date and host in the row
+_IOR_PARSEABLE_HOST = re.compile(r"node...|nid.....")
+
+
+# Hosts already warned about, so a run warns once per host, not once per output
+_IOR_WARNED_HOSTS: Set[str] = set()
+
+
+def _iorFileHost(f_payload: Any) -> str:
+    """<host> of an IOR output file: the recorded host when ior-parse.sh can strip it."""
+    f_host = str(f_payload.get("host") or "")
+    if _IOR_PARSEABLE_HOST.fullmatch(f_host):
+        return f_host
+    if f_host and f_host not in _IOR_WARNED_HOSTS:
+        _IOR_WARNED_HOSTS.add(f_host)
+        from lsmiotool.lib.log import Console
+
+        Console.warning(
+            f"IOR output host {f_host!r} cannot be parsed by ior-parse.sh; "
+            f"naming it {IOR_UNKNOWN_HOST!r}"
+        )
+    return IOR_UNKNOWN_HOST
+
+
+def exportIorPoint(
+    f_layout: Any,
+    f_evidence_store: Any,
+    f_scale_point: Any,
+    f_ordinal: int,
+    f_combinations: Any,
+    f_infix: str,
+    f_node_dir: str,
+) -> int:
+    """Copy one IOR point's per-combination outputs into f_node_dir (replaced if
+    present), named as bmtool's jobs/ior-benchmark.sh names them; f_infix is the IOR
+    setup in lower case (base, collective, hdf5, hdf5-c).
+
+    Returns the number of files written.
+    """
+    f_tmp_dir = f_node_dir.rstrip(os.sep) + ".partial"
+    shutil.rmtree(f_tmp_dir, ignore_errors=True)
+    f_written = 0
+    try:
+        for f_combo in f_combinations:
+            f_combo_name = f_layout.combinationName(f_combo)
+            f_stripe = getattr(f_combo, "stripe_count")
+            f_block = getattr(f_combo, "block_size")
+            f_rec = f_evidence_store.readControllerResult(
+                f_scale_point, f_combo, f_ordinal=f_ordinal
+            )
+            f_payload = (f_rec.payload if f_rec is not None else None) or {}
+            # The recorded path, else the layout's (the run root may have moved)
+            f_layout_log = os.path.join(
+                f_layout.pointLogsDir(f_scale_point, f_ordinal),
+                f"ior_{f_combo_name}.stdout",
+            )
+            f_log = next(
+                (
+                    f_p
+                    for f_p in (f_payload.get("output_path"), f_layout_log)
+                    if f_p and os.path.isfile(f_p)
+                ),
+                None,
+            )
+            if f_log is None:
+                raise ExportError(
+                    f"Missing IOR output for {f_combo_name}: {f_layout_log}"
+                )
+            f_date = _recordDate(f_rec)
+            f_host = _iorFileHost(f_payload)
+            f_dest_dir = os.path.join(f_tmp_dir, f_date)
+            os.makedirs(f_dest_dir, exist_ok=True)
+            shutil.copyfile(
+                f_log,
+                os.path.join(
+                    f_dest_dir,
+                    f"out-{f_infix}-{f_stripe}-{f_block}-{f_date}-{f_host}-0.txt",
+                ),
+            )
+            f_written += 1
+        shutil.rmtree(f_node_dir, ignore_errors=True)
+        os.makedirs(os.path.dirname(f_node_dir.rstrip(os.sep)), exist_ok=True)
+        os.rename(f_tmp_dir, f_node_dir)
+    except Exception:
+        shutil.rmtree(f_tmp_dir, ignore_errors=True)
+        raise
+    return f_written
+
+
+def generateIorReports(f_archive_dir: str) -> bool:
+    """(Re)generate ior-report.csv in an IOR archive dir, like bmtool's ior-parse.sh.
+    Returns True when ior-report.csv was written."""
+    from lsmiotool.lib.data import generateBmtoolIorReport
+
+    return generateBmtoolIorReport(str(f_archive_dir)) is not None
 
 
 def generateReports(f_archive_dir: str) -> bool:

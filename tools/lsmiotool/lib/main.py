@@ -45,6 +45,7 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
     TYPE_CHECKING,
@@ -511,17 +512,21 @@ class ParseMain(BaseMain):
 
         'parse lsmio backends <scale>' covers <dest>=<root>/lsmio-archive/backends/<scale>;
         every outputs-* directory there gets its agg-*-report.csv files and lsm-report.csv
-        rebuilt.
+        rebuilt. 'parse ior <scale>' covers <root>/lsmio-archive/ior/<scale>, where 'run
+        ior' archives its IOR setups: each outputs-* gets its ior-report.csv (ior-parse.sh).
         """
         from lsmiotool.lib.archive import resolveArchiveDest
 
         f_mode = self.m_request.mode
         f_scale = self.m_request.scale
+        f_target = self.m_request.target.strip().lower()
         if self.m_request.output_dir:
             f_dests = [os.path.abspath(os.path.expanduser(self.m_request.output_dir))]
         else:
             f_dests = [
-                resolveArchiveDest(f_root, f_mode=f_mode, f_scale=f_scale)
+                resolveArchiveDest(
+                    f_root, f_mode=f_mode, f_scale=f_scale, f_target=f_target
+                )
                 for f_root in self._benchmarkRoots()
             ]
             if not f_dests:
@@ -538,16 +543,24 @@ class ParseMain(BaseMain):
             )
             return 3
 
+        from lsmiotool.lib.arms import isIorArmId
+
+        # 'parse lsmio backends' never reads IOR outputs, nor 'parse ior' LSMIO ones
         f_arms = sorted(
             f_entry
             for f_entry in os.listdir(f_dest)
             if f_entry.startswith("outputs-")
             and os.path.isdir(os.path.join(f_dest, f_entry))
+            and isIorArmId(f_entry[len("outputs-") :]) == (f_target == "ior")
         )
         if not f_arms:
             sys.stderr.write(f"Error: no outputs-* directories in {f_dest}\n")
             return 3
 
+        if f_target == "ior":
+            return self._regenerateIorDirs(
+                [os.path.join(f_dest, f_arm) for f_arm in f_arms]
+            )
         f_node_scale = f_scale
         return self._regenerateOutputDirs(
             [
@@ -557,11 +570,75 @@ class ParseMain(BaseMain):
             f_node_scale,
         )
 
+    @staticmethod
+    def _regenerateIorDirs(f_dirs: Sequence[str]) -> int:
+        """Regenerate ior-report.csv (bmtool ior-parse.sh) in each IOR archive dir.
+
+        Returns:
+            0 when at least one ior-report.csv was produced, 5 otherwise.
+        """
+        from lsmiotool.lib.data import IOR_REPORT_FILE
+        from lsmiotool.lib.export import generateIorReports
+
+        f_written = 0
+        for f_dir in f_dirs:
+            sys.stdout.write(
+                f"=== Generating report for {os.path.basename(f_dir)[len('outputs-') :]} ===\n"
+            )
+            try:
+                if not generateIorReports(f_dir):
+                    sys.stderr.write(f"Warning: no IOR results found in {f_dir}\n")
+                    continue
+            except Exception as f_err:
+                sys.stderr.write(f"Error: failed to parse {f_dir}: {f_err}\n")
+                continue
+            f_written += 1
+            sys.stdout.write(f"{os.path.join(f_dir, IOR_REPORT_FILE)}\n")
+        sys.stdout.flush()
+        return 0 if f_written else 5
+
+    @staticmethod
+    def _isIorArmDir(f_dir: str) -> bool:
+        """True for the archive dir of an IOR arm, outputs-ior[-<setup>]."""
+        from lsmiotool.lib.arms import isIorArmId
+
+        f_name = os.path.basename(f_dir.rstrip(os.sep))
+        return f_name.startswith("outputs-") and isIorArmId(f_name[len("outputs-") :])
+
     def _parseBmtoolLayout(self, f_dir: str) -> int:
-        """Regenerate reports for a bmtool-layout outputs dir or an archive of them."""
+        """Regenerate reports for a bmtool-layout outputs dir or an archive of them; an
+        IOR arm (outputs-ior[-<setup>]) gets its ior-report.csv, never LSMIO reports."""
         from lsmiotool.lib.output import isBmtoolOutputDir
 
         f_scale = self.m_request.scale
+        if self.m_request.format != "csv" and (
+            self._isIorArmDir(f_dir)
+            or any(
+                self._isIorArmDir(os.path.join(f_dir, f_entry))
+                and os.path.isdir(os.path.join(f_dir, f_entry))
+                for f_entry in os.listdir(f_dir)
+            )
+        ):
+            # As 'parse ior <scale>' rejects it: IOR outputs give ior-report.csv only
+            sys.stderr.write(
+                f"Error: {f_dir} holds IOR outputs, reported as ior-report.csv only "
+                "(bmtool ior-parse.sh); --format json is not supported\n"
+            )
+            return 2
+        if self._isIorArmDir(f_dir):
+            if self.m_request.output_dir:
+                from lsmiotool.lib.data import generateBmtoolIorReport
+
+                f_report = generateBmtoolIorReport(
+                    f_dir,
+                    f_report_dir=os.path.abspath(self.m_request.output_dir),
+                )
+                if f_report is None:
+                    sys.stderr.write(f"Warning: no IOR results found in {f_dir}\n")
+                    return 5
+                sys.stdout.write(f"{f_report}\n")
+                return 0
+            return self._regenerateIorDirs([f_dir])
         if isBmtoolOutputDir(f_dir):
             if self.m_request.output_dir:
                 # Aggregate into the requested directory, leaving the source untouched
@@ -586,9 +663,20 @@ class ParseMain(BaseMain):
             if f_entry.startswith("outputs-")
             and os.path.isdir(os.path.join(f_dir, f_entry))
         ]
-        return self._regenerateOutputDirs(
-            [(f_child, os.path.basename(f_child)) for f_child in f_children], f_scale
-        )
+        f_ior = [f_c for f_c in f_children if self._isIorArmDir(f_c)]
+        f_lsmio = [f_c for f_c in f_children if f_c not in f_ior]
+        f_codes = []
+        if f_lsmio:
+            f_codes.append(
+                self._regenerateOutputDirs(
+                    [(f_child, os.path.basename(f_child)) for f_child in f_lsmio],
+                    f_scale,
+                )
+            )
+        if f_ior:
+            f_codes.append(self._regenerateIorDirs(f_ior))
+        # 0 when either kind produced a report, as each does for its own dirs
+        return 0 if 0 in f_codes else 5
 
     def _isOutputsTarget(self, f_target: str) -> bool:
         """True for a directory without manifest.json that holds bmtool-layout outputs
@@ -654,9 +742,10 @@ class ParseMain(BaseMain):
 
         try:
             # bmtool lsmio-parse.sh archive mode is for backends only; every other
-            # scale (variants included) parses the latest run, like bmtool's live outputs
+            # scale (variants included) parses the latest run, like bmtool's live outputs.
+            # 'parse ior <scale>' is the archive mode of 'run ior' (lsmio-archive/ior)
             f_target_name = self.m_request.target.strip().lower()
-            if f_target_name == "lsmio" and self.m_request.mode == "backends":
+            if f_target_name in ("lsmio", "ior") and self.m_request.mode == "backends":
                 return self._parseArchive()
 
             # bmtool-layout outputs directory (or an archive destination of them). A bare
@@ -756,13 +845,19 @@ class ParseMain(BaseMain):
 class CompareNodesMain(BaseMain):
     """Submode orchestrator for 'compare nodes' (multi-node scaling curve comparison)."""
 
+    # Longest folder part of a combined chart's file name (NAME_MAX is 255)
+    MAX_COMBINED_NAME = 120
+
     m_request: "CompareNodesRequest"
     m_folder: str
+    m_extra_dirs: Tuple[str, ...]
     m_op: str
     m_stripes: int
     m_bs: str
     m_output_dir: Optional[str]
     m_all: bool
+    # outputs-* whose report could not be built, tried once per run, not once per chart
+    m_no_report: Set[str]
 
     def __init__(
         self,
@@ -861,11 +956,14 @@ class CompareNodesMain(BaseMain):
 
         self.m_request = req
         self.m_folder = req.folder
+        # Further folders whose outputs-* are charted with the first (e.g. lsmio-archive/ior)
+        self.m_extra_dirs = tuple(self.resolveDirectory(f_f) for f_f in req.folders[1:])
         self.m_op = req.op
         self.m_stripes = req.stripes
         self.m_bs = req.blocksize
         self.m_output_dir = req.output_dir
         self.m_all = req.all
+        self.m_no_report = set()
 
     @property
     def request(self) -> "CompareNodesRequest":
@@ -910,9 +1008,17 @@ class CompareNodesMain(BaseMain):
         from lsmiotool.lib.cli import CompareCliParser
 
         target_dir = self.resolveDirectory(self.m_folder)
-        if not os.path.isdir(target_dir):
-            log.Console.error(f"Directory not found: {target_dir}")
-            sys.exit(1)
+        self.m_no_report = set()
+        # A folder given twice is charted once
+        self.m_extra_dirs = tuple(
+            f_d
+            for f_i, f_d in enumerate(self.m_extra_dirs)
+            if f_d != target_dir and f_d not in self.m_extra_dirs[:f_i]
+        )
+        for f_dir in (target_dir,) + self.m_extra_dirs:
+            if not os.path.isdir(f_dir):
+                log.Console.error(f"Directory not found: {f_dir}")
+                sys.exit(1)
 
         if not self.m_all:
             self._plotOne(target_dir, self.m_op, self.m_stripes, self.m_bs)
@@ -922,6 +1028,30 @@ class CompareNodesMain(BaseMain):
             for f_stripes, f_bs in CompareCliParser.WORKLOAD_PERMUTATIONS:
                 self._plotOne(target_dir, f_op, f_stripes, f_bs)
         return 0
+
+    @staticmethod
+    def _uniqueTails(f_paths: Sequence[str], f_min_depth: int) -> List[str]:
+        """The last path parts of each of f_paths (at least f_min_depth), as many as tell
+        them apart: ['/a/backends/small', '/b/backends/small'] -> ['a/backends/small', ...]."""
+        f_parts = [os.path.normpath(f_p).strip(os.sep).split(os.sep) for f_p in f_paths]
+        f_depth = f_min_depth
+        while f_depth < max(len(f_p) for f_p in f_parts) and len(
+            {tuple(f_p[-f_depth:]) for f_p in f_parts}
+        ) < len(f_parts):
+            f_depth += 1
+        return ["/".join(f_p[-f_depth:]) for f_p in f_parts]
+
+    @staticmethod
+    def _isIorOnly(f_dir: str) -> bool:
+        """f_dir's outputs-* directories are all IOR arms ('run ior' archives), and it has one."""
+        from lsmiotool.lib.arms import isIorArmId
+
+        f_arms = [
+            f_e[len("outputs-") :]
+            for f_e in os.listdir(f_dir)
+            if f_e.startswith("outputs-") and os.path.isdir(os.path.join(f_dir, f_e))
+        ]
+        return bool(f_arms) and all(isIorArmId(f_a) for f_a in f_arms)
 
     def _plotOne(self, target_dir: str, f_op: str, f_stripes: int, f_bs: str) -> None:
         """Generate the comparison plot of one (operation, stripes, blocksize)."""
@@ -947,17 +1077,58 @@ class CompareNodesMain(BaseMain):
             "plugin": 2,
             "rocksdb": 3,
             "leveldb": 4,
+            # IOR arms archived by 'run ior' (outputs-ior[-<setup>]), charted after the backends
+            "ior": 5,
+            "ior-collective": 6,
+            "ior-hdf5": 7,
+            "ior-hdf5-collective": 8,
+            "ior-fsync": 9,
+            "ior-reverse": 10,
         }
 
-        entries = sorted(os.listdir(target_dir))
+        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib.export import generateIorReports
+
         plot_data_list: List[plot.PlotData] = []
+        # Folder of each series, to tell same-named arms of several folders apart
+        f_sources: List[str] = []
         is_read = f_op == "read"
 
-        for entry in entries:
-            child_path = os.path.join(target_dir, entry)
-            if os.path.isdir(child_path):
+        for f_dir, entry in (
+            (f_d, f_e)
+            for f_d in [target_dir] + list(self.m_extra_dirs)
+            for f_e in sorted(os.listdir(f_d))
+        ):
+            child_path = os.path.join(f_dir, entry)
+            f_ior_arm = entry[len("outputs-") :] if entry.startswith("outputs-") else ""
+            if not os.path.isdir(child_path) or child_path in self.m_no_report:
+                continue
+            if isIorArmId(f_ior_arm):
+                # An IOR arm: ior-report.csv (ior-parse.sh), generated when missing
+                f_ior_report = os.path.join(child_path, data.IOR_REPORT_FILE)
+                if not data.isUsableReport(f_ior_report):
+                    try:
+                        generateIorReports(child_path)
+                    except Exception as f_err:
+                        log.Console.warning(
+                            f"Failed to generate report for {child_path}: {f_err}"
+                        )
+                if not data.isUsableReport(f_ior_report):
+                    self.m_no_report.add(child_path)
+                else:
+                    x_series, y_series = data.IorSummaryData(f_ior_report).timeSeries(
+                        is_read, f_stripes, f_bs
+                    )
+                    if x_series and y_series:
+                        plot_data_list.append(
+                            plot.PlotData(f_ior_arm, x_series, y_series)
+                        )
+                        f_sources.append(f_dir)
+            else:
                 report_file = os.path.join(child_path, "lsm-report.csv")
-                if output.ensureLsmioReports(child_path):
+                if not output.ensureLsmioReports(child_path):
+                    self.m_no_report.add(child_path)
+                else:
                     summary_data = data.LsmioSummaryData(report_file)
                     x_series, y_series = summary_data.timeSeries(
                         is_read, f_stripes, f_bs
@@ -982,17 +1153,39 @@ class CompareNodesMain(BaseMain):
                         plot_data_list.append(
                             plot.PlotData(legend_label, x_series, y_series)
                         )
+                        f_sources.append(f_dir)
 
         if not plot_data_list:
             log.Console.warning(
-                f"No benchmark data found in subdirectories of {target_dir} for {f_op}, stripes={f_stripes}, bs={f_bs}"
+                "No benchmark data found in subdirectories of "
+                f"{', '.join([target_dir] + list(self.m_extra_dirs))} "
+                f"for {f_op}, stripes={f_stripes}, bs={f_bs}"
             )
             return
 
-        # Sort plot series by canonical precedence: [adios2, native, plugin, rocksdb, leveldb] (INV-BACKEND-5)
-        plot_data_list.sort(
-            key=lambda p: (canonical_order.get(p.legend, 999), p.legend)
+        # Sort plot series by canonical precedence: [adios2, native, plugin, rocksdb, leveldb] (INV-BACKEND-5);
+        # the same arm from several folders stays in folder order
+        f_series = sorted(
+            zip(plot_data_list, f_sources),
+            key=lambda f_t: (canonical_order.get(f_t[0].legend, 999), f_t[0].legend),
         )
+        plot_data_list = [f_pd for f_pd, _ in f_series]
+
+        # The same arm in several folders: name each after its folder, by as many trailing
+        # path parts (at least <parent>/<name>) as tell those folders apart
+        f_folders: Dict[str, List[str]] = {}
+        for f_pd, f_src in f_series:
+            f_srcs = f_folders.setdefault(f_pd.legend, [])
+            if f_src not in f_srcs:
+                f_srcs.append(f_src)
+        f_labels: Dict[Tuple[str, str], str] = {}
+        for f_legend, f_srcs in f_folders.items():
+            if len(f_srcs) < 2:
+                continue
+            for f_src, f_tail in zip(f_srcs, self._uniqueTails(f_srcs, 2)):
+                f_labels[(f_legend, f_src)] = f"{f_legend} ({f_tail})"
+        for f_pd, f_src in f_series:
+            f_pd.legend = f_labels.get((f_pd.legend, f_src), f_pd.legend)
 
         base_name = os.path.basename(target_dir.rstrip(os.sep))
 
@@ -1019,15 +1212,48 @@ class CompareNodesMain(BaseMain):
         else:
             scale_name = base_name
 
+        # Several folders: named after each folder's parent too (backends+ior), so the
+        # chart never replaces the first folder's own one; folders sharing a parent
+        # (backends/small, backends/large) are named by their own path tails instead
+        f_combined = ""
+        if self.m_extra_dirs:
+            f_dirs = [
+                os.path.normpath(f_d) for f_d in (target_dir,) + self.m_extra_dirs
+            ]
+            f_parents = [os.path.basename(os.path.dirname(f_d)) for f_d in f_dirs]
+            if all(f_parents) and len(set(f_parents)) == len(f_parents):
+                f_names = f_parents
+            else:
+                f_names = [
+                    f_t.replace("/", "_") for f_t in self._uniqueTails(f_dirs, 1)
+                ]
+            f_combined = "+".join(f_names)
+        elif self._isIorOnly(target_dir):
+            # IOR setups alone (lsmio-archive/ior/<scale>): named apart from the
+            # backends of that scale, which may share the output directory
+            f_combined = "ior"
+        if len(f_combined) > self.MAX_COMBINED_NAME:
+            # Keep the file name within NAME_MAX: a prefix and a hash of the rest
+            import hashlib
+
+            f_combined = (
+                f_combined[: self.MAX_COMBINED_NAME - 9]
+                + "-"
+                + hashlib.sha1(f_combined.encode()).hexdigest()[:8]
+            )
+
         os.makedirs(out_dir, exist_ok=True)
         title = (
-            f"Comparison: {scale_name} ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
+            f"Comparison: {scale_name}"
+            + (f", {f_combined.replace('+', ' + ')}" if f_combined else "")
+            + f" ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
         )
         meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
 
         output_filename = os.path.join(
             out_dir,
-            f"compare-{scale_name}-{f_op}-{f_stripes}-{f_bs}.png",
+            f"compare-{scale_name}{'-' + f_combined if f_combined else ''}"
+            f"-{f_op}-{f_stripes}-{f_bs}.png",
         )
         bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
         bar_plot.plot(output_filename)
@@ -1925,7 +2151,8 @@ class ArchiveMain(BaseMain):
     Benchmark root: f_benchmark_root, else the site profile's benchmark root (hdd,
     as bmtool's archive has no --ssd) - never the working directory.
     Destination: --dest (resolved like bmtool's include/archive-dest.in.sh), else
-    <root>/lsmio-archive/{variants|baseline}. An inherited BM_ARCHIVE_DEST is ignored:
+    <root>/lsmio-archive/{variants|baseline}; for ior, <root>/lsmio-archive/ior/<scale>,
+    where 'run ior' archives. An inherited BM_ARCHIVE_DEST is ignored:
     bmtool clears it before resolving the archive command's destination.
     Arm: outputs-<arm>, arm = resolveArmId(setup, variant) with setup from --setup,
     else $BM_SETUP, else NATIVE (an lsmiotool run root: the run's own setup).
@@ -2062,6 +2289,9 @@ class ArchiveMain(BaseMain):
         f_setup = getattr(self.m_request, "setup", None)
         if f_setup:
             return f_setup
+        if self.m_request.target != "lsmio":
+            # BM_SETUP is bmtool's LSMIO setup
+            return None
         f_env = str(self.m_environ.get("BM_SETUP", "") or "").strip()
         if not f_env:
             return None
@@ -2100,7 +2330,7 @@ class ArchiveMain(BaseMain):
                 )
 
         f_target = str(f_req.get("target") or "").strip().lower()
-        if f_target != "lsmio":
+        if f_target != self.m_request.target:
             mismatch(f"target {f_target!r}")
             return None
         f_scale = str(f_req.get("scale") or "").strip().lower()
@@ -2109,6 +2339,18 @@ class ArchiveMain(BaseMain):
         if f_scale != self.m_request.scale:
             mismatch(f"scale {f_scale!r}, not {self.m_request.scale!r}")
             return None
+        if f_target == "ior":
+            from lsmiotool.lib.arms import IOR_ARMS, ArmError, iorArmToken
+
+            f_ior_setup = str(f_req.get("setup") or "BASE").strip().upper()
+            if f_setup and f_setup != f_ior_setup:
+                mismatch(f"setup {f_ior_setup!r}, not {f_setup!r}")
+                return None
+            try:
+                return IOR_ARMS[iorArmToken(f_ior_setup)][1]
+            except ArmError as f_err:
+                mismatch(str(f_err))
+                return None
         from lsmiotool.lib.benchmarks import LsmioAdapter
 
         f_run_setup = str(f_req.get("setup") or "NATIVE").strip().upper()
@@ -2193,11 +2435,14 @@ class ArchiveMain(BaseMain):
                     "cannot resolve the benchmark root from the site profile; "
                     "pass an absolute --dest (and --source)"
                 )
+            f_ior = self.m_request.target == "ior"
             f_dest_root = resolveArchiveDest(
                 f_root or "",
-                f_mode=None,
+                # Where 'run ior' archives: lsmio-archive/ior/<scale>
+                f_mode="backends" if f_ior else None,
                 f_scale=f_scale,
                 f_explicit=f_explicit_dest,
+                f_target=self.m_request.target,
             )
 
             # Source: explicit, else bmtool's $LSM_DIR_OBASE or the latest lsmiotool run
@@ -2205,6 +2450,12 @@ class ArchiveMain(BaseMain):
             if f_source:
                 if os.path.isfile(os.path.join(f_source, "manifest.json")):
                     f_run_root, f_source = f_source, None
+                elif f_ior:
+                    # bmtool never archived IOR: only lsmiotool runs are archived
+                    raise ArchiveError(
+                        f"--source {f_source} is not an lsmiotool run root "
+                        "(manifest.json); an ior archive takes only an ior run root"
+                    )
                 else:
                     # bmtool's archive only ever moves its live outputs dir
                     # (include/archive.in.sh moves $LSM_DIR_OBASE): never an archive, a copy
@@ -2229,7 +2480,8 @@ class ArchiveMain(BaseMain):
                     )
                 f_outputs = os.path.join(f_root, "lsmio", "outputs")
                 f_latest = self._latestRunRoot(f_root, f_setup)
-                f_has_outputs = self._holdsOutputs(f_outputs)
+                # bmtool's live outputs are LSMIO's: an ior archive takes only runs
+                f_has_outputs = not f_ior and self._holdsOutputs(f_outputs)
                 if f_has_outputs and f_latest is not None:
                     raise ArchiveError(
                         f"Both bmtool outputs ({f_outputs}) and an lsmiotool run "
@@ -2239,6 +2491,13 @@ class ArchiveMain(BaseMain):
                     f_run_root = f_latest
                 elif f_has_outputs:
                     f_source = f_outputs
+                elif f_ior:
+                    raise ArchiveError(
+                        f"Nothing to archive: no lsmiotool run of 'ior {f_scale}'"
+                        + (f" ({f_setup})" if f_setup else "")
+                        + f" was found under {os.path.join(f_root, 'runs')} (a multi-setup "
+                        "ior run is archived with --source <one of its run roots>)"
+                    )
                 else:
                     raise ArchiveError(
                         f"Nothing to archive: {f_outputs} is missing or empty and no "
@@ -2324,10 +2583,10 @@ class ArchiveMain(BaseMain):
         f_run_scale = str(f_req.get("scale") or "").strip().lower()
         if f_run_scale == "baseline":
             f_run_scale = "variants"
-        if f_target != "lsmio" or f_run_scale != f_scale:
+        if f_target != self.m_request.target or f_run_scale != f_scale:
             raise ArchiveError(
                 f"Run root {f_arm_root} does not match the request: "
-                f"{f_target} {f_run_scale}, not lsmio {f_scale}"
+                f"{f_target} {f_run_scale}, not {self.m_request.target} {f_scale}"
             )
         if f_explicit_dest and f_root is None and not os.path.isabs(f_explicit_dest):
             raise ArchiveError(

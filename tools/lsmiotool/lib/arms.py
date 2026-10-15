@@ -32,6 +32,7 @@
 
 Mirrors the branches of bmtool's jobs/batch.in.sh:
 - backends mode: one arm per backend (INV-BACKEND-1)
+- ior scaling runs: one arm per IOR setup, archived like backends to lsmio-archive/ior
 - versioned variants: the bm_native:main reference baseline (role base), then the current
   binary per variant (role run) with a version-<branch>-<hash>[-<variant>] arm ID
 - paired variants: the unconfigured baseline (role base), then each variant (role run)
@@ -41,7 +42,7 @@ Mirrors the branches of bmtool's jobs/batch.in.sh:
 import os
 import re
 import subprocess
-from typing import Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Dict, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 DEFAULT_VARIANT_TOKENS = (None, "", "default", "base")
 
@@ -54,6 +55,20 @@ BACKEND_ARMS: Dict[str, Tuple[str, str]] = {
     "rocksdb": ("ROCKSDB", "rocksdb"),
     "leveldb": ("LEVELDB", "leveldb"),
 }
+
+# IOR setup token -> (setup, arm ID); bmtool's ior-benchmark.sh ran one hard-coded setup
+IOR_ARMS: Dict[str, Tuple[str, str]] = {
+    "base": ("BASE", "ior"),
+    "ior": ("BASE", "ior"),
+    "collective": ("COLLECTIVE", "ior-collective"),
+    "hdf5": ("HDF5", "ior-hdf5"),
+    "hdf5-c": ("HDF5-C", "ior-hdf5-collective"),
+    "hdf5-collective": ("HDF5-C", "ior-hdf5-collective"),
+    "fsync": ("FSYNC", "ior-fsync"),
+    "reverse": ("REVERSE", "ior-reverse"),
+}
+DEFAULT_IOR_SETUPS: Tuple[str, ...] = ("base", "collective", "hdf5", "hdf5-collective")
+DEFAULT_LSMIO_BACKENDS: Tuple[str, ...] = ("adios2", "native", "plugin", "rocksdb")
 
 # Reference baseline binary installed by `./build.sh install:main`
 REFERENCE_NATIVE_EXECUTABLE = "bm_native:main"
@@ -94,6 +109,22 @@ class ArmGroup(NamedTuple):
     @property
     def run_arms(self) -> Tuple[RunArm, ...]:
         return self.arms[1:] if self.is_paired else self.arms
+
+
+def iorArmToken(f_setup: str) -> str:
+    """The IOR arm token of an IOR setup name or token (BASE -> base, HDF5-C and
+    hdf5-c -> hdf5-collective, ior -> base)."""
+    f_low = str(f_setup).strip().lower()
+    f_norm = IOR_ARMS[f_low][0] if f_low in IOR_ARMS else f_low.upper()
+    for f_token in DEFAULT_IOR_SETUPS + tuple(IOR_ARMS):
+        if IOR_ARMS[f_token][0] == f_norm:
+            return f_token
+    raise ArmError(f"Unsupported IOR setup: [{f_setup}]")
+
+
+def isIorArmId(f_arm_id: Optional[str]) -> bool:
+    """True for the arm ID of an IOR arm (outputs-ior, outputs-ior-<setup>)."""
+    return f_arm_id is not None and (f_arm_id == "ior" or f_arm_id.startswith("ior-"))
 
 
 def isDefaultVariant(f_variant: Optional[str]) -> bool:
@@ -148,6 +179,22 @@ def resolveArmGroup(
         raise ArmError(
             f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
         )
+
+    if f_target == "ior" and f_mode == "backends":
+        f_ior_arms: List[RunArm] = []
+        f_seen: Set[str] = set()
+        for f_raw in getattr(f_request, "backends", None) or DEFAULT_IOR_SETUPS:
+            f_token = str(f_raw).strip().lower()
+            if f_token not in IOR_ARMS:
+                raise ArmError(
+                    f"Unsupported IOR setup: [{f_token}]. Must be one of: {sorted(IOR_ARMS)}"
+                )
+            f_i_setup, f_i_arm = IOR_ARMS[f_token]
+            if f_i_arm in f_seen:
+                raise ArmError(f"IOR setup listed twice: [{f_token}]")
+            f_seen.add(f_i_arm)
+            f_ior_arms.append(RunArm(f_token, f_i_setup, None, f_i_arm, None))
+        return ArmGroup("backends", tuple(f_ior_arms), f_archive_flag is not False)
 
     if f_target == "lsmio" and f_mode == "backends":
         f_arms: List[RunArm] = []
@@ -236,7 +283,8 @@ def resolveArmGroup(
     f_arm_id = (
         ArchiveEngine.resolveArmId(f_setup, f_variant) if f_target == "lsmio" else None
     )
-    # bmtool never archives ior/lmp or plain lsmio scaling runs
+    # bmtool never archives ior/lmp or plain lsmio scaling runs (ior scaling runs are
+    # backends-mode groups above)
     return ArmGroup(
         "single",
         (RunArm(f_variant or "default", f_setup, f_variant, f_arm_id, None),),

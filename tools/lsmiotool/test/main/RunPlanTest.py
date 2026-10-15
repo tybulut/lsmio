@@ -762,17 +762,34 @@ class RunPlanTest(unittest.TestCase):
 
     def testPbsFixedWalltimeIgnoresTimeOverride(self) -> None:
         """M1: a PBS site's fixed walltime wins over --time, as in bmtool, so the job script
-        still renders instead of failing on a non-06:00:00 walltime."""
+        still renders instead of failing on another walltime. It is per run: a job running
+        several arms gets it once per arm, up to 48 hours."""
         from lsmiotool.lib.scheduler import PbsScriptRenderer
 
-        for f_req in (
-            RunRequest("lsmio", "variants", f_variants=["footer"], f_wallhour=10),
-            RunRequest("lsmio", "small", f_walltime="12:00:00"),
+        for f_req, f_walltime in (
+            (
+                RunRequest("lsmio", "variants", f_variants=["footer"], f_wallhour=10),
+                "12:00:00",
+            ),
+            (RunRequest("lsmio", "small", f_walltime="12:00:00"), "06:00:00"),
+            (RunRequest("lsmio", "small", f_mode="backends"), "24:00:00"),
+            (RunRequest("ior", "small", f_mode="backends"), "24:00:00"),
+            (
+                RunRequest("ior", "small", f_mode="backends", f_backends=["hdf5"]),
+                "06:00:00",
+            ),
+            (RunRequest("lsmio", "variants", f_versioned=True), "12:00:00"),
+            (
+                RunRequest(
+                    "lsmio", "variants", f_variants=[f"v{f_i}" for f_i in range(9)]
+                ),
+                "48:00:00",
+            ),
         ):
             f_plan = RunPlanner.createPlan(f_req, self.m_isambard_profile)
             for f_idx, f_sp in enumerate(f_plan.scale_points):
                 f_res = f_plan.scheduled_points[f_idx]
-                self.assertEqual(f_res.walltime, "06:00:00")
+                self.assertEqual(f_res.walltime, f_walltime, f_req)
                 PbsScriptRenderer.renderDirectives(
                     f_point=f_sp,
                     f_profile=self.m_isambard_profile,
@@ -781,6 +798,74 @@ class RunPlanTest(unittest.TestCase):
                     f_error_path="/tmp/err",
                     f_walltime=f_res.walltime,
                 )
+
+    def testFixedWalltimeRunCountAndOtherFixedValues(self) -> None:
+        """The arms a job runs, as resolveArmGroup resolves them; another fixed value scales
+        by whole multiples within 48 hours, and the PBS renderer accepts exactly those."""
+        from lsmiotool.lib.run import (
+            PlanValidationError,
+            groupRunCount,
+            scaleFixedWalltime,
+        )
+        from lsmiotool.lib.scheduler import PbsScriptRenderer, SchedulerScriptError
+
+        self.assertEqual(
+            groupRunCount(RunRequest("lsmio", "baseline", f_variants=["a"])), 2
+        )
+        self.assertEqual(
+            groupRunCount(RunRequest("lsmio", "baseline", f_versioned=True)), 2
+        )
+        self.assertEqual(
+            groupRunCount(RunRequest("lmp", "small", f_mode="backends")), 1
+        )
+        self.assertEqual(
+            groupRunCount(RunRequest("ior", "small", f_mode="backends")), 4
+        )
+        self.assertEqual(scaleFixedWalltime("07:00:00", 9), "42:00:00")
+        self.assertEqual(scaleFixedWalltime("08:00:00", 3), "24:00:00")
+        self.assertEqual(
+            PbsScriptRenderer.fixedWalltimes("08:00:00"),
+            ("08:00:00", "16:00:00", "24:00:00", "32:00:00", "40:00:00", "48:00:00"),
+        )
+
+        f_profile = copy.deepcopy(self.m_isambard_profile)
+        f_small = (
+            f_profile.resources["small"]
+            if isinstance(f_profile.resources, dict)
+            else f_profile.resources.small
+        )
+        object.__setattr__(f_small, "m_walltime_policy", "fixed_08:00:00")
+        for f_req, f_walltime in (
+            (RunRequest("lsmio", "small"), "08:00:00"),
+            (RunRequest("ior", "small", f_mode="backends"), "32:00:00"),
+            (RunRequest("lsmio", "variants", f_variants=["a", "b"]), "24:00:00"),
+        ):
+            f_plan = RunPlanner.createPlan(f_req, f_profile)
+            f_sp = f_plan.scale_points[0]
+            self.assertEqual(f_plan.scheduled_points[0].walltime, f_walltime)
+            self.assertIn(
+                f"#PBS -l walltime={f_walltime}",
+                PbsScriptRenderer.renderDirectives(
+                    f_point=f_sp,
+                    f_profile=f_profile,
+                    f_job_name=f_plan.tokens[0],
+                    f_output_path="/tmp/out",
+                    f_error_path="/tmp/err",
+                    f_walltime=f_walltime,
+                ),
+            )
+        with self.assertRaises(SchedulerScriptError):
+            PbsScriptRenderer.renderDirectives(
+                f_point=f_sp,
+                f_profile=f_profile,
+                f_job_name=f_plan.tokens[0],
+                f_output_path="/tmp/out",
+                f_error_path="/tmp/err",
+                f_walltime="06:00:00",
+            )
+        object.__setattr__(f_small, "m_walltime_policy", "fixed_6h")
+        with self.assertRaises(PlanValidationError):
+            RunPlanner.createPlan(RunRequest("lsmio", "small"), f_profile)
 
     def testSlurmQosPromotionBoundariesAndLimits(self) -> None:
         """Verify exact QoS promotion boundaries, Slurm time format handling, and limit enforcement (T1, S4, S5)."""

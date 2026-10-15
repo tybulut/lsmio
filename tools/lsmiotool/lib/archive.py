@@ -199,11 +199,14 @@ def resolveArchiveDest(
     f_scale: Optional[str] = None,
     f_explicit: Optional[str] = None,
     f_versioned: bool = False,
+    f_target: Optional[str] = None,
 ) -> str:
     """Resolve the archive destination root, mirroring bmtool/include/archive-dest.in.sh.
 
     Layout (destinations under <benchmark_root>/lsmio-archive):
         backends/<scale>   multi-backend intra-allocation runs (mode 'backends')
+        ior/<scale>        ior scaling runs, one arm per IOR setup (target 'ior', mode
+                           'backends'; lsmiotool only, bmtool never archived ior)
         variants           variant matrix runs (scale 'variants')
         variants-versioned --versioned variant runs; bmtool archives these to 'variants',
                            where 'compare variants' would chart them with the matrix runs
@@ -219,6 +222,7 @@ def resolveArchiveDest(
             '/lsmio-archive' which is treated as benchmark-root relative;
             relative paths resolve against the benchmark root.
         f_versioned: A --versioned run (scale 'variants' only).
+        f_target: Benchmark ('lsmio' when None); 'ior' archives apart from LSMIO.
 
     Returns:
         Absolute archive destination root.
@@ -238,6 +242,12 @@ def resolveArchiveDest(
     if f_norm_scale == "baseline":
         f_norm_scale = "variants"
 
+    if f_norm_mode == "backends" and (f_target or "").strip().lower() == "ior":
+        return (
+            os.path.join(f_root, "ior", f_norm_scale)
+            if f_norm_scale
+            else os.path.join(f_root, "ior")
+        )
     if f_norm_mode == "backends":
         return (
             os.path.join(f_root, "backends", f_norm_scale)
@@ -373,8 +383,9 @@ class ArchiveEngine:
 
         The rank logs of every succeeded scale point are copied (lib/export.py) to
         <target>/<nodes>/<date>/out-<arm>-<rf>-<bs>-...txt and the agg files and
-        lsm-report.csv generated; the run root itself is left untouched (it is the
-        run's evidence), so nothing is recreated in its place.
+        lsm-report.csv generated (an IOR arm: its outputs, named by the IOR setup, and
+        ior-report.csv); the run root itself is left untouched (it is the run's
+        evidence), so nothing is recreated in its place.
 
         Returns:
             (target directory, exported point ids, skipped point ids)
@@ -383,7 +394,13 @@ class ArchiveEngine:
             ArchiveError: When the run root cannot be read or no point could be
                 exported (nothing is left behind in the destination then).
         """
-        from lsmiotool.lib.export import exportPoint, generateReports
+        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib.export import (
+            exportIorPoint,
+            exportPoint,
+            generateIorReports,
+            generateReports,
+        )
         from lsmiotool.lib.log import Console
         from lsmiotool.lib.runparse import RunParseError, RunRootResolver
         from lsmiotool.lib.state import PointRunState
@@ -414,16 +431,22 @@ class ArchiveEngine:
             else cls.resolveTargetDirectory(f_dest_root, f_arm_id)
         )
         f_created = not os.path.exists(f_target)
+        f_ior = isIorArmId(f_arm_id)
         f_exported: List[str] = []
         for f_pt in f_points:
             try:
-                exportPoint(
+                (exportIorPoint if f_ior else exportPoint)(
                     f_layout=f_store.layout,
                     f_evidence_store=f_store,
                     f_scale_point=f_pt.scalePoint,
                     f_ordinal=f_pt.ordinal,
                     f_combinations=f_resolved.plan.combinations,
-                    f_infix=f_arm_id,
+                    # bmtool's IOR outputs are named by the IOR setup (base, hdf5-c)
+                    f_infix=(
+                        str(f_resolved.plan.request.setup or "BASE").lower()
+                        if f_ior
+                        else f_arm_id
+                    ),
                     f_node_dir=os.path.join(f_target, str(f_pt.scalePoint.nodes)),
                 )
             except Exception as f_err:
@@ -439,7 +462,10 @@ class ArchiveEngine:
                 f"No point of run '{f_resolved.runId}' could be exported from {f_run_root}"
             )
 
-        if not generateReports(f_target):
+        if f_ior:
+            if not generateIorReports(f_target):
+                Console.warning(f"No ior-report.csv rows for {f_target}")
+        elif not generateReports(f_target):
             Console.warning(f"No lsm-report.csv rows for {f_target}")
         cls.writeRunMarker(f_target, f_resolved.runId, f_run_root, f_exported)
         return f_target, f_exported, f_skipped

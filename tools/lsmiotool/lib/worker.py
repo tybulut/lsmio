@@ -2611,6 +2611,8 @@ class AllocationController:
                         "elapsed_seconds": f_proc_res.elapsed_seconds,
                         "stage": "execution",
                         "output_path": f_out_path,
+                        # bmtool names the IOR output after this node (lib/export.py)
+                        "host": rankHostName(os.environ),
                     },
                     f_ordinal=f_matched_ord,
                 )

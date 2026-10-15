@@ -435,7 +435,8 @@ class PbsRendererTest(unittest.TestCase):
         self.assertFalse(any("pvmem" in f_d for f_d in f_large_dirs))
 
     def testFixedSixHours(self) -> None:
-        """Asserts walltime is always fixed 06:00:00 regardless of node count, and variable walltimes are rejected."""
+        """Asserts walltime is fixed 06:00:00 per run regardless of node count: a whole multiple
+        of it up to 48:00:00 (a job running several arms) is rendered, anything else rejected."""
         # Tested on various node counts
         for f_tasks in [1, 2, 4, 8, 16, 32, 64, 128, 256]:
             f_ppn = 1 if f_tasks <= 48 else 4
@@ -463,11 +464,26 @@ class PbsRendererTest(unittest.TestCase):
         )
         self.assertIn("#PBS -l walltime=06:00:00", f_dirs_exact)
 
-        # Passing variable or non-06:00:00 walltime must raise SchedulerScriptError
+        # A job running several arms: 06:00:00 per arm
+        for f_wt in ("12:00:00", "24:00:00", "48:00:00"):
+            self.assertIn(
+                f"#PBS -l walltime={f_wt}",
+                PbsScriptRenderer.renderDirectives(
+                    f_point=f_point_1,
+                    f_profile=self.m_isambard_profile,
+                    f_job_name=self.m_job_name,
+                    f_output_path=self.m_output_path,
+                    f_error_path=self.m_error_path,
+                    f_walltime=f_wt,
+                ),
+            )
+
+        # Passing any other walltime must raise SchedulerScriptError
         f_bad_walltimes = [
             "02:00:00",
             "04:00:00",
-            "12:00:00",
+            "13:00:00",
+            "54:00:00",
             "00:30:00",
             "06:00",
             "6:00:00",

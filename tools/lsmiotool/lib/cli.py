@@ -49,10 +49,12 @@ common cmds:
   compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
+  parse ior <local|bake|small|large> [--output-dir <dir>]
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
   parseLegacy lsmio backends <local|bake|small|large> [<path>]
   run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
   run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
+  run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -70,19 +72,23 @@ ARCHIVE_HELP_TEXT = """Usage:
   lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
 Arguments:
-  <benchmark>   Supported benchmarks: lsmio
+  <benchmark>   Supported benchmarks: lsmio, ior
   <scale>       Supported scales: local, bake, small, large, variants
-                ('baseline' is accepted as the deprecated spelling of 'variants')
+                ('baseline' is accepted as the deprecated spelling of 'variants');
+                ior: local, bake, small, large. An ior run is archived as
+                outputs-ior[-<setup>] in <benchmark_root>/lsmio-archive/ior/<scale>.
   <variant>     Optional variant configuration for 'lsmio variants'
                 (e.g. btree, mmap-btree, wbuf-512m). Only supported for 'lsmio variants'.
 
 Options:
-  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
+  --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline};
+                ior/<scale> for ior).
                 Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
   --setup <name>
                 LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE;
-                for an lsmiotool run, the run's own setup).
+                for an lsmiotool run, the run's own setup). For ior: the IOR setup of the
+                run to archive (BASE, COLLECTIVE, HDF5, HDF5-C, FSYNC, REVERSE).
   --source <path>
                 What to archive: an lsmiotool run root, or bmtool's live outputs directory
                 <benchmark_root>/lsmio/outputs (the only bmtool directory moved, as in bmtool).
@@ -101,11 +107,16 @@ Source (default): <benchmark_root> is the site profile's benchmark root.
     <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
     in bmtool's layout with reports; the run root is left in place.
   Both present is an error: pick one with --source.
+  For ior, only lsmiotool runs: the latest standalone run of 'ior <scale>' (made before
+  'run ior' ran its setups as arms); its points go to <dest>/outputs-ior[-<setup>]/<nodes>
+  with ior-report.csv. A 'run ior' run archives itself, or with --source <one of its
+  run roots>.
 """
 
 RUN_HELP_TEXT = """Usage:
   lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
   lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
+  lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp
@@ -114,6 +125,12 @@ Arguments:
   <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb).
                 Each scale point is one job running the backends one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
+  <ior setups>  Optional comma-separated list of IOR setups for an ior scaling run
+                (default: base,collective,hdf5,hdf5-collective; also fsync, reverse).
+                Each scale point is one job running the setups one after another, and
+                each is archived like a backend, as outputs-ior[-<setup>]/<nodes> in
+                <benchmark_root>/lsmio-archive/ior/<scale> ('parse ior <scale>' regenerates
+                its reports). '--setup <IOR setup>' runs that setup alone.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. btree,no-manoff,autotune), or 'most' or 'all'
                 for the baseline and all 25 variants.
@@ -124,20 +141,26 @@ Options:
   --setup <name>
                 Explicit benchmark setup profile (e.g. BASE, HDF5, NATIVE, ROCKSDB, LSMIO).
                 Note: '--setup=value' syntax is strictly rejected; use '--setup <name>'.
-  --archive     Archive each scale point when its job ends. On by default for 'backends', for
-                'variants' with one or more variants and for --versioned; a 'variants' run of
-                the baseline alone is archived only with --archive.
+  --archive     Archive each scale point when its job ends. On by default for 'backends' and
+                ior scaling runs, for 'variants' with one or more variants and for
+                --versioned; a 'variants' run of the baseline alone is archived only with
+                --archive.
   --no-archive  Do not archive (not allowed with --versioned).
-  --resume      Skip a variant whose outputs-<arm>:run archive exists, or a backend's scale point
-                whose outputs-<backend>/<nodes> archive exists. A baseline-alone or a --versioned run
-                without variants always runs again.
+  --resume      Skip a variant whose outputs-<arm>:run archive exists, or a backend's (IOR
+                setup's) scale point whose outputs-<backend>/<nodes> archive exists. A
+                baseline-alone or a --versioned run without variants always runs again.
   --out-dir <path>
-                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|variants|variants-versioned}).
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|ior/<scale>|variants|variants-versioned}).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
                 Explicit job walltime limit in hours (aliases: --walltime, --wallhour, clamped to [1, 48]).
-                Overrides default dynamic scaling (2 + total_runs * 2 hours, granting 120 minutes per matrix run + 2 hours safety headroom).
+                Overrides the default dynamic scaling: 2 + total_runs * 2 hours for 'variants'
+                (120 minutes per matrix run + 2 hours safety headroom), and
+                2 + arms * max(1, nodes // 3) hours for 'lsmio backends' and 'ior' scaling runs
+                (arms: backends or IOR setups). Ignored on a site with a fixed walltime (PBS
+                job templates, e.g. isambard), which gives each job that walltime once per arm,
+                capped at 48 hours.
   --versioned   Execute versioned comparison run against reference baseline.
   --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
   --foreground  Stay attached to the terminal. By default a run started from a terminal
@@ -153,10 +176,14 @@ Global Options (preserved for legacy compatibility):
 PARSE_HELP_TEXT = """Usage:
   lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
   lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>]
+  lsmiotool parse ior <scale> [--output-dir <dir>]
 
 Arguments:
   <target>      Target run root path, manifest file path, or benchmark name (ior, lsmio, lmp).
   <scale>       Supported scales for backends mode: local, bake, small, large.
+                'parse ior <scale>' regenerates ior-report.csv in every outputs-* of
+                <benchmark_root>/lsmio-archive/ior/<scale> (or --output-dir), where
+                'run ior <scale>' archives its IOR setups.
 
 Options:
   --output-dir <dir>
@@ -171,9 +198,17 @@ COMPARE_HELP_TEXT = """Usage:
 Submodes:
   nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
   nodes <folder> [read|write] --all [--output-dir <dir>]
-      Compares performance across node counts for a benchmark folder.
+      Compares performance across node counts for a benchmark folder (or several:
+      nodes <folder> <folder> ... [read|write] ...).
       Arguments:
           <folder>: Archive folder with one outputs-<backend> directory per backend (e.g. <archive>/backends/<scale>).
+                    Further folders are charted with it, e.g. the IOR setups 'run ior' archived:
+                    compare nodes <archive>/backends/small <archive>/ior/small --all
+                    (plots are named by the first folder's scale and every folder's
+                    parent, e.g. compare-small-backends+ior-write-4-1M.png; an arm in
+                    several folders is labelled '<arm> (<parent>/<folder>)'). A folder of
+                    IOR setups alone gives compare-<scale>-ior-*.png, apart from its
+                    scale's backends charts.
           <read|write>: Operation to compare ('read' or 'write'); optional with --all.
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
@@ -419,7 +454,9 @@ class RunCliParser:
                     raise RunCliParseError("Backends specification cannot be empty.")
                 f_backends = tuple(parsed_b)
             else:
-                f_backends = ("adios2", "native", "plugin", "rocksdb")
+                from lsmiotool.lib.arms import DEFAULT_LSMIO_BACKENDS
+
+                f_backends = DEFAULT_LSMIO_BACKENDS
         else:
             # Validate scale (positional 1)
             f_scale_tok = f_post_run_tokens[1]
@@ -481,6 +518,34 @@ class RunCliParser:
                         f"Benchmark {f_benchmark!r} does not support variant configurations; "
                         f"variants are supported exclusively for 'lsmio'."
                     )
+        elif f_benchmark == "ior" and f_mode == "standard":
+            # IOR scaling runs: one arm per IOR setup in each job, archived like backends
+            from lsmiotool.lib.arms import IOR_ARMS
+
+            f_mode = "backends"
+            if f_trailing_tokens and not f_trailing_tokens[0].startswith("-"):
+                f_setups_raw = f_trailing_tokens[0].strip()
+                f_trailing_tokens = f_trailing_tokens[1:]
+                f_parsed_setups = [
+                    f_s.strip().lower()
+                    for f_s in f_setups_raw.split(",")
+                    if f_s.strip()
+                ]
+                if not f_parsed_setups:
+                    raise RunCliParseError("IOR setup specification cannot be empty.")
+                f_seen_arms: Dict[str, str] = {}
+                for f_s in f_parsed_setups:
+                    if f_s not in IOR_ARMS:
+                        raise RunCliParseError(
+                            f"Invalid IOR setup: {f_s!r}. Must be one of: {sorted(IOR_ARMS)}"
+                        )
+                    if IOR_ARMS[f_s][1] in f_seen_arms:
+                        raise RunCliParseError(
+                            f"IOR setup listed twice: {f_seen_arms[IOR_ARMS[f_s][1]]!r} "
+                            f"and {f_s!r}"
+                        )
+                    f_seen_arms[IOR_ARMS[f_s][1]] = f_s
+                f_backends = tuple(f_parsed_setups)
 
         f_is_ssd: bool = f_effective_global_ssd
         f_trailing_ssd_seen: bool = False
@@ -657,9 +722,25 @@ class RunCliParser:
             if f_unsupported:
                 raise RunCliParseError(
                     f"{', '.join(f_unsupported)} not supported for '{f_benchmark} {f_scale}': "
-                    "only 'variants' and 'backends' runs are archived or resumed "
+                    "only 'variants', 'lsmio backends' and ior scaling runs are archived "
+                    "or resumed "
                     "(set BM_WALLHOUR to change the walltime)."
                 )
+
+        # An ior scaling run's --setup names its one arm (the IOR setup list's form)
+        if f_benchmark == "ior" and f_mode == "backends" and f_setup_name is not None:
+            from lsmiotool.lib.arms import IOR_ARMS, ArmError, iorArmToken
+
+            if f_backends is not None:
+                raise RunCliParseError(
+                    "Cannot specify both an IOR setup list and '--setup'."
+                )
+            try:
+                f_backends = (iorArmToken(f_setup_name),)
+            except ArmError as f_err:
+                raise RunCliParseError(str(f_err)) from f_err
+            # The IOR setup name (HDF5-C), also for a token (--setup hdf5-collective)
+            f_setup_name = IOR_ARMS[f_backends[0]][0]
 
         # bmtool environment defaults: BM_SETUP picks the lsmio setup when --setup is not
         # given (ior/lmp hard-set theirs in bmtool); BM_WALLHOUR sets the walltime of any
@@ -850,6 +931,7 @@ class ParseCliParser:
         lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
         lsmiotool parse lsmio <local|bake|small|large|variants> [options]
         lsmiotool parse lsmio backends <local|bake|small|large> [options]
+        lsmiotool parse ior <local|bake|small|large> [options]
 
     Arguments:
         <target>: Run root path (also an archived one), manifest file path, bmtool-layout
@@ -859,7 +941,9 @@ class ParseCliParser:
         <scale>: With 'lsmio', restricts the latest-run search to that scale.
             'parse lsmio variants' and 'parse lsmio backends <scale>' instead
             regenerate the reports of every outputs-* directory in the archive
-            destination, like bmtool.
+            destination, like bmtool. 'parse ior <scale>' regenerates the
+            ior-report.csv of every IOR setup 'run ior <scale>' archived
+            (<root>/lsmio-archive/ior/<scale>/outputs-*).
 
     Options:
         --output-dir <dir>: Destination directory for reports (default: current working
@@ -946,6 +1030,20 @@ class ParseCliParser:
                 )
             f_scale = f_scale_tok
         elif (
+            f_target.lower() == "ior"
+            and f_remaining_tokens
+            and not f_remaining_tokens[0].startswith("-")
+        ):
+            # The archive of 'run ior <scale>' (lsmio-archive/ior/<scale>)
+            f_mode = "backends"
+            f_scale_tok = f_remaining_tokens.pop(0).strip().lower()
+            valid_scales = frozenset({"local", "bake", "small", "large"})
+            if f_scale_tok not in valid_scales:
+                raise ParseCliParseError(
+                    f"Invalid scale for ior parse: {f_scale_tok!r}. Must be one of: {sorted(valid_scales)}"
+                )
+            f_scale = f_scale_tok
+        elif (
             f_target.lower() == "lsmio"
             and f_remaining_tokens
             and f_remaining_tokens[0].strip().lower() in cls.VALID_SCALES
@@ -1005,6 +1103,12 @@ class ParseCliParser:
                     f"Unexpected extra positional argument: {f_tok!r}"
                 )
 
+        if f_target.lower() == "ior" and f_mode == "backends" and f_format != "csv":
+            raise ParseCliParseError(
+                "'parse ior <scale>' writes ior-report.csv only (bmtool ior-parse.sh); "
+                "--format json is not supported"
+            )
+
         return ParseRequest(
             f_target=f_target,
             f_mode=f_mode,
@@ -1026,21 +1130,23 @@ class ArchiveCliParser:
         lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
     Positional Arguments:
-        <benchmark>: Required. Must be 'lsmio'.
+        <benchmark>: Required. 'lsmio' or 'ior'.
         <scale>: Required. One of: local, bake, small, large, variants
-            ('baseline' is the deprecated spelling of 'variants').
+            ('baseline' is the deprecated spelling of 'variants'); not variants for ior.
         <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
-        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline}).
+        --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline};
+            ior/<scale> for ior).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
         --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE;
-            for an lsmiotool run, the run's own setup).
+            for an lsmiotool run, the run's own setup); for ior, the IOR setup of the
+            run to archive.
         --source <path>: What to archive: an lsmiotool run root or a bmtool outputs
             directory (default: resolved from the benchmark root, see ArchiveMain).
     """
 
-    VALID_BENCHMARKS = frozenset({"lsmio"})
+    VALID_BENCHMARKS = frozenset({"lsmio", "ior"})
     VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
     # Deprecated spelling retained so existing scripts keep working
     SCALE_ALIASES = {"baseline": "variants"}
@@ -1138,6 +1244,11 @@ class ArchiveCliParser:
             raise ArchiveCliParseError(
                 f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
             )
+        if f_benchmark == "ior" and f_scale == "variants":
+            raise ArchiveCliParseError(
+                "Invalid scale for ior: 'variants'. Only ior scaling runs "
+                "(local, bake, small, large) are archived."
+            )
 
         # Parse trailing options and optional positional variant
         from lsmiotool.lib.variants import VariantCatalogue
@@ -1177,7 +1288,7 @@ class ArchiveCliParser:
                         f"Missing valid value after '{f_tok}' option, got: {f_trailing_tokens[f_idx + 1]!r}"
                     )
                 if f_tok == "--setup":
-                    f_setup = cls.validateSetup(f_val)
+                    f_setup = cls.validateSetup(f_val, f_benchmark)
                 else:
                     f_source = f_val
                 f_idx += 2
@@ -1213,18 +1324,27 @@ class ArchiveCliParser:
         )
 
     @classmethod
-    def validateSetup(cls, f_setup: str) -> str:
-        """Canonical (upper-case) LSMIO setup name, as 'run --setup' accepts it.
+    def validateSetup(cls, f_setup: str, f_benchmark: str = "lsmio") -> str:
+        """Canonical (upper-case) setup name of f_benchmark, as 'run --setup' accepts it.
 
         Raises:
             ArchiveCliParseError: For an unknown setup.
         """
-        from lsmiotool.lib.benchmarks import LsmioAdapter
+        from lsmiotool.lib.arms import IOR_ARMS
+        from lsmiotool.lib.benchmarks import IorAdapter, LsmioAdapter
 
+        f_allowed = (
+            IorAdapter.ALLOWED_SETUPS
+            if f_benchmark == "ior"
+            else LsmioAdapter.ALLOWED_SETUPS
+        )
         f_norm = f_setup.strip().upper()
-        if f_norm not in LsmioAdapter.ALLOWED_SETUPS:
+        if f_benchmark == "ior" and f_setup.strip().lower() in IOR_ARMS:
+            # An IOR setup token, as 'run ior <scale> <ior setups>' takes it
+            f_norm = IOR_ARMS[f_setup.strip().lower()][0]
+        if f_norm not in f_allowed:
             raise ArchiveCliParseError(
-                f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
+                f"Invalid setup: {f_setup!r}. Must be one of: {list(f_allowed)}"
             )
         return f_norm
 
@@ -1239,6 +1359,7 @@ class CompareNodesRequest:
 
     __slots__ = (
         "m_folder",
+        "m_extra_folders",
         "m_op",
         "m_stripes",
         "m_blocksize",
@@ -1255,9 +1376,16 @@ class CompareNodesRequest:
         f_blocksize: str = "1M",
         f_output_dir: Optional[str] = None,
         f_all: bool = False,
+        f_extra_folders: Sequence[str] = (),
     ) -> None:
         if not isinstance(f_folder, str) or not f_folder.strip():
             raise ValueError(f"folder must be a non-empty string, got: {f_folder!r}")
+        if isinstance(f_extra_folders, str) or any(
+            not isinstance(f_f, str) or not f_f.strip() for f_f in f_extra_folders
+        ):
+            raise ValueError(
+                f"extra folders must be non-empty strings, got: {f_extra_folders!r}"
+            )
         if not isinstance(f_all, bool):
             raise ValueError(f"all must be a boolean, got: {f_all!r}")
         # With --all the operation is optional: 'both' charts read and write
@@ -1292,6 +1420,9 @@ class CompareNodesRequest:
             )
 
         super().__setattr__("m_folder", f_folder.strip())
+        super().__setattr__(
+            "m_extra_folders", tuple(f_f.strip() for f_f in f_extra_folders)
+        )
         super().__setattr__("m_op", f_norm_op)
         super().__setattr__("m_stripes", f_stripes)
         super().__setattr__("m_blocksize", f_norm_bs)
@@ -1323,6 +1454,11 @@ class CompareNodesRequest:
         return self.m_all
 
     @property
+    def folders(self) -> Tuple[str, ...]:
+        """Every folder charted: the first (it names the plots), then the others."""
+        return (self.m_folder,) + self.m_extra_folders
+
+    @property
     def folder(self) -> str:
         return self.m_folder
 
@@ -1350,6 +1486,11 @@ class CompareNodesRequest:
         return {
             "submode": "nodes",
             "folder": self.m_folder,
+            **(
+                {"extra_folders": list(self.m_extra_folders)}
+                if self.m_extra_folders
+                else {}
+            ),
             "op": self.m_op,
             "stripes": self.m_stripes,
             "blocksize": self.m_blocksize,
@@ -1360,6 +1501,7 @@ class CompareNodesRequest:
     def __repr__(self) -> str:
         return (
             f"CompareNodesRequest(folder={self.m_folder!r}, "
+            f"extra_folders={self.m_extra_folders!r}, "
             f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
             f"blocksize={self.m_blocksize!r}, "
             f"output_dir={self.m_output_dir!r}, all={self.m_all!r})"
@@ -1369,6 +1511,7 @@ class CompareNodesRequest:
         if isinstance(f_other, CompareNodesRequest):
             return (
                 self.m_folder == f_other.m_folder
+                and self.m_extra_folders == f_other.m_extra_folders
                 and self.m_op == f_other.m_op
                 and self.m_stripes == f_other.m_stripes
                 and self.m_blocksize == f_other.m_blocksize
@@ -1381,6 +1524,7 @@ class CompareNodesRequest:
         return hash(
             (
                 self.m_folder,
+                self.m_extra_folders,
                 self.m_op,
                 self.m_stripes,
                 self.m_blocksize,
@@ -1563,8 +1707,8 @@ class CompareCliParser:
     """Pure standard-library two-tier parser for 'lsmiotool compare' CLI arguments.
 
     Grammar:
-        lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
-        lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
+        lsmiotool compare nodes <folder> [<folder> ...] <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
+        lsmiotool compare nodes <folder> [<folder> ...] [read|write] --all [--output-dir <dir>]
         lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
     """
 
@@ -1690,17 +1834,37 @@ class CompareCliParser:
         f_remaining_tokens = f_tokens[1:]
         f_pos_idx = 0
         f_rem_idx = 0
+        # Further folders, charted with the first: tokens before <read|write> that name a
+        # path (with a '/') or an existing directory; any other word is a bad operation
+        f_extra_folders: List[str] = []
 
         while f_rem_idx < len(f_remaining_tokens):
             f_tok = f_remaining_tokens[f_rem_idx]
             if f_tok.startswith("-"):
                 break
 
-            if f_pos_idx == 0:
+            if (
+                f_pos_idx == 0
+                and f_tok.strip()
+                and f_tok.strip().lower() not in cls.VALID_OPERATIONS
+                and (
+                    os.sep in f_tok
+                    or (
+                        # A stripe count or block size is never a folder ('./4' is)
+                        not f_tok.strip().isdigit()
+                        and f_tok.strip().upper() not in cls.VALID_BLOCKSIZES
+                        and os.path.isdir(os.path.expanduser(f_tok.strip()))
+                    )
+                )
+            ):
+                f_extra_folders.append(f_tok.strip())
+                f_rem_idx += 1
+            elif f_pos_idx == 0:
                 f_op_norm = f_tok.strip().lower()
                 if f_op_norm not in cls.VALID_OPERATIONS_NODES:
                     raise CompareCliParseError(
-                        f"Invalid operation: {f_tok!r}. Must be 'read' or 'write'"
+                        f"Invalid operation: {f_tok!r}. Must be 'read' or 'write' (a "
+                        "further folder is a path with '/' or an existing directory)"
                     )
                 f_op = f_op_norm
                 f_pos_idx += 1
@@ -1781,6 +1945,7 @@ class CompareCliParser:
             f_blocksize=f_blocksize,
             f_output_dir=f_output_dir,
             f_all=f_all,
+            f_extra_folders=f_extra_folders,
         )
 
     @classmethod

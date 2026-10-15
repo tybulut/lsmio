@@ -103,10 +103,10 @@ bmtool parse lsmio backends small
 - **Symmetrical Dynamic Walltime Scaling (`INV-BACKEND-2`)**:
   Total allocation walltime scales deterministically with backend count and physical node count:
   $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{\text{nodes}}{3} \right\rfloor\right)\right)$$
-  User overrides (`--time`, `--walltime`, `--wallhour`, or `BM_WALLHOUR_OVERRIDE`) take absolute precedence and are clamped to $[1, 48]$.
+  User overrides (`--time`, `--walltime`, `--wallhour`, or `BM_WALLHOUR_OVERRIDE`) take absolute precedence and are clamped to $[1, 48]$ (except on PBS sites, whose job templates fix the walltime).
   With the default four backends the formula exceeds 48 hours from 36 nodes on (e.g. 54 hours at 40 nodes), so the last backends of a large point may hit the time limit. Each backend is archived on its own, so re-running with `--resume` completes only the missing ones.
 - **Approach 2 Partitioned Archive Layout (`INV-BACKEND-3`)**:
-  Runs partition their archives by mode: `backends/<scale>/` for backend scaling, `variants/` for the variant matrix, and `baseline/` for plain scaling runs, all under `$BM_PATH/lsmio-archive` (see "Approach 2 Partitioned Directory Layout" below).
+  Runs partition their archives by mode: `backends/<scale>/` for backend scaling, `variants/` for the variant matrix, and `baseline/` for plain scaling runs, all under `$BM_PATH/lsmio-archive` (see "Approach 2 Partitioned Directory Layout" below). bmtool never archives IOR; lsmiotool's `run ior` archives to `ior/<scale>/`.
 
 #### Options:
 - `--versioned`: Executes paired baseline comparison benchmarking the current working branch binary against the golden reference binary (`$SB_BIN/bm_native:main`). Can be run unconfigured or combined with one or more specific variants (e.g. `legacy`). Symmetrically archives `:run` and `:base` directories for automated delta comparison.
@@ -116,7 +116,7 @@ bmtool parse lsmio backends small
 - `--no-archive`: Disables automatic archiving after variant execution (forces `no`). Specifying both `--archive` and `--no-archive` is rejected.
 - `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}` or `outputs-${ARM_ID}:run`) already exists in the destination directory (`INV-MULTI-3`, `INV-PAIR-7`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
 - `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory. Default: the partitioned path for the run (`$BM_PATH/lsmio-archive/backends/<scale>`, `.../variants` or `.../baseline`). An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against `$BM_PATH`.
-- `--time <hours>` / `--walltime <hours>` / `--wallhour <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides the default dynamic scaling calculation (`2 + total_runs * 2` hours, granting 120 minutes per matrix run + 2 hours safety headroom to absorb 64K workloads and regressions).
+- `--time <hours>` / `--walltime <hours>` / `--wallhour <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides the default dynamic scaling calculation (`2 + total_runs * 2` hours, granting 120 minutes per matrix run + 2 hours safety headroom to absorb 64K workloads and regressions). Ignored on PBS sites, whose job templates fix the walltime.
 - `--fast`: Fast simulation mode. Reduces requested walltime by approximately half and caps maximum walltime at 23 hours (instead of 48 hours), ensuring multi-node scaling sweeps and variant evaluations on ARCHER2 enter `qos=standard` ($\le 24\text{h}$) rather than being deprioritized in `qos=long`.
 - `-h`, `--help`: Early help dispatch without credentials.
 
@@ -170,6 +170,7 @@ graph TD
 ```bash
 lsmiotool run <workload> <scale> [<variants>] [options]
 lsmiotool run lsmio backends <scale> [<backends>] [options]
+lsmiotool run ior <scale> [<ior setups>] [options]
 ```
 
 Full invocation signature:
@@ -179,6 +180,9 @@ lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archi
 
 # Multi-Backend Intra-Allocation Scaling Execution:
 lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--fast]
+
+# IOR Scaling Execution (one arm per IOR setup in each job, archived to lsmio-archive/ior/<scale>):
+lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--fast]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
@@ -198,6 +202,14 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 ./tools/lsmiotool/lsmiotool run lsmio backends small
 ./tools/lsmiotool/lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small --all --output-dir ~/png/backends/small
 
+# IOR (POSIX, MPIIO collective, HDF5, HDF5 collective) on 1-48 nodes, archived to lsmio-archive/ior/small
+# as outputs-ior, outputs-ior-collective, outputs-ior-hdf5 and outputs-ior-hdf5-collective;
+# 'parse ior small' regenerates their ior-report.csv, and 'compare nodes' charts them next to
+# the LSMIO backends when given both folders (compare-small-backends+ior-*.png, beside the
+# backends-only charts above)
+./tools/lsmiotool/lsmiotool run ior small
+./tools/lsmiotool/lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small ~/scratch/benchmark/lsmio-archive/ior/small --all --output-dir ~/png/backends/small
+
 # Every variant against the baseline on 8 nodes, in one job, then 12 delta charts
 ./tools/lsmiotool/lsmiotool run lsmio variants all
 ./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants --all --output-dir ~/png/variants
@@ -210,7 +222,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 
 #### Arguments & Options:
 - `<benchmark>` / `<workload>`: Benchmark suite to run. Supported values:
-  - `ior`: IOR parallel I/O benchmark (default setup: `BASE`).
+  - `ior`: IOR parallel I/O benchmark. On `local`, `bake`, `small` and `large` it runs several IOR setups per job (see `<ior setups>`); on `variants` one setup (default `BASE`), not archived.
   - `lsmio`: LSMIO storage engine benchmark (default setup: `NATIVE`).
   - `lmp`: LAMMPS ReaxFF molecular dynamics benchmark (default setup: `LSMIO`).
 - `<scale>`: Execution scale. Supported values:
@@ -229,6 +241,10 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - **Data cleanup**: Each combination's data directory is emptied before the next combination runs.
   - **Dynamic Walltime Calculation (`INV-BACKEND-2`)**: Automatically scales allocation walltime based on backend count and node count:
     $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{K}{3} \right\rfloor\right)\right)$$
+- `<ior setups>`: Optional comma-separated list of IOR setups for an `ior` scaling run (`local`, `bake`, `small`, `large`), defaulting to `base,collective,hdf5,hdf5-collective`. Tokens: `base` (or `ior`; POSIX), `collective` (`-c -a MPIIO`), `hdf5` (`-a HDF5`), `hdf5-collective` (or `hdf5-c`; `-c -a HDF5`), `fsync` (`-e`), `reverse` (`-C`). bmtool's `jobs/ior-benchmark.sh` ran one hard-coded setup; lsmiotool runs the setups like backends:
+  - **Single Cluster Allocation**: one job per scale point runs the setups one after another, each with its own run root under `<root>/runs/`.
+  - **Per-point archiving**: unless `--no-archive` is given, each setup's `<nodes>` directory is archived apart from the LSMIO backends, to `<benchmark_root>/lsmio-archive/ior/<scale>/outputs-<arm>/<nodes>` with `<arm>` `ior`, `ior-collective`, `ior-hdf5`, `ior-hdf5-collective`, `ior-fsync` or `ior-reverse`, in bmtool's IOR layout (`<nodes>/<date>/out-<setup>-<rf>-<bs>-<date>-<host>-0.txt`), and `ior-report.csv` regenerated (bmtool `ior-parse.sh`). `--resume`, `--out-dir` and the backends walltime formula apply as for `backends`.
+  - `--setup <IOR setup>` (e.g. `--setup HDF5-C`) runs that setup alone; it cannot be combined with a setup list.
 - `<variants>`: Optional variant specification for `lsmio variants`. Supported formats:
   - **Omitted** or **`default`** / **`base`**: Executes the default baseline configuration (empty variant).
   - **Single variant key**: e.g., `btree`, `mmap`, `no-manoff`, `autotune`.
@@ -241,19 +257,19 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 - `--setup <name>`: Explicitly overrides the benchmark setup profile.
   - **Syntax rule**: `--setup <name>` must be specified as two separate arguments. Syntax `--setup=value` is strictly rejected.
 - `--archive` / `--no-archive`: Archiving control. Each scale point is archived when its job ends:
-  - **Defaults**: on for `backends`, for `variants` with one or more variants (including `most` / `all`), and for `--versioned`. A `variants` run of the baseline alone (no variants, `default` or `base`) is archived only with `--archive`.
+  - **Defaults**: on for `backends` and `ior` scaling runs, for `variants` with one or more variants (including `most` / `all`), and for `--versioned`. A `variants` run of the baseline alone (no variants, `default` or `base`) is archived only with `--archive`.
   - `--no-archive`: Disables archiving; rejected with `--versioned`.
-  - Plain scaling runs (`local`, `bake`, `small`, `large`) reject both options.
+  - Plain `lsmio`/`lmp` scaling runs (`local`, `bake`, `small`, `large`) reject both options.
   - Specifying both `--archive` and `--no-archive` is rejected as an error.
 - `--resume`: Idempotent pre-run resumption (`INV-MULTI-3`):
   - Before running, checks the archive destination for each arm: a variant is skipped when its `outputs-<arm>:run` exists, a backend's scale point when its `outputs-<backend>/<nodes>` exists. The baseline only runs while some variant still needs it.
-  - A skipped variant is reported as `[RESUME] Skipping variant '<variant>'` before any run root is allocated or job submitted.
+  - A skipped variant is reported as `[RESUME] Skipping variant '<variant>'` (a backend or IOR setup whose every point is archived: `[RESUME] Skipping arm '<arm>'`) before any run root is allocated or job submitted.
   - A `variants` run of the baseline alone and a `--versioned` run without variants are never skipped, as in bmtool: they run again.
   - Without `--resume`, an existing variant pair is kept and the new one is archived with a numerical suffix (`:run-1`/`:base-1`, ..., `-N`; `INV-MULTI-6`); an existing backend `<nodes>` directory is replaced.
 - `--out-dir <dir>` / `--output-dir <dir>` (alias: `--dest <dir>`): Configurable archive destination directory:
-  - Specifies the destination root directory where variant outputs are archived. Default: the partitioned path for the run (`<benchmark_root>/lsmio-archive/{backends/<scale>|variants|variants-versioned}`; `variants-versioned` for `--versioned` runs). Plain scaling runs (`local`, `bake`, `small`, `large`) are not archived by `run` and reject this option. An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against the benchmark root, matching `bmtool` (`lsmiotool.lib.archive.resolveArchiveDest`).
+  - Specifies the destination root directory where variant outputs are archived. Default: the partitioned path for the run (`<benchmark_root>/lsmio-archive/{backends/<scale>|ior/<scale>|variants|variants-versioned}`; `ior/<scale>` for `run ior`, `variants-versioned` for `--versioned` runs). Plain `lsmio`/`lmp` scaling runs (`local`, `bake`, `small`, `large`) are not archived by `run` and reject this option; `ior` scaling runs archive to `ior/<scale>`. An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against the benchmark root, matching `bmtool` (`lsmiotool.lib.archive.resolveArchiveDest`).
   - **Syntax rule**: Must be specified as two separate tokens (`--out-dir <path>`); equals syntax (`--out-dir=<path>`) is strictly rejected.
-- `--wallhour <hours>` / `--walltime <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides dynamic walltime scaling calculations.
+- `--wallhour <hours>` / `--walltime <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides dynamic walltime scaling calculations (for `ior` scaling runs, the backends formula with one arm per IOR setup). Ignored on PBS sites, whose job templates fix the walltime per arm.
 - `--fast`: Fast simulation mode. Reduces computed allocation walltime by half (`// 2`) and caps maximum walltime at 23 hours (instead of 48 hours). Clamps minimum walltime to 1 hour (2 hours for variants). Ensures jobs on ARCHER2 stay within the 24-hour limit for `qos=standard` scheduling. Explicit walltime overrides are honored but capped at 23 hours.
 - `-h`, `--help`: Early CLI help dispatch (`INV-MULTI-7`):
   - Intercepts help requests at CLI entry point, displaying comprehensive documentation and exiting with status 0 immediately without touching the filesystem or verifying credentials.
@@ -340,7 +356,7 @@ Environment configurations are loaded from `RUN_PROFILES` in `etc/environments.j
   - `viking`: Slurm scheduler (`srun` launcher, `END,FAIL` mail, computed walltime)
   - `viking2`: Slurm scheduler (`srun --mpi=pmix` launcher, `END,FAIL` mail, pool configuration); the profile's optional `srun_mpi` key sets `--mpi` because its Open MPI 5 module sets `SLURM_MPI_TYPE=none`, which leaves ranks without PMIx
   - `archer2`: Slurm scheduler (`srun` launcher, `standard` partition/QoS)
-  - `isambard`: PBS scheduler (`aprun` launcher, `abe` mail, fixed 6-hour walltime)
+  - `isambard`: PBS scheduler (`aprun` launcher, `abe` mail, fixed 6-hour walltime per run: a job running several arms, e.g. `backends`, `run ior` setups or a baseline with its variants, gets 6 hours per arm, capped at 48 hours; bmtool gave the whole job 6 hours. The job is sized for every arm of the request, also when `--resume` skips some)
   - `dev`: Fake scheduler & launcher (test-only profile)
 - **Certification status**: All production profiles are in `configured` state (pending opt-in live site certification). No external live certification is claimed.
 - **Slurm Credentials**: Slurm profiles (`viking`, `viking2`, `archer2`) require valid `SB_ACCOUNT` and `SB_EMAIL` in the environment (`os.environ`), validated prior to run mutation. PBS (`isambard`) and DEV (`dev`) do not require or render Slurm credentials. Credentials are not stored in the immutable `manifest.json`.
@@ -363,7 +379,7 @@ Before allocating a run root or interacting with the scheduler:
 ### 2.8 Scheduler Resource Directives & Policies
 
 #### PBS Directives (Isambard Profile):
-- Fixed walltime directive: `#PBS -l walltime=06:00:00`
+- Fixed walltime directive: `#PBS -l walltime=06:00:00` per run (`12:00:00`, `18:00:00`, ... up to `48:00:00` for a job running several arms); `--time` is ignored, as in bmtool
 - Typed mail mode directive: `#PBS -m abe` (abort, begin, end)
 - Queue directive: `#PBS -q arm`
 - Small / Bake / Local scale chunk directive: `#PBS -l select=<nodes>:ncpus=1:mpiprocs=1:mem=32GB` plus memory limits `#PBS -l pmem=8G` and `#PBS -l pvmem=8G`
@@ -522,6 +538,7 @@ The runtime paths are explicitly constructed without cross-fallback or directory
 ```bash
 lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
 lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>]
+lsmiotool parse ior <local|bake|small|large> [--output-dir <dir>]
 ```
 
 #### Arguments & Target Resolution:
@@ -531,7 +548,7 @@ lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>
   - **Benchmark name**: Short name (`ior`, `lsmio`, `lmp`). Scans candidate benchmark directories (e.g., `~/scratch/benchmark/<name>/runs/`) and infers the latest succeeded run directory containing a valid `manifest.json`.
 - `backends`: Positional mode token for `lsmio` selecting Multi-Backend Intra-Allocation Scaling report extraction (`lsmiotool parse lsmio backends <scale>`).
   - `<scale>`: Scaling target (`local`, `bake`, `small`, `large`).
-  - Automatically parses all backend output directories under the Approach 2 partitioned directory `<archive>/backends/<scale>/outputs-<backend>/`, generating Stage 1 (`agg-*`) and Stage 2 (`lsm-report.csv` / `lsm-report.json`) reports for each backend.
+  - Automatically parses all backend output directories under the Approach 2 partitioned directory `<archive>/backends/<scale>/outputs-<backend>/`, generating Stage 1 (`agg-*`) and Stage 2 (`lsm-report.csv` / `lsm-report.json`) reports for each backend. IOR outputs (`outputs-ior[-<setup>]`) are never parsed here, even when moved into that folder: `parse ior <scale>` regenerates the `ior-report.csv` (bmtool `ior-parse.sh`) of every IOR setup `run ior <scale>` archived to `<archive>/ior/<scale>/outputs-*` (or `--output-dir`).
 
 #### Options:
 - `--output-dir <dir>`: Destination directory for generated report files. Defaults to current working directory (`os.getcwd()`).
@@ -622,7 +639,7 @@ lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
 ```
 
 #### Arguments & Options:
-- `<folder>`: Archive directory holding one `outputs-<backend>` directory per backend (e.g., `<archive>/backends/<scale>`), each with its `lsm-report.csv`.
+- `<folder>`: Archive directory holding one `outputs-<backend>` directory per backend (e.g., `<archive>/backends/<scale>`), each with its `lsm-report.csv`. More folders may follow (`compare nodes <folder> <folder> ... [read|write] ...`; each a path with a `/` or an existing directory), and all their `outputs-*` are charted together, e.g. the IOR setups `run ior` archived: `compare nodes <archive>/backends/small <archive>/ior/small --all`. IOR arms (`outputs-ior[-<setup>]`, with `ior-report.csv`, built when missing) are charted after the backends, labelled by arm (`ior`, `ior-collective`, `ior-hdf5`, `ior-hdf5-collective`). The first folder names the plots; an arm found in several folders is labelled `<arm> (<parent>/<folder>)`.
 - `<read|write>`: Operation phase to compare (`read` or `write`); optional with `--all`.
 - `[stripes]`: Stripe count: `4` or `16` (default: `4`).
 - `[blocksize]`: Block size: `'64K'`, `'1M'`, or `'8M'` (default: `'1M'`).
@@ -632,6 +649,7 @@ lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
 #### Output Files:
 Plots are named after the scale (`<archive>/backends/<scale>` gives `<scale>`, a variants archive gives `variants`, anything else its directory name):
 $$\text{compare-}<\text{scale}>-<\text{op}>-<\text{stripes}>-<\text{bs}>.png$$
+With several folders, the scale of the first is followed by each folder's parent, joined by `+` (as much of each path as tells them apart, `/` written `_`), so a combined chart never replaces a single folder's: `compare nodes <archive>/backends/small <archive>/ior/small` writes `compare-small-backends+ior-<op>-<stripes>-<bs>.png`. A single folder holding IOR setups alone (`outputs-ior[-<setup>]` only, e.g. `<archive>/ior/small`) gives `compare-<scale>-ior-<op>-<stripes>-<bs>.png`, so its charts never replace the backends charts of that scale in the same `--output-dir`.
 
 *Example*:
 ```bash
@@ -701,11 +719,11 @@ If `<archive_folder>` contains no `:run` directory at all (only unpaired `output
 lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 ```
 
-- `<benchmark>`: Benchmark suite (`lsmio`).
-- `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `variants`; `baseline` is a deprecated alias of `variants`).
+- `<benchmark>`: Benchmark suite (`lsmio` or `ior`).
+- `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `variants`; `baseline` is a deprecated alias of `variants`). `ior` takes `local`, `bake`, `small` or `large`: the latest standalone lsmiotool run of `ior <scale>` (one made before `run ior` ran its setups as arms; `--setup` picks the IOR setup), or `--source` with its run root, is archived to `<benchmark_root>/lsmio-archive/ior/<scale>/outputs-ior[-<setup>]` (a suffix `-1`, ... when that exists) with `ior-report.csv`. A `run ior` run archives itself; `--source` with the run root of any of its setups archives the points it left (e.g. after `--no-archive`), as `run` would. Only lsmiotool run roots are archived for `ior` (bmtool never archived IOR).
 - `[variant]`: Optional variant identifier for `variants` (resolved against `VariantCatalogue`); it names the arm, `outputs-<arm>`.
-- `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`).
-- `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE`; for an lsmiotool run, its own setup).
+- `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`; `ior/<scale>` for `ior`).
+- `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE`; for an lsmiotool run, its own setup). For `ior`: the IOR setup of the run to archive (`BASE`, `COLLECTIVE`, `HDF5`, `HDF5-C`, `FSYNC`, `REVERSE`).
 - `--source <path>`: What to archive. Without it: bmtool's `<benchmark_root>/lsmio/outputs`, else the latest standalone lsmiotool run of `lsmio <scale>` (and `<variant>`).
   - An lsmiotool run root: its succeeded points are copied in bmtool's layout with reports; the run root stays.
   - The run root of any arm of a `variants`, `--versioned` or `backends` run: the whole run is archived as `run` would have, each finished point not yet archived (`:run`/`:base` pairs, or `outputs-<backend>/<nodes>`), in the run's own destination unless `--dest` is given; `<variant>` is not used. A point counts as finished when every combination and every rank succeeded (bmtool keeps a run with a failed step out of the archive), whatever happened to the `run` process. Running it again archives nothing twice, and an existing backend `<nodes>` directory of another run is never replaced (only `run` replaces, as bmtool's jobs do). A run whose `run` process is still alive (its `control/orchestrator.pid`) is refused: it archives itself.
@@ -717,6 +735,7 @@ Under paired execution workflows, the archiving engine automatically coordinates
 To prevent cross-experiment collisions between baseline variant parameter sweeps and multi-node backend scaling benchmarks, the archive subsystem enforces domain partitioning:
 The destinations are resolved by one helper per tool (`lsmiotool.lib.archive.resolveArchiveDest`; `bmtool/include/archive-dest.in.sh` for bmtool), so `run`, `parse` and `archive` agree:
 - **Backend Scaling Runs** (`run lsmio backends <scale>`): `$BM_PATH/lsmio-archive/backends/<scale>/outputs-<backend>/` (with node subfolders `1/`, `2/`, ..., and master `lsm-report.csv`).
+- **IOR Scaling Runs** (`run ior <scale>`, lsmiotool only): `$BM_PATH/lsmio-archive/ior/<scale>/outputs-ior[-<setup>]/` (node subfolders and master `ior-report.csv`).
 - **Variant Matrix Runs** (`run lsmio variants [<variants>]`): `$BM_PATH/lsmio-archive/variants/outputs-native-<variant>:run` and `:base`.
 - **Versioned Runs** (`run lsmio variants [<variants>] --versioned`, lsmiotool only; bmtool uses `variants/`): `$BM_PATH/lsmio-archive/variants-versioned/outputs-native-version-<branch>-<hash>[-<variant>]:run` and `:base`. Versioned pairs archived to `variants/` earlier (by bmtool, or by lsmiotool before this default) are not seen there by `--resume` and still appear in `variants/` charts: move their `outputs-*-version-*` directories to `variants-versioned/`, or pass `--out-dir lsmio-archive/variants`.
 - **Plain Scaling Runs** (`local`, `bake`, `small`, `large`): `$BM_PATH/lsmio-archive/baseline/outputs-<arm>/`.

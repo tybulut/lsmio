@@ -58,9 +58,11 @@ class RunCliParserTest(unittest.TestCase):
         # 5. Direct RunCliParser.parse call
         f_req5 = RunCliParser.parse(["ior", "local", "--ssd"])
 
+        # An ior scaling run runs the default IOR setups like backends
         f_expected = RunRequest(
             f_target="ior",
             f_scale="local",
+            f_mode="backends",
             f_ssd=True,
             f_setup=None,
         )
@@ -127,9 +129,12 @@ class RunCliParserTest(unittest.TestCase):
             ["run", "ior", "small", "--setup", "collective", "--ssd"]
         )
 
+        # --setup runs that IOR setup alone
         f_expected = RunRequest(
             f_target="ior",
             f_scale="small",
+            f_mode="backends",
+            f_backends=("collective",),
             f_ssd=True,
             f_setup="COLLECTIVE",
         )
@@ -537,7 +542,6 @@ class RunCliParserTest(unittest.TestCase):
         ):
             for f_target, f_scale in (
                 ("lsmio", "small"),
-                ("ior", "local"),
                 ("lmp", "bake"),
             ):
                 with self.assertRaises(RunCliParseError) as f_ctx:
@@ -554,6 +558,61 @@ class RunCliParserTest(unittest.TestCase):
         self.assertTrue(
             parseRunArguments(["ior", "variants", "--resume"], f_environ={}).resume
         )
+        # ior scaling runs are archived like backends
+        self.assertTrue(
+            parseRunArguments(
+                ["ior", "local", "--resume", "--time", "5", "--no-archive"],
+                f_environ={},
+            ).resume
+        )
+
+    def testIorScalingRunsAreBackendsOfSetups(self) -> None:
+        """'run ior <scale> [<ior setups>]': one arm per IOR setup, as in backends mode."""
+        f_req = parseRunArguments(["ior", "small"], f_environ={})
+        self.assertEqual(f_req.mode, "backends")
+        self.assertEqual(
+            f_req.backends, ("base", "collective", "hdf5", "hdf5-collective")
+        )
+        self.assertIsNone(f_req.setup)
+
+        f_req = parseRunArguments(["ior", "small", "HDF5,base", "--ssd"], f_environ={})
+        self.assertEqual(f_req.backends, ("hdf5", "base"))
+        self.assertTrue(f_req.ssd)
+
+        f_req = parseRunArguments(["ior", "bake", "--setup", "hdf5-c"], f_environ={})
+        self.assertEqual(f_req.backends, ("hdf5-collective",))
+        self.assertEqual(f_req.setup, "HDF5-C")
+        # --setup takes the setup list's tokens too
+        for f_tok, f_arm, f_setup in (
+            ("hdf5-collective", "hdf5-collective", "HDF5-C"),
+            ("ior", "base", "BASE"),
+        ):
+            f_req = parseRunArguments(["ior", "bake", "--setup", f_tok], f_environ={})
+            self.assertEqual((f_req.backends, f_req.setup), ((f_arm,), f_setup))
+
+        # The variants scale stays a single, unarchived IOR run
+        f_req = parseRunArguments(["ior", "variants"], f_environ={})
+        self.assertEqual(f_req.mode, "standard")
+        self.assertIsNone(f_req.backends)
+
+        # BM_SETUP is bmtool's LSMIO setup: it never picks the IOR arms
+        f_req = parseRunArguments(["ior", "small"], f_environ={"BM_SETUP": "ROCKSDB"})
+        self.assertIsNone(f_req.setup)
+        self.assertEqual(len(f_req.backends), 4)
+
+        for f_argv, f_msg in (
+            (["ior", "small", "posix"], "Invalid IOR setup"),
+            (["ior", "small", ","], "cannot be empty"),
+            (["ior", "small", "base", "--setup", "HDF5"], "both"),
+            (["ior", "small", "base,ior"], "listed twice"),
+            (["ior", "small", "hdf5-c,hdf5-collective"], "listed twice"),
+            (["ior", "small", "--setup", "BOGUS"], "Unsupported IOR setup"),
+            (["ior", "variants", "base"], "variant"),
+        ):
+            with self.subTest(argv=f_argv):
+                with self.assertRaises(RunCliParseError) as f_ctx:
+                    parseRunArguments(f_argv, f_environ={})
+                self.assertIn(f_msg, str(f_ctx.exception))
 
     def testBmtoolEnvironmentDefaults(self) -> None:
         """M6: BM_SETUP picks the setup and BM_WALLHOUR the walltime when the options are absent."""
