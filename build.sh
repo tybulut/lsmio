@@ -428,10 +428,13 @@ if [ "$DO_COVERAGE" = true ]; then
 fi
 
 log "Configuring a $BUILD_TYPE build (cmake, coverage: $DO_COVERAGE)"
+# Every library goes to $INSTALL_PREFIX/lib, where the install RPATH and lsmio_adios
+# point (GNUInstallDirs would pick lib64 for the others on 64-bit Red Hat systems)
 cmake -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
   -DBUILD_SHARED_LIBS=On \
   -DCMAKE_INSTALL_PREFIX:PATH="$INSTALL_PREFIX" \
+  -DCMAKE_INSTALL_LIBDIR:PATH=lib \
   -DLSMIO_ENABLE_COVERAGE=$DO_COVERAGE \
   "${EXTRA_CMAKE_ARGS[@]}"
 
