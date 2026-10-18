@@ -3159,6 +3159,45 @@ class PreflightError(OrchestrationError):
     pass
 
 
+class ObservationThrottle:
+    """Decides which scheduler polls of one point (and arm) are written as observations.
+
+    A poll is written when its payload differs from the last one written, or when
+    f_heartbeat_seconds have passed since then. StateReconciler only uses which states
+    were observed, the first FAILED/TIMEOUT and the job handles, and every change is
+    written, so dropping repeats leaves its result unchanged; it stops the per-point
+    observation count, and with it every reconcile's reads, growing with job length.
+    """
+
+    # A repeated payload is still written this often, so the observations show the
+    # orchestrator polling (1800 s is 225 polls at the default 8 s interval)
+    HEARTBEAT_SECONDS = 1800.0
+
+    __slots__ = ("m_heartbeat_seconds", "m_last_payload", "m_last_time")
+
+    def __init__(self, f_heartbeat_seconds: Optional[float] = None) -> None:
+        self.m_heartbeat_seconds = (
+            self.HEARTBEAT_SECONDS
+            if f_heartbeat_seconds is None
+            else f_heartbeat_seconds
+        )
+        self.m_last_payload: Optional[Dict[str, Any]] = None
+        self.m_last_time = 0.0
+
+    def shouldWrite(self, f_payload: Dict[str, Any], f_now: float) -> bool:
+        """True when f_payload, polled at f_now, is to be written."""
+        return (
+            self.m_last_payload is None
+            or f_payload != self.m_last_payload
+            or f_now - self.m_last_time >= self.m_heartbeat_seconds
+        )
+
+    def noteWritten(self, f_payload: Dict[str, Any], f_now: float) -> None:
+        """Remember f_payload as the last one written, at f_now."""
+        self.m_last_payload = copy.deepcopy(f_payload)
+        self.m_last_time = f_now
+
+
 def validateBenchmarkExecutable(f_exe_path: str) -> str:
     """Validate benchmark executable as a non-symlink regular readable/executable file using os.lstat."""
     if f_exe_path is None:
@@ -4451,6 +4490,7 @@ class RunOrchestrator:
                         if os.path.isdir(f_obs_dir)
                         else 0
                     )
+                    f_c["obs_throttle"] = ObservationThrottle()
 
                 f_unknown_polls = 0
                 f_job_state = SchedulerJobState.UNKNOWN
@@ -4485,6 +4525,7 @@ class RunOrchestrator:
                         f_handle=f_handle,
                         f_profile=f_profile,
                     )
+                    f_now = f_clock_float()
                     for f_c in f_included:
                         f_payload: Dict[str, Any] = {
                             "handle": f_handle.toDict(),
@@ -4505,6 +4546,10 @@ class RunOrchestrator:
                             f_payload["status"] = SchedulerJobState.SUCCEEDED.value
                             f_payload["job_state"] = f_job_state.value
                             f_payload["arm_completed_before_job_end"] = True
+                        # obs_seq is the next free sequence number, so it moves only
+                        # when a file is written (the cancel paths write at it too)
+                        if not f_c["obs_throttle"].shouldWrite(f_payload, f_now):
+                            continue
                         f_c["evidence"].recordSchedulerObservation(
                             f_point=f_sp,
                             f_writer_id="control",
@@ -4513,6 +4558,7 @@ class RunOrchestrator:
                             f_ordinal=f_idx,
                         )
                         f_c["obs_seq"] += 1
+                        f_c["obs_throttle"].noteWritten(f_payload, f_now)
 
                     if f_job_state == SchedulerJobState.UNKNOWN:
                         f_unknown_polls += 1
@@ -6477,6 +6523,7 @@ class RunOrchestrator:
                         f_x for f_x in os.listdir(f_obs_dir) if f_x.endswith(".json")
                     ]
                     f_obs_seq = len(f_existing_obs) + 1
+                f_obs_throttle = ObservationThrottle()
 
                 f_point_terminal = False
                 f_unknown_polls = 0
@@ -6517,19 +6564,25 @@ class RunOrchestrator:
                         f_profile=f_profile,
                     )
 
-                    f_evidence_store.recordSchedulerObservation(
-                        f_point=f_scale_point,
-                        f_writer_id="control",
-                        f_sequence=f_obs_seq,
-                        f_payload={
-                            "handle": f_handle.toDict(),
-                            "state": f_job_state.value,
-                            "status": f_job_state.value,
-                            "exit_code": f_exit_code,
-                        },
-                        f_ordinal=f_idx,
-                    )
-                    f_obs_seq += 1
+                    f_obs_payload: Dict[str, Any] = {
+                        "handle": f_handle.toDict(),
+                        "state": f_job_state.value,
+                        "status": f_job_state.value,
+                        "exit_code": f_exit_code,
+                    }
+                    f_now = f_clock_float()
+                    # f_obs_seq is the next free sequence number, so it moves only
+                    # when a file is written (the cancel path writes at it too)
+                    if f_obs_throttle.shouldWrite(f_obs_payload, f_now):
+                        f_evidence_store.recordSchedulerObservation(
+                            f_point=f_scale_point,
+                            f_writer_id="control",
+                            f_sequence=f_obs_seq,
+                            f_payload=f_obs_payload,
+                            f_ordinal=f_idx,
+                        )
+                        f_obs_seq += 1
+                        f_obs_throttle.noteWritten(f_obs_payload, f_now)
 
                     if f_job_state == SchedulerJobState.UNKNOWN:
                         # A failed or empty squeue/sacct query (e.g. sacct lag right
