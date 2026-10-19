@@ -33,6 +33,8 @@
 Mirrors the branches of bmtool's jobs/batch.in.sh:
 - backends mode: one arm per backend (INV-BACKEND-1)
 - ior scaling runs: one arm per IOR setup, archived like backends to lsmio-archive/ior
+- epocpp runs: the no-output baseline, then a wall-time and a bandwidth arm per backend,
+  archived like backends to lsmio-archive/epocpp
 - versioned variants: the bm_native:main reference baseline (role base), then the current
   binary per variant (role run) with a version-<branch>-<hash>[-<variant>] arm ID
 - paired variants: the unconfigured baseline (role base), then each variant (role run)
@@ -42,7 +44,7 @@ Mirrors the branches of bmtool's jobs/batch.in.sh:
 import os
 import re
 import subprocess
-from typing import Dict, List, Mapping, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
 DEFAULT_VARIANT_TOKENS = (None, "", "default", "base")
 
@@ -68,6 +70,18 @@ IOR_ARMS: Dict[str, Tuple[str, str]] = {
     "reverse": ("REVERSE", "ior-reverse"),
 }
 DEFAULT_IOR_SETUPS: Tuple[str, ...] = ("base", "collective", "hdf5", "hdf5-collective")
+
+# EPOCpp backend token -> setup; each backend runs as a wall-time arm (epocpp-<token>,
+# setup <SETUP>) and a bandwidth arm (epocpp-<token>-bw, setup <SETUP>-BW), after the
+# no-output baseline (epocpp-baseline, setup NONE) that every epocpp run has
+EPOCPP_BACKENDS: Dict[str, str] = {
+    "posix": "POSIX",
+    "adios2": "ADIOS2",
+    "plugin": "PLUGIN",
+    "native": "NATIVE",
+}
+DEFAULT_EPOCPP_BACKENDS: Tuple[str, ...] = ("posix", "adios2", "plugin", "native")
+EPOCPP_BASELINE_ARM = "epocpp-baseline"
 DEFAULT_LSMIO_BACKENDS: Tuple[str, ...] = ("adios2", "native", "plugin", "rocksdb")
 
 # Reference baseline binary installed by `./build.sh install:main`
@@ -127,6 +141,42 @@ def isIorArmId(f_arm_id: Optional[str]) -> bool:
     return f_arm_id is not None and (f_arm_id == "ior" or f_arm_id.startswith("ior-"))
 
 
+def isEpocppArmId(f_arm_id: Optional[str]) -> bool:
+    """True for the arm ID of an EPOCpp arm (outputs-epocpp-<kind>)."""
+    return f_arm_id is not None and f_arm_id.startswith("epocpp-")
+
+
+def epocppArms(f_backends: Sequence[str]) -> Tuple[RunArm, ...]:
+    """The arms of an epocpp run, in run order: the baseline, each backend's wall-time
+    arm, then each backend's bandwidth arm."""
+    f_tokens: List[str] = []
+    for f_raw in f_backends:
+        f_token = str(f_raw).strip().lower()
+        if f_token not in EPOCPP_BACKENDS:
+            raise ArmError(
+                f"Unsupported EPOCpp backend: [{f_token}]. "
+                f"Must be one of: {list(EPOCPP_BACKENDS)}"
+            )
+        if f_token in f_tokens:
+            raise ArmError(f"EPOCpp backend listed twice: [{f_token}]")
+        f_tokens.append(f_token)
+    if not f_tokens:
+        raise ArmError("An epocpp run requires at least one backend")
+    f_arms = [RunArm("baseline", "NONE", None, EPOCPP_BASELINE_ARM, None)]
+    for f_suffix, f_setup_suffix in (("", ""), ("-bw", "-BW")):
+        for f_token in f_tokens:
+            f_arms.append(
+                RunArm(
+                    f_token + f_suffix,
+                    EPOCPP_BACKENDS[f_token] + f_setup_suffix,
+                    None,
+                    f"epocpp-{f_token}{f_suffix}",
+                    None,
+                )
+            )
+    return tuple(f_arms)
+
+
 def isDefaultVariant(f_variant: Optional[str]) -> bool:
     return f_variant in DEFAULT_VARIANT_TOKENS
 
@@ -175,7 +225,10 @@ def resolveArmGroup(
     f_mode = getattr(f_request, "mode", "standard")
     f_archive_flag = getattr(f_request, "archive", None)
 
-    if f_target == "lsmio" and str(f_setup).strip().upper() not in LsmioAdapter.ALLOWED_SETUPS:
+    if (
+        f_target == "lsmio"
+        and str(f_setup).strip().upper() not in LsmioAdapter.ALLOWED_SETUPS
+    ):
         raise ArmError(
             f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
         )
@@ -195,6 +248,14 @@ def resolveArmGroup(
             f_seen.add(f_i_arm)
             f_ior_arms.append(RunArm(f_token, f_i_setup, None, f_i_arm, None))
         return ArmGroup("backends", tuple(f_ior_arms), f_archive_flag is not False)
+
+    if f_target == "epocpp":
+        # Archived like backends, to lsmio-archive/epocpp/<scale>/outputs-<arm>
+        return ArmGroup(
+            "backends",
+            epocppArms(getattr(f_request, "backends", None) or DEFAULT_EPOCPP_BACKENDS),
+            f_archive_flag is not False,
+        )
 
     if f_target == "lsmio" and f_mode == "backends":
         f_arms: List[RunArm] = []

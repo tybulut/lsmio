@@ -35,6 +35,7 @@ before the throttle) and once throttled. Reconciling both must give the same run
 point states, and the throttled run must keep its observation sequences gapless.
 """
 
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import signal
@@ -221,6 +222,18 @@ class ObservationWritingTest(unittest.TestCase):
         def _clockFn() -> float:
             return f_clock[0]
 
+        class _SimulatedDatetime(datetime):
+            """Evidence timestamps on the simulated clock. On the wall clock they are
+            per second, so a cancel request and the failure after it could share a
+            second in one run and not in the other, and reconcile apart (FAILED vs
+            CANCELLED)."""
+
+            @classmethod
+            def now(cls, tz: Any = None) -> datetime:
+                return datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(
+                    seconds=f_clock[0]
+                )
+
         f_orch = RunOrchestrator(
             f_worker_validator=self.m_worker_validator,
             f_command_runner=f_runner,
@@ -266,12 +279,15 @@ class ObservationWritingTest(unittest.TestCase):
             )
         else:
             f_req = RunRequest("ior", "local")
-        with patch.object(
-            ObservationThrottle,
-            "HEARTBEAT_SECONDS",
-            ObservationThrottle.HEARTBEAT_SECONDS
-            if f_heartbeat is None
-            else f_heartbeat,
+        with (
+            patch.object(
+                ObservationThrottle,
+                "HEARTBEAT_SECONDS",
+                ObservationThrottle.HEARTBEAT_SECONDS
+                if f_heartbeat is None
+                else f_heartbeat,
+            ),
+            patch("lsmiotool.lib.evidence.datetime", _SimulatedDatetime),
         ):
             f_orch.execute(
                 f_request=f_req,

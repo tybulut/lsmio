@@ -78,6 +78,10 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.DetachTest",
     "lsmiotool.test.main.DispatchTest",
     "lsmiotool.test.main.EndToEndRunTest",
+    "lsmiotool.test.main.EpocppAdapterTest",
+    "lsmiotool.test.main.EpocppReportTest",
+    "lsmiotool.test.main.EpocppRunTest",
+    "lsmiotool.test.main.EpocppWorkerTest",
     "lsmiotool.test.main.EvidenceStoreTest",
     "lsmiotool.test.main.InstalledLayoutTest",
     "lsmiotool.test.main.InterruptionTest",
@@ -290,7 +294,7 @@ class LoaderTest(unittest.TestCase):
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
         self.assertEqual(len(preexisting_test_ids), 61)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 888)
+        self.assertEqual(len(all_test_ids), 959)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

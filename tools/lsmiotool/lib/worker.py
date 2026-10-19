@@ -2359,7 +2359,7 @@ class AllocationController:
 
         # 7. Ordered Matrix Execution
         f_target = f_manifest.request.target.lower().strip()
-        if f_target not in ("ior", "lsmio", "lmp"):
+        if f_target not in ("ior", "lsmio", "lmp", "epocpp"):
             raise AllocationControllerError(
                 f"Unsupported benchmark target: {f_manifest.request.target!r}"
             )
@@ -2809,6 +2809,22 @@ class AllocationController:
                     f_ordinal=f_matched_ord,
                 )
 
+            elif f_target == "epocpp":
+                f_epocpp_rc = cls._runEpocppCombination(
+                    f_manifest=f_manifest,
+                    f_store=f_store,
+                    f_point=f_matched_sp,
+                    f_ordinal=f_matched_ord,
+                    f_combo_name=f_combo_name,
+                    f_data_dir=f_data_dir,
+                    f_work_dir=f_combo_work_dir,
+                    f_logs_dir=f_logs_dir,
+                    f_run_root=f_layout_obj.runRoot,
+                    f_runner=f_runner,
+                    f_asset_source=f_asset_source,
+                )
+                f_failed_rc = f_failed_rc or f_epocpp_rc
+
             elif f_target == "lsmio":
                 # Rank-local mode
                 f_worker_exe = f_worker_executable
@@ -2986,6 +3002,174 @@ class AllocationController:
     # bmtool sleeps 3 s after every step (batch.in.sh run_matrix_workload);
     # LSMIO_STEP_SETTLE_SECONDS overrides it (tests set 0)
     STEP_SETTLE_SECONDS = 3.0
+
+    @staticmethod
+    def epocppLogPath(f_logs_dir: str, f_combo_name: str, f_repeat: int) -> str:
+        """The log of one epocpp run: logs/epocpp_<combo>_r<NN>.stdout (1-based)."""
+        from lsmiotool.lib.benchmarks import EpocppAdapter
+
+        return os.path.join(
+            f_logs_dir, EpocppAdapter.logFileName(f_combo_name, f_repeat)
+        )
+
+    @classmethod
+    def _runEpocppCombination(
+        cls,
+        f_manifest: Any,
+        f_store: Any,
+        f_point: Any,
+        f_ordinal: int,
+        f_combo_name: str,
+        f_data_dir: str,
+        f_work_dir: str,
+        f_logs_dir: str,
+        f_run_root: str,
+        f_runner: Any,
+        f_asset_source: Optional[str],
+    ) -> int:
+        """Run one combination of an epocpp arm: fill the deck into the combination's
+        work dir, then run epocpp --repeats times, each writing its dumps to the striped
+        data dir. Once a run has exited its log gets the bytes it left on disk and the
+        data dir is emptied. Records one controller result; returns 0 or a failure code.
+        """
+        from lsmiotool.lib.benchmarks import EpocppAdapter
+
+        def _fail(f_stage: str, f_error: str, f_code: int = 1, **f_extra: Any) -> int:
+            try:
+                f_store.recordControllerResult(
+                    f_point=f_point,
+                    f_combination=f_combo_name,
+                    f_payload={
+                        "status": "failed",
+                        "exit_code": f_code,
+                        "stage": f_stage,
+                        "error": f_error,
+                        **f_extra,
+                    },
+                    f_ordinal=f_ordinal,
+                )
+            except Exception:
+                pass
+            return f_code
+
+        f_adapter = EpocppAdapter()
+        f_setup = f_manifest.request.setup or EpocppAdapter.DEFAULT_SETUP
+        from lsmiotool.lib.run import RunPlanner
+
+        f_repeats = f_manifest.request.repeats or RunPlanner.EPOCPP_DEFAULT_REPEATS
+
+        # The deck template sits next to the LMP assets (share/ or share/lsmio/)
+        f_assets = f_asset_source
+        if f_assets is None:
+            try:
+                from lsmiotool.lib.resources import ResourceLocator
+
+                f_assets = ResourceLocator.forSource(sys.argv[0]).asset_root
+            except Exception:
+                f_assets = os.path.join(
+                    f_manifest.site.install_prefix, "share", "lsmio", "lmp-reaxff"
+                )
+        # A RuntimeLayout or its asset directory, as LmpAdapter.stageAssets takes
+        f_assets = getattr(f_assets, "asset_root", f_assets)
+        f_share_root = os.path.dirname(os.path.normpath(str(f_assets)))
+        try:
+            f_deck = f_adapter.renderDeck(
+                f_adapter.readTemplate(EpocppAdapter.templatePath(f_share_root)),
+                f_setup,
+                EpocppAdapter.deckForScale(f_manifest.request.scale),
+            )
+            f_adapter.writeDeck(f_deck, f_work_dir)
+            f_exe = f_manifest.site.executables["epocpp"]
+        except Exception as f_err:
+            return _fail("stage_assets", f"EPOCpp deck or executable: {f_err}")
+
+        f_elapsed = 0.0
+        f_first_log: Optional[str] = None
+        for f_repeat in range(1, f_repeats + 1):
+            f_log = cls.epocppLogPath(f_logs_dir, f_combo_name, f_repeat)
+            f_first_log = f_first_log or f_log
+            try:
+                f_cmd = f_adapter.buildCommand(
+                    f_executable=f_exe,
+                    f_setup=f_setup,
+                    f_deck_dir=f_work_dir,
+                    f_data_dir=f_data_dir,
+                    f_working_dir=f_work_dir,
+                    f_stdout_path=f_log,
+                )
+                f_proc = Launcher.launchShared(
+                    f_profile=f_manifest.site,
+                    f_point=f_point,
+                    f_command=f_cmd,
+                    f_runner=f_runner,
+                    f_cwd=f_work_dir,
+                    f_log_path=f_log,
+                )
+            except Exception as f_err:
+                return _fail("launch", f"repeat {f_repeat}: {f_err}", output_path=f_log)
+            f_elapsed += float(f_proc.elapsed_seconds or 0.0)
+
+            # After the run has exited: the bytes it left, counted in the same threaded
+            # pass that empties the data dir
+            f_purge_error: Optional[str] = None
+            try:
+                f_size, f_alloc, f_files = EpocppAdapter.countAndRemove(f_data_dir)
+                with open(f_log, "a", encoding="utf-8") as f_f:
+                    f_f.write(EpocppAdapter.dataBytesLine(f_size, f_alloc, f_files))
+                    f_f.flush()
+                    os.fsync(f_f.fileno())
+                # The next run's bytes are its own only on an empty data dir
+                f_left = os.listdir(f_data_dir)
+                if f_left:
+                    raise OSError(f"data dir not emptied: {sorted(f_left)[:5]}")
+            except Exception as f_err:
+                f_purge_error = f"repeat {f_repeat}: {f_err}"
+
+            # A failed run is an execution failure, whether or not its purge failed
+            if not f_proc.is_success or f_proc.returncode != 0:
+                f_ret = f_proc.returncode if f_proc.returncode else 1
+                return _fail(
+                    "execution",
+                    f"repeat {f_repeat}: epocpp failed with code {f_proc.returncode}"
+                    + (f"; and its purge: {f_purge_error}" if f_purge_error else ""),
+                    f_code=f_ret,
+                    output_path=f_log,
+                )
+            if f_purge_error is not None:
+                return _fail("purge", f_purge_error, output_path=f_log)
+            try:
+                from lsmiotool.lib.artifacts import validatePathContainment
+
+                validatePathContainment(f_log, f_run_root)
+                f_st = os.lstat(f_log)
+                if not stat.S_ISREG(f_st.st_mode):
+                    raise ValueError("not a regular file")
+                with open(f_log, encoding="utf-8", errors="replace") as f_f:
+                    f_problem = EpocppAdapter.checkOutput(f_setup, f_f.read())
+            except Exception as f_err:
+                f_problem = f"log could not be read: {f_err}"
+            if f_problem is not None:
+                return _fail(
+                    "output_validation",
+                    f"repeat {f_repeat}: {f_problem}",
+                    output_path=f_log,
+                )
+
+        f_store.recordControllerResult(
+            f_point=f_point,
+            f_combination=f_combo_name,
+            f_payload={
+                "status": "success",
+                "exit_code": 0,
+                "elapsed_seconds": f_elapsed,
+                "stage": "execution",
+                "output_path": f_first_log,
+                # Names the archived outputs, as for IOR (lib/export.py)
+                "host": rankHostName(os.environ),
+            },
+            f_ordinal=f_ordinal,
+        )
+        return 0
 
     @classmethod
     def _settle(cls) -> None:

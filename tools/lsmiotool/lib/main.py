@@ -34,6 +34,7 @@ import os
 import signal
 import subprocess
 import sys
+import types
 import time
 from typing import (
     Any,
@@ -514,6 +515,8 @@ class ParseMain(BaseMain):
         every outputs-* directory there gets its agg-*-report.csv files and lsm-report.csv
         rebuilt. 'parse ior <scale>' covers <root>/lsmio-archive/ior/<scale>, where 'run
         ior' archives its IOR setups: each outputs-* gets its ior-report.csv (ior-parse.sh).
+        'parse epocpp backends <scale>' covers <root>/lsmio-archive/epocpp/<scale>: each
+        outputs-epocpp-* gets its epocpp-report.csv, and the scale its epocpp-cost.csv.
         """
         from lsmiotool.lib.archive import resolveArchiveDest
 
@@ -543,20 +546,30 @@ class ParseMain(BaseMain):
             )
             return 3
 
-        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib.arms import isEpocppArmId, isIorArmId
 
-        # 'parse lsmio backends' never reads IOR outputs, nor 'parse ior' LSMIO ones
+        def _armKind(f_arm: str) -> str:
+            if isIorArmId(f_arm):
+                return "ior"
+            return "epocpp" if isEpocppArmId(f_arm) else "lsmio"
+
+        # 'parse lsmio backends' reads only LSMIO outputs, 'parse ior' only IOR ones and
+        # 'parse epocpp backends' only EPOCpp ones
         f_arms = sorted(
             f_entry
             for f_entry in os.listdir(f_dest)
             if f_entry.startswith("outputs-")
             and os.path.isdir(os.path.join(f_dest, f_entry))
-            and isIorArmId(f_entry[len("outputs-") :]) == (f_target == "ior")
+            and _armKind(f_entry[len("outputs-") :]) == f_target
         )
         if not f_arms:
             sys.stderr.write(f"Error: no outputs-* directories in {f_dest}\n")
             return 3
 
+        if f_target == "epocpp":
+            return self._regenerateEpocppDirs(
+                [os.path.join(f_dest, f_arm) for f_arm in f_arms]
+            )
         if f_target == "ior":
             return self._regenerateIorDirs(
                 [os.path.join(f_dest, f_arm) for f_arm in f_arms]
@@ -569,6 +582,132 @@ class ParseMain(BaseMain):
             ],
             f_node_scale,
         )
+
+    @staticmethod
+    def _regenerateEpocppDirs(f_dirs: Sequence[str]) -> int:
+        """Regenerate each epocpp arm's epocpp-report.csv, and the scale's
+        epocpp-cost.csv.
+
+        Returns:
+            0 when at least one epocpp-report.csv was produced, 5 otherwise.
+        """
+        from lsmiotool.lib.epocppreport import (
+            ARM_REPORT_FILE,
+            writeArmReport,
+            writeCostReport,
+        )
+
+        f_written = 0
+        for f_dir in f_dirs:
+            f_arm = os.path.basename(f_dir)[len("outputs-") :]
+            sys.stdout.write(f"=== Generating report for {f_arm} ===\n")
+            try:
+                if writeArmReport(f_dir) is None:
+                    sys.stderr.write(f"Warning: no EPOCpp results found in {f_dir}\n")
+                    continue
+            except Exception as f_err:
+                sys.stderr.write(f"Error: failed to parse {f_dir}: {f_err}\n")
+                continue
+            f_written += 1
+            sys.stdout.write(f"{os.path.join(f_dir, ARM_REPORT_FILE)}\n")
+        if f_dirs:
+            try:
+                f_cost = writeCostReport(os.path.dirname(os.path.normpath(f_dirs[0])))
+            except Exception as f_err:
+                f_cost = None
+                sys.stderr.write(
+                    f"Error: failed to write the I/O cost report: {f_err}\n"
+                )
+            if f_cost is not None:
+                sys.stdout.write(f"{f_cost}\n")
+        sys.stdout.flush()
+        return 0 if f_written else 5
+
+    def _parseEpocppRunRoot(self, f_resolved_run: Any) -> int:
+        """'parse <run root>' of an epocpp arm: its succeeded points exported, as the
+        archive holds them, to <output dir>/outputs-<arm>/<nodes> (default: the cwd),
+        and their reports written there.
+
+        Returns:
+            0 when every point was reported, 4 when the run did not succeed (the points
+            that did are reported, if any), 5 when nothing could be reported otherwise,
+            2 for --format json.
+        """
+        from lsmiotool.lib.archive import ArchiveEngine
+        from lsmiotool.lib.export import exportEpocppPoint
+        from lsmiotool.lib.run import RunOrchestrator, RunPlanner
+
+        if self.format != "csv":
+            sys.stderr.write(
+                "Error: an epocpp run is reported as epocpp-report.csv only; "
+                "--format json is not supported\n"
+            )
+            return 2
+        f_plan = f_resolved_run.plan
+        f_evidence = f_resolved_run.evidenceStore
+        f_marker = ArchiveEngine.readArmMarker(f_resolved_run.runRoot) or {}
+        f_arm_id = f_marker.get("arm_id")
+        if not isinstance(f_arm_id, str) or not f_arm_id.startswith("epocpp-"):
+            # The arm of a run root without its marker: its setup
+            f_setup = (f_plan.request.setup or "POSIX").lower()
+            f_arm_id = "epocpp-baseline" if f_setup == "none" else f"epocpp-{f_setup}"
+        f_out = os.path.join(
+            os.path.abspath(os.path.expanduser(self.output_dir or os.getcwd())),
+            f"outputs-{f_arm_id}",
+        )
+        # What RunOrchestrator._armPointSucceeded reads of an arm group's run
+        f_ctx = {
+            "evidence": f_evidence,
+            "plan": f_plan,
+            "arm": types.SimpleNamespace(arm_id=f_arm_id),
+        }
+        f_done = 0
+        f_kept = 0
+        f_failed = 0
+        for f_idx, f_sp in enumerate(f_plan.scale_points):
+            if not RunOrchestrator._armPointSucceeded(f_ctx, f_idx):
+                f_failed += 1
+                sys.stderr.write(
+                    f"Warning: point {f_evidence.layout.pointDirName(f_sp, f_idx)} did "
+                    "not succeed; not reported\n"
+                )
+                continue
+            f_node_dir = os.path.join(f_out, str(f_sp.nodes))
+            # Like archiving, never replace a <nodes> directory already there (it may
+            # hold another run's results)
+            if os.path.lexists(f_node_dir):
+                f_kept += 1
+                sys.stderr.write(
+                    f"Warning: '{f_node_dir}' exists; not replaced (move it away to "
+                    "export this run's point)\n"
+                )
+                continue
+            try:
+                exportEpocppPoint(
+                    f_layout=f_evidence.layout,
+                    f_evidence_store=f_evidence,
+                    f_scale_point=f_sp,
+                    f_ordinal=f_idx,
+                    f_combinations=f_plan.combinations,
+                    f_arm_id=f_arm_id,
+                    f_repeats=f_plan.request.repeats
+                    or RunPlanner.EPOCPP_DEFAULT_REPEATS,
+                    f_node_dir=f_node_dir,
+                )
+            except Exception as f_err:
+                sys.stderr.write(f"Error: exporting point {f_idx} failed: {f_err}\n")
+                continue
+            f_done += 1
+        if f_done + f_kept == 0:
+            sys.stderr.write(
+                f"Error: no point of run '{f_resolved_run.runId}' could be reported\n"
+            )
+            # As for the other benchmarks: 4 when the run did not succeed
+            return 4 if f_failed else 5
+        f_status = self._regenerateEpocppDirs([f_out])
+        if f_status != 0:
+            return f_status
+        return 0 if f_done + f_kept == len(f_plan.scale_points) else 4
 
     @staticmethod
     def _regenerateIorDirs(f_dirs: Sequence[str]) -> int:
@@ -607,10 +746,35 @@ class ParseMain(BaseMain):
 
     def _parseBmtoolLayout(self, f_dir: str) -> int:
         """Regenerate reports for a bmtool-layout outputs dir or an archive of them; an
-        IOR arm (outputs-ior[-<setup>]) gets its ior-report.csv, never LSMIO reports."""
+        IOR arm (outputs-ior[-<setup>]) gets its ior-report.csv and an epocpp arm
+        (outputs-epocpp-*) its epocpp-report.csv, never LSMIO reports."""
         from lsmiotool.lib.output import isBmtoolOutputDir
 
         f_scale = self.m_request.scale
+        f_epocpp_dirs = (
+            [f_dir]
+            if self._isEpocppArmDir(f_dir)
+            else [
+                os.path.join(f_dir, f_entry)
+                for f_entry in sorted(os.listdir(f_dir))
+                if self._isEpocppArmDir(os.path.join(f_dir, f_entry))
+                and os.path.isdir(os.path.join(f_dir, f_entry))
+            ]
+        )
+        if f_epocpp_dirs and self.m_request.format != "csv":
+            sys.stderr.write(
+                f"Error: {f_dir} holds EPOCpp outputs, reported as epocpp-report.csv "
+                "only; --format json is not supported\n"
+            )
+            return 2
+        if self._isEpocppArmDir(f_dir):
+            if self.m_request.output_dir:
+                sys.stderr.write(
+                    f"Error: an EPOCpp arm's reports are written in its archive "
+                    f"({f_dir}); --output-dir is not supported for it\n"
+                )
+                return 2
+            return self._regenerateEpocppDirs([f_dir])
         if self.m_request.format != "csv" and (
             self._isIorArmDir(f_dir)
             or any(
@@ -664,8 +828,13 @@ class ParseMain(BaseMain):
             and os.path.isdir(os.path.join(f_dir, f_entry))
         ]
         f_ior = [f_c for f_c in f_children if self._isIorArmDir(f_c)]
-        f_lsmio = [f_c for f_c in f_children if f_c not in f_ior]
+        f_lsmio = [
+            f_c for f_c in f_children if f_c not in f_ior and f_c not in f_epocpp_dirs
+        ]
         f_codes = []
+        if f_epocpp_dirs:
+            # In the archive, as 'parse epocpp backends' writes them
+            f_codes.append(self._regenerateEpocppDirs(f_epocpp_dirs))
         if f_lsmio:
             f_codes.append(
                 self._regenerateOutputDirs(
@@ -677,6 +846,16 @@ class ParseMain(BaseMain):
             f_codes.append(self._regenerateIorDirs(f_ior))
         # 0 when either kind produced a report, as each does for its own dirs
         return 0 if 0 in f_codes else 5
+
+    @staticmethod
+    def _isEpocppArmDir(f_dir: str) -> bool:
+        """f_dir is an epocpp arm's archive (outputs-epocpp-<kind>)."""
+        from lsmiotool.lib.arms import isEpocppArmId
+
+        f_name = os.path.basename(os.path.normpath(f_dir))
+        return f_name.startswith("outputs-") and isEpocppArmId(
+            f_name[len("outputs-") :]
+        )
 
     def _isOutputsTarget(self, f_target: str) -> bool:
         """True for a directory without manifest.json that holds bmtool-layout outputs
@@ -745,7 +924,10 @@ class ParseMain(BaseMain):
             # scale (variants included) parses the latest run, like bmtool's live outputs.
             # 'parse ior <scale>' is the archive mode of 'run ior' (lsmio-archive/ior)
             f_target_name = self.m_request.target.strip().lower()
-            if f_target_name in ("lsmio", "ior") and self.m_request.mode == "backends":
+            if (
+                f_target_name in ("lsmio", "ior", "epocpp")
+                and self.m_request.mode == "backends"
+            ):
                 return self._parseArchive()
 
             # bmtool-layout outputs directory (or an archive destination of them). A bare
@@ -762,6 +944,8 @@ class ParseMain(BaseMain):
 
             # 1. Target resolution (a partially failed run resolves too)
             f_resolved_run = self._resolveRun()
+            if f_resolved_run.target.lower() == "epocpp":
+                return self._parseEpocppRunRoot(f_resolved_run)
 
             # 2. Metric extraction: every point/combination with complete output;
             # the rest are skipped with a warning, as bmtool's parsers do
@@ -1053,6 +1237,54 @@ class CompareNodesMain(BaseMain):
         ]
         return bool(f_arms) and all(isIorArmId(f_a) for f_a in f_arms)
 
+    @staticmethod
+    def _ensureEpocppReports(f_dir: str) -> None:
+        """Build the epocpp reports f_dir lacks: every arm's first, then the cost
+        report, which needs the baseline's and each backend's."""
+        from lsmiotool.lib import epocppreport
+        from lsmiotool.lib.arms import isEpocppArmId
+
+        f_arms = [
+            os.path.join(f_dir, f_e)
+            for f_e in sorted(os.listdir(f_dir))
+            if f_e.startswith("outputs-")
+            and isEpocppArmId(f_e[len("outputs-") :])
+            and os.path.isdir(os.path.join(f_dir, f_e))
+        ]
+        f_missing = [
+            f_a
+            for f_a in f_arms
+            if not os.path.isfile(os.path.join(f_a, epocppreport.ARM_REPORT_FILE))
+        ]
+        f_cost = os.path.join(f_dir, epocppreport.COST_REPORT_FILE)
+        if not f_missing and (not f_arms or os.path.isfile(f_cost)):
+            return
+        # One unusable arm loses only its own report
+        for f_arm in f_missing:
+            try:
+                epocppreport.writeArmReport(f_arm)
+            except Exception as f_err:
+                log.Console.warning(f"Failed to generate report for {f_arm}: {f_err}")
+        try:
+            epocppreport.writeCostReport(f_dir)
+        except Exception as f_err:
+            log.Console.warning(
+                f"Failed to generate the cost report of {f_dir}: {f_err}"
+            )
+
+    @staticmethod
+    def _isEpocppOnly(f_dir: str) -> bool:
+        """f_dir's outputs-* directories are all epocpp arms ('run epocpp backends'
+        archives), and it has one."""
+        from lsmiotool.lib.arms import isEpocppArmId
+
+        f_arms = [
+            f_e[len("outputs-") :]
+            for f_e in os.listdir(f_dir)
+            if f_e.startswith("outputs-") and os.path.isdir(os.path.join(f_dir, f_e))
+        ]
+        return bool(f_arms) and all(isEpocppArmId(f_a) for f_a in f_arms)
+
     def _plotOne(self, target_dir: str, f_op: str, f_stripes: int, f_bs: str) -> None:
         """Generate the comparison plot of one (operation, stripes, blocksize)."""
         from lsmiotool.lib import data, output, plot
@@ -1077,6 +1309,16 @@ class CompareNodesMain(BaseMain):
             "plugin": 2,
             "rocksdb": 3,
             "leveldb": 4,
+            # EPOCpp arms ('run epocpp backends'), by kind then backend
+            "epocpp-baseline": 20,
+            "epocpp-posix": 21,
+            "epocpp-adios2": 22,
+            "epocpp-plugin": 23,
+            "epocpp-native": 24,
+            "epocpp-posix-bw": 25,
+            "epocpp-adios2-bw": 26,
+            "epocpp-plugin-bw": 27,
+            "epocpp-native-bw": 28,
             # IOR arms archived by 'run ior' (outputs-ior[-<setup>]), charted after the backends
             "ior": 5,
             "ior-collective": 6,
@@ -1086,13 +1328,16 @@ class CompareNodesMain(BaseMain):
             "ior-reverse": 10,
         }
 
-        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib import epocppreport
+        from lsmiotool.lib.arms import isEpocppArmId, isIorArmId
         from lsmiotool.lib.export import generateIorReports
 
         plot_data_list: List[plot.PlotData] = []
         # Folder of each series, to tell same-named arms of several folders apart
         f_sources: List[str] = []
         is_read = f_op == "read"
+        for f_dir in [target_dir] + list(self.m_extra_dirs):
+            self._ensureEpocppReports(f_dir)
 
         for f_dir, entry in (
             (f_d, f_e)
@@ -1102,6 +1347,28 @@ class CompareNodesMain(BaseMain):
             child_path = os.path.join(f_dir, entry)
             f_ior_arm = entry[len("outputs-") :] if entry.startswith("outputs-") else ""
             if not os.path.isdir(child_path) or child_path in self.m_no_report:
+                continue
+            if isEpocppArmId(f_ior_arm):
+                # An epocpp arm: its epocpp-report.csv (and the scale's epocpp-cost.csv,
+                # both built when missing above); only arms with the metric are charted
+                f_report = os.path.join(child_path, epocppreport.ARM_REPORT_FILE)
+                if not os.path.isfile(f_report):
+                    self.m_no_report.add(child_path)
+                    continue
+                try:
+                    x_series, y_series = epocppreport.timeSeries(
+                        child_path, f_op, f_stripes, f_bs
+                    )
+                except (OSError, ValueError) as f_err:
+                    log.Console.warning(f"Unusable report in {child_path}: {f_err}")
+                    self.m_no_report.add(child_path)
+                    continue
+                if x_series and y_series:
+                    plot_data_list.append(plot.PlotData(f_ior_arm, x_series, y_series))
+                    f_sources.append(f_dir)
+                continue
+            if f_op in ("runtime", "cost"):
+                # Only epocpp arms have these metrics
                 continue
             if isIorArmId(f_ior_arm):
                 # An IOR arm: ior-report.csv (ior-parse.sh), generated when missing
@@ -1232,6 +1499,9 @@ class CompareNodesMain(BaseMain):
             # IOR setups alone (lsmio-archive/ior/<scale>): named apart from the
             # backends of that scale, which may share the output directory
             f_combined = "ior"
+        elif self._isEpocppOnly(target_dir):
+            # lsmio-archive/epocpp/<scale>: named apart from its scale's other charts
+            f_combined = "epocpp"
         if len(f_combined) > self.MAX_COMBINED_NAME:
             # Keep the file name within NAME_MAX: a prefix and a hash of the rest
             import hashlib
@@ -1248,7 +1518,15 @@ class CompareNodesMain(BaseMain):
             + (f", {f_combined.replace('+', ' + ')}" if f_combined else "")
             + f" ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
         )
-        meta_data = plot.PlotMetaData(title, "# of Nodes", "Max BW in MB")
+        # epocpp reports are MiB/s (lsmio::Benchmark), as named when they alone are drawn
+        f_epocpp_only = all(
+            f_pd.legend.startswith("epocpp-") for f_pd in plot_data_list
+        )
+        f_y_label = {
+            "runtime": "Min Runtime in s",
+            "cost": "I/O cost in s (Min Runtime - no-output baseline)",
+        }.get(f_op, "Max BW in MiB/s" if f_epocpp_only else "Max BW in MB")
+        meta_data = plot.PlotMetaData(title, "# of Nodes", f_y_label)
 
         output_filename = os.path.join(
             out_dir,
@@ -2152,7 +2430,8 @@ class ArchiveMain(BaseMain):
     as bmtool's archive has no --ssd) - never the working directory.
     Destination: --dest (resolved like bmtool's include/archive-dest.in.sh), else
     <root>/lsmio-archive/{variants|baseline}; for ior, <root>/lsmio-archive/ior/<scale>,
-    where 'run ior' archives. An inherited BM_ARCHIVE_DEST is ignored:
+    where 'run ior' archives (an epocpp run archives to <root>/lsmio-archive/epocpp/<scale>
+    from --source). An inherited BM_ARCHIVE_DEST is ignored:
     bmtool clears it before resolving the archive command's destination.
     Arm: outputs-<arm>, arm = resolveArmId(setup, variant) with setup from --setup,
     else $BM_SETUP, else NATIVE (an lsmiotool run root: the run's own setup).
@@ -2428,6 +2707,13 @@ class ArchiveMain(BaseMain):
                     return self._archiveGroupRun(
                         f_source, f_explicit_dest, f_root, f_scale
                     )
+            if self.m_request.target == "epocpp":
+                # 'run epocpp backends' archives itself; what it left is archived from
+                # one of its arms' run roots
+                raise ArchiveError(
+                    "an epocpp run is archived with --source <run root of one of its "
+                    "arms> (runs/<run id> with .lsmiotool-arm.json)"
+                )
             if f_root is None and not (
                 f_explicit_dest and os.path.isabs(f_explicit_dest)
             ):

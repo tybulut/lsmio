@@ -65,7 +65,8 @@
           "bm_adios": "bm_adios",
           "bm_rocksdb": "bm_rocksdb",
           "bm_leveldb": "bm_leveldb",
-          "bm_manager": "bm_manager"
+          "bm_manager": "bm_manager",
+          "epocpp": "epocpp"
         },
         "modules": [],
         "resources": {
@@ -121,7 +122,8 @@
           "bm_adios": "bm_adios",
           "bm_rocksdb": "bm_rocksdb",
           "bm_leveldb": "bm_leveldb",
-          "bm_manager": "bm_manager"
+          "bm_manager": "bm_manager",
+          "epocpp": "epocpp"
         },
         "modules": [
           "data/HDF5/1.10.7-gompi-2020b",
@@ -188,7 +190,8 @@
           "bm_adios": "bm_adios",
           "bm_rocksdb": "bm_rocksdb",
           "bm_leveldb": "bm_leveldb",
-          "bm_manager": "bm_manager"
+          "bm_manager": "bm_manager",
+          "epocpp": "epocpp"
         },
         "modules": [
           "GCCcore/13.3.0",
@@ -265,7 +268,8 @@
           "bm_adios": "bm_adios",
           "bm_rocksdb": "bm_rocksdb",
           "bm_leveldb": "bm_leveldb",
-          "bm_manager": "bm_manager"
+          "bm_manager": "bm_manager",
+          "epocpp": "epocpp"
         },
         "modules": [
           "PrgEnv-gnu",
@@ -339,7 +343,8 @@
           "bm_adios": "bm_adios",
           "bm_rocksdb": "bm_rocksdb",
           "bm_leveldb": "bm_leveldb",
-          "bm_manager": "bm_manager"
+          "bm_manager": "bm_manager",
+          "epocpp": "epocpp"
         },
         "modules": [
           "modules/3.2.11.4",

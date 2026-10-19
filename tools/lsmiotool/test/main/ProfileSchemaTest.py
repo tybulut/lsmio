@@ -221,6 +221,7 @@ class ProfileSchemaTest(unittest.TestCase):
                 "bm_rocksdb": "bm_rocksdb",
                 "bm_leveldb": "bm_leveldb",
                 "bm_manager": "bm_manager",
+                "epocpp": "epocpp",
             },
         )
         self.assertEqual(f_dev.modules, ())

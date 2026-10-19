@@ -430,9 +430,7 @@ class VariantCatalogue:
             # The longest variant name the key ends with decides, as in bmtool:
             # version-<branch>-<hash>-<retired variant> is rejected like the bare key
             # (footer-btree is not read as btree), no-pread is not read as pread
-            for cand_var in sorted(
-                cls.archivedVariantNames(), key=len, reverse=True
-            ):
+            for cand_var in sorted(cls.archivedVariantNames(), key=len, reverse=True):
                 if payload.endswith(f"-{cand_var}"):
                     prefix = payload[: -len(cand_var) - 1]
                     if "-" in prefix:

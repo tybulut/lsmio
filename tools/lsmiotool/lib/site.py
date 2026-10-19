@@ -595,6 +595,8 @@ class ExecutableRegistry:
         "bm_leveldb",
         "bm_manager",
     }
+    # Executables a profile (or an older run's manifest) may leave out
+    OPTIONAL_EXECUTABLES: Set[str] = {"epocpp"}
 
     def __init__(self, f_executables: Mapping[str, str]) -> None:
         f_missing = self.REQUIRED_EXECUTABLES - set(f_executables.keys())
@@ -602,7 +604,11 @@ class ExecutableRegistry:
             raise SiteResolutionError(
                 f"Missing required executables in registry: {sorted(f_missing)}"
             )
-        f_extra = set(f_executables.keys()) - self.REQUIRED_EXECUTABLES
+        f_extra = (
+            set(f_executables.keys())
+            - self.REQUIRED_EXECUTABLES
+            - self.OPTIONAL_EXECUTABLES
+        )
         if f_extra:
             raise SiteResolutionError(
                 f"Unexpected extra executables in registry: {sorted(f_extra)}"
@@ -663,6 +669,10 @@ class ExecutableRegistry:
     @property
     def bm_manager(self) -> str:
         return self.m_executables["bm_manager"]
+
+    @property
+    def epocpp(self) -> str:
+        return self.getExecutable("epocpp")
 
     @property
     def executables(self) -> Dict[str, str]:

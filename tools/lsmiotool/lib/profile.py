@@ -273,6 +273,8 @@ class ProfileLoader:
         "bm_leveldb",
         "bm_manager",
     }
+    # ExecutableRegistry.OPTIONAL_EXECUTABLES
+    _OPTIONAL_EXECUTABLE_KEYS: Set[str] = {"epocpp"}
     _REQUIRED_RESOURCE_SHAPES: Set[str] = {"small", "large"}
     _REQUIRED_SHAPE_FIELDS: Set[str] = {
         "walltime_policy",
@@ -478,9 +480,11 @@ class ProfileLoader:
                 f"Profile '{f_site_name}'.executables must be a dictionary"
             )
         f_exec_keys = set(f_executables.keys())
-        if f_exec_keys != cls._REQUIRED_EXECUTABLE_KEYS:
-            f_missing = cls._REQUIRED_EXECUTABLE_KEYS - f_exec_keys
-            f_extra = f_exec_keys - cls._REQUIRED_EXECUTABLE_KEYS
+        f_missing = cls._REQUIRED_EXECUTABLE_KEYS - f_exec_keys
+        f_extra = (
+            f_exec_keys - cls._REQUIRED_EXECUTABLE_KEYS - cls._OPTIONAL_EXECUTABLE_KEYS
+        )
+        if f_missing or f_extra:
             raise ProfileSchemaError(
                 f"Profile '{f_site_name}'.executables keys mismatch: missing={sorted(f_missing)}, extra={sorted(f_extra)}"
             )

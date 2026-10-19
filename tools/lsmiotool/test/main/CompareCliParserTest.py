@@ -541,13 +541,15 @@ class CompareCliParserTest(unittest.TestCase):
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "both"])
         self.assertIn(
-            "Invalid operation: 'both'. Must be 'read' or 'write'", str(ctx.exception)
+            "Invalid operation: 'both'. Must be 'read', 'write', 'runtime' or 'cost'",
+            str(ctx.exception),
         )
 
         with self.assertRaises(CompareCliParseError) as ctx:
             parseCompareArguments(["nodes", "/path/to/bench", "delete"])
         self.assertIn(
-            "Invalid operation: 'delete'. Must be 'read' or 'write'", str(ctx.exception)
+            "Invalid operation: 'delete'. Must be 'read', 'write', 'runtime' or 'cost'",
+            str(ctx.exception),
         )
 
         # Invalid stripes

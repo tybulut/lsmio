@@ -106,7 +106,7 @@ bmtool parse lsmio backends small
   User overrides (`--time`, `--walltime`, `--wallhour`, or `BM_WALLHOUR_OVERRIDE`) take absolute precedence and are clamped to $[1, 48]$ (except on PBS sites, whose job templates fix the walltime).
   With the default four backends the formula exceeds 48 hours from 36 nodes on (e.g. 54 hours at 40 nodes), so the last backends of a large point may hit the time limit. Each backend is archived on its own, so re-running with `--resume` completes only the missing ones.
 - **Approach 2 Partitioned Archive Layout (`INV-BACKEND-3`)**:
-  Runs partition their archives by mode: `backends/<scale>/` for backend scaling, `variants/` for the variant matrix, and `baseline/` for plain scaling runs, all under `$BM_PATH/lsmio-archive` (see "Approach 2 Partitioned Directory Layout" below). bmtool never archives IOR; lsmiotool's `run ior` archives to `ior/<scale>/`.
+  Runs partition their archives by mode: `backends/<scale>/` for backend scaling, `variants/` for the variant matrix, and `baseline/` for plain scaling runs, all under `$BM_PATH/lsmio-archive` (see "Approach 2 Partitioned Directory Layout" below). bmtool never archives IOR; lsmiotool's `run ior` archives to `ior/<scale>/` and `run epocpp backends` to `epocpp/<scale>/`.
 
 #### Options:
 - `--versioned`: Executes paired baseline comparison benchmarking the current working branch binary against the golden reference binary (`$SB_BIN/bm_native:main`). Can be run unconfigured or combined with one or more specific variants (e.g. `legacy`). Symmetrically archives `:run` and `:base` directories for automated delta comparison.
@@ -115,7 +115,7 @@ bmtool parse lsmio backends small
   - **Automatic archive default rules**: Automatically defaults to `yes` when multiple variants ($N > 1$), `most`, or `all` is specified; defaults to `no` for single-variant ($N = 1$) or default baseline runs (`INV-MULTI-2`).
 - `--no-archive`: Disables automatic archiving after variant execution (forces `no`). Specifying both `--archive` and `--no-archive` is rejected.
 - `--resume`: Skip variant if target archive directory (`outputs-${ARM_ID}` or `outputs-${ARM_ID}:run`) already exists in the destination directory (`INV-MULTI-3`, `INV-PAIR-7`). When `--resume` is omitted and the directory exists, auto-increment `-N` suffix collision protection (`-1`, `-2`, ..., `-N`) prevents data overwriting (`INV-MULTI-6`).
-- `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory. Default: the partitioned path for the run (`$BM_PATH/lsmio-archive/backends/<scale>`, `.../variants` or `.../baseline`). An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against `$BM_PATH`.
+- `--out-dir <dir>` / `--output-dir <dir>` (aliases: `--dest <dir>`, `--dest=<dir>`): Configurable archive destination directory. Default: the partitioned path for the run (`$BM_PATH/lsmio-archive/backends/<scale>`, `.../ior/<scale>`, `.../epocpp/<scale>`, `.../variants` or `.../baseline`). An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against `$BM_PATH`.
 - `--time <hours>` / `--walltime <hours>` / `--wallhour <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides the default dynamic scaling calculation (`2 + total_runs * 2` hours, granting 120 minutes per matrix run + 2 hours safety headroom to absorb 64K workloads and regressions). Ignored on PBS sites, whose job templates fix the walltime.
 - `--fast`: Fast simulation mode. Reduces requested walltime by approximately half and caps maximum walltime at 23 hours (instead of 48 hours), ensuring multi-node scaling sweeps and variant evaluations on ARCHER2 enter `qos=standard` ($\le 24\text{h}$) rather than being deprioritized in `qos=long`.
 - `-h`, `--help`: Early help dispatch without credentials.
@@ -171,6 +171,7 @@ graph TD
 lsmiotool run <workload> <scale> [<variants>] [options]
 lsmiotool run lsmio backends <scale> [<backends>] [options]
 lsmiotool run ior <scale> [<ior setups>] [options]
+lsmiotool run epocpp backends <scale> [<backends>] [options]
 ```
 
 Full invocation signature:
@@ -183,6 +184,9 @@ lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--setup <name>] [--ar
 
 # IOR Scaling Execution (one arm per IOR setup in each job, archived to lsmio-archive/ior/<scale>):
 lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--fast]
+
+# EPOCpp I/O backends (one arm per run kind in each job, archived to lsmio-archive/epocpp/<scale>):
+lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--repeats <n>] [--fast]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
@@ -225,6 +229,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - `ior`: IOR parallel I/O benchmark. On `local`, `bake`, `small` and `large` it runs several IOR setups per job (see `<ior setups>`); on `variants` one setup (default `BASE`), not archived.
   - `lsmio`: LSMIO storage engine benchmark (default setup: `NATIVE`).
   - `lmp`: LAMMPS ReaxFF molecular dynamics benchmark (default setup: `LSMIO`).
+  - `epocpp`: the EPOCpp particle-in-cell code's checkpoint I/O on each backend, as `run epocpp backends` (see `<backends> (epocpp)`).
 - `<scale>`: Execution scale. Supported values:
   - `local`: 1 task on 1 node (1 task/node).
   - `bake`: 1, 2, 4, 8 tasks on 1, 2, 4, 8 nodes (1 task/node).
@@ -245,6 +250,12 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - **Single Cluster Allocation**: one job per scale point runs the setups one after another, each with its own run root under `<root>/runs/`.
   - **Per-point archiving**: unless `--no-archive` is given, each setup's `<nodes>` directory is archived apart from the LSMIO backends, to `<benchmark_root>/lsmio-archive/ior/<scale>/outputs-<arm>/<nodes>` with `<arm>` `ior`, `ior-collective`, `ior-hdf5`, `ior-hdf5-collective`, `ior-fsync` or `ior-reverse`, in bmtool's IOR layout (`<nodes>/<date>/out-<setup>-<rf>-<bs>-<date>-<host>-0.txt`), and `ior-report.csv` regenerated (bmtool `ior-parse.sh`). `--resume`, `--out-dir` and the backends walltime formula apply as for `backends`.
   - `--setup <IOR setup>` (e.g. `--setup HDF5-C`) runs that setup alone; it cannot be combined with a setup list.
+- `<backends> (epocpp)`: Optional comma-separated list of EPOCpp I/O backends for `run epocpp backends <scale>`, defaulting to `posix,adios2,plugin,native` (`adios2` is BP5, `plugin` ADIOS2 with the LSMIO engine plugin, `native` LSMIO). The design is in `EPOCpp/BENCHMARKS.md`.
+  - **Arms**: every scale point is one job that runs, one after another, the no-output baseline `epocpp-baseline` (setup `NONE`), each backend's wall-time arm `epocpp-<backend>` (setup `POSIX`, `ADIOS2`, `PLUGIN`, `NATIVE`) and each backend's bandwidth arm `epocpp-<backend>-bw` (setup `<SETUP>-BW`: `epocpp --io-benchmark -m`). Each arm runs the 6 combinations, each with `--repeats` runs (default 10).
+  - **Deck**: one template, `share/epocpp/two_stream.deck.in` (installed as `share/lsmio/epocpp/`): the 2D two-stream decks recommended for these benchmarks, filled in with the deck size and the arm's output block (full restart dumps every step, a file per process; no output for the baseline). `local`, `bake` and `small` run the small deck (128x128 cells, 64 particles per cell), `large` the large one (1024x1024, 128).
+  - **Scale points**: `local` and `bake` as above; `small` on 2, 4, 8, 16, 24, 32, 40 and 48 nodes (1 task/node); `large` on 8, 16, 32, 48 and 64 nodes (4 tasks/node).
+  - **Walltime**: 12 hours per small-deck point; for the large deck 12 hours at 8 and 16 nodes, 16 at 32, 20 at 48 and 36 at 64 (on ARCHER2 the 64-node point, over 24 hours, goes to the `long` QoS). They assume the default 10 repeats: `--repeats` does not scale them. `--time` overrides it; `--fast` halves it.
+  - **Executable**: `<install_prefix>/bin/epocpp`, an EPOCpp built with LSMIO; the plugin arms also need `liblsmio_adios` in `<install_prefix>/lib`.
 - `<variants>`: Optional variant specification for `lsmio variants`. Supported formats:
   - **Omitted** or **`default`** / **`base`**: Executes the default baseline configuration (empty variant).
   - **Single variant key**: e.g., `btree`, `mmap`, `no-manoff`, `autotune`.
@@ -267,7 +278,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - A `variants` run of the baseline alone and a `--versioned` run without variants are never skipped, as in bmtool: they run again.
   - Without `--resume`, an existing variant pair is kept and the new one is archived with a numerical suffix (`:run-1`/`:base-1`, ..., `-N`; `INV-MULTI-6`); an existing backend `<nodes>` directory is replaced.
 - `--out-dir <dir>` / `--output-dir <dir>` (alias: `--dest <dir>`): Configurable archive destination directory:
-  - Specifies the destination root directory where variant outputs are archived. Default: the partitioned path for the run (`<benchmark_root>/lsmio-archive/{backends/<scale>|ior/<scale>|variants|variants-versioned}`; `ior/<scale>` for `run ior`, `variants-versioned` for `--versioned` runs). Plain `lsmio`/`lmp` scaling runs (`local`, `bake`, `small`, `large`) are not archived by `run` and reject this option; `ior` scaling runs archive to `ior/<scale>`. An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against the benchmark root, matching `bmtool` (`lsmiotool.lib.archive.resolveArchiveDest`).
+  - Specifies the destination root directory where variant outputs are archived. Default: the partitioned path for the run (`<benchmark_root>/lsmio-archive/{backends/<scale>|ior/<scale>|epocpp/<scale>|variants|variants-versioned}`; `ior/<scale>` for `run ior`, `epocpp/<scale>` for `run epocpp backends`, `variants-versioned` for `--versioned` runs). Plain `lsmio`/`lmp` scaling runs (`local`, `bake`, `small`, `large`) are not archived by `run` and reject this option; `ior` scaling runs archive to `ior/<scale>`. An absolute path is used as given; a path starting with `/lsmio-archive` and any relative path resolve against the benchmark root, matching `bmtool` (`lsmiotool.lib.archive.resolveArchiveDest`).
   - **Syntax rule**: Must be specified as two separate tokens (`--out-dir <path>`); equals syntax (`--out-dir=<path>`) is strictly rejected.
 - `--wallhour <hours>` / `--walltime <hours>`: Explicit job walltime limit in hours (clamped to `[1, 48]`). Overrides dynamic walltime scaling calculations (for `ior` scaling runs, the backends formula with one arm per IOR setup). Ignored on PBS sites, whose job templates fix the walltime per arm.
 - `--fast`: Fast simulation mode. Reduces computed allocation walltime by half (`// 2`) and caps maximum walltime at 23 hours (instead of 48 hours). Clamps minimum walltime to 1 hour (2 hours for variants). Ensures jobs on ARCHER2 stay within the 24-hour limit for `qos=standard` scheduling. Explicit walltime overrides are honored but capped at 23 hours.
@@ -539,6 +550,7 @@ The runtime paths are explicitly constructed without cross-fallback or directory
 lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
 lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>]
 lsmiotool parse ior <local|bake|small|large> [--output-dir <dir>]
+lsmiotool parse epocpp backends <local|bake|small|large> [--output-dir <dir>]
 ```
 
 #### Arguments & Target Resolution:
@@ -550,9 +562,20 @@ lsmiotool parse ior <local|bake|small|large> [--output-dir <dir>]
   - `<scale>`: Scaling target (`local`, `bake`, `small`, `large`).
   - Automatically parses all backend output directories under the Approach 2 partitioned directory `<archive>/backends/<scale>/outputs-<backend>/`, generating Stage 1 (`agg-*`) and Stage 2 (`lsm-report.csv` / `lsm-report.json`) reports for each backend. IOR outputs (`outputs-ior[-<setup>]`) are never parsed here, even when moved into that folder: `parse ior <scale>` regenerates the `ior-report.csv` (bmtool `ior-parse.sh`) of every IOR setup `run ior <scale>` archived to `<archive>/ior/<scale>/outputs-*` (or `--output-dir`).
 
+- `epocpp backends <scale>`: the archive of `run epocpp backends <scale>`, `<benchmark_root>/lsmio-archive/epocpp/<scale>` (or `--output-dir`). Every `outputs-epocpp-*` there gets its `epocpp-report.csv`, and the scale its `epocpp-cost.csv` (see "EPOCpp Reports" below); other `outputs-*` are not read. CSV only.
+- `parse <run root>` of an epocpp arm (`runs/<run id>`): its succeeded points are exported as the archive holds them to `<output dir>/outputs-<arm>/<nodes>` (default: the current directory) and their reports written there, before or without archiving. Parsing every arm root of a run into one `--output-dir` also gives the cost report.
+
 #### Options:
 - `--output-dir <dir>`: Destination directory for generated report files. Defaults to current working directory (`os.getcwd()`).
 - `--format <format>`: Output report format (`csv` or `json`). Defaults to `csv`.
+
+#### EPOCpp Reports (`lsmiotool.lib.epocppreport`):
+- **Archive layout**: `<benchmark_root>/lsmio-archive/epocpp/<scale>/outputs-<arm>/<nodes>/<date>/out-<arm>-<rf>-<bs>-<date>-<host>-r<NN>.txt`, one EPOCpp output per run (`--repeats` per combination), plus `<nodes>/input.deck`, the deck those runs read. Each output ends with the worker's `lsmiotool: data bytes = <n> allocated = <n> files = <n>` line, counted after the run exited.
+- **`outputs-<arm>/epocpp-report.csv`**: `N,Stripes,BlockSize,Metric,Best,Mean,Worst,Runs,PayloadBytes,DataBytes,DataCheck`.
+  - Wall-time arms (`epocpp-baseline`, `epocpp-<backend>`): a `runtime` row; `Best` is the `Min()` of EPOCpp's `Runtime` over the runs (seconds), `Mean` their mean, `Worst` their `Max()`.
+  - Bandwidth arms (`epocpp-<backend>-bw`): `write` and `read` rows from lsmio::Benchmark's summaries; `Best` is the `Max()` of the runs' max MiB/s, `Mean` the `Max()` of their mean MiB/s, `Worst` the `Min()` of their min MiB/s.
+  - `PayloadBytes`: what the runs must have written (a bandwidth arm's write summary; for a wall-time arm a lower bound from `input.deck`: every particle's positions, momenta and id in every dump). `DataBytes`: the fewest bytes a run left on disk (the most, for the baseline). `DataCheck`: `ok` when every run covers the payload (the baseline: no run left anything), `short` (the baseline: `unexpected`) when one did not, `unknown` when a run has no count.
+- **`epocpp-cost.csv`** (the scale's archive directory): `N,Stripes,BlockSize,Backend,BestRuntime,BaselineBestRuntime,IOCost`; a backend's I/O cost is the `Min()` of its `Runtime` minus the `Min()` of the no-output baseline's.
 
 ---
 
@@ -639,6 +662,7 @@ lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
 ```
 
 #### Arguments & Options:
+- `<operation>`: `read` or `write` (bandwidth), or for an epocpp archive also `runtime` and `cost`. An epocpp archive (`<benchmark_root>/lsmio-archive/epocpp/<scale>`) charts the `Best` of its bandwidth arms for `read`/`write`, of its wall-time arms (the baseline included) for `runtime`, and each backend's I/O cost for `cost` (`epocpp-cost.csv`); its reports are built when missing, and its plots are named `compare-<scale>-epocpp-<op>-<stripes>-<bs>.png`, apart from LSMIO's backends charts.
 - `<folder>`: Archive directory holding one `outputs-<backend>` directory per backend (e.g., `<archive>/backends/<scale>`), each with its `lsm-report.csv`. More folders may follow (`compare nodes <folder> <folder> ... [read|write] ...`; each a path with a `/` or an existing directory), and all their `outputs-*` are charted together, e.g. the IOR setups `run ior` archived: `compare nodes <archive>/backends/small <archive>/ior/small --all`. IOR arms (`outputs-ior[-<setup>]`, with `ior-report.csv`, built when missing) are charted after the backends, labelled by arm (`ior`, `ior-collective`, `ior-hdf5`, `ior-hdf5-collective`). The first folder names the plots; an arm found in several folders is labelled `<arm> (<parent>/<folder>)`.
 - `<read|write>`: Operation phase to compare (`read` or `write`); optional with `--all`.
 - `[stripes]`: Stripe count: `4` or `16` (default: `4`).
@@ -719,10 +743,10 @@ If `<archive_folder>` contains no `:run` directory at all (only unpaired `output
 lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 ```
 
-- `<benchmark>`: Benchmark suite (`lsmio` or `ior`).
+- `<benchmark>`: Benchmark suite (`lsmio`, `ior` or `epocpp`). An `epocpp` run archives itself; `archive epocpp <scale> --source <run root of any of its arms>` archives what it left (e.g. after `--no-archive`), to `<benchmark_root>/lsmio-archive/epocpp/<scale>`, as `run` would. Without `--source` it is refused.
 - `<scale>`: Execution scale (`local`, `bake`, `small`, `large`, or `variants`; `baseline` is a deprecated alias of `variants`). `ior` takes `local`, `bake`, `small` or `large`: the latest standalone lsmiotool run of `ior <scale>` (one made before `run ior` ran its setups as arms; `--setup` picks the IOR setup), or `--source` with its run root, is archived to `<benchmark_root>/lsmio-archive/ior/<scale>/outputs-ior[-<setup>]` (a suffix `-1`, ... when that exists) with `ior-report.csv`. A `run ior` run archives itself; `--source` with the run root of any of its setups archives the points it left (e.g. after `--no-archive`), as `run` would. Only lsmiotool run roots are archived for `ior` (bmtool never archived IOR).
 - `[variant]`: Optional variant identifier for `variants` (resolved against `VariantCatalogue`); it names the arm, `outputs-<arm>`.
-- `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`; `ior/<scale>` for `ior`).
+- `--dest <path>`: Destination archive directory (default `<benchmark_root>/lsmio-archive/{variants|baseline}`; `ior/<scale>` for `ior`, `epocpp/<scale>` for `epocpp`).
 - `--setup <name>`: LSMIO setup naming the arm (default `$BM_SETUP`, else `NATIVE`; for an lsmiotool run, its own setup). For `ior`: the IOR setup of the run to archive (`BASE`, `COLLECTIVE`, `HDF5`, `HDF5-C`, `FSYNC`, `REVERSE`).
 - `--source <path>`: What to archive. Without it: bmtool's `<benchmark_root>/lsmio/outputs`, else the latest standalone lsmiotool run of `lsmio <scale>` (and `<variant>`).
   - An lsmiotool run root: its succeeded points are copied in bmtool's layout with reports; the run root stays.
@@ -736,6 +760,7 @@ To prevent cross-experiment collisions between baseline variant parameter sweeps
 The destinations are resolved by one helper per tool (`lsmiotool.lib.archive.resolveArchiveDest`; `bmtool/include/archive-dest.in.sh` for bmtool), so `run`, `parse` and `archive` agree:
 - **Backend Scaling Runs** (`run lsmio backends <scale>`): `$BM_PATH/lsmio-archive/backends/<scale>/outputs-<backend>/` (with node subfolders `1/`, `2/`, ..., and master `lsm-report.csv`).
 - **IOR Scaling Runs** (`run ior <scale>`, lsmiotool only): `$BM_PATH/lsmio-archive/ior/<scale>/outputs-ior[-<setup>]/` (node subfolders and master `ior-report.csv`).
+- **EPOCpp Runs** (`run epocpp backends <scale>`, lsmiotool only): `$BM_PATH/lsmio-archive/epocpp/<scale>/outputs-epocpp-<arm>/` (node subfolders, each arm's `epocpp-report.csv`, and the scale's `epocpp-cost.csv`).
 - **Variant Matrix Runs** (`run lsmio variants [<variants>]`): `$BM_PATH/lsmio-archive/variants/outputs-native-<variant>:run` and `:base`.
 - **Versioned Runs** (`run lsmio variants [<variants>] --versioned`, lsmiotool only; bmtool uses `variants/`): `$BM_PATH/lsmio-archive/variants-versioned/outputs-native-version-<branch>-<hash>[-<variant>]:run` and `:base`. Versioned pairs archived to `variants/` earlier (by bmtool, or by lsmiotool before this default) are not seen there by `--resume` and still appear in `variants/` charts: move their `outputs-*-version-*` directories to `variants-versioned/`, or pass `--out-dir lsmio-archive/variants`.
 - **Plain Scaling Runs** (`local`, `bake`, `small`, `large`): `$BM_PATH/lsmio-archive/baseline/outputs-<arm>/`.

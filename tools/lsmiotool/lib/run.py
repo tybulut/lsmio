@@ -417,6 +417,7 @@ class RunRequest:
         "m_walltime",
         "m_versioned",
         "m_fast",
+        "m_repeats",
         "_frozen",
     )
 
@@ -437,6 +438,7 @@ class RunRequest:
         f_walltime: Optional[str] = None,
         f_versioned: bool = False,
         f_fast: bool = False,
+        f_repeats: Optional[int] = None,
     ) -> None:
         if isinstance(f_mode, bool):
             f_ssd = f_mode
@@ -458,14 +460,18 @@ class RunRequest:
             )
         m_mode = f_mode.strip().lower()
 
-        from lsmiotool.lib.arms import DEFAULT_IOR_SETUPS, DEFAULT_LSMIO_BACKENDS
-
-        # The arms of backends mode: LSMIO backends, or IOR setups for an ior run
-        f_default_backends = (
-            DEFAULT_IOR_SETUPS
-            if f_target.strip().lower() == "ior"
-            else DEFAULT_LSMIO_BACKENDS
+        from lsmiotool.lib.arms import (
+            DEFAULT_EPOCPP_BACKENDS,
+            DEFAULT_IOR_SETUPS,
+            DEFAULT_LSMIO_BACKENDS,
         )
+
+        # The arms of backends mode: LSMIO backends, IOR setups for an ior run, or
+        # EPOCpp backends for an epocpp run
+        f_default_backends = {
+            "ior": DEFAULT_IOR_SETUPS,
+            "epocpp": DEFAULT_EPOCPP_BACKENDS,
+        }.get(f_target.strip().lower(), DEFAULT_LSMIO_BACKENDS)
         if f_backends is not None:
             if not isinstance(f_backends, (list, tuple)):
                 raise PlanValidationError("backends must be a sequence of strings")
@@ -538,6 +544,14 @@ class RunRequest:
                 )
         if not isinstance(f_fast, bool):
             raise PlanValidationError(f"fast must be a boolean, got: {f_fast!r}")
+        if f_repeats is not None and (
+            isinstance(f_repeats, bool)
+            or not isinstance(f_repeats, int)
+            or f_repeats < 1
+        ):
+            raise PlanValidationError(
+                f"repeats must be a positive integer or None, got: {f_repeats!r}"
+            )
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
@@ -553,6 +567,7 @@ class RunRequest:
         super().__setattr__("m_walltime", f_walltime.strip() if f_walltime else None)
         super().__setattr__("m_versioned", bool(f_versioned))
         super().__setattr__("m_fast", bool(f_fast))
+        super().__setattr__("m_repeats", f_repeats)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -660,6 +675,11 @@ class RunRequest:
     def is_fast(self) -> bool:
         return self.m_fast
 
+    @property
+    def repeats(self) -> Optional[int]:
+        """Runs of each epocpp arm per combination (--repeats); None is the default."""
+        return self.m_repeats
+
     def toDict(self) -> Dict[str, Any]:
         f_dict: Dict[str, Any] = {
             "target": self.m_target,
@@ -691,6 +711,8 @@ class RunRequest:
             f_dict["versioned"] = True
         if self.m_fast:
             f_dict["fast"] = True
+        if self.m_repeats is not None:
+            f_dict["repeats"] = self.m_repeats
         return f_dict
 
     def __repr__(self) -> str:
@@ -709,7 +731,8 @@ class RunRequest:
             f"wallhour={self.m_wallhour!r}, "
             f"walltime={self.m_walltime!r}, "
             f"versioned={self.m_versioned!r}, "
-            f"fast={self.m_fast!r})"
+            f"fast={self.m_fast!r}, "
+            f"repeats={self.m_repeats!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -729,6 +752,7 @@ class RunRequest:
                 and self.m_walltime == f_other.m_walltime
                 and self.m_versioned == f_other.m_versioned
                 and self.m_fast == f_other.m_fast
+                and self.m_repeats == f_other.m_repeats
             )
         return False
 
@@ -1349,6 +1373,13 @@ def groupRunCount(f_request: Any) -> int:
     the baseline and each variant (paired variants), the reference and each variant or
     the branch (--versioned); 1 otherwise."""
     f_target = getattr(f_request, "target", "")
+    if f_target == "epocpp":
+        # The baseline, then a wall-time and a bandwidth arm per backend
+        from lsmiotool.lib.arms import DEFAULT_EPOCPP_BACKENDS
+
+        return 1 + 2 * len(
+            getattr(f_request, "backends", None) or DEFAULT_EPOCPP_BACKENDS
+        )
     if getattr(f_request, "mode", "standard") == "backends" and f_target in (
         "lsmio",
         "ior",
@@ -1472,10 +1503,29 @@ class RunPlanner:
         "variants": (ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8),),
     }
 
+    # EPOCpp runs real simulations, so fewer points (BENCHMARKS.md, 2026-10-18): small
+    # without 1 node, large from 8 nodes (32 tasks), where a large-deck particle array
+    # per rank stays under LSMIO's record limit; local and bake are test scales
+    EPOCPP_SCALE_MATRICES: Dict[str, Tuple[ScalePoint, ...]] = {
+        "local": SCALE_MATRICES["local"],
+        "bake": SCALE_MATRICES["bake"],
+        "small": tuple(f_sp for f_sp in SCALE_MATRICES["small"] if f_sp.nodes >= 2),
+        "large": tuple(f_sp for f_sp in SCALE_MATRICES["large"] if f_sp.nodes >= 8),
+    }
+    # Runs of each epocpp arm per combination (Max()/Min() over them when parsing)
+    EPOCPP_DEFAULT_REPEATS = 10
+    # Hours per epocpp point without --time (--fast halves them): 12 for the small
+    # deck; for the large deck by node count, from the 2026-10-19 trial at one repeat
+    # (runs and cleanup x 10 repeats, +20%, at least 12). Over 24 hours a 'standard'
+    # Slurm QoS becomes 'long' (ARCHER2)
+    EPOCPP_SMALL_DECK_HOURS = 12
+    EPOCPP_LARGE_DECK_HOURS: Dict[int, int] = {8: 12, 16: 12, 32: 16, 48: 20, 64: 36}
+
     DEFAULT_SETUPS: Dict[str, str] = {
         "ior": "BASE",
         "lsmio": "NATIVE",
         "lmp": "LSMIO",
+        "epocpp": "POSIX",
     }
 
     ALLOWED_SETUPS: Dict[str, Set[str]] = {
@@ -1489,6 +1539,19 @@ class RunPlanner:
             "MANAGER",
         },
         "lmp": {"LSMIO", "LSMIO-MMAP", "FS"},
+        # EpocppAdapter.ALLOWED_SETUPS: the baseline, each backend's wall-time arm and
+        # its bandwidth (-BW) arm
+        "epocpp": {
+            "NONE",
+            "POSIX",
+            "ADIOS2",
+            "PLUGIN",
+            "NATIVE",
+            "POSIX-BW",
+            "ADIOS2-BW",
+            "PLUGIN-BW",
+            "NATIVE-BW",
+        },
     }
 
     LMP_TASK_TUNING: Dict[int, Dict[str, int]] = {
@@ -1515,6 +1578,23 @@ class RunPlanner:
                 f"LMP tuning is not defined for task count {f_tasks}"
             )
         return dict(cls.LMP_TASK_TUNING[f_tasks])
+
+    @classmethod
+    def scalePoints(cls, f_target: str, f_scale: str) -> Tuple[ScalePoint, ...]:
+        """The scale points a target runs at a scale (epocpp has its own)."""
+        if f_target == "epocpp":
+            return cls.EPOCPP_SCALE_MATRICES[f_scale]
+        return cls.SCALE_MATRICES[f_scale]
+
+    @classmethod
+    def epocppPointHours(cls, f_scale: str, f_sp: ScalePoint) -> int:
+        """An epocpp point's walltime in hours when --time is not given."""
+        if f_scale != "large":
+            return cls.EPOCPP_SMALL_DECK_HOURS
+        # A node count off the table gets the longest
+        return cls.EPOCPP_LARGE_DECK_HOURS.get(
+            f_sp.nodes, max(cls.EPOCPP_LARGE_DECK_HOURS.values())
+        )
 
     @classmethod
     def createPlan(
@@ -1547,6 +1627,11 @@ class RunPlanner:
         if f_scale not in cls.SCALE_MATRICES:
             raise PlanValidationError(
                 f"Unknown scale '{f_request.scale}'. Allowed: {sorted(cls.SCALE_MATRICES.keys())}"
+            )
+        if f_target == "epocpp" and f_scale not in cls.EPOCPP_SCALE_MATRICES:
+            raise PlanValidationError(
+                f"Scale '{f_request.scale}' is not supported for epocpp. "
+                f"Allowed: {sorted(cls.EPOCPP_SCALE_MATRICES.keys())}"
             )
 
         # 2. Strict rejection of LMP large scale and verification of LMP task tuning BEFORE sources
@@ -1582,7 +1667,7 @@ class RunPlanner:
         # 4. Resource policy lookup
         f_shape = "large" if f_scale == "large" else "small"
         f_resource_policy = f_profile.getResourcePolicy(f_shape)
-        f_scale_points = cls.SCALE_MATRICES[f_scale]
+        f_scale_points = cls.scalePoints(f_target, f_scale)
 
         # 5. ScheduledPointResources calculation
         from lsmiotool.lib.scheduler import parseWalltimeToSeconds
@@ -1612,6 +1697,15 @@ class RunPlanner:
                     f_walltime = f"{f_max_sec // 3600:02d}:00:00"
                 elif wall_sec is not None and wall_sec < 3600:
                     f_walltime = "01:00:00"
+            elif (
+                f_target == "epocpp"
+                and f_resource_policy.walltime_policy == "slurm_nodes"
+            ):
+                # One point runs every arm, each 6 combinations x the repeats
+                f_hours = cls.epocppPointHours(f_scale, f_sp)
+                if f_request.fast:
+                    f_hours = max(1, min(23, f_hours // 2))
+                f_walltime = f"{f_hours:02d}:00:00"
             elif (
                 getattr(f_request, "mode", "standard") == "backends"
                 and f_resource_policy.walltime_policy == "slurm_nodes"
@@ -1843,6 +1937,12 @@ class RunPlanner:
             f_walltime=f_request.walltime,
             f_versioned=f_request.versioned,
             f_fast=f_request.fast,
+            # An epocpp run records how many runs each arm makes per combination
+            f_repeats=(
+                f_request.repeats or cls.EPOCPP_DEFAULT_REPEATS
+                if f_target == "epocpp"
+                else None
+            ),
         )
 
         if f_target == "lmp":
@@ -2110,6 +2210,7 @@ class ManifestSerializer:
             "wallhour",
             "walltime",
             "fast",
+            "repeats",
         }
     )
     REQUIRED_PLAN_KEYS: Set[str] = {
@@ -2348,6 +2449,12 @@ class ManifestSerializer:
         f_walltime_raw = f_req_raw.get("walltime")
         if f_walltime_raw is not None and not isinstance(f_walltime_raw, str):
             raise ManifestValidationError("request.walltime must be a string or null")
+        # --repeats: an epocpp run given one records it
+        f_repeats_raw = f_req_raw.get("repeats")
+        if f_repeats_raw is not None and (
+            isinstance(f_repeats_raw, bool) or not isinstance(f_repeats_raw, int)
+        ):
+            raise ManifestValidationError("request.repeats must be an integer or null")
 
         try:
             f_request = RunRequest(
@@ -2363,6 +2470,7 @@ class ManifestSerializer:
                 f_wallhour=f_wallhour_raw,
                 f_walltime=f_walltime_raw,
                 f_fast=bool(f_fast_raw),
+                f_repeats=f_repeats_raw,
             )
         except Exception as f_err:
             raise ManifestValidationError(f"Invalid request record: {f_err}")
@@ -2722,7 +2830,11 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 f"Missing keys in site.executables: {sorted(f_missing_ex)}"
             )
-        f_extra_ex = f_ex_keys - ExecutableRegistry.REQUIRED_EXECUTABLES
+        f_extra_ex = (
+            f_ex_keys
+            - ExecutableRegistry.REQUIRED_EXECUTABLES
+            - ExecutableRegistry.OPTIONAL_EXECUTABLES
+        )
         if f_extra_ex:
             raise ManifestValidationError(
                 f"Unexpected extra keys in site.executables: {sorted(f_extra_ex)}"
@@ -4740,10 +4852,12 @@ class RunOrchestrator:
         of the same run land in the same pair; f_succeeded replaces the reconciled point
         state as the test of an (arm, point). Returns False when an archive step failed."""
         from lsmiotool.lib.archive import ArchiveEngine
-        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib.arms import isEpocppArmId, isIorArmId
         from lsmiotool.lib.export import (
+            exportEpocppPoint,
             exportIorPoint,
             exportPoint,
+            generateEpocppReports,
             generateIorReports,
             generateReports,
         )
@@ -4764,6 +4878,20 @@ class RunOrchestrator:
         def _export(f_ctx: Dict[str, Any], f_idx: int, f_dir: str) -> None:
             f_arm = f_ctx["arm"]
             f_sp = f_ctx["plan"].scale_points[f_idx]
+            if isEpocppArmId(f_arm.arm_id):
+                # Every run's log of every combination, and the deck they read
+                exportEpocppPoint(
+                    f_layout=f_ctx["store"].layout,
+                    f_evidence_store=f_ctx["evidence"],
+                    f_scale_point=f_sp,
+                    f_ordinal=f_idx,
+                    f_combinations=f_ctx["plan"].combinations,
+                    f_arm_id=f_arm.arm_id,
+                    f_repeats=f_ctx["plan"].request.repeats
+                    or RunPlanner.EPOCPP_DEFAULT_REPEATS,
+                    f_node_dir=os.path.join(f_dir, str(f_sp.nodes)),
+                )
+                return
             if isIorArmId(f_arm.arm_id):
                 # One shared IOR output per combination, named by its IOR setup
                 exportIorPoint(
@@ -4800,12 +4928,21 @@ class RunOrchestrator:
             )
 
         def _reports(f_dir: str) -> None:
-            f_ior = isIorArmId(os.path.basename(f_dir)[len("outputs-") :])
+            f_arm_id = os.path.basename(f_dir)[len("outputs-") :]
+            f_ior = isIorArmId(f_arm_id)
+            f_epocpp = isEpocppArmId(f_arm_id)
+            f_kind = "epocpp" if f_epocpp else "ior" if f_ior else "lsm"
             try:
-                if not (generateIorReports(f_dir) if f_ior else generateReports(f_dir)):
+                if not (
+                    generateEpocppReports(f_dir)
+                    if f_epocpp
+                    else generateIorReports(f_dir)
+                    if f_ior
+                    else generateReports(f_dir)
+                ):
                     self._reportProgress(
                         f_reporter,
-                        f"WARNING: no {'ior' if f_ior else 'lsm'}-report.csv rows for {f_dir}",
+                        f"WARNING: no {f_kind}-report.csv rows for {f_dir}",
                     )
             except Exception as f_err:
                 self._reportProgress(
@@ -4915,12 +5052,13 @@ class RunOrchestrator:
             f_status = str((f_rec.payload or {}).get("status") or "") if f_rec else ""
             return f_status.strip().lower() in f_ok
 
-        from lsmiotool.lib.arms import isIorArmId
+        from lsmiotool.lib.arms import isEpocppArmId, isIorArmId
 
         f_evidence = f_ctx["evidence"]
         f_sp = f_ctx["plan"].scale_points[f_idx]
-        # A shared IOR launch records only its controller result, no rank results
-        f_shared = isIorArmId(f_ctx["arm"].arm_id)
+        # A shared IOR or EPOCpp launch records only its controller result, no rank
+        # results
+        f_shared = isIorArmId(f_ctx["arm"].arm_id) or isEpocppArmId(f_ctx["arm"].arm_id)
         try:
             for f_combo in f_ctx["plan"].combinations:
                 if not succeeded(
@@ -5515,6 +5653,14 @@ class RunOrchestrator:
 
                 f_exe_name = LsmioAdapter.getExecutableName(f_norm_setup)
                 f_raw_benchmark_exe = f_profile.executables.getExecutable(f_exe_name)
+            elif f_target == "epocpp":
+                try:
+                    f_raw_benchmark_exe = f_profile.executables.epocpp
+                except SiteResolutionError as f_err:
+                    raise PreflightError(
+                        f"Site profile '{f_profile.name}' has no epocpp executable: "
+                        f"{f_err}"
+                    ) from f_err
             else:
                 raise PreflightError(f"Unknown benchmark target '{f_target}'")
 
@@ -5539,6 +5685,7 @@ class RunOrchestrator:
                 BenchmarkConfigurationError,
                 BenchmarkProbeError,
                 CapabilityState,
+                EpocppAdapter,
                 IorAdapter,
                 LmpAdapter,
                 LsmioAdapter,
@@ -5550,6 +5697,8 @@ class RunOrchestrator:
                 f_adapter = LmpAdapter()
             elif f_target == "lsmio":
                 f_adapter = LsmioAdapter()
+            elif f_target == "epocpp":
+                f_adapter = EpocppAdapter()
             else:
                 raise PreflightError(f"Unsupported benchmark target '{f_target}'")
 
@@ -5585,6 +5734,21 @@ class RunOrchestrator:
                 except (BenchmarkConfigurationError, Exception) as f_err:
                     raise PreflightError(
                         f"LMP asset validation failed for asset root '{f_asset_root}': {f_err}"
+                    ) from f_err
+
+            if f_target == "epocpp" and not f_is_custom_mock_validator:
+                # The deck template sits next to the LMP assets (share/ in a source
+                # tree, share/lsmio/ installed)
+                f_share_root = (
+                    os.path.dirname(os.path.normpath(f_runtime_layout.asset_root))
+                    if f_runtime_layout is not None
+                    else os.path.join(f_profile.install_prefix, "share", "lsmio")
+                )
+                try:
+                    f_adapter.readTemplate(EpocppAdapter.templatePath(f_share_root))
+                except BenchmarkConfigurationError as f_err:
+                    raise PreflightError(
+                        f"EPOCpp deck template validation failed: {f_err}"
                     ) from f_err
 
             # -----------------------------------------------------------------
@@ -5647,6 +5811,24 @@ class RunOrchestrator:
             if f_target == "lsmio" and not f_is_custom_mock_validator:
                 for f_arm in f_group.arms:
                     self._preflightArm(f_arm, f_profile)
+            # The LSMIO ADIOS2 plugin, for an epocpp run's plugin arms
+            if f_target == "epocpp" and not f_is_custom_mock_validator:
+                from lsmiotool.lib.site import findAdiosPluginLibrary
+
+                f_plugin_arms = [
+                    f_arm.label
+                    for f_arm in f_group.arms
+                    if f_arm.setup in ("PLUGIN", "PLUGIN-BW")
+                ]
+                if (
+                    f_plugin_arms
+                    and findAdiosPluginLibrary(f_profile.install_prefix) is None
+                ):
+                    raise PreflightError(
+                        "LSMIO ADIOS2 plugin liblsmio_adios not found in "
+                        f"{os.path.join(f_profile.install_prefix, 'lib')} "
+                        f"(arms {f_plugin_arms}). Please verify build and install."
+                    )
 
             # Allocation resources (walltime) come from the whole request, so the
             # backends / versioned / paired walltime rules apply to the shared job
@@ -5741,6 +5923,7 @@ class RunOrchestrator:
                         f_wallhour=f_request.wallhour,
                         f_walltime=f_request.walltime,
                         f_fast=f_request.fast,
+                        f_repeats=f_request.repeats,
                     )
                     try:
                         f_plan = f_planner_obj.createPlan(

@@ -205,6 +205,7 @@ def resolveArchiveDest(
 
     Layout (destinations under <benchmark_root>/lsmio-archive):
         backends/<scale>   multi-backend intra-allocation runs (mode 'backends')
+        epocpp/<scale>     epocpp runs, one arm per run kind (target 'epocpp')
         ior/<scale>        ior scaling runs, one arm per IOR setup (target 'ior', mode
                            'backends'; lsmiotool only, bmtool never archived ior)
         variants           variant matrix runs (scale 'variants')
@@ -222,7 +223,8 @@ def resolveArchiveDest(
             '/lsmio-archive' which is treated as benchmark-root relative;
             relative paths resolve against the benchmark root.
         f_versioned: A --versioned run (scale 'variants' only).
-        f_target: Benchmark ('lsmio' when None); 'ior' archives apart from LSMIO.
+        f_target: Benchmark ('lsmio' when None); 'ior' archives apart from LSMIO, and
+            'epocpp' to epocpp/<scale>.
 
     Returns:
         Absolute archive destination root.
@@ -242,6 +244,12 @@ def resolveArchiveDest(
     if f_norm_scale == "baseline":
         f_norm_scale = "variants"
 
+    if (f_target or "").strip().lower() == "epocpp":
+        # Next to the IOR setups (ior/<scale>), apart from LSMIO's backends
+        f_epocpp_root = os.path.join(f_root, "epocpp")
+        return (
+            os.path.join(f_epocpp_root, f_norm_scale) if f_norm_scale else f_epocpp_root
+        )
     if f_norm_mode == "backends" and (f_target or "").strip().lower() == "ior":
         return (
             os.path.join(f_root, "ior", f_norm_scale)

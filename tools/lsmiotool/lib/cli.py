@@ -55,6 +55,7 @@ common cmds:
   run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
   run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
   run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
+  run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--fast] [--foreground]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -82,7 +83,7 @@ Arguments:
 
 Options:
   --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline};
-                ior/<scale> for ior).
+                ior/<scale> for ior, epocpp/<scale> for epocpp).
                 Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
   --setup <name>
@@ -117,9 +118,10 @@ RUN_HELP_TEXT = """Usage:
   lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
   lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
   lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
+  lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--repeats <n>] [--fast] [--foreground]
 
 Arguments:
-  <benchmark>   Supported benchmarks: ior, lsmio, lmp
+  <benchmark>   Supported benchmarks: ior, lsmio, lmp, epocpp ('run epocpp backends')
   <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
   <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb).
@@ -131,6 +133,17 @@ Arguments:
                 each is archived like a backend, as outputs-ior[-<setup>]/<nodes> in
                 <benchmark_root>/lsmio-archive/ior/<scale> ('parse ior <scale>' regenerates
                 its reports). '--setup <IOR setup>' runs that setup alone.
+  <backends> (epocpp)
+                Optional comma-separated list of EPOCpp backends (default:
+                posix,adios2,plugin,native). Each scale point is one job running, one
+                after another, the no-output baseline (epocpp-baseline), each backend's
+                wall-time arm (epocpp-<backend>) and its bandwidth arm
+                (epocpp-<backend>-bw, epocpp --io-benchmark -m), each over the 6 Lustre
+                combinations with --repeats runs. The scales run the recommended 2D
+                two-stream decks: small (128x128) for local, bake and small (2-48
+                nodes),
+                large (1024x1024) for large (8-64 nodes). Archived to
+                <benchmark_root>/lsmio-archive/epocpp/<scale>/outputs-<arm>/<nodes>.
   <variants>    Optional single variant, comma-separated list of variants
                 (e.g. btree,no-manoff,autotune), or 'most' or 'all'
                 for the baseline and all 25 variants.
@@ -150,7 +163,7 @@ Options:
                 setup's) scale point whose outputs-<backend>/<nodes> archive exists. A
                 baseline-alone or a --versioned run without variants always runs again.
   --out-dir <path>
-                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|ior/<scale>|variants|variants-versioned}).
+                Explicit archive destination directory (default: <benchmark_root>/lsmio-archive/{backends/<scale>|ior/<scale>|epocpp/<scale>|variants|variants-versioned}).
                 Aliases: --output-dir <path>, --dest <path>.
                 Note: '--out-dir=value' syntax is strictly rejected; use separated arguments.
   --time <hours>
@@ -161,6 +174,11 @@ Options:
                 (arms: backends or IOR setups). Ignored on a site with a fixed walltime (PBS
                 job templates, e.g. isambard), which gives each job that walltime once per arm,
                 capped at 48 hours.
+                An epocpp point gets 12 hours on the small deck, and on the large deck
+                12 hours at 8 and 16 nodes, 16 at 32, 20 at 48 and 36 at 64 (over 24
+                hours: QoS 'long' on ARCHER2), for the default 10 repeats.
+  --repeats <n> Runs of each epocpp arm per combination (default 10); the reports take
+                the Max() of bandwidth and the Min() of EPOCpp's Runtime over them.
   --versioned   Execute versioned comparison run against reference baseline.
   --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
   --foreground  Stay attached to the terminal. By default a run started from a terminal
@@ -210,6 +228,12 @@ Submodes:
                     IOR setups alone gives compare-<scale>-ior-*.png, apart from its
                     scale's backends charts.
           <read|write>: Operation to compare ('read' or 'write'); optional with --all.
+                    An epocpp archive (<benchmark_root>/lsmio-archive/epocpp/<scale>)
+                    charts its bandwidth arms for read/write (Max() of MiB/s), and its
+                    wall-time arms for 'runtime' (Min() of EPOCpp's Runtime) or 'cost'
+                    (that minus the no-output baseline's, epocpp-cost.csv); its plots
+                    are
+                    named compare-<scale>-epocpp-*.png.
           [stripes]: Stripe count: 4 or 16 (default: 4).
           [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
       Options:
@@ -302,7 +326,7 @@ class RunCliParser:
         --ssd / -s: Accepted before or after commands for backwards compatibility.
     """
 
-    VALID_BENCHMARKS = frozenset({"ior", "lsmio", "lmp"})
+    VALID_BENCHMARKS = frozenset({"ior", "lsmio", "lmp", "epocpp"})
     VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
     # Deprecated spelling retained so existing scripts keep working
     SCALE_ALIASES = {"baseline": "variants"}
@@ -423,18 +447,28 @@ class RunCliParser:
         f_variant_name: Optional[str] = None
 
         if (
-            f_benchmark == "lsmio"
+            f_benchmark == "epocpp"
+            and f_post_run_tokens[1].strip().lower() != "backends"
+        ):
+            raise RunCliParseError(
+                "epocpp runs as "
+                "'run epocpp backends <local|bake|small|large> [<backends>]'"
+            )
+        if (
+            f_benchmark in ("lsmio", "epocpp")
             and f_post_run_tokens[1].strip().lower() == "backends"
         ):
             f_mode = "backends"
             if len(f_post_run_tokens) < 3:
                 raise RunCliParseError(
-                    "Missing required positional argument: <scale> for 'run lsmio backends'"
+                    "Missing required positional argument: <scale> for "
+                    f"'run {f_benchmark} backends'"
                 )
             f_scale_tok = f_post_run_tokens[2]
             if f_scale_tok.startswith("-"):
                 raise RunCliParseError(
-                    f"Unexpected option {f_scale_tok!r} placed before scale in 'run lsmio backends'."
+                    f"Unexpected option {f_scale_tok!r} placed before scale in "
+                    f"'run {f_benchmark} backends'."
                 )
             f_scale = f_scale_tok.strip().lower()
             valid_backend_scales = frozenset({"local", "bake", "small", "large"})
@@ -453,6 +487,17 @@ class RunCliParser:
                 if not parsed_b:
                     raise RunCliParseError("Backends specification cannot be empty.")
                 f_backends = tuple(parsed_b)
+                if f_benchmark == "epocpp":
+                    from lsmiotool.lib.arms import ArmError, epocppArms
+
+                    try:
+                        epocppArms(f_backends)
+                    except ArmError as f_err:
+                        raise RunCliParseError(str(f_err)) from f_err
+            elif f_benchmark == "epocpp":
+                from lsmiotool.lib.arms import DEFAULT_EPOCPP_BACKENDS
+
+                f_backends = DEFAULT_EPOCPP_BACKENDS
             else:
                 from lsmiotool.lib.arms import DEFAULT_LSMIO_BACKENDS
 
@@ -557,6 +602,7 @@ class RunCliParser:
         f_walltime: Optional[str] = None
         f_versioned: bool = False
         f_fast: bool = False
+        f_repeats: Optional[int] = None
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -609,6 +655,18 @@ class RunCliParser:
                 # Repeating a flag is harmless, as in bmtool
                 f_resume = True
                 f_idx += 1
+            elif f_tok == "--repeats":
+                if f_repeats is not None:
+                    raise RunCliParseError("Duplicate '--repeats' option specified.")
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise RunCliParseError("Missing value after '--repeats' option.")
+                f_val = f_trailing_tokens[f_idx + 1].strip()
+                if not f_val.isascii() or not f_val.isdigit() or int(f_val) < 1:
+                    raise RunCliParseError(
+                        f"--repeats must be a positive integer, got: {f_val!r}"
+                    )
+                f_repeats = int(f_val)
+                f_idx += 2
             elif f_tok in ("--out-dir", "--output-dir", "--dest"):
                 if f_out_dir is not None:
                     raise RunCliParseError(
@@ -682,6 +740,7 @@ class RunCliParser:
                     "--wallhour=",
                     "--versioned=",
                     "--fast=",
+                    "--repeats=",
                 )
             ):
                 flag_name = f_tok.split("=")[0]
@@ -726,6 +785,16 @@ class RunCliParser:
                     "or resumed "
                     "(set BM_WALLHOUR to change the walltime)."
                 )
+
+        # --repeats is the runs of each epocpp arm per combination; an epocpp run's
+        # arms come from its backend list, not --setup
+        if f_repeats is not None and f_benchmark != "epocpp":
+            raise RunCliParseError("--repeats is supported only for 'epocpp backends'.")
+        if f_benchmark == "epocpp" and f_setup_name is not None:
+            raise RunCliParseError(
+                "--setup is not supported for 'epocpp backends': "
+                "list the backends instead."
+            )
 
         # An ior scaling run's --setup names its one arm (the IOR setup list's form)
         if f_benchmark == "ior" and f_mode == "backends" and f_setup_name is not None:
@@ -788,6 +857,7 @@ class RunCliParser:
             f_walltime=f_walltime,
             f_versioned=f_versioned,
             f_fast=f_fast,
+            f_repeats=f_repeats,
         )
 
 
@@ -1011,8 +1081,15 @@ class ParseCliParser:
         f_mode: str = "standard"
         f_scale: Optional[str] = None
 
+        if f_target.lower() == "epocpp" and not (
+            f_remaining_tokens and f_remaining_tokens[0].lower() == "backends"
+        ):
+            raise ParseCliParseError(
+                "epocpp is parsed as 'parse epocpp backends <scale>' (its archive) or "
+                "'parse <run root>'"
+            )
         if (
-            f_target.lower() == "lsmio"
+            f_target.lower() in ("lsmio", "epocpp")
             and f_remaining_tokens
             and f_remaining_tokens[0].lower() == "backends"
         ):
@@ -1020,7 +1097,8 @@ class ParseCliParser:
             f_remaining_tokens.pop(0)
             if not f_remaining_tokens or f_remaining_tokens[0].startswith("-"):
                 raise ParseCliParseError(
-                    "Missing required positional argument: <scale> for 'parse lsmio backends'"
+                    "Missing required positional argument: <scale> for "
+                    f"'parse {f_target.lower()} backends'"
                 )
             f_scale_tok = f_remaining_tokens.pop(0).strip().lower()
             valid_scales = frozenset({"local", "bake", "small", "large"})
@@ -1108,6 +1186,11 @@ class ParseCliParser:
                 "'parse ior <scale>' writes ior-report.csv only (bmtool ior-parse.sh); "
                 "--format json is not supported"
             )
+        if f_target.lower() == "epocpp" and f_format != "csv":
+            raise ParseCliParseError(
+                "'parse epocpp backends <scale>' writes epocpp-report.csv and "
+                "epocpp-cost.csv only; --format json is not supported"
+            )
 
         return ParseRequest(
             f_target=f_target,
@@ -1130,14 +1213,15 @@ class ArchiveCliParser:
         lsmiotool archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
 
     Positional Arguments:
-        <benchmark>: Required. 'lsmio' or 'ior'.
+        <benchmark>: Required. 'lsmio', 'ior' or 'epocpp' (epocpp: --source <the run
+            root of one of its arms>, whose whole run is archived).
         <scale>: Required. One of: local, bake, small, large, variants
             ('baseline' is the deprecated spelling of 'variants'); not variants for ior.
         <variant>: Optional. Supported exclusively for 'lsmio variants'.
 
     Options:
         --dest <path>: Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline};
-            ior/<scale> for ior).
+            ior/<scale> for ior, epocpp/<scale> for epocpp).
             Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
         --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE;
             for an lsmiotool run, the run's own setup); for ior, the IOR setup of the
@@ -1146,7 +1230,7 @@ class ArchiveCliParser:
             directory (default: resolved from the benchmark root, see ArchiveMain).
     """
 
-    VALID_BENCHMARKS = frozenset({"lsmio", "ior"})
+    VALID_BENCHMARKS = frozenset({"lsmio", "ior", "epocpp"})
     VALID_SCALES = frozenset({"local", "bake", "small", "large", "variants"})
     # Deprecated spelling retained so existing scripts keep working
     SCALE_ALIASES = {"baseline": "variants"}
@@ -1244,10 +1328,10 @@ class ArchiveCliParser:
             raise ArchiveCliParseError(
                 f"Invalid scale: {f_scale_tok!r}. Must be one of: {sorted(cls.VALID_SCALES)}"
             )
-        if f_benchmark == "ior" and f_scale == "variants":
+        if f_benchmark in ("ior", "epocpp") and f_scale == "variants":
             raise ArchiveCliParseError(
-                "Invalid scale for ior: 'variants'. Only ior scaling runs "
-                "(local, bake, small, large) are archived."
+                f"Invalid scale for {f_benchmark}: 'variants'. Only {f_benchmark} "
+                "scaling runs (local, bake, small, large) are archived."
             )
 
         # Parse trailing options and optional positional variant
@@ -1331,13 +1415,12 @@ class ArchiveCliParser:
             ArchiveCliParseError: For an unknown setup.
         """
         from lsmiotool.lib.arms import IOR_ARMS
-        from lsmiotool.lib.benchmarks import IorAdapter, LsmioAdapter
+        from lsmiotool.lib.benchmarks import EpocppAdapter, IorAdapter, LsmioAdapter
 
-        f_allowed = (
-            IorAdapter.ALLOWED_SETUPS
-            if f_benchmark == "ior"
-            else LsmioAdapter.ALLOWED_SETUPS
-        )
+        f_allowed = {
+            "ior": IorAdapter.ALLOWED_SETUPS,
+            "epocpp": EpocppAdapter.ALLOWED_SETUPS,
+        }.get(f_benchmark, LsmioAdapter.ALLOWED_SETUPS)
         f_norm = f_setup.strip().upper()
         if f_benchmark == "ior" and f_setup.strip().lower() in IOR_ARMS:
             # An IOR setup token, as 'run ior <scale> <ior setups>' takes it
@@ -1394,7 +1477,10 @@ class CompareNodesRequest:
         if not isinstance(f_op, str) or not f_op.strip():
             raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
         f_norm_op = f_op.strip().lower()
-        f_valid_ops = ("read", "write", "both") if f_all else ("read", "write")
+        # runtime and cost chart an epocpp archive's wall-time arms
+        f_valid_ops = ("read", "write", "runtime", "cost") + (
+            ("both",) if f_all else ()
+        )
         if f_norm_op not in f_valid_ops:
             raise ValueError(f"op must be one of {f_valid_ops}, got: {f_op!r}")
         if (
@@ -1713,9 +1799,17 @@ class CompareCliParser:
     """
 
     VALID_SUBMODES: Tuple[str, ...] = ("nodes", "variants")
-    VALID_OPERATIONS_NODES: Tuple[str, ...] = ("read", "write")
+    # runtime and cost: an epocpp archive's wall-time arms (epocpp-report.csv,
+    # epocpp-cost.csv)
+    VALID_OPERATIONS_NODES: Tuple[str, ...] = ("read", "write", "runtime", "cost")
     VALID_OPERATIONS_VARIANTS: Tuple[str, ...] = ("read", "write", "both")
-    VALID_OPERATIONS: Tuple[str, ...] = ("read", "write", "both")
+    VALID_OPERATIONS: Tuple[str, ...] = (
+        "read",
+        "write",
+        "both",
+        "runtime",
+        "cost",
+    )
     VALID_STRIPES: Tuple[int, ...] = (4, 16)
     VALID_BLOCKSIZES: Tuple[str, ...] = ("64K", "1M", "8M")
     WORKLOAD_PERMUTATIONS: Tuple[Tuple[int, str], ...] = (
@@ -1863,8 +1957,9 @@ class CompareCliParser:
                 f_op_norm = f_tok.strip().lower()
                 if f_op_norm not in cls.VALID_OPERATIONS_NODES:
                     raise CompareCliParseError(
-                        f"Invalid operation: {f_tok!r}. Must be 'read' or 'write' (a "
-                        "further folder is a path with '/' or an existing directory)"
+                        f"Invalid operation: {f_tok!r}. Must be 'read', 'write', "
+                        "'runtime' or 'cost' (a further folder is a path with '/' or "
+                        "an existing directory)"
                     )
                 f_op = f_op_norm
                 f_pos_idx += 1
