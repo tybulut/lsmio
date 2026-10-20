@@ -53,9 +53,9 @@ common cmds:
   parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
   parseLegacy lsmio backends <local|bake|small|large> [<path>]
   run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
-  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
-  run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--fast] [--foreground]
-  run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--fast] [--foreground]
+  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
+  run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
+  run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
 
 other cmds:
   latex <viking|viking2|isambard>
@@ -116,9 +116,9 @@ Source (default): <benchmark_root> is the site profile's benchmark root.
 
 RUN_HELP_TEXT = """Usage:
   lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
-  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
-  lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--fast] [--foreground]
-  lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--repeats <n>] [--fast] [--foreground]
+  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
+  lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
+  lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
 
 Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp, epocpp ('run epocpp backends')
@@ -179,6 +179,13 @@ Options:
                 hours: QoS 'long' on ARCHER2), for the default 10 repeats.
   --repeats <n> Runs of each epocpp arm per combination (default 10); the reports take
                 the Max() of bandwidth and the Min() of EPOCpp's Runtime over them.
+  --nodes <list> Only these node counts of the scale, comma-separated (e.g. 32 or
+                24,32,40), run in the scale's order; each must be one of the scale's
+                ('lsmio backends', 'ior <scale>' and 'epocpp backends'). E.g.
+                'run epocpp backends small adios2 --nodes 32' runs the baseline and
+                the ADIOS2 arms at 32 nodes alone. Each point keeps its own walltime
+                and is archived like a full run's: without --resume its <nodes>
+                archive is replaced.
   --versioned   Execute versioned comparison run against reference baseline.
   --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
   --foreground  Stay attached to the terminal. By default a run started from a terminal
@@ -603,6 +610,7 @@ class RunCliParser:
         f_versioned: bool = False
         f_fast: bool = False
         f_repeats: Optional[int] = None
+        f_nodes: Optional[List[int]] = None
 
         f_idx = 0
         while f_idx < len(f_trailing_tokens):
@@ -666,6 +674,30 @@ class RunCliParser:
                         f"--repeats must be a positive integer, got: {f_val!r}"
                     )
                 f_repeats = int(f_val)
+                f_idx += 2
+            elif f_tok == "--nodes":
+                if f_nodes is not None:
+                    raise RunCliParseError("Duplicate '--nodes' option specified.")
+                if f_idx + 1 >= len(f_trailing_tokens):
+                    raise RunCliParseError("Missing value after '--nodes' option.")
+                f_val = f_trailing_tokens[f_idx + 1].strip()
+                f_items = [f_n.strip() for f_n in f_val.split(",")]
+                if (
+                    not all(
+                        f_n.isascii()
+                        and f_n.isdigit()
+                        and len(f_n) <= 9
+                        and int(f_n) >= 1
+                        for f_n in f_items
+                    )
+                    or len(set(f_items)) != len(f_items)
+                    or len({int(f_n) for f_n in f_items}) != len(f_items)
+                ):
+                    raise RunCliParseError(
+                        "--nodes must be a comma-separated list of distinct positive "
+                        f"integers, got: {f_val!r}"
+                    )
+                f_nodes = [int(f_n) for f_n in f_items]
                 f_idx += 2
             elif f_tok in ("--out-dir", "--output-dir", "--dest"):
                 if f_out_dir is not None:
@@ -741,6 +773,7 @@ class RunCliParser:
                     "--versioned=",
                     "--fast=",
                     "--repeats=",
+                    "--nodes=",
                 )
             ):
                 flag_name = f_tok.split("=")[0]
@@ -790,6 +823,13 @@ class RunCliParser:
         # arms come from its backend list, not --setup
         if f_repeats is not None and f_benchmark != "epocpp":
             raise RunCliParseError("--repeats is supported only for 'epocpp backends'.")
+        # --nodes picks points of a backends run's scale: lsmio backends, the ior
+        # scaling runs (parsed as backends) and epocpp backends
+        if f_nodes is not None and (f_mode != "backends" or f_scale == "variants"):
+            raise RunCliParseError(
+                "--nodes is supported only for 'lsmio backends', 'ior <scale>' and "
+                "'epocpp backends'."
+            )
         if f_benchmark == "epocpp" and f_setup_name is not None:
             raise RunCliParseError(
                 "--setup is not supported for 'epocpp backends': "
@@ -858,6 +898,7 @@ class RunCliParser:
             f_versioned=f_versioned,
             f_fast=f_fast,
             f_repeats=f_repeats,
+            f_nodes=f_nodes,
         )
 
 

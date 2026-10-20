@@ -422,7 +422,7 @@ class EpocppExportTest(_EpocppWorkerHarness):
             self.assertEqual(f_row[3:5], ["runtime", "1.250000"])
             self.assertEqual(f_row[7], "2")
             # The mock writes 3000 bytes, far less than the deck's particles
-            self.assertEqual(f_row[9:], ["3000", "short"])
+            self.assertEqual(f_row[9:], ["3000", "short", "", ""])
 
         # parse <run root>: the same, into --output-dir
         f_out = os.path.join(self.m_temp_dir, "parsed")

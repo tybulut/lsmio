@@ -120,6 +120,51 @@ class EpocppCliTest(unittest.TestCase):
         self.assertIs(f_req.archive, False)
         self.assertTrue(f_req.resume)
 
+    def testNodesOption(self) -> None:
+        f_req = parseRunArguments(
+            ["run", "epocpp", "backends", "small", "adios2", "--nodes", "32"],
+            f_environ={},
+        )
+        self.assertEqual(f_req.nodes, (32,))
+        self.assertEqual(f_req.backends, ("adios2",))
+        f_req = parseRunArguments(
+            ["run", "epocpp", "backends", "small", "--nodes", "40, 24,32"],
+            f_environ={},
+        )
+        self.assertEqual(f_req.nodes, (40, 24, 32))
+        for f_argv in (
+            ["run", "lsmio", "backends", "small", "adios2", "--nodes", "8,2"],
+            ["run", "ior", "small", "--nodes", "8,2"],
+            ["run", "ior", "small", "base,hdf5", "--nodes", "2"],
+        ):
+            with self.subTest(f_argv=f_argv):
+                self.assertIsNotNone(parseRunArguments(f_argv, f_environ={}).nodes)
+        self.assertIsNone(
+            parseRunArguments(
+                ["run", "epocpp", "backends", "small"], f_environ={}
+            ).nodes
+        )
+        for f_argv in (
+            ["run", "epocpp", "backends", "small", "--nodes"],
+            ["run", "epocpp", "backends", "small", "--nodes", ""],
+            ["run", "epocpp", "backends", "small", "--nodes", "0"],
+            ["run", "epocpp", "backends", "small", "--nodes", "x"],
+            ["run", "epocpp", "backends", "small", "--nodes", "\u00b2"],
+            ["run", "epocpp", "backends", "small", "--nodes", "8,"],
+            ["run", "epocpp", "backends", "small", "--nodes", "8,8"],
+            ["run", "epocpp", "backends", "small", "--nodes", "8,08"],
+            ["run", "epocpp", "backends", "small", "--nodes", "1" * 10],
+            ["run", "epocpp", "backends", "small", "--nodes", "9" * 5000],
+            ["run", "epocpp", "backends", "small", "--nodes=8"],
+            ["run", "epocpp", "backends", "small", "--nodes", "8", "--nodes", "16"],
+            # Only backends runs take it: not plain scaling, variants or lmp runs
+            ["run", "lsmio", "small", "--nodes", "8"],
+            ["run", "lsmio", "variants", "legacy", "--nodes", "8"],
+            ["run", "lmp", "small", "--nodes", "8"],
+        ):
+            with self.subTest(f_argv=f_argv), self.assertRaises(RunCliParseError):
+                parseRunArguments(f_argv, f_environ={})
+
     def testRefusals(self) -> None:
         with self.assertRaisesRegex(RunCliParseError, "'run epocpp backends'"):
             parseRunArguments(["run", "epocpp", "backends"], f_environ={})
@@ -326,11 +371,83 @@ class EpocppPlanTest(unittest.TestCase):
         with self.assertRaises(PlanValidationError):
             RunRequest("epocpp", "small", f_repeats=True)
 
+    def testNodesPickScalePoints(self) -> None:
+        def _nodes(f_plan: Any) -> List[int]:
+            return [f_sp.nodes for f_sp in f_plan.scale_points]
+
+        self.assertEqual(_nodes(self._plan("small", f_nodes=[32])), [32])
+        # In the scale's order, with each point's own walltime
+        f_plan = self._plan("large", f_nodes=[64, 8])
+        self.assertEqual(_nodes(f_plan), [8, 64])
+        self.assertEqual(
+            [f_p.walltime for f_p in f_plan.scheduled_points], ["12:00:00", "36:00:00"]
+        )
+        # Recorded in the scale's order, not the order given
+        self.assertEqual(f_plan.request.nodes, (8, 64))
+        self.assertIsNone(self._plan("small").request.nodes)
+        self.assertEqual(
+            _nodes(self._plan("small", f_nodes=[48, 40, 32, 24, 16, 8, 4, 2])),
+            _nodes(self._plan("small")),
+        )
+        # Nodes the scale does not run, and bad values
+        with self.assertRaisesRegex(
+            PlanValidationError, r"\[1\] are not in the 'small'"
+        ):
+            self._plan("small", f_nodes=[1])
+        with self.assertRaisesRegex(
+            PlanValidationError, r"\[12\] are not in the 'large'"
+        ):
+            self._plan("large", f_nodes=[8, 12])
+        for f_bad in ([], [0], [True], [8, 8], "8", [8.0]):
+            with self.subTest(f_bad=f_bad), self.assertRaises(PlanValidationError):
+                RunRequest("epocpp", "small", f_nodes=f_bad)
+        # lsmio and ior runs take it too, not lmp or variants runs
+        for f_request in (
+            RunRequest("lsmio", "small", f_mode="backends", f_nodes=[8, 2]),
+            RunRequest("ior", "small", f_mode="backends", f_nodes=[8, 2]),
+        ):
+            self.assertEqual(
+                _nodes(RunPlanner.createPlan(f_request, self.m_viking2)), [2, 8]
+            )
+        for f_request in (
+            RunRequest("lmp", "small", f_nodes=[8]),
+            RunRequest("lsmio", "variants", f_variants=["legacy"], f_nodes=[1]),
+        ):
+            with (
+                self.subTest(f_request=f_request),
+                self.assertRaisesRegex(
+                    PlanValidationError, "only for 'lsmio backends'"
+                ),
+            ):
+                RunPlanner.createPlan(f_request, self.m_viking2)
+
     def testEveryArmSetupPlans(self) -> None:
         for _, f_setup, _ in _ALL_ARMS:
             self.assertEqual(self._plan("bake", f_setup).request.setup, f_setup)
         with self.assertRaises(PlanValidationError):
             self._plan("bake", "HDF5")
+
+    def testManifestRoundTripKeepsNodes(self) -> None:
+        f_plan = self._plan("small", "ADIOS2-BW", f_nodes=[40, 32])
+        f_text = ManifestSerializer.serialize(f_plan)
+        self.assertEqual(json.loads(f_text)["request"]["nodes"], [32, 40])
+        f_doc = ManifestSerializer.deserialize(f_text)
+        self.assertEqual(f_doc.request, f_plan.request)
+        self.assertEqual(f_doc.request.nodes, (32, 40))
+        self.assertEqual(ManifestSerializer.serialize(f_doc.toRunPlan()), f_text)
+        # A run without --nodes records none, and a bad record is refused
+        self.assertNotIn(
+            "nodes",
+            json.loads(ManifestSerializer.serialize(self._plan("small")))["request"],
+        )
+        f_bad = json.loads(f_text)
+        for f_value in ("32", [32, "8"], [True]):
+            f_bad["request"]["nodes"] = f_value
+            with (
+                self.subTest(f_value=f_value),
+                self.assertRaises(ManifestValidationError),
+            ):
+                ManifestSerializer.deserialize(json.dumps(f_bad))
 
     def testManifestRoundTripKeepsRepeats(self) -> None:
         f_plan = self._plan("large", "PLUGIN-BW", f_repeats=3)
@@ -489,6 +606,27 @@ class EpocppOrchestrationTest(unittest.TestCase):
             f_worker_executable=self.m_worker_path,
         )
         return f_orch
+
+    def testNodesRunOnlyThosePoints(self) -> None:
+        f_orch = self._execute(
+            [
+                "run",
+                "epocpp",
+                "backends",
+                "bake",
+                "posix",
+                "--repeats",
+                "1",
+                "--nodes",
+                "4,2",
+                "--no-archive",
+            ]
+        )
+        for f_r in f_orch.groupRuns:
+            self.assertEqual([f_sp.nodes for f_sp in f_r["plan"].scale_points], [2, 4])
+            with open(f_r["store"].layout.manifestPath) as f_f:
+                self.assertEqual(json.load(f_f)["request"]["nodes"], [2, 4])
+        self.assertEqual(len(self._submittedScripts(self.m_runner)), 2)
 
     def testOneJobPerPointRunsEveryArm(self) -> None:
         f_orch = self._execute(

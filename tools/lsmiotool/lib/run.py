@@ -418,6 +418,7 @@ class RunRequest:
         "m_versioned",
         "m_fast",
         "m_repeats",
+        "m_nodes",
         "_frozen",
     )
 
@@ -439,6 +440,7 @@ class RunRequest:
         f_versioned: bool = False,
         f_fast: bool = False,
         f_repeats: Optional[int] = None,
+        f_nodes: Optional[Sequence[int]] = None,
     ) -> None:
         if isinstance(f_mode, bool):
             f_ssd = f_mode
@@ -552,6 +554,22 @@ class RunRequest:
             raise PlanValidationError(
                 f"repeats must be a positive integer or None, got: {f_repeats!r}"
             )
+        if f_nodes is not None:
+            if (
+                isinstance(f_nodes, (str, bytes))
+                or not isinstance(f_nodes, (list, tuple))
+                or not f_nodes
+                or any(
+                    isinstance(f_n, bool) or not isinstance(f_n, int) or f_n < 1
+                    for f_n in f_nodes
+                )
+                or len(set(f_nodes)) != len(f_nodes)
+            ):
+                raise PlanValidationError(
+                    "nodes must be a non-empty list of distinct positive integers "
+                    f"or None, got: {f_nodes!r}"
+                )
+            f_nodes = tuple(f_nodes)
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
@@ -568,6 +586,7 @@ class RunRequest:
         super().__setattr__("m_versioned", bool(f_versioned))
         super().__setattr__("m_fast", bool(f_fast))
         super().__setattr__("m_repeats", f_repeats)
+        super().__setattr__("m_nodes", f_nodes)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -680,6 +699,11 @@ class RunRequest:
         """Runs of each epocpp arm per combination (--repeats); None is the default."""
         return self.m_repeats
 
+    @property
+    def nodes(self) -> Optional[Tuple[int, ...]]:
+        """The node counts to run (--nodes), from the scale's; None runs them all."""
+        return self.m_nodes
+
     def toDict(self) -> Dict[str, Any]:
         f_dict: Dict[str, Any] = {
             "target": self.m_target,
@@ -713,6 +737,8 @@ class RunRequest:
             f_dict["fast"] = True
         if self.m_repeats is not None:
             f_dict["repeats"] = self.m_repeats
+        if self.m_nodes is not None:
+            f_dict["nodes"] = list(self.m_nodes)
         return f_dict
 
     def __repr__(self) -> str:
@@ -732,7 +758,8 @@ class RunRequest:
             f"walltime={self.m_walltime!r}, "
             f"versioned={self.m_versioned!r}, "
             f"fast={self.m_fast!r}, "
-            f"repeats={self.m_repeats!r})"
+            f"repeats={self.m_repeats!r}, "
+            f"nodes={self.m_nodes!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -753,6 +780,7 @@ class RunRequest:
                 and self.m_versioned == f_other.m_versioned
                 and self.m_fast == f_other.m_fast
                 and self.m_repeats == f_other.m_repeats
+                and self.m_nodes == f_other.m_nodes
             )
         return False
 
@@ -1668,6 +1696,23 @@ class RunPlanner:
         f_shape = "large" if f_scale == "large" else "small"
         f_resource_policy = f_profile.getResourcePolicy(f_shape)
         f_scale_points = cls.scalePoints(f_target, f_scale)
+        if f_request.nodes is not None:
+            # --nodes picks some of the scale's points, in the scale's order
+            if f_target not in ("epocpp", "lsmio", "ior") or f_scale == "variants":
+                raise PlanValidationError(
+                    "nodes is supported only for 'lsmio backends', 'ior <scale>' and "
+                    "'epocpp backends'"
+                )
+            f_known = {f_sp.nodes for f_sp in f_scale_points}
+            f_unknown = [f_n for f_n in f_request.nodes if f_n not in f_known]
+            if f_unknown:
+                raise PlanValidationError(
+                    f"nodes {f_unknown} are not in the '{f_scale}' scale; "
+                    f"it runs {sorted(f_known)}"
+                )
+            f_scale_points = tuple(
+                f_sp for f_sp in f_scale_points if f_sp.nodes in f_request.nodes
+            )
 
         # 5. ScheduledPointResources calculation
         from lsmiotool.lib.scheduler import parseWalltimeToSeconds
@@ -1943,6 +1988,12 @@ class RunPlanner:
                 if f_target == "epocpp"
                 else None
             ),
+            # In the scale's order, whatever order --nodes was given in
+            f_nodes=(
+                tuple(f_sp.nodes for f_sp in f_scale_points)
+                if f_request.nodes is not None
+                else None
+            ),
         )
 
         if f_target == "lmp":
@@ -2211,6 +2262,7 @@ class ManifestSerializer:
             "walltime",
             "fast",
             "repeats",
+            "nodes",
         }
     )
     REQUIRED_PLAN_KEYS: Set[str] = {
@@ -2455,6 +2507,17 @@ class ManifestSerializer:
             isinstance(f_repeats_raw, bool) or not isinstance(f_repeats_raw, int)
         ):
             raise ManifestValidationError("request.repeats must be an integer or null")
+        # --nodes: a run given some records them (lsmio/ior/epocpp backends arms)
+        f_nodes_raw = f_req_raw.get("nodes")
+        if f_nodes_raw is not None and (
+            not isinstance(f_nodes_raw, list)
+            or any(
+                isinstance(f_n, bool) or not isinstance(f_n, int) for f_n in f_nodes_raw
+            )
+        ):
+            raise ManifestValidationError(
+                "request.nodes must be a list of integers or null"
+            )
 
         try:
             f_request = RunRequest(
@@ -2471,6 +2534,7 @@ class ManifestSerializer:
                 f_walltime=f_walltime_raw,
                 f_fast=bool(f_fast_raw),
                 f_repeats=f_repeats_raw,
+                f_nodes=f_nodes_raw,
             )
         except Exception as f_err:
             raise ManifestValidationError(f"Invalid request record: {f_err}")
@@ -5924,6 +5988,7 @@ class RunOrchestrator:
                         f_walltime=f_request.walltime,
                         f_fast=f_request.fast,
                         f_repeats=f_request.repeats,
+                        f_nodes=f_request.nodes,
                     )
                     try:
                         f_plan = f_planner_obj.createPlan(

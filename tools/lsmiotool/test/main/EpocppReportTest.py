@@ -37,7 +37,7 @@ import io
 import os
 import shutil
 import tempfile
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -63,16 +63,24 @@ def _log(
     f_bytes: Optional[int] = None,
     f_write: Optional[Sequence[float]] = None,
     f_read: Optional[Sequence[float]] = None,
+    f_dumps: Optional[Dict[str, Sequence[Tuple[float, float]]]] = None,
 ) -> str:
     """An EPOCpp run's log as the worker leaves it; f_write/f_read are (max, min, mean,
-    MiB) of an lsmio::Benchmark summary."""
+    MiB) of an lsmio::Benchmark summary, f_dumps the (MiB/s, MiB) of each dump's
+    iwrite/iread row (a summary then counts its rows, else 11 iterations)."""
     f_lines = ["EPOC++ version v1.0.0", "MPI processor split: 2, 2"]
     if f_write is not None or f_read is not None:
         f_lines += ["BENCHMARK RESULTS: ", "Iteration-WRITE: POSIX:data"]
+        for f_op, f_rows in (f_dumps or {}).items():
+            for f_bw, f_mib in f_rows:
+                f_lines.append(
+                    f"{f_op},{f_bw:.2f},{f_bw:.2f},{f_bw:.2f},{f_mib:.2f},33,1"
+                )
         for f_op, f_vals in (("write", f_write), ("read", f_read)):
             if f_vals is not None:
+                f_iters = len((f_dumps or {}).get("i" + f_op, ())) or 11
                 f_lines.append(
-                    f"{f_op},{f_vals[0]:.2f},{f_vals[1]:.2f},{f_vals[2]:.2f},{f_vals[3]:.2f},33,11"
+                    f"{f_op},{f_vals[0]:.2f},{f_vals[1]:.2f},{f_vals[2]:.2f},{f_vals[3]:.2f},33,{f_iters}"
                 )
     if f_runtime is not None:
         f_lines.append(f"Runtime = {f_runtime:f}")
@@ -258,6 +266,8 @@ class EpocppReportTest(EpocppArchiveFixture):
         self.assertEqual(f_rows[0]["PayloadBytes"], str(3 * 1024 * 1024))
         self.assertEqual(f_rows[0]["DataCheck"], "ok")
         self.assertEqual(f_rows[1]["DataCheck"], "")
+        # Without per-dump rows there is no whole-run rate
+        self.assertEqual((f_rows[0]["Effective"], f_rows[0]["StallFactor"]), ("", ""))
 
         f_rows = _rows(
             epocppreport.writeArmReport(
@@ -328,6 +338,91 @@ class EpocppReportTest(EpocppArchiveFixture):
         )
         self.assertEqual(f_rows[0]["BestRuntime"], "13.500000")
         self.assertEqual(f_rows[0]["BaselineBestRuntime"], "9.000000")
+
+    def testEffectiveBandwidthAndStallFactor(self) -> None:
+        # Run 1 has a fast dump and a stalled one; run 2's dumps take alike. Best is
+        # the fastest dump of any run, Effective the best run's MiB over its dumps' time
+        f_arm = self._arm(
+            "epocpp-posix-bw",
+            "POSIX-BW",
+            {
+                (2, 4, "1M"): [
+                    _log(
+                        5.0,
+                        3 * 1024 * 1024,
+                        (100.0, 1.0, 67.0, 3.0),
+                        (90.0, 30.0, 60.0, 3.0),
+                        {
+                            "iwrite": [(100.0, 1.0), (100.0, 1.0), (1.0, 1.0)],
+                            "iread": [(90.0, 1.0), (30.0, 1.0), (60.0, 1.0)],
+                        },
+                    ),
+                    _log(
+                        5.0,
+                        3 * 1024 * 1024,
+                        (50.0, 50.0, 50.0, 3.0),
+                        (40.0, 40.0, 40.0, 3.0),
+                        {"iwrite": [(50.0, 1.0)] * 3, "iread": [(40.0, 1.0)] * 3},
+                    ),
+                ],
+            },
+        )
+        f_write, f_read = _rows(epocppreport.writeArmReport(f_arm))
+        self.assertEqual(f_write["Best"], "100.00")
+        self.assertEqual(
+            (f_write["Effective"], f_write["StallFactor"]), ("50.00", "2.00")
+        )
+        # Run 1 reads 3 MiB in 1/90 + 1/30 + 1/60 s: 49.09 MiB/s, more than run 2's 40
+        self.assertEqual(f_read["Best"], "90.00")
+        self.assertEqual(
+            (f_read["Effective"], f_read["StallFactor"]), ("49.09", "1.83")
+        )
+        f_run = epocppreport.parseRunLog(
+            _log(
+                1.0,
+                None,
+                (100.0, 1.0, 67.0, 3.0),
+                None,
+                {"iwrite": [(100.0, 1.0), (1.0, 1.0)]},
+            )
+        )
+        self.assertAlmostEqual(f_run.write_effective or 0, 2 / 1.01)
+        self.assertIsNone(f_run.read_effective)
+        # A summary counting a dump with no row (a mangled line) leaves the rate open
+        f_text = _log(
+            1.0, None, (100.0, 1.0, 67.0, 3.0), None, {"iwrite": [(100.0, 1.0)] * 3}
+        )
+        self.assertIsNone(
+            epocppreport.parseRunLog(
+                f_text.replace("iwrite,100.00,100.00,100.00,1.00,33,1\n", "", 1)
+            ).write_effective
+        )
+        # A dump without a rate leaves the run's rate open
+        self.assertIsNone(
+            epocppreport.parseRunLog(
+                _log(
+                    1.0,
+                    None,
+                    (1.0, 0.0, 1.0, 2.0),
+                    None,
+                    {"iwrite": [(1.0, 1.0), (0.0, 1.0)]},
+                )
+            ).write_effective
+        )
+
+    def testWallTimeRowsHaveNoRate(self) -> None:
+        f_arm = self._arm("epocpp-posix", "POSIX", {(2, 4, "1M"): [_log(1.0)]})
+        f_row = _rows(epocppreport.writeArmReport(f_arm))[0]
+        self.assertEqual((f_row["Effective"], f_row["StallFactor"]), ("", ""))
+
+    def testReportsFromBeforeTheRateColumnsAreStillRead(self) -> None:
+        # A report written with the header before Effective and StallFactor
+        f_arm = self._arm("epocpp-baseline", "NONE", {(2, 4, "1M"): [_log(1.0, 0)]})
+        f_path = os.path.join(f_arm, epocppreport.ARM_REPORT_FILE)
+        with open(f_path, "w", encoding="utf-8") as f_f:
+            f_f.write(",".join(epocppreport.REPORT_HEADER[:-2]) + "\n")
+            f_f.write("2,4,1M,runtime,1.000000,1.000000,1.000000,1,0,0,ok\n")
+        self.assertEqual(epocppreport.readReport(f_path)[0]["Best"], "1.000000")
 
     def testStaleArmReportAndUncountedRuns(self) -> None:
         # A run without its byte count leaves the data check open

@@ -180,13 +180,13 @@ Full invocation signature:
 lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast]
 
 # Multi-Backend Intra-Allocation Scaling Execution:
-lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--fast]
+lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--nodes <list>] [--fast]
 
 # IOR Scaling Execution (one arm per IOR setup in each job, archived to lsmio-archive/ior/<scale>):
-lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--fast]
+lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--nodes <list>] [--fast]
 
 # EPOCpp I/O backends (one arm per run kind in each job, archived to lsmio-archive/epocpp/<scale>):
-lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--repeats <n>] [--fast]
+lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--wallhour <hours>] [--repeats <n>] [--nodes <list>] [--fast]
 ```
 
 For legacy migration compatibility, global `--ssd` / `-s` is also accepted:
@@ -244,6 +244,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - **Single Cluster Allocation**: Submits a single job allocation for each scale point ($K$). Backends execute one after another within that allocation on identical physical nodes, ensuring fair cross-engine comparisons. The same holds for `variants` (baseline and each variant) and `--versioned` (reference baseline and each variant). Each backend or variant keeps its own run root under `<root>/runs/`.
   - **Per-point archiving**: Unless `--no-archive` is given, each backend's `<nodes>` directory is archived to `<dest>/outputs-<arm>/<nodes>` (`adios`, `native`, `plugin`, `rocksdb`, `leveldb`; `adios2` is `adios`) as soon as its scale point finishes, with `agg-*-report.csv` and `lsm-report.csv` regenerated. A rerun replaces the `<nodes>` directories it archives again.
   - **Data cleanup**: Each combination's data directory is emptied before the next combination runs.
+  - **`--nodes <list>`**: runs only these node counts of the scale (comma-separated, each one of the scale's), in the scale's order, each with its own walltime; also for `ior` scaling runs and `epocpp backends`, not for plain scaling, `variants` or `lmp` runs. Their points are archived and resumed like a full run's (without `--resume`, a rerun replaces the `<nodes>` directories it archives again).
   - **Dynamic Walltime Calculation (`INV-BACKEND-2`)**: Automatically scales allocation walltime based on backend count and node count:
     $$\text{wallhour} = \text{clamp}_{[1, 48]}\left(2 + N_{\text{backends}} \times \max\left(1, \left\lfloor \frac{K}{3} \right\rfloor\right)\right)$$
 - `<ior setups>`: Optional comma-separated list of IOR setups for an `ior` scaling run (`local`, `bake`, `small`, `large`), defaulting to `base,collective,hdf5,hdf5-collective`. Tokens: `base` (or `ior`; POSIX), `collective` (`-c -a MPIIO`), `hdf5` (`-a HDF5`), `hdf5-collective` (or `hdf5-c`; `-c -a HDF5`), `fsync` (`-e`), `reverse` (`-C`). bmtool's `jobs/ior-benchmark.sh` ran one hard-coded setup; lsmiotool runs the setups like backends:
@@ -255,6 +256,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - **Deck**: one template, `share/epocpp/two_stream.deck.in` (installed as `share/lsmio/epocpp/`): the 2D two-stream decks recommended for these benchmarks, filled in with the deck size and the arm's output block (full restart dumps every step, a file per process; no output for the baseline). `local`, `bake` and `small` run the small deck (128x128 cells, 64 particles per cell), `large` the large one (1024x1024, 128).
   - **Scale points**: `local` and `bake` as above; `small` on 2, 4, 8, 16, 24, 32, 40 and 48 nodes (1 task/node); `large` on 8, 16, 32, 48 and 64 nodes (4 tasks/node).
   - **Walltime**: 12 hours per small-deck point; for the large deck 12 hours at 8 and 16 nodes, 16 at 32, 20 at 48 and 36 at 64 (on ARCHER2 the 64-node point, over 24 hours, goes to the `long` QoS). They assume the default 10 repeats: `--repeats` does not scale them. `--time` overrides it; `--fast` halves it.
+  - **`--nodes <list>`**: runs only these node counts of the scale (comma-separated, each one of the scale's; e.g. `run epocpp backends small adios2 --nodes 32` for the baseline and the ADIOS2 arms at 32 nodes), in the scale's order. Their points are archived and resumed like a full run's: `--resume` skips a point whose `<nodes>` archive exists, and without `--resume` a rerun replaces the `<nodes>` directories it archives again, for the arms it runs (the other arms' directories at that node count are kept, so the cost report can then compare an older arm with a newer baseline); use `--no-archive` or `--out-dir` to keep the existing ones. The manifest records the node counts in the scale's order.
   - **Executable**: `<install_prefix>/bin/epocpp`, an EPOCpp built with LSMIO; the plugin arms also need `liblsmio_adios` in `<install_prefix>/lib`.
 - `<variants>`: Optional variant specification for `lsmio variants`. Supported formats:
   - **Omitted** or **`default`** / **`base`**: Executes the default baseline configuration (empty variant).
@@ -571,9 +573,9 @@ lsmiotool parse epocpp backends <local|bake|small|large> [--output-dir <dir>]
 
 #### EPOCpp Reports (`lsmiotool.lib.epocppreport`):
 - **Archive layout**: `<benchmark_root>/lsmio-archive/epocpp/<scale>/outputs-<arm>/<nodes>/<date>/out-<arm>-<rf>-<bs>-<date>-<host>-r<NN>.txt`, one EPOCpp output per run (`--repeats` per combination), plus `<nodes>/input.deck`, the deck those runs read. Each output ends with the worker's `lsmiotool: data bytes = <n> allocated = <n> files = <n>` line, counted after the run exited.
-- **`outputs-<arm>/epocpp-report.csv`**: `N,Stripes,BlockSize,Metric,Best,Mean,Worst,Runs,PayloadBytes,DataBytes,DataCheck`.
+- **`outputs-<arm>/epocpp-report.csv`**: `N,Stripes,BlockSize,Metric,Best,Mean,Worst,Runs,PayloadBytes,DataBytes,DataCheck,Effective,StallFactor` (reports written before the last two columns existed are still read; `parse epocpp backends <scale>` rewrites them).
   - Wall-time arms (`epocpp-baseline`, `epocpp-<backend>`): a `runtime` row; `Best` is the `Min()` of EPOCpp's `Runtime` over the runs (seconds), `Mean` their mean, `Worst` their `Max()`.
-  - Bandwidth arms (`epocpp-<backend>-bw`): `write` and `read` rows from lsmio::Benchmark's summaries; `Best` is the `Max()` of the runs' max MiB/s, `Mean` the `Max()` of their mean MiB/s, `Worst` the `Min()` of their min MiB/s.
+  - Bandwidth arms (`epocpp-<backend>-bw`): `write` and `read` rows from lsmio::Benchmark's summaries; `Best` is the `Max()` of the runs' max MiB/s (the fastest single dump), `Mean` the `Max()` of their mean MiB/s, `Worst` the `Min()` of their min MiB/s. `Effective` is the `Max()` over the runs of a run's whole rate: its dumps' MiB over their total time, from the per-dump `iwrite`/`iread` rows; it is the rate a run's wall time reflects (exactly for an `epocpp` whose `Runtime` covers every dump, from 2026-10-20; before, `Runtime` left out the first dump). `StallFactor` is `Best / Effective`: near 1 when the dumps take alike, large when some dumps stall, which is when the wall-time arms and `Best` disagree; `Best` and `Effective` may come from different runs. Both are empty for a wall-time arm, and for a run whose per-dump rows don't match its summary's iteration count.
   - `PayloadBytes`: what the runs must have written (a bandwidth arm's write summary; for a wall-time arm a lower bound from `input.deck`: every particle's positions, momenta and id in every dump). `DataBytes`: the fewest bytes a run left on disk (the most, for the baseline). `DataCheck`: `ok` when every run covers the payload (the baseline: no run left anything), `short` (the baseline: `unexpected`) when one did not, `unknown` when a run has no count.
 - **`epocpp-cost.csv`** (the scale's archive directory): `N,Stripes,BlockSize,Backend,BestRuntime,BaselineBestRuntime,IOCost`; a backend's I/O cost is the `Min()` of its `Runtime` minus the `Min()` of the no-output baseline's.
 

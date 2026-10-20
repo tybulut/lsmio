@@ -35,13 +35,20 @@ An arm's archive,
 holds one EPOCpp output per run (a combination runs --repeats times). Its report,
 outputs-<arm>/epocpp-report.csv, has a row per node count, combination and metric:
 
-    N,Stripes,BlockSize,Metric,Best,Mean,Worst,Runs,PayloadBytes,DataBytes,DataCheck
+    N,Stripes,BlockSize,Metric,Best,Mean,Worst,Runs,PayloadBytes,DataBytes,DataCheck,Effective,StallFactor
 
 - A wall-time arm (epocpp-baseline, epocpp-<backend>) has a 'runtime' row: Best is the
   Min() of EPOCpp's Runtime over the runs (seconds), Mean their mean, Worst their Max().
 - A bandwidth arm (epocpp-<backend>-bw) has 'write' and 'read' rows from
   lsmio::Benchmark's summaries: Best is the Max() of the runs' max MiB/s, Mean the
-  Max() of their mean MiB/s, Worst the Min() of their min MiB/s.
+  Max() of their mean MiB/s, Worst the Min() of their min MiB/s. Best is thus the
+  fastest single dump; Effective is the Max() over the runs of a run's whole rate (its
+  dumps' MiB over their total time, from the per-dump iwrite/iread rows), the rate a
+  run's wall time reflects (exactly, for an epocpp whose Runtime covers every dump:
+  from 2026-10-20), and StallFactor is Best / Effective: near 1 when the dumps take
+  alike, large when some dumps stall. Best and Effective may come from different
+  runs. Both are empty for a wall-time arm, and for a run whose per-dump rows do not
+  match its summary's iteration count (one output block per run, as the deck has).
 - PayloadBytes is what the runs must have written (a bandwidth arm's write summary; for
   a wall-time arm a lower bound from the archived deck: every particle's positions,
   momenta and id in every dump), DataBytes the fewest bytes a run left on disk (the
@@ -76,7 +83,11 @@ REPORT_HEADER = (
     "PayloadBytes",
     "DataBytes",
     "DataCheck",
+    "Effective",
+    "StallFactor",
 )
+# The header before Effective and StallFactor, still read (a report made then)
+_LEGACY_REPORT_HEADER = REPORT_HEADER[:-2]
 COST_HEADER = (
     "N",
     "Stripes",
@@ -106,6 +117,11 @@ _OUT_RE = re.compile(
 _DATA_RE = re.compile(
     r"^lsmiotool: data bytes = (\d+) allocated = (\d+) files = (\d+)\s*$", re.M
 )
+# A per-dump row of lsmio::Benchmark: access,bw,bw,bw,MiB,ops,1
+_ITERATION_RE = re.compile(
+    r"^(iwrite|iread),([0-9.eE+-]+),[0-9.eE+-]+,[0-9.eE+-]+,([0-9.eE+-]+),\d+,\d+\s*$",
+    re.M,
+)
 _SUMMARY_RE = re.compile(
     r"^(write|read),([0-9.eE+-]+),([0-9.eE+-]+),([0-9.eE+-]+),([0-9.eE+-]+),(\d+),(\d+)\s*$",
     re.M,
@@ -130,6 +146,20 @@ class RunResult(NamedTuple):
     data_bytes: Optional[int]
     write: Optional[Summary]
     read: Optional[Summary]
+    # The run's whole write/read rate in MiB/s: its dumps' MiB over their total time;
+    # None without per-dump rows or with a dump of no rate
+    write_effective: Optional[float] = None
+    read_effective: Optional[float] = None
+
+
+def _effective(f_dumps: List[Tuple[float, float]]) -> Optional[float]:
+    """Total MiB over total seconds of (MiB/s, MiB) dumps; None if any has no rate."""
+    if not f_dumps or any(f_bw <= 0 for f_bw, _ in f_dumps):
+        return None
+    f_seconds = math.fsum(f_mib / f_bw for f_bw, f_mib in f_dumps)
+    return (
+        math.fsum(f_mib for _, f_mib in f_dumps) / f_seconds if f_seconds > 0 else None
+    )
 
 
 def parseRunLog(f_text: str) -> RunResult:
@@ -145,11 +175,25 @@ def parseRunLog(f_text: str) -> RunResult:
             int(f_m.group(6)),
             int(f_m.group(7)),
         )
+    f_dumps: Dict[str, List[Tuple[float, float]]] = {"iwrite": [], "iread": []}
+    for f_m in _ITERATION_RE.finditer(f_text):
+        f_dumps[f_m.group(1)].append((float(f_m.group(2)), float(f_m.group(3))))
+
+    def _rate(f_op: str) -> Optional[float]:
+        # Every dump the summary counted, or no rate: a missing row would hide its time
+        f_summary = f_summaries.get(f_op)
+        f_rows = f_dumps["i" + f_op]
+        if f_summary is None or len(f_rows) != f_summary.iterations:
+            return None
+        return _effective(f_rows)
+
     return RunResult(
         EpocppAdapter.runtimeOf(f_text),
         int(f_data[-1][0]) if f_data else None,
         f_summaries.get("write"),
         f_summaries.get("read"),
+        _rate("write"),
+        _rate("read"),
     )
 
 
@@ -275,11 +319,18 @@ def armReportRows(f_arm_dir: str) -> List[List[str]]:
                     if f_op == "write"
                     else None
                 )
+                f_best = max(f_s.max for f_s in f_sums)
+                f_rates = [
+                    f_e
+                    for f_e in (getattr(f_r, f_op + "_effective") for f_r in f_runs)
+                    if f_e is not None
+                ]
+                f_eff = max(f_rates) if f_rates else None
                 f_rows.append(
                     f_common
                     + [
                         f_op,
-                        _number(max(f_s.max for f_s in f_sums), 2),
+                        _number(f_best, 2),
                         _number(max(f_s.mean for f_s in f_sums), 2),
                         _number(min(f_s.min for f_s in f_sums), 2),
                         str(len(f_sums)),
@@ -288,6 +339,8 @@ def armReportRows(f_arm_dir: str) -> List[List[str]]:
                         _dataCheck(f_payload, f_data, False, f_counted)
                         if f_op == "write"
                         else "",
+                        "" if f_eff is None else _number(f_eff, 2),
+                        "" if not f_eff else _number(f_best / f_eff, 2),
                     ]
                 )
         else:
@@ -306,6 +359,8 @@ def armReportRows(f_arm_dir: str) -> List[List[str]]:
                     "" if f_payload is None else str(f_payload),
                     "" if f_data is None else str(f_data),
                     _dataCheck(f_payload, f_data, f_baseline, f_counted),
+                    "",
+                    "",
                 ]
             )
     return f_rows
@@ -336,7 +391,11 @@ def writeArmReport(f_arm_dir: str) -> Optional[str]:
 def readReport(f_path: str) -> List[Dict[str, str]]:
     with open(f_path, encoding="utf-8", newline="") as f_f:
         f_reader = csv.DictReader(f_f)
-        if tuple(f_reader.fieldnames or ()) not in (REPORT_HEADER, COST_HEADER):
+        if tuple(f_reader.fieldnames or ()) not in (
+            REPORT_HEADER,
+            _LEGACY_REPORT_HEADER,
+            COST_HEADER,
+        ):
             raise ValueError(f"{f_path} is not an epocpp report")
         return list(f_reader)
 
