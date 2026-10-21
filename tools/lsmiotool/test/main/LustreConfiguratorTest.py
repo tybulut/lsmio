@@ -473,6 +473,82 @@ class LustreConfiguratorTest(unittest.TestCase):
         with self.assertRaises(LustreConfigurationError):
             LustreConfigurator.validateTargetDir(f_symlink_with_name, f_combo)
 
+    def testSiteSymlinkAboveRunRootAccepted(self) -> None:
+        """Asserts that site symlinks above the run root are accepted and those from it down are rejected."""
+        f_combo = self.m_combinations[0]  # (16, "8M")
+        f_lustre = os.path.join(self.m_temp_dir, "lustre", "work", "e281")
+        f_point = os.path.join("benchmark", "runs", "r1", "points", "00-tasks-1")
+        os.makedirs(os.path.join(f_lustre, f_point, "data", "c16", "b8M"))
+        f_work = os.path.join(self.m_temp_dir, "work")
+        os.makedirs(f_work)
+        os.symlink(f_lustre, os.path.join(f_work, "e281"))
+
+        f_target = os.path.join(f_work, "e281", f_point, "data", "c16", "b8M")
+        self.assertEqual(
+            LustreConfigurator.validateTargetDir(f_target, f_combo), f_target
+        )
+        self.assertEqual(LustreConfigurator.validateTargetDir(f_target), f_target)
+
+        # A symlinked data/ inside the point directory
+        f_real_data = os.path.join(self.m_temp_dir, "elsewhere")
+        os.makedirs(os.path.join(f_real_data, "c16", "b8M"))
+        f_linked_point = os.path.join(f_lustre, "benchmark", "runs", "r1", "points", "01")
+        os.makedirs(f_linked_point)
+        os.symlink(f_real_data, os.path.join(f_linked_point, "data"))
+        with self.assertRaisesRegex(LustreConfigurationError, "symlink"):
+            LustreConfigurator.validateTargetDir(
+                os.path.join(f_linked_point, "data", "c16", "b8M"), f_combo
+            )
+
+        # A symlinked point directory under the site symlink
+        f_runs = os.path.join(f_lustre, "benchmark", "runs")
+        f_points = os.path.join(f_runs, "r1", "points")
+        os.symlink(os.path.join(f_points, "00-tasks-1"), os.path.join(f_points, "02"))
+        with self.assertRaisesRegex(LustreConfigurationError, "symlink"):
+            LustreConfigurator.validateTargetDir(
+                os.path.join(f_work, "e281", "benchmark", "runs", "r1", "points", "02",
+                             "data", "c16", "b8M"),
+                f_combo,
+            )
+
+        # A symlinked stripe directory, points/ directory and run root
+        f_stripe_point = os.path.join(f_points, "03")
+        os.makedirs(os.path.join(f_stripe_point, "data"))
+        os.symlink(
+            os.path.join(f_real_data, "c16"), os.path.join(f_stripe_point, "data", "c16")
+        )
+        os.symlink(os.path.join(f_runs, "r1"), os.path.join(f_runs, "r2"))
+        os.makedirs(os.path.join(f_runs, "r3"))
+        os.symlink(f_points, os.path.join(f_runs, "r3", "points"))
+        for f_linked in (
+            os.path.join(f_stripe_point, "data", "c16", "b8M"),
+            os.path.join(f_runs, "r2", "points", "00-tasks-1", "data", "c16", "b8M"),
+            os.path.join(f_runs, "r3", "points", "00-tasks-1", "data", "c16", "b8M"),
+        ):
+            with self.assertRaisesRegex(LustreConfigurationError, "symlink", msg=f_linked):
+                LustreConfigurator.validateTargetDir(f_linked, f_combo)
+
+        # A symlinked runs/ directory, just above the run root, is the site's
+        f_other_root = os.path.join(f_lustre, "other-benchmark")
+        os.makedirs(f_other_root)
+        os.symlink(f_runs, os.path.join(f_other_root, "runs"))
+        f_via_runs = os.path.join(
+            f_other_root, "runs", "r1", "points", "00-tasks-1", "data", "c16", "b8M"
+        )
+        self.assertEqual(
+            LustreConfigurator.validateTargetDir(f_via_runs, f_combo), f_via_runs
+        )
+
+        # A point directory at the root, and a leading '//' (kept by normpath), return
+        self.assertEqual(
+            LustreConfigurator.validateTargetDir("/data/c16/b8M", f_combo),
+            "/data/c16/b8M",
+        )
+        self.assertEqual(
+            LustreConfigurator.validateTargetDir("//data/c16/b8M", f_combo),
+            "//data/c16/b8M",
+        )
+
     def testMissingCommandFatal(self) -> None:
         """Asserts that missing lfs binary or nonzero exit code raises LustreConfigurationError."""
         f_combo = self.m_combinations[0]

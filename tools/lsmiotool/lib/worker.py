@@ -1049,7 +1049,9 @@ class LustreConfigurator:
         - Must be a non-empty string and absolute path.
         - Must not contain NUL bytes or path traversal ('..').
         - Must not be root filesystem ('/').
-        - Must not be a symlink or contain symlink components.
+        - Must not be a symlink or contain symlink components up to its run root
+          (else its point directory, the parent of 'data/'); links above it are the
+          site's.
         - Must be contained under point data directory ('data/c<stripe>/b<block>').
 
         Args:
@@ -1086,36 +1088,45 @@ class LustreConfigurator:
         if f_abs_path in ("/", ""):
             raise LustreConfigurationError("Target directory cannot be root filesystem")
 
-        # Symlink detection
-        if os.path.islink(f_abs_path):
-            raise LustreConfigurationError(
-                f"Target directory is a symlink: '{f_abs_path}'"
-            )
-
-        f_curr = f_abs_path
-        while f_curr and f_curr != "/":
-            if os.path.islink(f_curr):
-                raise LustreConfigurationError(
-                    f"Target directory path contains symlink component: '{f_curr}'"
-                )
-            f_parent = os.path.dirname(f_curr)
-            if f_parent == f_curr:
-                break
-            f_curr = f_parent
-
         # Point data directory containment
         if f_combination is not None:
             f_stripe, f_block = cls._extractCombination(f_combination)
             f_expected_pattern = rf"(?:^|/)data/c{f_stripe}/b{f_block}(?:/.*)?$"
-            if not re.search(f_expected_pattern, f_abs_path):
+            f_match = re.search(f_expected_pattern, f_abs_path)
+            if not f_match:
                 raise LustreConfigurationError(
                     f"Target directory '{f_abs_path}' is not contained under expected point data directory 'data/c{f_stripe}/b{f_block}'"
                 )
         else:
             f_general_pattern = r"(?:^|/)data/c\d+/b[0-9]+[KMGkmg]?(?:/.*)?$"
-            if not re.search(f_general_pattern, f_abs_path):
+            f_match = re.search(f_general_pattern, f_abs_path)
+            if not f_match:
                 raise LustreConfigurationError(
                     f"Target directory '{f_abs_path}' is not contained under a point data directory ('data/c<stripe>/b<block>')"
+                )
+
+        # Symlink detection, from the target up to its run root ('runs/<run id>' above
+        # 'points/<point>'), else its point directory (the parent of 'data/'): the
+        # directories a run creates. Above it is the site's own layout, whose links are
+        # legitimate (ARCHER2: /work and /work/<project> link to Lustre). The leftmost
+        # 'data/' match gives the longest walk
+        if os.path.islink(f_abs_path):
+            raise LustreConfigurationError(
+                f"Target directory is a symlink: '{f_abs_path}'"
+            )
+
+        f_stop = f_abs_path[: f_match.start()] or "/"
+        if os.path.basename(os.path.dirname(f_stop)) == "points":
+            f_stop = os.path.dirname(os.path.dirname(f_stop))
+        f_curr = f_abs_path
+        while f_curr != f_stop:
+            f_parent = os.path.dirname(f_curr)
+            if f_parent == f_curr:
+                break
+            f_curr = f_parent
+            if os.path.islink(f_curr):
+                raise LustreConfigurationError(
+                    f"Target directory path contains symlink component: '{f_curr}'"
                 )
 
         return f_abs_path
