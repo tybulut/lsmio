@@ -280,6 +280,19 @@ class InstalledSmoke(unittest.TestCase):
                 os.path.isfile(f_dest_file), f"Staged file missing: {f_dest_file}"
             )
 
+    def testEpocppDeckTemplateInstalled(self) -> None:
+        """The EPOCpp deck template is installed under share/lsmio and fills in."""
+        from lsmiotool.lib.benchmarks import EpocppAdapter
+
+        f_adapter = EpocppAdapter()
+        f_template = EpocppAdapter.templatePath(
+            os.path.join(self.m_stage_dir, "share", "lsmio")
+        )
+        f_text = f_adapter.readTemplate(f_template)
+        f_deck = f_adapter.renderDeck(f_text, "PLUGIN", "large")
+        self.assertIn("adios_engine = plugin", f_deck)
+        self.assertNotIn("$", f_deck)
+
     def testMissingCopiedStageResourceCannotFallback(self) -> None:
         """Verify that a damaged copied stage fails strictly without falling back to source, cwd, or home."""
         from lsmiotool.lib.benchmarks import BenchmarkConfigurationError, LmpAdapter

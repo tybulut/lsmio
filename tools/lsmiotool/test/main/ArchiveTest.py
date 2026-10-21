@@ -196,7 +196,7 @@ class ArchiveTest(unittest.TestCase):
         with self.assertRaises(ArchiveCliParseError):
             parseArchiveArguments(["lsmio"])
 
-        # Benchmark validation: only lsmio is supported for archive
+        # Benchmark validation: lsmio, and ior scaling runs (not 'ior variants')
         with self.assertRaises(ArchiveCliParseError):
             parseArchiveArguments(["ior", "baseline"])
 
@@ -532,6 +532,19 @@ class ArchiveDestResolverTest(unittest.TestCase):
                 resolveArchiveDest("/bm", f_mode="standard", f_scale=f_scale),
                 "/bm/lsmio-archive/baseline",
             )
+        # ior scaling runs archive apart from the LSMIO backends
+        self.assertEqual(
+            resolveArchiveDest(
+                "/bm", f_mode="backends", f_scale="small", f_target="ior"
+            ),
+            "/bm/lsmio-archive/ior/small",
+        )
+        self.assertEqual(
+            resolveArchiveDest(
+                "/bm", f_mode="backends", f_scale="small", f_target="lsmio"
+            ),
+            "/bm/lsmio-archive/backends/small",
+        )
 
     def testVersionedVariantsGetTheirOwnDestination(self) -> None:
         """--versioned runs default to variants-versioned, so 'compare variants' on the
@@ -791,6 +804,104 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
             os.path.exists(os.path.join(f_dest, "outputs-native-m"))
         )
         self.assertFalse(os.path.exists(os.path.join(f_dest, "outputs-native")))
+
+    def _iorRun(self, f_run_id: str, f_setup: str) -> str:
+        """A succeeded single-setup 'ior local' run root under <root>/runs, with each
+        combination's shared IOR output."""
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+        from lsmiotool.test.parse.RunParseTest import RunParseTest
+
+        f_helper = RunParseTest("testExplicitSucceededPaths")
+        f_helper.setUp()
+        try:
+            f_helper.m_temp_dir = self.m_root
+            f_run_root, f_plan, _ = f_helper._setupSucceededRun(
+                f_run_id, "ior", "local", f_setup=f_setup
+            )
+        finally:
+            f_helper.m_temp_dir = self.m_temp_dir
+        for f_idx, f_sp in enumerate(f_plan.scale_points):
+            f_logs = os.path.join(
+                f_run_root, "points", f"{f_idx:02d}-tasks-{f_sp.tasks}", "logs"
+            )
+            os.makedirs(f_logs, exist_ok=True)
+            for f_combo in f_plan.combinations:
+                with open(
+                    os.path.join(f_logs, f"ior_{f_combo.name}.stdout"), "w"
+                ) as f_f:
+                    f_f.write(IOR_SUMMARY)
+        return f_run_root
+
+    def testIorRunArchivedToIorFolder(self) -> None:
+        """'archive ior <scale>': a single-setup ior run goes to ior/<scale> as
+        outputs-ior[-<setup>], in bmtool's IOR layout with ior-report.csv."""
+        f_run_root = self._iorRun("run-20261014T000000Z-ior1", "HDF5-C")
+        # bmtool's LSMIO outputs and BM_SETUP play no part in an ior archive
+        self._bmtoolOutputs()
+        f_code, f_err = self._archive(
+            ["ior", "local"], f_environ={"BM_SETUP": "ROCKSDB"}
+        )
+        self.assertEqual(f_code, 0, f_err)
+        f_target = os.path.join(
+            self.m_root, "lsmio-archive", "ior", "local", "outputs-ior-hdf5-collective"
+        )
+        with open(os.path.join(f_target, "ior-report.csv")) as f_f:
+            f_rows = f_f.read().split()
+        self.assertEqual(len(f_rows), 12)
+        self.assertTrue(all(f_r.startswith("1,") for f_r in f_rows))
+        f_days = [
+            f_n
+            for f_n in os.listdir(os.path.join(f_target, "1"))
+            if os.path.isdir(os.path.join(f_target, "1", f_n))
+        ]
+        self.assertEqual(len(f_days), 1)
+        f_logs = os.listdir(os.path.join(f_target, "1", f_days[0]))
+        self.assertEqual(len(f_logs), 6)
+        self.assertTrue(all(f_n.startswith("out-hdf5-c-") for f_n in f_logs))
+        self.assertFalse(os.path.exists(os.path.join(f_target, "lsm-report.csv")))
+        self.assertTrue(os.path.isfile(os.path.join(f_run_root, "manifest.json")))
+
+        f_code, f_err = self._archive(["ior", "local"])
+        self.assertEqual(f_code, 1)
+        self.assertIn("already archived", f_err)
+        f_code, f_err = self._archive(["ior", "local", "--setup", "base"])
+        self.assertEqual(f_code, 1)
+        self.assertIn("Nothing to archive", f_err)
+        f_code, f_err = self._archive(
+            ["ior", "local", "--source", f_run_root, "--setup", "BASE"]
+        )
+        self.assertEqual(f_code, 1)
+        self.assertIn("does not match", f_err)
+
+    def testIorArchiveTakesOnlyRunRoots(self) -> None:
+        """bmtool never archived IOR: its live LSMIO outputs are never an ior --source."""
+        f_outputs = self._bmtoolOutputs()
+        f_before = sorted(os.listdir(f_outputs))
+        for f_extra in ([], ["--setup", "HDF5"]):
+            f_code, f_err = self._archive(
+                ["ior", "local", "--source", f_outputs] + f_extra
+            )
+            self.assertEqual(f_code, 1)
+            self.assertIn("an ior archive takes only an ior run root", f_err)
+        self.assertEqual(sorted(os.listdir(f_outputs)), f_before)
+        self.assertFalse(os.path.exists(os.path.join(self.m_root, "lsmio-archive")))
+
+    def testIorArchiveCli(self) -> None:
+        f_req = parseArchiveArguments(["ior", "small", "--setup", "hdf5-c"])
+        self.assertEqual((f_req.target, f_req.setup), ("ior", "HDF5-C"))
+        # The IOR setup tokens of 'run ior <scale> <ior setups>' name setups too
+        for f_tok, f_setup in (("hdf5-collective", "HDF5-C"), ("ior", "BASE")):
+            self.assertEqual(
+                parseArchiveArguments(["ior", "small", "--setup", f_tok]).setup, f_setup
+            )
+        for f_argv in (
+            ["ior", "variants"],
+            ["ior", "small", "--setup", "NATIVE"],
+            ["lsmio", "small", "--setup", "HDF5"],
+        ):
+            with self.subTest(argv=f_argv):
+                with self.assertRaises(ArchiveCliParseError):
+                    parseArchiveArguments(f_argv)
 
     def testAmbiguousSourceNeedsExplicitSource(self) -> None:
         f_run_root = self._lsmiotoolRun("run-20261010T000000Z-bbbb", f_variant=None)

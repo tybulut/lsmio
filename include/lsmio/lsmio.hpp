@@ -31,7 +31,10 @@
 #ifndef _LSMIO_LSMIO_H
 #define _LSMIO_LSMIO_H
 
-#ifdef NDEBUG
+// Release builds of LSMIO strip LOG(INFO). A program that included glog before
+// this header already has its own GOOGLE_STRIP_LOG (glog defines 0 by default),
+// which glog has used; redefining it would only warn
+#if defined(NDEBUG) && !defined(GOOGLE_STRIP_LOG)
 #define GOOGLE_STRIP_LOG 1
 #endif
 

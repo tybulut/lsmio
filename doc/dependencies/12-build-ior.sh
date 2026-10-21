@@ -11,6 +11,7 @@ git checkout 3.3
 ./configure \
   --with-hdf5 \
   --prefix=$HOME/src/usr
+#  MPICC=cc \ # required for Cray systems
 #  --enable-static --disable-shared \
 
 make -j16 \

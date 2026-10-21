@@ -3313,6 +3313,392 @@ class RunOrchestratorTest(unittest.TestCase):
             )
             self.assertEqual(f_orch.exitCode, 0)
 
+    def testBackendsNodesRunOnlyThosePoints(self) -> None:
+        """--nodes: an lsmio backends run submits and archives only those points."""
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+        with tempfile.TemporaryDirectory() as f_tmpdir:
+            f_fake_runner = FakeSchedulerCommandRunner()
+            f_orch = RunOrchestrator(
+                f_profile_resolver=self.m_registry,
+                f_command_runner=f_fake_runner,
+                f_poll_interval=0.01,
+            )
+            f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
+            ):
+                f_orch.execute(
+                    RunRequest(
+                        "lsmio",
+                        "bake",
+                        f_mode="backends",
+                        f_backends=["native"],
+                        f_out_dir=f_tmpdir,
+                        f_nodes=[8, 2],
+                    ),
+                    f_site=self.m_viking_profile,
+                    f_worker_executable=self.m_worker_path,
+                )
+            self.assertEqual(f_orch.exitCode, 0)
+            (f_run,) = f_orch.groupRuns
+            self.assertEqual(
+                [f_sp.nodes for f_sp in f_run["plan"].scale_points], [2, 8]
+            )
+            self.assertEqual(f_run["plan"].request.nodes, (2, 8))
+            self.assertEqual(len(f_fake_runner.m_submit_calls), 2)
+            self.assertEqual(
+                sorted(
+                    os.path.relpath(f_c.kwargs["f_node_dir"], f_tmpdir)
+                    for f_c in f_export.call_args_list
+                ),
+                [
+                    os.path.join("outputs-native", "2"),
+                    os.path.join("outputs-native", "8"),
+                ],
+            )
+
+    def testIorNodesArchiveAndResumeOnlyThosePoints(self) -> None:
+        """--nodes on 'run ior': only those points run and are archived; with --resume
+        an archived one is skipped and the others still run."""
+        f_dest = os.path.join(self.m_viking_root_hdd, "lsmio-archive", "ior", "bake")
+        f_orch, f_runner, _ = self._iorRun(
+            RunRequest(
+                "ior", "bake", f_mode="backends", f_backends=["base"], f_nodes=[4]
+            )
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        self.assertEqual(len(f_runner.m_submit_calls), 1)
+        self.assertIn("--nodes=4", self._submittedScripts(f_runner)[0])
+        f_arm_dir = os.path.join(f_dest, "outputs-ior")
+        self.assertEqual([f_n for f_n in os.listdir(f_arm_dir) if f_n.isdigit()], ["4"])
+        f_orch, f_runner, _ = self._iorRun(
+            RunRequest(
+                "ior",
+                "bake",
+                f_mode="backends",
+                f_backends=["base"],
+                f_nodes=[2, 4],
+                f_resume=True,
+            )
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        self.assertEqual(len(f_runner.m_submit_calls), 1)
+        self.assertIn("--nodes=2", self._submittedScripts(f_runner)[0])
+        self.assertEqual(
+            sorted(f_n for f_n in os.listdir(f_arm_dir) if f_n.isdigit()), ["2", "4"]
+        )
+
+    def testIorRunEverySetupPerScalePoint(self) -> None:
+        """'run ior <scale>': one job per scale point runs every IOR setup; each setup's
+        points are archived like a backend's, as outputs-ior[-<setup>]/<nodes> in
+        lsmio-archive/ior/<scale>, with its outputs named by the IOR setup and
+        ior-report.csv; --resume skips the archived points."""
+        f_dest = os.path.join(self.m_viking_root_hdd, "lsmio-archive", "ior", "bake")
+        f_fake_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_fake_runner,
+            f_poll_interval=0.01,
+        )
+        f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+
+        def fake_export(**f_kw: Any) -> int:
+            os.makedirs(f_kw["f_node_dir"], exist_ok=True)
+            return 1
+
+        with (
+            patch(
+                "lsmiotool.lib.export.exportIorPoint", side_effect=fake_export
+            ) as f_ior,
+            patch("lsmiotool.lib.export.exportPoint") as f_lsmio,
+            patch(
+                "lsmiotool.lib.export.generateIorReports", return_value=True
+            ) as f_rep,
+            patch("lsmiotool.lib.export.generateReports") as f_lsm_rep,
+        ):
+            f_orch.execute(
+                RunRequest("ior", "bake", f_mode="backends"),
+                f_site=self.m_viking_profile,
+                f_worker_executable=self.m_worker_path,
+            )
+        f_runs = f_orch.groupRuns
+        self.assertEqual(
+            [(f_r["arm"].label, f_r["plan"].request.setup) for f_r in f_runs],
+            [
+                ("base", "BASE"),
+                ("collective", "COLLECTIVE"),
+                ("hdf5", "HDF5"),
+                ("hdf5-collective", "HDF5-C"),
+            ],
+        )
+        f_points = f_runs[0]["plan"].scale_points
+        self.assertEqual(len(f_fake_runner.m_submit_calls), len(f_points))
+        self.assertEqual(f_lsmio.call_count, 0)
+        self.assertEqual(f_lsm_rep.call_count, 0)
+        self.assertTrue(f_rep.called)
+        f_arms = ("ior", "ior-collective", "ior-hdf5", "ior-hdf5-collective")
+        self.assertEqual(
+            sorted(
+                (
+                    os.path.relpath(f_c.kwargs["f_node_dir"], f_dest),
+                    f_c.kwargs["f_infix"],
+                )
+                for f_c in f_ior.call_args_list
+            ),
+            sorted(
+                (os.path.join(f"outputs-{f_a}", str(f_sp.nodes)), f_i)
+                for f_a, f_i in zip(f_arms, ("base", "collective", "hdf5", "hdf5-c"))
+                for f_sp in f_points
+            ),
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+
+        # Every point of the setups is archived: --resume submits nothing
+        f_resume_runner = FakeSchedulerCommandRunner()
+        f_view = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_resume_runner,
+            f_poll_interval=0.01,
+        ).execute(
+            RunRequest("ior", "bake", f_mode="backends", f_resume=True),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+        self.assertEqual(len(f_resume_runner.m_submit_calls), 0)
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+
+    def _iorRun(self, f_request: RunRequest, f_site: Optional[Any] = None) -> Any:
+        """Run f_request (on f_site, default viking) with a fake worker that writes each
+        combination's IOR output and a controller result naming it and the node (as the
+        IOR worker does). Returns (orchestrator, scheduler runner, reporter)."""
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+
+        def write_ior(
+            f_ev: Any,
+            f_sp: Any,
+            f_plan: Any,
+            f_ordinal: int = 0,
+            f_failed: bool = False,
+        ) -> None:
+            f_logs = f_ev.layout.pointLogsDir(f_sp, f_ordinal)
+            os.makedirs(f_logs, exist_ok=True)
+            for f_combo in f_plan.combinations:
+                f_out = os.path.join(f_logs, f"ior_{f_combo.name}.stdout")
+                with open(f_out, "w") as f_f:
+                    f_f.write(IOR_SUMMARY)
+                f_ev.recordControllerResult(
+                    f_point=f_sp,
+                    f_combination=f_combo,
+                    f_payload={
+                        "status": "success",
+                        "exit_code": 0,
+                        "stage": "execution",
+                        "output_path": f_out,
+                        "host": "node042",
+                    },
+                    f_ordinal=f_ordinal,
+                )
+
+        f_runner = FakeSchedulerCommandRunner()
+        f_reporter = RunReporter()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+            f_reporter=f_reporter,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        with (
+            patch.object(self, "_mockWritePointResults", side_effect=write_ior),
+            patch("lsmiotool.lib.log.Console.warning"),
+        ):
+            f_orch.execute(
+                f_request,
+                f_site=f_site or self.m_viking_profile,
+                f_worker_executable=self.m_worker_path,
+            )
+        return f_orch, f_runner, f_reporter
+
+    def testIorRunOnPbsGetsTheFixedWalltimePerSetup(self) -> None:
+        """'run ior' on a PBS site (isambard): one job per scale point gets the fixed
+        walltime once per IOR setup (--time is ignored), and is archived as on Slurm."""
+        f_orch, f_runner, _ = self._iorRun(
+            RunRequest(
+                "ior",
+                "bake",
+                f_mode="backends",
+                f_backends=["base", "hdf5", "fsync"],
+                f_wallhour=2,
+            ),
+            f_site=self.m_isambard_profile,
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        f_points = f_orch.groupRuns[0]["plan"].scale_points
+        f_scripts = self._submittedScripts(f_runner)
+        self.assertEqual(len(f_scripts), len(f_points))
+        for f_script in f_scripts:
+            self.assertIn("#PBS -l walltime=18:00:00", f_script)
+        f_dest = os.path.join(self.m_isambard_root_hdd, "lsmio-archive", "ior", "bake")
+        self.assertEqual(
+            sorted(os.listdir(f_dest)),
+            ["outputs-ior", "outputs-ior-fsync", "outputs-ior-hdf5"],
+        )
+        for f_arm in os.listdir(f_dest):
+            self.assertTrue(
+                os.path.isfile(os.path.join(f_dest, f_arm, "ior-report.csv"))
+            )
+
+    def testRunWithTimeRecordsItInTheManifest(self) -> None:
+        """--time is kept in each arm's manifest (which must read back) and sets each
+        job's Slurm walltime in place of the backends formula."""
+        f_orch, f_runner, _ = self._iorRun(
+            RunRequest(
+                "ior", "bake", f_mode="backends", f_backends=["base"], f_wallhour=3
+            )
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        for f_script in self._submittedScripts(f_runner):
+            self.assertIn("#SBATCH --time=03:00:00", f_script)
+        with open(
+            os.path.join(f_orch.groupRuns[0]["store"].layout.runRoot, "manifest.json")
+        ) as f_f:
+            self.assertEqual(json.load(f_f)["request"]["wallhour"], 3)
+
+    def testArchiveGroupRunNeverReplacesAnotherRunsIorPoint(self) -> None:
+        """Archiving an IOR run after the fact (--no-archive, then 'archive ior --source')
+        fills in the missing <nodes> dirs of each setup but never replaces one holding
+        another run's results."""
+        from lsmiotool.lib.archive import ArchiveEngine
+
+        f_orch, _, _ = self._iorRun(
+            RunRequest(
+                "ior",
+                "bake",
+                f_mode="backends",
+                f_backends=["base", "hdf5"],
+                f_archive=False,
+            )
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        f_nodes = sorted(
+            str(f_sp.nodes) for f_sp in f_orch.groupRuns[0]["plan"].scale_points
+        )
+        f_dest = os.path.join(self.m_temp_dir, "dest")
+        f_newer = os.path.join(f_dest, "outputs-ior", f_nodes[0])
+        os.makedirs(f_newer)
+        ArchiveEngine.writeRunMarker(
+            os.path.dirname(f_newer), "run-newer", f_newer, ["00-tasks-1"]
+        )
+        f_lines: List[str] = []
+        f_ok, f_dirs = RunOrchestrator().archiveGroupRun(
+            f_orch.groupRuns[0]["store"].layout.runRoot,
+            f_dest_root=f_dest,
+            f_reporter=f_lines.append,
+        )
+        self.assertTrue(f_ok)
+        self.assertIn(f"Not archived: {f_newer} holds another run's results", f_lines)
+        # The other run's point is kept as it was, the rest of each setup archived
+        self.assertEqual(os.listdir(f_newer), [])
+        for f_arm, f_want in (("ior", f_nodes[1:]), ("ior-hdf5", f_nodes)):
+            f_arm_dir = os.path.join(f_dest, f"outputs-{f_arm}")
+            self.assertEqual(
+                sorted(
+                    f_n
+                    for f_n in os.listdir(f_arm_dir)
+                    if f_n.isdigit() and os.listdir(os.path.join(f_arm_dir, f_n))
+                ),
+                f_want,
+            )
+            self.assertFalse(os.path.exists(os.path.join(f_arm_dir, "lsm-report.csv")))
+        self.assertTrue(
+            os.path.isfile(os.path.join(f_dest, "outputs-ior-hdf5", "ior-report.csv"))
+        )
+
+    def testIorRunArchivesRealOutputsAndResumesMissingPoints(self) -> None:
+        """'run ior' end to end, nothing mocked in export or reports: bmtool's IOR file
+        names and ior-report.csv per setup; --resume reruns only a missing point; an
+        unarchived setup is archived with 'archive ior --source <its run root>'."""
+        from lsmiotool.lib.main import ArchiveMain
+
+        f_dest = os.path.join(self.m_viking_root_hdd, "lsmio-archive", "ior", "bake")
+        f_orch, _, _ = self._iorRun(
+            RunRequest(
+                "ior", "bake", f_mode="backends", f_backends=["base", "hdf5-collective"]
+            )
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        f_points = f_orch.groupRuns[0]["plan"].scale_points
+        f_nodes = sorted(str(f_sp.nodes) for f_sp in f_points)
+        for f_arm, f_infix in (("ior", "base"), ("ior-hdf5-collective", "hdf5-c")):
+            f_arm_dir = os.path.join(f_dest, f"outputs-{f_arm}")
+            self.assertEqual(
+                sorted(f_n for f_n in os.listdir(f_arm_dir) if f_n.isdigit()), f_nodes
+            )
+            (f_day,) = os.listdir(os.path.join(f_arm_dir, f_nodes[0]))
+            self.assertEqual(
+                sorted(os.listdir(os.path.join(f_arm_dir, f_nodes[0], f_day))),
+                sorted(
+                    f"out-{f_infix}-{f_c.stripe_count}-{f_c.block_size}-{f_day}-node042-0.txt"
+                    for f_c in f_orch.groupRuns[0]["plan"].combinations
+                ),
+            )
+            with open(os.path.join(f_arm_dir, "ior-report.csv")) as f_f:
+                f_rows = f_f.read().split()
+            self.assertEqual(len(f_rows), 2 * 6 * len(f_points))
+            self.assertIn(f"{f_nodes[0]},4,1M,write,1650.38", ",".join(f_rows))
+            self.assertFalse(os.path.exists(os.path.join(f_arm_dir, "lsm-report.csv")))
+
+        # --resume: only the point whose archive is missing runs, in one job
+        shutil.rmtree(os.path.join(f_dest, "outputs-ior-hdf5-collective", f_nodes[-1]))
+        f_orch, f_runner, f_reporter = self._iorRun(
+            RunRequest(
+                "ior",
+                "bake",
+                f_mode="backends",
+                f_backends=["base", "hdf5-collective"],
+                f_resume=True,
+            )
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+        self.assertEqual(len(f_runner.m_submit_calls), 1)
+        self.assertTrue(
+            any("[RESUME] Skipping arm 'base'" in f_l for f_l in f_reporter.lines)
+        )
+        self.assertTrue(
+            os.path.isdir(
+                os.path.join(f_dest, "outputs-ior-hdf5-collective", f_nodes[-1])
+            )
+        )
+
+        # --no-archive, then 'archive ior <scale> --source <its run root>'
+        f_orch, _, _ = self._iorRun(
+            RunRequest(
+                "ior", "bake", f_mode="backends", f_backends=["fsync"], f_archive=False
+            )
+        )
+        self.assertFalse(os.path.exists(os.path.join(f_dest, "outputs-ior-fsync")))
+        with patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(
+                ArchiveMain(
+                    [
+                        "ior",
+                        "bake",
+                        "--source",
+                        f_orch.groupRuns[0]["store"].layout.runRoot,
+                    ],
+                    f_benchmark_root=self.m_viking_root_hdd,
+                ).run(),
+                0,
+            )
+        f_fsync = os.path.join(f_dest, "outputs-ior-fsync")
+        self.assertEqual(
+            sorted(f_n for f_n in os.listdir(f_fsync) if f_n.isdigit()), f_nodes
+        )
+        self.assertTrue(os.path.isfile(os.path.join(f_fsync, "ior-report.csv")))
+
     def testBackendsPluginRequiresLibrary(self) -> None:
         """The plugin backend fails preflight when liblsmio_adios is missing."""
         f_orch = RunOrchestrator(

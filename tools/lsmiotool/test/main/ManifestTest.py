@@ -138,6 +138,10 @@ class ManifestTest(unittest.TestCase):
             self.assertEqual(f_doc.created_at_utc, f_plan.manifest_timestamp)
             self.assertEqual(f_doc.request, f_plan.request)
             self.assertEqual(f_doc.site.toDict(), f_plan.profile.toDict())
+            self.assertEqual(f_doc.site.launcher, f_prof.launcher)
+            self.assertEqual(
+                json.loads(f_json_str)["site"].get("srun_mpi"), f_prof.launcher.srun_mpi
+            )
             self.assertEqual(f_doc.scale_points, f_plan.scale_points)
             self.assertEqual(f_doc.combinations, f_plan.combinations)
             self.assertEqual(f_doc.points, f_plan.scheduled_points)
@@ -171,6 +175,39 @@ class ManifestTest(unittest.TestCase):
             f_dict = json.loads(f_json_str)
             f_doc_from_dict = ManifestSerializer.deserialize(f_dict)
             self.assertEqual(f_doc_from_dict, f_doc)
+
+    def testSiteSrunMpi(self) -> None:
+        """srun_mpi round-trips in the manifest site, is optional, and is validated."""
+        f_req = RunRequest(
+            f_target="lsmio", f_scale="local", f_ssd=False, f_setup="NATIVE"
+        )
+        f_plan = RunPlanner.createPlan(
+            f_request=f_req,
+            f_profile=self.m_viking2_profile,
+            f_run_id_source=lambda: "run-test-srun-mpi",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=iter(f"lm-{f_i:024x}" for f_i in range(100)).__next__,
+        )
+        f_dict = json.loads(ManifestSerializer.serialize(f_plan))
+        self.assertEqual(f_dict["site"]["srun_mpi"], "pmix")
+        self.assertEqual(
+            ManifestSerializer.deserialize(f_dict).site.launcher.srun_mpi, "pmix"
+        )
+
+        # A manifest written before srun_mpi existed still loads, without --mpi
+        f_old = copy.deepcopy(f_dict)
+        del f_old["site"]["srun_mpi"]
+        self.assertIsNone(ManifestSerializer.deserialize(f_old).site.launcher.srun_mpi)
+
+        for f_key, f_val in (
+            ("srun_mpi", "pmix --x"),
+            ("srun_mpi", 5),
+            ("launcher", "aprun"),
+        ):
+            f_bad = copy.deepcopy(f_dict)
+            f_bad["site"][f_key] = f_val
+            with self.assertRaises(ManifestValidationError):
+                ManifestSerializer.deserialize(f_bad)
 
     def testSchemaVersionValidation(self) -> None:
         """Assert fail-closed rejection of missing, non-1, non-integer, or float schema_version."""

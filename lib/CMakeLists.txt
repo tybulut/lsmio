@@ -74,7 +74,9 @@ set(LIB_POSIX_SOURCE_FILES ${LIB_POSIX_HPP_FILES} ${LIB_POSIX_CPP_FILES})
 
 macro(lsmio_add_props MY_TARGET)
   set_property(TARGET ${MY_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
-  target_include_directories(${MY_TARGET} PRIVATE ${LSMIO_INCLUDE_DIR})
+  # PUBLIC in a build tree, so that a project building LSMIO from source (EPOCpp's
+  # FetchContent) compiles against these headers rather than an older installed copy
+  target_include_directories(${MY_TARGET} PUBLIC $<BUILD_INTERFACE:${LSMIO_INCLUDE_DIR}>)
   target_compile_definitions(${MY_TARGET} PRIVATE LSMIO_VERSION="${PROJECT_VERSION}")
   if(LSMIO_ENABLE_COVERAGE)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")

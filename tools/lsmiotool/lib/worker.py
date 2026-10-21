@@ -1049,7 +1049,9 @@ class LustreConfigurator:
         - Must be a non-empty string and absolute path.
         - Must not contain NUL bytes or path traversal ('..').
         - Must not be root filesystem ('/').
-        - Must not be a symlink or contain symlink components.
+        - Must not be a symlink or contain symlink components up to its run root
+          (else its point directory, the parent of 'data/'); links above it are the
+          site's.
         - Must be contained under point data directory ('data/c<stripe>/b<block>').
 
         Args:
@@ -1086,36 +1088,45 @@ class LustreConfigurator:
         if f_abs_path in ("/", ""):
             raise LustreConfigurationError("Target directory cannot be root filesystem")
 
-        # Symlink detection
-        if os.path.islink(f_abs_path):
-            raise LustreConfigurationError(
-                f"Target directory is a symlink: '{f_abs_path}'"
-            )
-
-        f_curr = f_abs_path
-        while f_curr and f_curr != "/":
-            if os.path.islink(f_curr):
-                raise LustreConfigurationError(
-                    f"Target directory path contains symlink component: '{f_curr}'"
-                )
-            f_parent = os.path.dirname(f_curr)
-            if f_parent == f_curr:
-                break
-            f_curr = f_parent
-
         # Point data directory containment
         if f_combination is not None:
             f_stripe, f_block = cls._extractCombination(f_combination)
             f_expected_pattern = rf"(?:^|/)data/c{f_stripe}/b{f_block}(?:/.*)?$"
-            if not re.search(f_expected_pattern, f_abs_path):
+            f_match = re.search(f_expected_pattern, f_abs_path)
+            if not f_match:
                 raise LustreConfigurationError(
                     f"Target directory '{f_abs_path}' is not contained under expected point data directory 'data/c{f_stripe}/b{f_block}'"
                 )
         else:
             f_general_pattern = r"(?:^|/)data/c\d+/b[0-9]+[KMGkmg]?(?:/.*)?$"
-            if not re.search(f_general_pattern, f_abs_path):
+            f_match = re.search(f_general_pattern, f_abs_path)
+            if not f_match:
                 raise LustreConfigurationError(
                     f"Target directory '{f_abs_path}' is not contained under a point data directory ('data/c<stripe>/b<block>')"
+                )
+
+        # Symlink detection, from the target up to its run root ('runs/<run id>' above
+        # 'points/<point>'), else its point directory (the parent of 'data/'): the
+        # directories a run creates. Above it is the site's own layout, whose links are
+        # legitimate (ARCHER2: /work and /work/<project> link to Lustre). The leftmost
+        # 'data/' match gives the longest walk
+        if os.path.islink(f_abs_path):
+            raise LustreConfigurationError(
+                f"Target directory is a symlink: '{f_abs_path}'"
+            )
+
+        f_stop = f_abs_path[: f_match.start()] or "/"
+        if os.path.basename(os.path.dirname(f_stop)) == "points":
+            f_stop = os.path.dirname(os.path.dirname(f_stop))
+        f_curr = f_abs_path
+        while f_curr != f_stop:
+            f_parent = os.path.dirname(f_curr)
+            if f_parent == f_curr:
+                break
+            f_curr = f_parent
+            if os.path.islink(f_curr):
+                raise LustreConfigurationError(
+                    f"Target directory path contains symlink component: '{f_curr}'"
                 )
 
         return f_abs_path
@@ -1241,6 +1252,8 @@ class Launcher:
     - Builds direct execution argv for shared benchmark workloads and rank workers.
     - Slurm (SchedulerKind.SLURM):
         ['srun', '--export=ALL', '--kill-on-bad-exit=1', '-n', str(point.tasks), '-N', str(point.nodes)]
+        Adds '--mpi=<type>' after '--kill-on-bad-exit=1' if the site profile sets srun_mpi
+        (VIKING2: pmix, since its Open MPI 5 module sets SLURM_MPI_TYPE=none).
         Appends ['-p', partition] if site profile defines a partition (e.g. Archer2 '-p standard').
         --kill-on-bad-exit ends the step when one rank fails; otherwise the surviving ranks
         block in MPI until the allocation's time limit.
@@ -1336,6 +1349,52 @@ class Launcher:
             )
 
         return f_tasks, f_ppn, f_nodes
+
+    @classmethod
+    def _resolveSrunMpi(cls, f_profile: Any) -> Optional[str]:
+        """Return the profile's srun --mpi type (e.g. 'pmix'), or None to leave srun to
+        SLURM_MPI_TYPE and the cluster default. Accepts the same profile forms as
+        _resolveSchedulerAndPartition."""
+        from lsmiotool.lib.profile import SRUN_MPI_PATTERN
+        from lsmiotool.lib.site import EnvironmentResolver, LauncherPolicy
+
+        if isinstance(f_profile, LauncherPolicy):
+            return f_profile.srun_mpi
+        if isinstance(f_profile, dict):
+            f_srun_mpi = f_profile.get("srun_mpi")
+            if f_srun_mpi is not None and (
+                not isinstance(f_srun_mpi, str)
+                or not SRUN_MPI_PATTERN.fullmatch(f_srun_mpi)
+            ):
+                raise LauncherError(
+                    f"srun_mpi must be an srun --mpi type such as 'pmix', got: {f_srun_mpi!r}"
+                )
+            return f_srun_mpi
+        if isinstance(f_profile, str):
+            if f_profile.strip().lower() in (
+                "slurm",
+                "srun",
+                "pbs",
+                "aprun",
+                "fake",
+                "direct",
+            ):
+                return None
+            try:
+                f_profile = EnvironmentResolver.resolveProfile(
+                    f_profile,
+                    f_user=os.environ.get("USER") or "user",
+                    f_home=os.environ.get("HOME") or "/tmp",
+                )
+            except Exception as f_err:
+                raise LauncherError(
+                    f"Failed to resolve site profile '{f_profile}': {f_err}"
+                ) from f_err
+        f_launcher = getattr(f_profile, "launcher", None)
+        if isinstance(f_launcher, LauncherPolicy):
+            return f_launcher.srun_mpi
+        f_srun_mpi = getattr(f_profile, "srun_mpi", None)
+        return f_srun_mpi if isinstance(f_srun_mpi, str) else None
 
     @classmethod
     def _resolveSchedulerAndPartition(
@@ -1651,11 +1710,11 @@ class Launcher:
                 "srun",
                 "--export=ALL",
                 "--kill-on-bad-exit=1",
-                "-n",
-                str(f_tasks),
-                "-N",
-                str(f_nodes),
             ]
+            f_srun_mpi = cls._resolveSrunMpi(f_profile)
+            if f_srun_mpi:
+                f_argv.append(f"--mpi={f_srun_mpi}")
+            f_argv.extend(["-n", str(f_tasks), "-N", str(f_nodes)])
             if f_partition:
                 f_argv.extend(["-p", f_partition])
             f_argv.extend(f_cmd_argv)
@@ -1728,11 +1787,11 @@ class Launcher:
                 "srun",
                 "--export=ALL",
                 "--kill-on-bad-exit=1",
-                "-n",
-                str(f_tasks),
-                "-N",
-                str(f_nodes),
             ]
+            f_srun_mpi = cls._resolveSrunMpi(f_profile)
+            if f_srun_mpi:
+                f_argv.append(f"--mpi={f_srun_mpi}")
+            f_argv.extend(["-n", str(f_tasks), "-N", str(f_nodes)])
             if f_partition:
                 f_argv.extend(["-p", f_partition])
             f_argv.extend(f_tail)
@@ -2311,7 +2370,7 @@ class AllocationController:
 
         # 7. Ordered Matrix Execution
         f_target = f_manifest.request.target.lower().strip()
-        if f_target not in ("ior", "lsmio", "lmp"):
+        if f_target not in ("ior", "lsmio", "lmp", "epocpp"):
             raise AllocationControllerError(
                 f"Unsupported benchmark target: {f_manifest.request.target!r}"
             )
@@ -2563,6 +2622,8 @@ class AllocationController:
                         "elapsed_seconds": f_proc_res.elapsed_seconds,
                         "stage": "execution",
                         "output_path": f_out_path,
+                        # bmtool names the IOR output after this node (lib/export.py)
+                        "host": rankHostName(os.environ),
                     },
                     f_ordinal=f_matched_ord,
                 )
@@ -2759,6 +2820,22 @@ class AllocationController:
                     f_ordinal=f_matched_ord,
                 )
 
+            elif f_target == "epocpp":
+                f_epocpp_rc = cls._runEpocppCombination(
+                    f_manifest=f_manifest,
+                    f_store=f_store,
+                    f_point=f_matched_sp,
+                    f_ordinal=f_matched_ord,
+                    f_combo_name=f_combo_name,
+                    f_data_dir=f_data_dir,
+                    f_work_dir=f_combo_work_dir,
+                    f_logs_dir=f_logs_dir,
+                    f_run_root=f_layout_obj.runRoot,
+                    f_runner=f_runner,
+                    f_asset_source=f_asset_source,
+                )
+                f_failed_rc = f_failed_rc or f_epocpp_rc
+
             elif f_target == "lsmio":
                 # Rank-local mode
                 f_worker_exe = f_worker_executable
@@ -2936,6 +3013,174 @@ class AllocationController:
     # bmtool sleeps 3 s after every step (batch.in.sh run_matrix_workload);
     # LSMIO_STEP_SETTLE_SECONDS overrides it (tests set 0)
     STEP_SETTLE_SECONDS = 3.0
+
+    @staticmethod
+    def epocppLogPath(f_logs_dir: str, f_combo_name: str, f_repeat: int) -> str:
+        """The log of one epocpp run: logs/epocpp_<combo>_r<NN>.stdout (1-based)."""
+        from lsmiotool.lib.benchmarks import EpocppAdapter
+
+        return os.path.join(
+            f_logs_dir, EpocppAdapter.logFileName(f_combo_name, f_repeat)
+        )
+
+    @classmethod
+    def _runEpocppCombination(
+        cls,
+        f_manifest: Any,
+        f_store: Any,
+        f_point: Any,
+        f_ordinal: int,
+        f_combo_name: str,
+        f_data_dir: str,
+        f_work_dir: str,
+        f_logs_dir: str,
+        f_run_root: str,
+        f_runner: Any,
+        f_asset_source: Optional[str],
+    ) -> int:
+        """Run one combination of an epocpp arm: fill the deck into the combination's
+        work dir, then run epocpp --repeats times, each writing its dumps to the striped
+        data dir. Once a run has exited its log gets the bytes it left on disk and the
+        data dir is emptied. Records one controller result; returns 0 or a failure code.
+        """
+        from lsmiotool.lib.benchmarks import EpocppAdapter
+
+        def _fail(f_stage: str, f_error: str, f_code: int = 1, **f_extra: Any) -> int:
+            try:
+                f_store.recordControllerResult(
+                    f_point=f_point,
+                    f_combination=f_combo_name,
+                    f_payload={
+                        "status": "failed",
+                        "exit_code": f_code,
+                        "stage": f_stage,
+                        "error": f_error,
+                        **f_extra,
+                    },
+                    f_ordinal=f_ordinal,
+                )
+            except Exception:
+                pass
+            return f_code
+
+        f_adapter = EpocppAdapter()
+        f_setup = f_manifest.request.setup or EpocppAdapter.DEFAULT_SETUP
+        from lsmiotool.lib.run import RunPlanner
+
+        f_repeats = f_manifest.request.repeats or RunPlanner.EPOCPP_DEFAULT_REPEATS
+
+        # The deck template sits next to the LMP assets (share/ or share/lsmio/)
+        f_assets = f_asset_source
+        if f_assets is None:
+            try:
+                from lsmiotool.lib.resources import ResourceLocator
+
+                f_assets = ResourceLocator.forSource(sys.argv[0]).asset_root
+            except Exception:
+                f_assets = os.path.join(
+                    f_manifest.site.install_prefix, "share", "lsmio", "lmp-reaxff"
+                )
+        # A RuntimeLayout or its asset directory, as LmpAdapter.stageAssets takes
+        f_assets = getattr(f_assets, "asset_root", f_assets)
+        f_share_root = os.path.dirname(os.path.normpath(str(f_assets)))
+        try:
+            f_deck = f_adapter.renderDeck(
+                f_adapter.readTemplate(EpocppAdapter.templatePath(f_share_root)),
+                f_setup,
+                EpocppAdapter.deckForScale(f_manifest.request.scale),
+            )
+            f_adapter.writeDeck(f_deck, f_work_dir)
+            f_exe = f_manifest.site.executables["epocpp"]
+        except Exception as f_err:
+            return _fail("stage_assets", f"EPOCpp deck or executable: {f_err}")
+
+        f_elapsed = 0.0
+        f_first_log: Optional[str] = None
+        for f_repeat in range(1, f_repeats + 1):
+            f_log = cls.epocppLogPath(f_logs_dir, f_combo_name, f_repeat)
+            f_first_log = f_first_log or f_log
+            try:
+                f_cmd = f_adapter.buildCommand(
+                    f_executable=f_exe,
+                    f_setup=f_setup,
+                    f_deck_dir=f_work_dir,
+                    f_data_dir=f_data_dir,
+                    f_working_dir=f_work_dir,
+                    f_stdout_path=f_log,
+                )
+                f_proc = Launcher.launchShared(
+                    f_profile=f_manifest.site,
+                    f_point=f_point,
+                    f_command=f_cmd,
+                    f_runner=f_runner,
+                    f_cwd=f_work_dir,
+                    f_log_path=f_log,
+                )
+            except Exception as f_err:
+                return _fail("launch", f"repeat {f_repeat}: {f_err}", output_path=f_log)
+            f_elapsed += float(f_proc.elapsed_seconds or 0.0)
+
+            # After the run has exited: the bytes it left, counted in the same threaded
+            # pass that empties the data dir
+            f_purge_error: Optional[str] = None
+            try:
+                f_size, f_alloc, f_files = EpocppAdapter.countAndRemove(f_data_dir)
+                with open(f_log, "a", encoding="utf-8") as f_f:
+                    f_f.write(EpocppAdapter.dataBytesLine(f_size, f_alloc, f_files))
+                    f_f.flush()
+                    os.fsync(f_f.fileno())
+                # The next run's bytes are its own only on an empty data dir
+                f_left = os.listdir(f_data_dir)
+                if f_left:
+                    raise OSError(f"data dir not emptied: {sorted(f_left)[:5]}")
+            except Exception as f_err:
+                f_purge_error = f"repeat {f_repeat}: {f_err}"
+
+            # A failed run is an execution failure, whether or not its purge failed
+            if not f_proc.is_success or f_proc.returncode != 0:
+                f_ret = f_proc.returncode if f_proc.returncode else 1
+                return _fail(
+                    "execution",
+                    f"repeat {f_repeat}: epocpp failed with code {f_proc.returncode}"
+                    + (f"; and its purge: {f_purge_error}" if f_purge_error else ""),
+                    f_code=f_ret,
+                    output_path=f_log,
+                )
+            if f_purge_error is not None:
+                return _fail("purge", f_purge_error, output_path=f_log)
+            try:
+                from lsmiotool.lib.artifacts import validatePathContainment
+
+                validatePathContainment(f_log, f_run_root)
+                f_st = os.lstat(f_log)
+                if not stat.S_ISREG(f_st.st_mode):
+                    raise ValueError("not a regular file")
+                with open(f_log, encoding="utf-8", errors="replace") as f_f:
+                    f_problem = EpocppAdapter.checkOutput(f_setup, f_f.read())
+            except Exception as f_err:
+                f_problem = f"log could not be read: {f_err}"
+            if f_problem is not None:
+                return _fail(
+                    "output_validation",
+                    f"repeat {f_repeat}: {f_problem}",
+                    output_path=f_log,
+                )
+
+        f_store.recordControllerResult(
+            f_point=f_point,
+            f_combination=f_combo_name,
+            f_payload={
+                "status": "success",
+                "exit_code": 0,
+                "elapsed_seconds": f_elapsed,
+                "stage": "execution",
+                "output_path": f_first_log,
+                # Names the archived outputs, as for IOR (lib/export.py)
+                "host": rankHostName(os.environ),
+            },
+            f_ordinal=f_ordinal,
+        )
+        return 0
 
     @classmethod
     def _settle(cls) -> None:

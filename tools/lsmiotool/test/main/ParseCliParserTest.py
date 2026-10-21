@@ -307,6 +307,23 @@ class ParseCliParserTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ParseRequest(f_target="ior", f_format="xml")
 
+    def testIorScaleParsesTheIorArchive(self) -> None:
+        """'parse ior <scale>' is the archive mode of 'run ior <scale>'."""
+        f_req = parseParseArguments(["parse", "ior", "small", "--output-dir", "/tmp/x"])
+        self.assertEqual(
+            (f_req.target, f_req.mode, f_req.scale, f_req.output_dir),
+            ("ior", "backends", "small", "/tmp/x"),
+        )
+        self.assertEqual(parseParseArguments(["ior"]).mode, "standard")
+        for f_argv in (
+            ["ior", "variants"],
+            ["ior", "huge"],
+            ["ior", "small", "--format", "json"],
+        ):
+            with self.subTest(argv=f_argv):
+                with self.assertRaises(ParseCliParseError):
+                    parseParseArguments(f_argv)
+
     def testBackendsModeParseSuccess(self) -> None:
         """Validates 'parse lsmio backends <scale>' parsing with default options."""
         req = parseParseArguments(["lsmio", "backends", "small"])

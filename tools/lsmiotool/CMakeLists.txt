@@ -131,3 +131,10 @@ install(
   FILES_MATCHING PATTERN "*"
 )
 
+# Install the EPOCpp deck template (EpocppAdapter.templatePath of share/lsmio)
+install(
+  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/share/epocpp/"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/lsmio/epocpp"
+  FILES_MATCHING PATTERN "*"
+)
+
