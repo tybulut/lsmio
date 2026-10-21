@@ -623,6 +623,8 @@ class ResultPayloadValidator:
         "returncode",
         "stage",
         "output_path",
+        # Node of a shared launch's controller (IOR), naming its archived output
+        "host",
         "elapsed_seconds",
         "combination",
         "target",

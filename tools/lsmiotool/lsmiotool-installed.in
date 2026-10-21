@@ -37,6 +37,8 @@ import sys
 
 if next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None) == "test":
     os.environ.setdefault("MPLBACKEND", "Agg")
+    # The tests run in the DEV environment, as ctest runs them, not the site's
+    os.environ.setdefault("LSMIO_ENV", "DEV")
 
 REL_BIN_TO_PYTHON = "@REL_BIN_TO_PYTHON@"
 REL_BIN_TO_LIBEXEC_WORKER = "@REL_BIN_TO_LIBEXEC_WORKER@"

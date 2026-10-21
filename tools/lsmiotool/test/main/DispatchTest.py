@@ -393,8 +393,9 @@ class DispatchTest(unittest.TestCase):
                     mock_stderr.getvalue(),
                 )
 
-        # parse command with unexpected extra positional argument
-        with patch.object(sys, "argv", [f_exec_str, "parse", "ior", "local"]):
+        # parse command with unexpected extra positional argument ('parse ior <scale>'
+        # is the ior archive form)
+        with patch.object(sys, "argv", [f_exec_str, "parse", "lmp", "local"]):
             with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
@@ -542,7 +543,6 @@ with patch("os.getlogin", side_effect=AssertionError("os.getlogin was called")):
         "matplotlib.pyplot",
         "lsmiotool.lib.plot",
         "lsmiotool.lib.dirs",
-        "lsmiotool.lib.jobs",
         "lsmiotool.lib.env",
     ):
         assert mod_name not in sys.modules, f"Module '{mod_name}' was eagerly imported into sys.modules"

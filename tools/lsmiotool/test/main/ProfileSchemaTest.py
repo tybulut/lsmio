@@ -182,6 +182,20 @@ class ProfileSchemaTest(unittest.TestCase):
         f_expected_sites = {"DEV", "VIKING", "VIKING2", "ARCHER2", "ISAMBARD"}
         self.assertEqual(set(f_doc.profiles.keys()), f_expected_sites)
 
+        # srun --mpi: only VIKING2 (its Open MPI 5 module sets SLURM_MPI_TYPE=none)
+        self.assertEqual(
+            {f_n: f_doc.getProfile(f_n).srun_mpi for f_n in f_expected_sites},
+            {
+                "DEV": None,
+                "VIKING": None,
+                "VIKING2": "pmix",
+                "ARCHER2": None,
+                "ISAMBARD": None,
+            },
+        )
+        self.assertEqual(f_doc.getProfile("VIKING2").toDict()["srun_mpi"], "pmix")
+        self.assertNotIn("srun_mpi", f_doc.getProfile("VIKING").toDict())
+
         # 1. DEV Profile
         f_dev: ProfileRecord = f_doc.getProfile("DEV")
         self.assertEqual(f_dev.name, "DEV")
@@ -207,6 +221,7 @@ class ProfileSchemaTest(unittest.TestCase):
                 "bm_rocksdb": "bm_rocksdb",
                 "bm_leveldb": "bm_leveldb",
                 "bm_manager": "bm_manager",
+                "epocpp": "epocpp",
             },
         )
         self.assertEqual(f_dev.modules, ())
@@ -523,6 +538,16 @@ class ProfileSchemaTest(unittest.TestCase):
             f_extra_key = copy.deepcopy(f_valid_json)
             f_extra_key["RUN_PROFILES"]["profiles"]["DEV"]["extra"] = "val"
             _assertInvalid(f_extra_key)
+
+            # 9b. srun_mpi: optional, only for srun, and an srun --mpi type
+            for f_site, f_val in (
+                ("DEV", "pmix"),
+                ("VIKING", "pmix --x"),
+                ("VIKING", 5),
+            ):
+                f_bad_mpi = copy.deepcopy(f_valid_json)
+                f_bad_mpi["RUN_PROFILES"]["profiles"][f_site]["srun_mpi"] = f_val
+                _assertInvalid(f_bad_mpi)
 
             # 10. Wrong types inside profile
             # test_only as string

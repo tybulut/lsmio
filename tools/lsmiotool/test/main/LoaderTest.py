@@ -40,7 +40,6 @@ _PREEXISTING_MODULE_NAMES = (
     "lsmiotool.test.main.BaselineGateTest",
     "lsmiotool.test.main.test_dirs",
     "lsmiotool.test.main.test_hpc",
-    "lsmiotool.test.main.test_jobs",
     "lsmiotool.test.parse.TestCompareMain",
     "lsmiotool.test.parse.TestEndToEndParse",
     "lsmiotool.test.parse.TestLmpData",
@@ -79,6 +78,10 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.DetachTest",
     "lsmiotool.test.main.DispatchTest",
     "lsmiotool.test.main.EndToEndRunTest",
+    "lsmiotool.test.main.EpocppAdapterTest",
+    "lsmiotool.test.main.EpocppReportTest",
+    "lsmiotool.test.main.EpocppRunTest",
+    "lsmiotool.test.main.EpocppWorkerTest",
     "lsmiotool.test.main.EvidenceStoreTest",
     "lsmiotool.test.main.InstalledLayoutTest",
     "lsmiotool.test.main.InterruptionTest",
@@ -93,6 +96,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.ManifestTest",
     "lsmiotool.test.main.ModuleAuthorityTest",
     "lsmiotool.test.main.ModuleRendererTest",
+    "lsmiotool.test.main.ObservationThrottleTest",
     "lsmiotool.test.main.PairedVariantRunTest",
     "lsmiotool.test.main.ParseCliParserTest",
     "lsmiotool.test.main.ParseMainTest",
@@ -288,9 +292,9 @@ class LoaderTest(unittest.TestCase):
             _PREEXISTING_MODULE_NAMES,
         )
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
-        self.assertEqual(len(preexisting_test_ids), 79)
+        self.assertEqual(len(preexisting_test_ids), 61)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 858)
+        self.assertEqual(len(all_test_ids), 969)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

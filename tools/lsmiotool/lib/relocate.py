@@ -37,7 +37,8 @@ the relocated worker path is returned for the job script instead.
 
 Layouts (lib/resources.py ResourceLocator):
 - Source: `<repo>/tools/lsmiotool/lsmiotool-worker` imports `lsmiotool.lib.*` from its own
-  package directory and reads LMP assets from its `share/lmp-reaxff`. The package, assets
+  package directory and reads LMP assets from its `share/lmp-reaxff` (and the EPOCpp deck
+  template from `share/epocpp`). The package, assets
   included, is mirrored to `<work>/tools/lsmiotool`, so ResourceLocator.forSource() of the
   relocated worker resolves the same relative layout.
 - Installed: `<prefix>/<libexec>/lsmio/lsmiotool-worker` reaches its python package, profile and
@@ -209,7 +210,12 @@ def _planInstalled(
     f_layout = ResourceLocator.forInstalled(f_worker, f_rel_layout)
 
     f_required = [os.path.dirname(f_worker), f_layout.package_root]
-    f_optional = [os.path.dirname(f_layout.profile_file), f_layout.asset_root]
+    # The EPOCpp deck template sits next to the LMP assets (share/lsmio/epocpp)
+    f_optional = [
+        os.path.dirname(f_layout.profile_file),
+        f_layout.asset_root,
+        os.path.join(os.path.dirname(os.path.normpath(f_layout.asset_root)), "epocpp"),
+    ]
     f_dirs: List[str] = list(f_required) + [
         f_d for f_d in f_optional if os.path.isdir(f_d)
     ]

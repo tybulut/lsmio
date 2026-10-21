@@ -35,7 +35,7 @@ from typing import List, Optional
 from unittest.mock import MagicMock, patch
 
 from lsmiotool.lib import main, plot
-from lsmiotool.lib.cli import CompareNodesRequest
+from lsmiotool.lib.cli import CompareNodesRequest, parseCompareArguments
 
 
 class CompareNodesTest(unittest.TestCase):
@@ -161,6 +161,312 @@ class CompareNodesTest(unittest.TestCase):
             self.assertEqual(
                 legends, ["adios2", "native", "plugin", "rocksdb", "leveldb"]
             )
+
+    def testIorArmsPlottedAfterBackends(self) -> None:
+        """IOR arms in an archive folder are charted from ior-report.csv (built
+        from their bmtool-layout outputs when missing), after the backends, by arm."""
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+
+        target_dir = os.path.join(self.m_base_path, "archive", "backends", "small")
+        self._create_report(
+            os.path.join(target_dir, "outputs-native"), 4, "1M", "write", 1500.0
+        )
+        for f_arm, f_infix in (
+            ("ior-hdf5-collective", "hdf5-c"),
+            ("ior", "base"),
+            ("ior-collective", "collective"),
+        ):
+            f_day = os.path.join(target_dir, f"outputs-{f_arm}", "2", "2026-10-14")
+            os.makedirs(f_day)
+            with open(
+                os.path.join(f_day, f"out-{f_infix}-4-1M-2026-10-14-node097-0.txt"), "w"
+            ) as f_f:
+                f_f.write(IOR_SUMMARY)
+
+        cnm = main.CompareNodesMain(
+            f_folder=target_dir,
+            f_op="write",
+            f_stripes=4,
+            f_blocksize="1M",
+            f_output_dir=os.path.join(self.m_base_path, "png"),
+        )
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            self.assertEqual(cnm.run(), 0)
+            args, _ = mock_plot_cls.call_args
+            f_series = {p.legend: p for p in args[1:]}
+            self.assertEqual(
+                [p.legend for p in args[1:]],
+                ["native", "ior", "ior-collective", "ior-hdf5-collective"],
+            )
+            self.assertEqual(list(f_series["ior"].x_series), [2])
+            self.assertEqual(list(f_series["ior"].y_series), [1650.38])
+        for f_arm in ("ior", "ior-collective", "ior-hdf5-collective"):
+            f_dir = os.path.join(target_dir, f"outputs-{f_arm}")
+            self.assertTrue(os.path.isfile(os.path.join(f_dir, "ior-report.csv")))
+            # Never aggregated as LSMIO rank logs
+            self.assertFalse(os.path.exists(os.path.join(f_dir, "lsm-report.csv")))
+
+    def testIorFolderAloneNamedApart(self) -> None:
+        """A folder of IOR setups alone (lsmio-archive/ior/<scale>) names its charts
+        compare-<scale>-ior-*, never those of the backends of that scale."""
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+
+        f_archive = os.path.join(self.m_base_path, "archive")
+        f_ior = os.path.join(f_archive, "ior", "small")
+        f_day = os.path.join(f_ior, "outputs-ior", "2", "2026-10-14")
+        os.makedirs(f_day)
+        with open(
+            os.path.join(f_day, "out-base-4-1M-2026-10-14-node097-0.txt"), "w"
+        ) as f_f:
+            f_f.write(IOR_SUMMARY)
+        self._create_report(
+            os.path.join(f_archive, "backends", "small", "outputs-native"),
+            4,
+            "1M",
+            "write",
+            1500.0,
+        )
+        f_out = os.path.join(self.m_base_path, "png")
+        for f_folder, f_name, f_title in (
+            (f_ior, "compare-small-ior-write-4-1M.png", "Comparison: small, ior ("),
+            (
+                os.path.join(f_archive, "backends", "small"),
+                "compare-small-write-4-1M.png",
+                "Comparison: small (",
+            ),
+        ):
+            with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+                mock_plot_cls.return_value = MagicMock()
+                main.CompareNodesMain(
+                    f_folder=f_folder, f_op="write", f_output_dir=f_out
+                ).run()
+                args, _ = mock_plot_cls.call_args
+                self.assertTrue(args[0].title.startswith(f_title), args[0].title)
+                mock_plot_cls.return_value.plot.assert_called_once_with(
+                    os.path.join(f_out, f_name)
+                )
+
+    def testReportTriedOncePerRun(self) -> None:
+        """--all builds a missing report once per folder, not once per chart, and the
+        "no benchmark data" warning names every folder."""
+        f_backends = os.path.join(self.m_base_path, "archive", "backends", "small")
+        f_ior = os.path.join(self.m_base_path, "archive", "ior", "small")
+        os.makedirs(os.path.join(f_backends, "outputs-native"))
+        os.makedirs(os.path.join(f_ior, "outputs-ior"))
+        f_req = parseCompareArguments(
+            [
+                "nodes",
+                f_backends,
+                f_ior,
+                "write",
+                "--all",
+                "--output-dir",
+                self.m_base_path,
+            ]
+        )
+        with (
+            patch(
+                "lsmiotool.lib.export.generateIorReports",
+                side_effect=RuntimeError("bad"),
+            ) as mock_gen,
+            patch(
+                "lsmiotool.lib.output.ensureLsmioReports", return_value=False
+            ) as mock_ensure,
+            patch("lsmiotool.lib.log.Console.warning") as mock_warn,
+        ):
+            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
+        self.assertEqual(mock_gen.call_count, 1)
+        self.assertEqual(mock_ensure.call_count, 1)
+        f_no_data = [
+            f_c.args[0]
+            for f_c in mock_warn.call_args_list
+            if f_c.args[0].startswith("No benchmark data")
+        ]
+        self.assertEqual(len(f_no_data), 6)
+        self.assertIn(f"{f_backends}, {f_ior} for write", f_no_data[0])
+
+    def testSeveralFoldersChartedTogether(self) -> None:
+        """'compare nodes <folder> <folder> ...': the IOR setups of lsmio-archive/ior with
+        the backends; the first folder names the plots, and an arm present in several
+        folders is labelled with its folder."""
+        from lsmiotool.lib.cli import parseCompareArguments
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+
+        f_archive = os.path.join(self.m_base_path, "archive")
+        f_backends = os.path.join(f_archive, "backends", "small")
+        f_ior = os.path.join(f_archive, "ior", "small")
+        f_old = os.path.join(f_archive, "backends-old", "small")
+        self._create_report(
+            os.path.join(f_backends, "outputs-native"), 4, "1M", "write", 1500.0
+        )
+        self._create_report(
+            os.path.join(f_old, "outputs-native"), 4, "1M", "write", 900.0
+        )
+        f_day = os.path.join(f_ior, "outputs-ior", "2", "2026-10-14")
+        os.makedirs(f_day)
+        with open(
+            os.path.join(f_day, "out-base-4-1M-2026-10-14-node097-0.txt"), "w"
+        ) as f_f:
+            f_f.write(IOR_SUMMARY)
+
+        f_out = os.path.join(self.m_base_path, "png")
+        f_req = parseCompareArguments(
+            ["nodes", f_backends, f_ior, f_old, "write", "--output-dir", f_out]
+        )
+        self.assertEqual(f_req.folders, (f_backends, f_ior, f_old))
+        self.assertEqual(f_req.op, "write")
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
+            args, _ = mock_plot_cls.call_args
+            self.assertEqual(
+                [p.legend for p in args[1:]],
+                ["native (backends/small)", "native (backends-old/small)", "ior"],
+            )
+            self.assertEqual(
+                args[0].title,
+                "Comparison: small, backends + ior + backends-old (WRITE - 4 stripes - 1M)",
+            )
+            # Named after every folder, never replacing the backends-only chart
+            mock_plot_cls.return_value.plot.assert_called_once_with(
+                os.path.join(
+                    f_out, "compare-small-backends+ior+backends-old-write-4-1M.png"
+                )
+            )
+
+        # Same-named folders get as much of their path as tells them apart; a folder given
+        # twice is charted once
+        f_other = os.path.join(
+            self.m_base_path, "other", "archive", "backends", "small"
+        )
+        self._create_report(
+            os.path.join(f_other, "outputs-native"), 4, "1M", "write", 700.0
+        )
+        f_req = parseCompareArguments(
+            ["nodes", f_backends, f_other, f_backends, "write", "--output-dir", f_out]
+        )
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
+            args, _ = mock_plot_cls.call_args
+            f_tail = os.path.basename(self.m_base_path)
+            self.assertEqual(
+                [p.legend for p in args[1:]],
+                [
+                    f"native ({f_tail}/archive/backends/small)",
+                    "native (other/archive/backends/small)",
+                ],
+            )
+            mock_plot_cls.return_value.plot.assert_called_once_with(
+                os.path.join(
+                    f_out,
+                    f"compare-small-{f_tail}_archive_backends_small"
+                    "+other_archive_backends_small-write-4-1M.png",
+                )
+            )
+
+        f_req = parseCompareArguments(["nodes", f_backends, f_ior, "--all"])
+        self.assertEqual((f_req.folders, f_req.op), ((f_backends, f_ior), "both"))
+        f_req = parseCompareArguments(["nodes", f_backends, "read", "16", "8M"])
+        self.assertEqual(f_req.folders, (f_backends,))
+        with self.assertRaises(SystemExit):
+            main.CompareNodesMain(
+                f_request=parseCompareArguments(
+                    ["nodes", f_backends, os.path.join(f_archive, "missing"), "write"]
+                )
+            ).run()
+
+        # A stripe count is never a folder, even with a directory of that name here
+        from lsmiotool.lib.cli import CompareCliParseError
+
+        f_cwd = os.getcwd()
+        os.makedirs(os.path.join(self.m_base_path, "cwd", "4"))
+        os.chdir(os.path.join(self.m_base_path, "cwd"))
+        try:
+            with self.assertRaises(CompareCliParseError):
+                parseCompareArguments(["nodes", f_backends, "4", "--all"])
+            self.assertEqual(
+                parseCompareArguments(["nodes", f_backends, "./4", "--all"]).folders,
+                (f_backends, "./4"),
+            )
+        finally:
+            os.chdir(f_cwd)
+
+    def testCombinedNameOfFoldersSharingAParent(self) -> None:
+        """Folders with one parent (backends/small, backends/large) are named by their own
+        tails, so two such charts never share a file; a long name is cut with a hash."""
+        f_root = os.path.join(self.m_base_path, "archive", "backends")
+        for f_scale in ("small", "large", "bake"):
+            self._create_report(
+                os.path.join(f_root, f_scale, "outputs-native"), 4, "1M", "write", 900.0
+            )
+        f_out = os.path.join(self.m_base_path, "png")
+        f_names = []
+        for f_other in ("large", "bake"):
+            with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+                mock_plot_cls.return_value = MagicMock()
+                main.CompareNodesMain(
+                    f_request=parseCompareArguments(
+                        [
+                            "nodes",
+                            os.path.join(f_root, "small"),
+                            os.path.join(f_root, f_other),
+                            "write",
+                            "--output-dir",
+                            f_out,
+                        ]
+                    )
+                ).run()
+                f_names.append(mock_plot_cls.return_value.plot.call_args[0][0])
+        self.assertEqual(
+            [os.path.basename(f_n) for f_n in f_names],
+            [
+                "compare-small-small+large-write-4-1M.png",
+                "compare-small-small+bake-write-4-1M.png",
+            ],
+        )
+
+        f_deep = os.path.join(self.m_base_path, *(["d" * 40] * 4))
+        f_dirs = []
+        for f_i in range(4):
+            f_d = os.path.join(f_deep, f"{'x' * 50}{f_i}", "small")
+            self._create_report(
+                os.path.join(f_d, "outputs-native"), 4, "1M", "write", 900.0
+            )
+            f_dirs.append(f_d)
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            main.CompareNodesMain(
+                f_request=parseCompareArguments(
+                    ["nodes"] + f_dirs + ["write", "--output-dir", f_out]
+                )
+            ).run()
+            f_name = os.path.basename(mock_plot_cls.return_value.plot.call_args[0][0])
+        self.assertLessEqual(len(f_name), 255)
+        self.assertRegex(
+            f_name, r"^compare-small-x{50}0\+x{50}1\+x*-[0-9a-f]{8}-write-4-1M\.png$"
+        )
+
+    def testSameArmTwiceInOneFolderKeepsItsLabel(self) -> None:
+        """Only arms of different folders get a folder label (a second rocksdb archive in
+        one folder stays 'rocksdb', as before several folders were supported)."""
+        target_dir = os.path.join(self.m_base_path, "archive", "backends", "small")
+        self._create_report(
+            os.path.join(target_dir, "outputs-rocksdb"), 4, "1M", "write", 800.0
+        )
+        self._create_report(
+            os.path.join(target_dir, "outputs-rocksdb-1"), 4, "1M", "write", 900.0
+        )
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            main.CompareNodesMain(
+                f_folder=target_dir,
+                f_op="write",
+                f_output_dir=os.path.join(self.m_base_path, "png"),
+            ).run()
+            args, _ = mock_plot_cls.call_args
+            self.assertEqual([p.legend for p in args[1:]], ["rocksdb", "rocksdb"])
 
     def testFallbackPatternMapping(self) -> None:
         """Verifies substring pattern matching for non-standard directory names containing backend keywords."""

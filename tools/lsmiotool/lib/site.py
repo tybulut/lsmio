@@ -49,6 +49,7 @@ from typing import (
 )
 
 from lsmiotool.lib.profile import (
+    SRUN_MPI_PATTERN,
     ProfileDocument,
     ProfileLoader,
     ProfileRecord,
@@ -181,16 +182,33 @@ def findAdiosPluginLibrary(f_install_prefix: str) -> Optional[str]:
 
 
 class LauncherPolicy:
-    """Immutable policy defining the MPI/job launcher configuration."""
+    """Immutable policy defining the MPI/job launcher configuration.
 
-    __slots__ = ("m_kind", "_frozen")
+    srun_mpi is the srun --mpi plugin type (e.g. "pmix") that lsmiotool passes to srun; None
+    leaves srun to SLURM_MPI_TYPE and the cluster default. A command-line --mpi beats a
+    module's SLURM_MPI_TYPE=none, which leaves Open MPI 5 ranks without PMIx.
+    """
 
-    def __init__(self, f_kind: str) -> None:
+    __slots__ = ("m_kind", "m_srun_mpi", "_frozen")
+
+    def __init__(self, f_kind: str, f_srun_mpi: Optional[str] = None) -> None:
         if not isinstance(f_kind, str) or not f_kind:
             raise SiteResolutionError(
                 f"Launcher kind must be a non-empty string, got: {f_kind!r}"
             )
+        if f_srun_mpi is not None:
+            if f_kind != "srun":
+                raise SiteResolutionError(
+                    f"srun_mpi is set but the launcher is {f_kind!r}"
+                )
+            if not isinstance(f_srun_mpi, str) or not SRUN_MPI_PATTERN.fullmatch(
+                f_srun_mpi
+            ):
+                raise SiteResolutionError(
+                    f"srun_mpi must be an srun --mpi type such as 'pmix', got: {f_srun_mpi!r}"
+                )
         super().__setattr__("m_kind", f_kind)
+        super().__setattr__("m_srun_mpi", f_srun_mpi)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -209,15 +227,26 @@ class LauncherPolicy:
     def kind(self) -> str:
         return self.m_kind
 
+    @property
+    def srun_mpi(self) -> Optional[str]:
+        return self.m_srun_mpi
+
     def toDict(self) -> Dict[str, Any]:
-        return {"kind": self.m_kind}
+        f_out: Dict[str, Any] = {"kind": self.m_kind}
+        if self.m_srun_mpi is not None:
+            f_out["srun_mpi"] = self.m_srun_mpi
+        return f_out
 
     def __repr__(self) -> str:
-        return f"LauncherPolicy(kind={self.m_kind!r})"
+        if self.m_srun_mpi is None:
+            return f"LauncherPolicy(kind={self.m_kind!r})"
+        return f"LauncherPolicy(kind={self.m_kind!r}, srun_mpi={self.m_srun_mpi!r})"
 
     def __eq__(self, f_other: Any) -> bool:
         if isinstance(f_other, LauncherPolicy):
-            return self.m_kind == f_other.m_kind
+            return (
+                self.m_kind == f_other.m_kind and self.m_srun_mpi == f_other.m_srun_mpi
+            )
         return False
 
 
@@ -566,6 +595,8 @@ class ExecutableRegistry:
         "bm_leveldb",
         "bm_manager",
     }
+    # Executables a profile (or an older run's manifest) may leave out
+    OPTIONAL_EXECUTABLES: Set[str] = {"epocpp"}
 
     def __init__(self, f_executables: Mapping[str, str]) -> None:
         f_missing = self.REQUIRED_EXECUTABLES - set(f_executables.keys())
@@ -573,7 +604,11 @@ class ExecutableRegistry:
             raise SiteResolutionError(
                 f"Missing required executables in registry: {sorted(f_missing)}"
             )
-        f_extra = set(f_executables.keys()) - self.REQUIRED_EXECUTABLES
+        f_extra = (
+            set(f_executables.keys())
+            - self.REQUIRED_EXECUTABLES
+            - self.OPTIONAL_EXECUTABLES
+        )
         if f_extra:
             raise SiteResolutionError(
                 f"Unexpected extra executables in registry: {sorted(f_extra)}"
@@ -634,6 +669,10 @@ class ExecutableRegistry:
     @property
     def bm_manager(self) -> str:
         return self.m_executables["bm_manager"]
+
+    @property
+    def epocpp(self) -> str:
+        return self.getExecutable("epocpp")
 
     @property
     def executables(self) -> Dict[str, str]:
@@ -904,7 +943,8 @@ class SiteProfile:
                 )
 
     def toDict(self) -> Dict[str, Any]:
-        return {
+        """Canonical dictionary (the manifest's site); srun_mpi only when set."""
+        f_out: Dict[str, Any] = {
             "name": self.m_name,
             "scheduler": self.m_scheduler.value,
             "launcher": self.m_launcher.kind,
@@ -923,6 +963,9 @@ class SiteProfile:
                 f_k.value: f_v for f_k, f_v in self.m_lustre_pools.items()
             },
         }
+        if self.m_launcher.srun_mpi is not None:
+            f_out["srun_mpi"] = self.m_launcher.srun_mpi
+        return f_out
 
 
 class SiteProfileRegistry:
@@ -1166,7 +1209,7 @@ class EnvironmentResolver:
             raise SiteResolutionError(f"Unknown scheduler kind: {f_record.scheduler!r}")
 
         # Launcher policy
-        f_launcher = LauncherPolicy(f_record.launcher)
+        f_launcher = LauncherPolicy(f_record.launcher, f_record.srun_mpi)
 
         # Certification state
         f_raw_cert = f_record.certification.lower()

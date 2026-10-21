@@ -1946,13 +1946,15 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
        #PBS -l pmem=8G
        #PBS -l pvmem=8G
        (If large scale ppn == 4, omits pmem and pvmem)
-    6. #PBS -l walltime=06:00:00 (fixed 6 hours; NEVER computed)
+    6. #PBS -l walltime=06:00:00 (fixed 6 hours per run; a job running several arms gets
+       it once per arm, so a whole multiple of 06:00:00 up to 48:00:00)
     7. #PBS -o <output_path>
     8. #PBS -e <error_path>
     Followed immediately by 'set -euo pipefail', one-time ModuleSetup.render(profile), and POSIX-quoted worker execution tail.
 
     Prohibitions & Invariants:
-    - NEVER render #SBATCH directives, Slurm account, email, or variable walltime.
+    - NEVER render #SBATCH directives, Slurm account, email, or a walltime that is not a
+      whole multiple of 06:00:00 (up to 48:00:00).
     - Reject SlurmMailMode (SlurmMailMode.END_FAIL), raw strings, or injected mail values with SchedulerScriptError.
     - Strict token validation on job_name, output_path, and error_path rejecting newlines, NUL bytes, and #PBS/#SBATCH directive injections.
     """
@@ -1960,6 +1962,25 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
     __slots__ = ()
 
     FIXED_WALLTIME = "06:00:00"
+    # A job running several arms: the fixed walltime once per arm, up to 48 hours
+    MAX_WALLTIME_HOURS = 48
+
+    @classmethod
+    def fixedWalltimes(cls, f_fixed: str) -> Tuple[str, ...]:
+        """Walltimes a job may ask for with the fixed per-run walltime f_fixed: its whole
+        multiples up to MAX_WALLTIME_HOURS, as HH:MM:SS (scaleFixedWalltime's form)."""
+        try:
+            f_sec = parseWalltimeToSeconds(f_fixed)
+        except ValueError:
+            return (f_fixed,)
+        f_max = cls.MAX_WALLTIME_HOURS * 3600
+        f_out = []
+        f_n = 1
+        while f_sec > 0 and f_sec * f_n <= f_max:
+            f_t = f_sec * f_n
+            f_out.append(f"{f_t // 3600:02d}:{f_t % 3600 // 60:02d}:{f_t % 60:02d}")
+            f_n += 1
+        return tuple(f_out) or (f_fixed,)
 
     @staticmethod
     def scaleMemory(f_mem: str, f_factor: int) -> str:
@@ -2015,20 +2036,6 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
         # Validate mail mode (strict PbsMailMode.ABE enforcement)
         f_valid_mail_mode = cls.validateMailMode(SchedulerKind.PBS, f_mail_mode)
 
-        # Validate walltime: fixed 06:00:00; reject any variable or different walltime
-        if f_walltime is not None:
-            if not isinstance(f_walltime, str) or not f_walltime.strip():
-                raise SchedulerScriptError(
-                    f"walltime must be a non-empty string, got: {f_walltime!r}"
-                )
-            _checkNoControlChars(f_walltime, "walltime")
-            _checkNoDirectiveInjection(f_walltime, "walltime")
-            f_norm_walltime = f_walltime.strip()
-            if f_norm_walltime != cls.FIXED_WALLTIME:
-                raise SchedulerScriptError(
-                    f"PBS walltime must be fixed '{cls.FIXED_WALLTIME}' (computed/variable walltime is rejected), got: {f_walltime!r}"
-                )
-
         # Extract profile resource configuration if available
         f_shape_name = "small" if f_ppn == 1 else "large"
         f_res_policy = None
@@ -2037,6 +2044,28 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
                 f_res_policy = f_profile.resources.get(f_shape_name)
             elif hasattr(f_profile.resources, f_shape_name):
                 f_res_policy = getattr(f_profile.resources, f_shape_name)
+
+        # Validate walltime: the profile's fixed walltime (default 06:00:00) per run, so a
+        # whole multiple of it up to 48:00:00 for a job running several arms; reject any
+        # other walltime
+        f_fixed = cls.FIXED_WALLTIME
+        f_policy = getattr(f_res_policy, "walltime_policy", None)
+        if isinstance(f_policy, str) and f_policy.startswith("fixed_"):
+            f_fixed = f_policy[len("fixed_") :]
+        f_norm_walltime = f_fixed
+        if f_walltime is not None:
+            if not isinstance(f_walltime, str) or not f_walltime.strip():
+                raise SchedulerScriptError(
+                    f"walltime must be a non-empty string, got: {f_walltime!r}"
+                )
+            _checkNoControlChars(f_walltime, "walltime")
+            _checkNoDirectiveInjection(f_walltime, "walltime")
+            f_norm_walltime = f_walltime.strip()
+            if f_norm_walltime not in cls.fixedWalltimes(f_fixed):
+                raise SchedulerScriptError(
+                    f"PBS walltime must be fixed '{f_fixed}' per run (a whole multiple "
+                    f"of it up to {cls.MAX_WALLTIME_HOURS}:00:00), got: {f_walltime!r}"
+                )
 
         # 1. Queue: default 'arm'
         f_queue = "arm"
@@ -2094,7 +2123,7 @@ class PbsScriptRenderer(SchedulerScriptRenderer):
             f_directives.append(f"#PBS -l pvmem={f_pvmem}")
 
         # 6. Fixed walltime
-        f_directives.append(f"#PBS -l walltime={cls.FIXED_WALLTIME}")
+        f_directives.append(f"#PBS -l walltime={f_norm_walltime}")
 
         # 7. Output path
         f_directives.append(f"#PBS -o {f_valid_out_path}")

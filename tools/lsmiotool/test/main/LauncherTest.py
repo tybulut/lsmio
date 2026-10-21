@@ -43,6 +43,7 @@ from lsmiotool.lib.site import (
     LauncherPolicy,
     SchedulerKind,
     SiteProfile,
+    SiteResolutionError,
 )
 from lsmiotool.lib.worker import (
     OMPI_TMPDIR_ENV,
@@ -196,7 +197,9 @@ class LauncherTest(unittest.TestCase):
             ],
         )
 
-        # 3. Viking2 (Slurm, ppn=1)
+        # 3. Viking2 (Slurm, ppn=1): srun_mpi=pmix, since its Open MPI 5 module sets
+        # SLURM_MPI_TYPE=none
+
         f_viking2_small = Launcher.buildSharedArgv(
             self.m_viking2_profile, self.m_small_point, self.m_lmp_command
         )
@@ -206,6 +209,7 @@ class LauncherTest(unittest.TestCase):
                 "srun",
                 "--export=ALL",
                 "--kill-on-bad-exit=1",
+                "--mpi=pmix",
                 "-n",
                 "8",
                 "-N",
@@ -229,6 +233,7 @@ class LauncherTest(unittest.TestCase):
                 "srun",
                 "--export=ALL",
                 "--kill-on-bad-exit=1",
+                "--mpi=pmix",
                 "-n",
                 "32",
                 "-N",
@@ -426,6 +431,66 @@ class LauncherTest(unittest.TestCase):
             )
             self.assertNotIn("-p", f_argv)
             self.assertNotIn("standard", f_argv)
+
+    def testSrunMpiFromProfile(self) -> None:
+        """srun_mpi adds --mpi=<type> to both srun forms; without it srun is left to the environment."""
+        f_worker = "/tmp/usr/bin/lsmioworker"
+        f_manifest = "/tmp/runs/run123/manifest.json"
+
+        def _rankArgv(f_profile: Any) -> List[str]:
+            return Launcher.buildRankWorkerArgv(
+                f_profile,
+                self.m_small_point,
+                f_worker_executable=f_worker,
+                f_manifest_path=f_manifest,
+                f_point_id="point_0",
+                f_combination_desc="c16_b8M",
+            )
+
+        self.assertEqual(self.m_viking2_profile.launcher.srun_mpi, "pmix")
+        self.assertEqual(
+            _rankArgv(self.m_viking2_profile)[:7],
+            [
+                "srun",
+                "--export=ALL",
+                "--kill-on-bad-exit=1",
+                "--mpi=pmix",
+                "-n",
+                "8",
+                "-N",
+            ],
+        )
+        self.assertEqual(
+            Launcher.buildSharedArgv(
+                self.m_viking2_profile, self.m_small_point, ["ior"]
+            )[3],
+            "--mpi=pmix",
+        )
+
+        # Viking (Open MPI 4) and ARCHER2 (Cray MPICH) leave srun to the environment
+        for f_profile in (self.m_viking_profile, self.m_archer2_profile):
+            self.assertIsNone(f_profile.launcher.srun_mpi)
+            self.assertFalse(
+                any(f_a.startswith("--mpi") for f_a in _rankArgv(f_profile))
+            )
+
+        # The other profile forms the launcher accepts
+        self.assertIn("--mpi=pmix", _rankArgv(LauncherPolicy("srun", "pmix")))
+        self.assertIn(
+            "--mpi=pmi2", _rankArgv({"scheduler": "slurm", "srun_mpi": "pmi2"})
+        )
+        self.assertIn("--mpi=pmix", _rankArgv("VIKING2"))
+        self.assertFalse(any(f_a.startswith("--mpi") for f_a in _rankArgv("slurm")))
+        with self.assertRaises(LauncherError):
+            _rankArgv({"scheduler": "slurm", "srun_mpi": 5})
+
+        # srun_mpi only makes sense for srun, and must be a plugin type
+        with self.assertRaises(SiteResolutionError):
+            LauncherPolicy("aprun", "pmix")
+        with self.assertRaises(SiteResolutionError):
+            LauncherPolicy("srun", "pmix --overcommit")
+        with self.assertRaises(SiteResolutionError):
+            LauncherPolicy("srun", "")
 
     def testSharedVersusRankWorkerTail(self) -> None:
         """Validates that shared mode appends benchmark argv while rank mode appends rank worker tail."""

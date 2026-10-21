@@ -361,12 +361,16 @@ class AllocationControllerTest(unittest.TestCase):
             f_target="ior", f_scale="local", f_run_id="run-ior-shared"
         )
         f_runner = MockProcessRunner()
-        f_status = AllocationController.run(
-            f_manifest_path=f_path_ior,
-            f_point_id="tasks-1",
-            f_runner=f_runner,
-            f_layout=f_layout_ior,
-        )
+        from unittest.mock import patch
+
+        # The controller's node names the archived IOR output (lib/export.py)
+        with patch.dict(os.environ, {"SLURMD_NODENAME": "node042"}):
+            f_status = AllocationController.run(
+                f_manifest_path=f_path_ior,
+                f_point_id="tasks-1",
+                f_runner=f_runner,
+                f_layout=f_layout_ior,
+            )
         self.assertEqual(f_status, 0)
 
         # Assert exactly 6 controller-result.json files and zero rank result files
@@ -376,6 +380,8 @@ class AllocationControllerTest(unittest.TestCase):
             f_combo = f"c{f_stripe}_b{f_block}"
             f_res = f_store_ior.readControllerResult(f_sp, f_combo, f_ordinal=0)
             self.assertIsNotNone(f_res)
+            self.assertEqual(f_res.payload["status"], "success")
+            self.assertEqual(f_res.payload["host"], "node042")
             # Ranks directory should have no result files
             self.assertIsNone(f_store_ior.readRankResult(f_sp, 0, f_combo, f_ordinal=0))
 

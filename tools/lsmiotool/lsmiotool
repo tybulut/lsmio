@@ -35,6 +35,8 @@ import sys
 
 if next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None) == "test":
     os.environ.setdefault("MPLBACKEND", "Agg")
+    # The tests run in the DEV environment, as ctest runs them, not the site's
+    os.environ.setdefault("LSMIO_ENV", "DEV")
 
 # Calculate server path
 srv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')

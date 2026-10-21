@@ -216,6 +216,7 @@ class RelocateTest(unittest.TestCase):
         _writeFile(os.path.join(f_share, "python", "lsmiotool", "VERSION"), "0.3.0\n")
         _writeFile(os.path.join(f_share, "etc", "environments.json"), "{}\n")
         _writeFile(os.path.join(f_share, "lmp-reaxff", "in.reaxc"))
+        _writeFile(os.path.join(f_share, "epocpp", "two_stream.deck.in"))
 
         f_runner = _RecordingRunner()
         f_new = relocateForSite(self.m_archer2, f_worker, self.m_env, f_runner)
@@ -233,6 +234,7 @@ class RelocateTest(unittest.TestCase):
                     os.path.join(f_share, "python") + "/",
                     os.path.join(f_share, "etc") + "/",
                     os.path.join(f_share, "lmp-reaxff") + "/",
+                    os.path.join(f_share, "epocpp") + "/",
                 ]
             ),
         )
@@ -241,6 +243,7 @@ class RelocateTest(unittest.TestCase):
             "../../share/lsmio/python/lsmiotool/VERSION",
             "../../share/lsmio/etc/environments.json",
             "../../share/lsmio/lmp-reaxff/in.reaxc",
+            "../../share/lsmio/epocpp/two_stream.deck.in",
         ):
             self.assertTrue(
                 os.path.isfile(os.path.normpath(os.path.join(f_anchor, f_rel)))

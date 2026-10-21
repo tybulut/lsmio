@@ -30,10 +30,13 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
+import errno
 import hashlib
 import os
 import re
 import stat
+import string
+import sys
 from typing import (
     Any,
     Callable,
@@ -1952,4 +1955,544 @@ class LmpAdapter(BenchmarkAdapter):
                     f"LMP executable {f_norm_executable!r} produced unrecognized help output: {f_output_text.strip()}"
                 )
 
+        return CapabilityState.VERIFIED
+
+
+class EpocppAdapter(BenchmarkAdapter):
+    """Adapter for EPOCpp, an application run with one shared srun per repeat.
+
+    It fills the deck template (share/epocpp/two_stream.deck.in) for an arm and a scale
+    and builds the epocpp command. An arm's setup names its backend (or NONE, the
+    no-output baseline) and its kind: <BACKEND> is a wall-time run, timed by EPOCpp's
+    own Runtime; <BACKEND>-BW is a bandwidth run, which adds --io-benchmark -m
+    (lsmio::Benchmark's iwrite/iread results).
+    """
+
+    TARGET: str = "epocpp"
+    DEFAULT_SETUP: str = "POSIX"
+    BACKENDS: Tuple[str, ...] = ("NONE", "POSIX", "ADIOS2", "PLUGIN", "NATIVE")
+    BANDWIDTH_SUFFIX: str = "-BW"
+    ALLOWED_SETUPS: Tuple[str, ...] = (
+        "NONE",
+        "POSIX",
+        "ADIOS2",
+        "PLUGIN",
+        "NATIVE",
+        "POSIX-BW",
+        "ADIOS2-BW",
+        "PLUGIN-BW",
+        "NATIVE-BW",
+    )
+
+    KIND_WALLTIME: str = "walltime"
+    KIND_BANDWIDTH: str = "bandwidth"
+    KINDS: Tuple[str, ...] = (KIND_WALLTIME, KIND_BANDWIDTH)
+    BANDWIDTH_FLAGS: Tuple[str, ...] = ("--io-benchmark", "-m")
+
+    # Output-block keys that pick each backend (EPOCpp's output block keys)
+    BACKEND_KEYS: Dict[str, Tuple[str, ...]] = {
+        "POSIX": ("filetype = posix",),
+        "ADIOS2": ("filetype = adios",),
+        "PLUGIN": ("filetype = adios", "adios_engine = plugin"),
+        "NATIVE": ("filetype = lsmio",),
+    }
+    # The dump extension each backend writes (data<step>_<rank>.<ext>)
+    OUTPUT_EXTENSIONS: Dict[str, str] = {
+        "POSIX": "epc",
+        "ADIOS2": "bp5",
+        "PLUGIN": "lsp",
+        "NATIVE": "ldb",
+    }
+
+    # The two deck sizes of the recommended decks: grid cells per side and particles
+    # per cell; every scale but large runs the small deck
+    DECK_SIZES: Dict[str, Tuple[int, int]] = {
+        "small": (128, 64),
+        "large": (1024, 128),
+    }
+    SCALE_DECKS: Dict[str, str] = {
+        "local": "small",
+        "bake": "small",
+        "small": "small",
+        "large": "large",
+    }
+
+    TEMPLATE_DIR: str = "epocpp"
+    TEMPLATE_NAME: str = "two_stream.deck.in"
+    TEMPLATE_PLACEHOLDERS: Tuple[str, ...] = ("nppc", "nx", "output")
+    DECK_NAME: str = "input.deck"
+
+    # The colleagues' output block: data named "data", particle positions and the
+    # px/py momenta; a no-output run never dumps, a dump run dumps every step as a
+    # full restart dump (restartable = T keeps the restart variables those
+    # particle lines would otherwise clear) with a file per process
+    _OUTPUT_COMMON: Tuple[str, ...] = (
+        "particles = always",
+        "px = always",
+        "py = always",
+    )
+    _OUTPUT_NONE: Tuple[str, ...] = (
+        "dump_first = F",
+        "dump_last = F",
+        "nstep_snapshot = 0",
+    )
+    _OUTPUT_DUMP: Tuple[str, ...] = (
+        "dump_first = T",
+        "dump_last = T",
+        "nstep_snapshot = 1",
+        "restartable = T",
+    )
+
+    _PLACEHOLDER_RE = re.compile(r"\$(?:\{(?P<braced>[^}]*)\}|(?P<other>.?))")
+
+    @property
+    def target(self) -> str:
+        return self.TARGET
+
+    @property
+    def defaultSetup(self) -> str:
+        return self.DEFAULT_SETUP
+
+    @property
+    def allowedSetups(self) -> Tuple[str, ...]:
+        return self.ALLOWED_SETUPS
+
+    @classmethod
+    def normalizeSetup(cls, f_setup: str) -> str:
+        """Return the canonical setup name, or raise BenchmarkConfigurationError."""
+        if not isinstance(f_setup, str) or not f_setup.strip():
+            raise BenchmarkConfigurationError(
+                f"Setup must be a non-empty string, got: {f_setup!r}"
+            )
+        f_norm = f_setup.strip().upper()
+        if f_norm not in cls.ALLOWED_SETUPS:
+            raise BenchmarkConfigurationError(
+                f"Unknown EPOCpp setup: {f_setup!r}. "
+                f"Allowed setups: {cls.ALLOWED_SETUPS}"
+            )
+        return f_norm
+
+    @classmethod
+    def splitSetup(cls, f_setup: str) -> Tuple[str, str]:
+        """Return an arm setup's (backend, kind): POSIX -> (POSIX, walltime),
+        POSIX-BW -> (POSIX, bandwidth), NONE -> (NONE, walltime)."""
+        f_norm = cls.normalizeSetup(f_setup)
+        if f_norm.endswith(cls.BANDWIDTH_SUFFIX):
+            return f_norm[: -len(cls.BANDWIDTH_SUFFIX)], cls.KIND_BANDWIDTH
+        return f_norm, cls.KIND_WALLTIME
+
+    @classmethod
+    def deckForScale(cls, f_scale: str) -> str:
+        """Return the deck size ('small' or 'large') a scale runs."""
+        f_norm = f_scale.strip().lower() if isinstance(f_scale, str) else ""
+        if f_norm not in cls.SCALE_DECKS:
+            raise BenchmarkConfigurationError(
+                f"Unsupported EPOCpp scale: {f_scale!r}. "
+                f"Allowed: {list(cls.SCALE_DECKS)}"
+            )
+        return cls.SCALE_DECKS[f_norm]
+
+    @classmethod
+    def outputBlock(cls, f_setup: str) -> str:
+        """Return the deck's output block for f_setup (both kinds share it)."""
+        f_norm = cls.splitSetup(f_setup)[0]
+        f_keys: List[str] = ["name = data"]
+        if f_norm == "NONE":
+            f_keys += [*cls._OUTPUT_NONE, *cls._OUTPUT_COMMON]
+        else:
+            f_keys += [
+                *cls._OUTPUT_DUMP,
+                *cls._OUTPUT_COMMON,
+                "file_per_process = T",
+                *cls.BACKEND_KEYS[f_norm],
+            ]
+        return "\n".join(
+            ["begin:output", *(f"  {f_key}" for f_key in f_keys), "end:output"]
+        )
+
+    @classmethod
+    def templatePath(cls, f_share_root: str) -> str:
+        """Return the template's path under a share root (source share/ or installed
+        share/lsmio/)."""
+        return os.path.join(f_share_root, cls.TEMPLATE_DIR, cls.TEMPLATE_NAME)
+
+    def readTemplate(self, f_template_path: str) -> str:
+        """Read the deck template: a readable, non-symlink regular file whose only
+        placeholders are exactly TEMPLATE_PLACEHOLDERS."""
+        if not isinstance(f_template_path, str) or not f_template_path.strip():
+            raise BenchmarkConfigurationError(
+                f"Template path must be a non-empty string, got: {f_template_path!r}"
+            )
+        if "\0" in f_template_path:
+            raise BenchmarkConfigurationError(
+                f"Template path contains NUL byte: {f_template_path!r}"
+            )
+        try:
+            f_stat = os.lstat(f_template_path)
+        except OSError as f_exc:
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck template not found at '{f_template_path}': {f_exc}"
+            ) from f_exc
+        if stat.S_ISLNK(f_stat.st_mode):
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck template '{f_template_path}' is a symlink, "
+                "which is forbidden"
+            )
+        if not stat.S_ISREG(f_stat.st_mode):
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck template '{f_template_path}' is not a regular file"
+            )
+        try:
+            with open(f_template_path, encoding="utf-8") as f_f:
+                f_text = f_f.read()
+        except (OSError, UnicodeDecodeError) as f_exc:
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck template '{f_template_path}' is not readable: {f_exc}"
+            ) from f_exc
+
+        f_found: Set[str] = set()
+        for f_match in self._PLACEHOLDER_RE.finditer(f_text):
+            f_name = f_match.group("braced")
+            if f_name is None:
+                raise BenchmarkConfigurationError(
+                    f"EPOCpp deck template '{f_template_path}' has a '$' that is not a "
+                    f"${{name}} placeholder: {f_match.group(0)!r}"
+                )
+            f_found.add(f_name)
+        if f_found != set(self.TEMPLATE_PLACEHOLDERS):
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck template '{f_template_path}' has placeholders "
+                f"{sorted(f_found)}, expected {sorted(self.TEMPLATE_PLACEHOLDERS)}"
+            )
+        return f_text
+
+    def renderDeck(
+        self,
+        f_template_text: str,
+        f_setup: str,
+        f_deck: str = "small",
+        f_nx: Optional[int] = None,
+        f_nppc: Optional[int] = None,
+    ) -> str:
+        """Fill the template for f_setup and the f_deck size; f_nx/f_nppc replace the
+        size's values (tests shrink the grid)."""
+        f_deck = f_deck.strip().lower() if isinstance(f_deck, str) else ""
+        if f_deck not in self.DECK_SIZES:
+            raise BenchmarkConfigurationError(
+                f"Unknown EPOCpp deck size: {f_deck!r}. "
+                f"Allowed: {list(self.DECK_SIZES)}"
+            )
+        f_size_nx, f_size_nppc = self.DECK_SIZES[f_deck]
+        f_values = {
+            "nx": f_size_nx if f_nx is None else f_nx,
+            "nppc": f_size_nppc if f_nppc is None else f_nppc,
+        }
+        for f_key, f_value in f_values.items():
+            if isinstance(f_value, bool) or not isinstance(f_value, int) or f_value < 1:
+                raise BenchmarkConfigurationError(
+                    f"EPOCpp deck {f_key} must be a positive integer, got: {f_value!r}"
+                )
+        try:
+            return string.Template(f_template_text).substitute(
+                nx=f_values["nx"],
+                nppc=f_values["nppc"],
+                output=self.outputBlock(f_setup),
+            )
+        except (KeyError, ValueError) as f_exc:
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck template could not be filled: {f_exc!r}"
+            ) from f_exc
+
+    def writeDeck(self, f_deck_text: str, f_deck_dir: str) -> str:
+        """Write f_deck_text as <f_deck_dir>/input.deck (a new file; an existing deck
+        or a symlink is refused) and return its path. A failed write leaves no deck."""
+        if not isinstance(f_deck_text, str):
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck text must be a string, got: {type(f_deck_text).__name__}"
+            )
+        try:
+            f_bytes = f_deck_text.encode("utf-8")
+        except UnicodeEncodeError as f_exc:
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck text cannot be encoded as UTF-8: {f_exc}"
+            ) from f_exc
+        if not os.path.isdir(f_deck_dir) or os.path.islink(f_deck_dir):
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck directory '{f_deck_dir}' is not a directory"
+            )
+        f_path = os.path.join(f_deck_dir, self.DECK_NAME)
+        try:
+            f_fd = os.open(f_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except OSError as f_exc:
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck '{f_path}' could not be created: {f_exc}"
+            ) from f_exc
+        try:
+            with os.fdopen(f_fd, "wb") as f_f:
+                f_f.write(f_bytes)
+                f_f.flush()
+                os.fsync(f_f.fileno())
+            f_dir_fd = os.open(f_deck_dir, os.O_RDONLY)
+            try:
+                os.fsync(f_dir_fd)
+            finally:
+                os.close(f_dir_fd)
+        except OSError as f_exc:
+            try:
+                os.unlink(f_path)
+            except OSError:
+                pass
+            raise BenchmarkConfigurationError(
+                f"EPOCpp deck '{f_path}' could not be written: {f_exc}"
+            ) from f_exc
+        return f_path
+
+    @staticmethod
+    def logFileName(f_combo_name: str, f_repeat: int) -> str:
+        """The log of one run (1-based repeat) in a point's logs dir."""
+        return f"epocpp_{f_combo_name}_r{f_repeat:02d}.stdout"
+
+    # The line the worker appends to a run's log once the run has exited
+    DATA_BYTES_PREFIX: str = "lsmiotool: data bytes = "
+    _RUNTIME_RE = re.compile(
+        r"^Runtime = ([0-9]+(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?)\s*$", re.M
+    )
+    _SUMMARY_RE = re.compile(r"^(write|read),([0-9][^,]*),", re.M)
+
+    @classmethod
+    def runtimeOf(cls, f_text: str) -> Optional[float]:
+        """EPOCpp's `Runtime = <seconds>` from a run's output, or None."""
+        f_matches = cls._RUNTIME_RE.findall(f_text)
+        return float(f_matches[-1]) if f_matches else None
+
+    @classmethod
+    def checkOutput(cls, f_setup: str, f_text: str) -> Optional[str]:
+        """Why a run's output is not a complete run of f_setup's kind, or None:
+        every run prints Runtime; a bandwidth run also prints BENCHMARK RESULTS with
+        numeric write and read summaries."""
+        if cls.runtimeOf(f_text) is None:
+            return "no 'Runtime = <seconds>' line"
+        if cls.splitSetup(f_setup)[1] != cls.KIND_BANDWIDTH:
+            return None
+        if "BENCHMARK RESULTS:" not in f_text:
+            return "no 'BENCHMARK RESULTS:' block"
+        f_ops = {f_m.group(1) for f_m in cls._SUMMARY_RE.finditer(f_text)}
+        for f_op in ("write", "read"):
+            if f_op not in f_ops:
+                return f"no numeric '{f_op},' summary (FAILED or missing)"
+        return None
+
+    # Threads that size and remove a run's dumps: each file costs Lustre metadata
+    # round trips, so overlapping them is what shortens the pass, not CPU
+    CLEANUP_THREADS = 32
+
+    @staticmethod
+    def _countAndRemoveEntry(f_path: str) -> Tuple[int, int, int]:
+        """Size, then remove, one top-level entry of a data dir: a file, a symlink
+        (never followed) or a directory, deepest first. Directories are walked by
+        file descriptor, so a symlink swapped in cannot lead the removal elsewhere.
+        What cannot be removed is left, with the first error on stderr."""
+        f_size = f_alloc = f_files = 0
+        f_error: Optional[OSError] = None
+
+        def _note(f_err: OSError) -> None:
+            nonlocal f_error
+            # Gone already is what removing wants
+            if f_error is None and f_err.errno != errno.ENOENT:
+                f_error = f_err
+
+        def _remove(f_name: str, f_dir_fd: Optional[int]) -> None:
+            nonlocal f_size, f_alloc, f_files
+            try:
+                f_st = os.stat(f_name, dir_fd=f_dir_fd, follow_symlinks=False)
+                if stat.S_ISDIR(f_st.st_mode):
+                    os.rmdir(f_name, dir_fd=f_dir_fd)
+                    return
+                os.unlink(f_name, dir_fd=f_dir_fd)
+                # Counted once removed, so a pass over what is left counts it once
+                if stat.S_ISREG(f_st.st_mode):
+                    f_size += f_st.st_size
+                    f_alloc += getattr(f_st, "st_blocks", 0) * 512
+                    f_files += 1
+            except OSError as f_err:
+                _note(f_err)
+
+        try:
+            f_is_dir = stat.S_ISDIR(os.lstat(f_path).st_mode)
+        except OSError as f_err:
+            _note(f_err)
+            f_is_dir = False
+        if f_is_dir:
+            # fwalk raises, rather than calls onerror, when it cannot open f_path
+            try:
+                for _, f_dirs, f_names, f_fd in os.fwalk(
+                    f_path, topdown=False, onerror=_note, follow_symlinks=False
+                ):
+                    for f_name in f_names + f_dirs:
+                        _remove(f_name, f_fd)
+            except OSError as f_err:
+                _note(f_err)
+        if f_error is None or f_is_dir:
+            _remove(f_path, None)
+        if f_error is not None:
+            sys.stderr.write(f"WARNING: failed to remove under '{f_path}': {f_error}\n")
+        return f_size, f_alloc, f_files
+
+    @classmethod
+    def countAndRemove(
+        cls, f_data_dir: str, f_threads: Optional[int] = None
+    ) -> Tuple[int, int, int]:
+        """(file bytes, allocated bytes, files) a run left under f_data_dir, in the same
+        pass that empties it; read once the run has exited, so nothing observes it
+        while running. Each top-level entry (one rank's dump: data<step>_<rank>.<ext>)
+        is sized and removed by one of f_threads threads. Symlinks are removed, never
+        followed; f_data_dir itself (and its striping) is kept. What cannot be removed
+        is left; the caller checks the dir ends up empty."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        try:
+            f_entries = [
+                os.path.join(f_data_dir, f_e) for f_e in os.listdir(f_data_dir)
+            ]
+        except OSError:
+            return 0, 0, 0
+        if not f_entries:
+            return 0, 0, 0
+        f_workers = max(1, min(f_threads or cls.CLEANUP_THREADS, len(f_entries)))
+        with ThreadPoolExecutor(max_workers=f_workers) as f_pool:
+            f_parts = list(f_pool.map(cls._countAndRemoveEntry, f_entries))
+        return (
+            sum(f_p[0] for f_p in f_parts),
+            sum(f_p[1] for f_p in f_parts),
+            sum(f_p[2] for f_p in f_parts),
+        )
+
+    @classmethod
+    def dataBytesLine(cls, f_size: int, f_alloc: int, f_files: int) -> str:
+        return (
+            f"{cls.DATA_BYTES_PREFIX}{f_size} allocated = {f_alloc} files = {f_files}\n"
+        )
+
+    def buildCommand(
+        self,
+        f_executable: str,
+        f_setup: str,
+        f_deck_dir: str,
+        f_data_dir: str,
+        f_working_dir: str,
+        f_stdout_path: str,
+        f_stderr_path: Optional[str] = None,
+    ) -> BenchmarkCommand:
+        """Construct the shared epocpp command: epocpp [--io-benchmark -m] -i <deck
+        dir> -o <data dir>."""
+        f_norm_kind = self.splitSetup(f_setup)[1]
+        f_checked: Dict[str, str] = {}
+        for f_desc, f_value in (
+            ("Executable", f_executable),
+            ("Deck directory", f_deck_dir),
+            ("Data directory", f_data_dir),
+            ("Working directory", f_working_dir),
+            ("Stdout path", f_stdout_path),
+            (
+                "Stderr path",
+                f_stdout_path if f_stderr_path is None else f_stderr_path,
+            ),
+        ):
+            if not isinstance(f_value, str) or not f_value.strip():
+                raise BenchmarkConfigurationError(
+                    f"{f_desc} must be a non-empty string, got: {f_value!r}"
+                )
+            if "\0" in f_value:
+                raise BenchmarkConfigurationError(
+                    f"{f_desc} contains NUL byte: {f_value!r}"
+                )
+            for f_ph in IorAdapter.RANK_PLACEHOLDERS:
+                if f_ph in f_value:
+                    raise BenchmarkConfigurationError(
+                        f"EPOCpp command {f_desc.lower()} contains rank placeholder "
+                        f"{f_ph!r}: {f_value!r}"
+                    )
+            f_checked[f_desc] = (
+                f_value.strip()
+                if f_desc == "Executable"
+                else os.path.normpath(f_value.strip())
+            )
+
+        f_argv: List[str] = [f_checked["Executable"]]
+        if f_norm_kind == self.KIND_BANDWIDTH:
+            f_argv += self.BANDWIDTH_FLAGS
+        f_argv += ["-i", f_checked["Deck directory"], "-o", f_checked["Data directory"]]
+        return BenchmarkCommand(
+            f_argv=f_argv,
+            f_stdout_path=f_checked["Stdout path"],
+            f_stderr_path=f_checked["Stderr path"],
+            f_working_dir=f_checked["Working directory"],
+            f_is_rank_local=False,
+        )
+
+    def probeCapability(
+        self,
+        f_executable: str,
+        f_runner: Optional[Callable[..., Any]] = None,
+        f_setup: Optional[str] = None,
+    ) -> CapabilityState:
+        """CONFIGURED without a runner; with one, VERIFIED when `epocpp --help` exits 0
+        and offers --io-benchmark (an EPOCpp built with LSMIO), else
+        BenchmarkProbeError. The runner must start epocpp bare: --help exits before
+        MPI_Finalize, which mpirun and srun report as a failure."""
+        if not isinstance(f_executable, str) or not f_executable.strip():
+            raise BenchmarkConfigurationError(
+                f"Executable must be a non-empty string, got: {f_executable!r}"
+            )
+        if "\0" in f_executable:
+            raise BenchmarkConfigurationError(
+                f"Executable contains NUL byte: {f_executable!r}"
+            )
+        if f_setup is not None:
+            try:
+                self.normalizeSetup(f_setup)
+            except BenchmarkConfigurationError as f_exc:
+                raise BenchmarkProbeError(str(f_exc)) from f_exc
+        if f_runner is None:
+            return CapabilityState.CONFIGURED
+
+        f_norm_executable = f_executable.strip()
+        f_argv = [f_norm_executable, "--help"]
+        try:
+            if hasattr(f_runner, "run") and callable(f_runner.run):
+                f_result = f_runner.run(f_argv)
+            else:
+                f_result = f_runner(f_argv)
+        except Exception as f_exc:
+            raise BenchmarkProbeError(
+                f"EPOCpp executable {f_norm_executable!r} probe could not run: {f_exc}"
+            ) from f_exc
+
+        # The runner's result, read as LmpAdapter.probeCapability does
+        f_code: Optional[int] = None
+        f_text = ""
+        if hasattr(f_result, "returncode") or hasattr(f_result, "exit_code"):
+            f_raw = getattr(
+                f_result, "returncode", getattr(f_result, "exit_code", None)
+            )
+            f_code = f_raw if type(f_raw) is int else None
+            f_text = (
+                f"{getattr(f_result, 'stdout', '') or ''}\n"
+                f"{getattr(f_result, 'stderr', '') or ''}"
+            )
+        elif isinstance(f_result, tuple) and len(f_result) >= 2:
+            f_code = f_result[0] if type(f_result[0]) is int else None
+            f_text = "\n".join(str(f_part) for f_part in f_result[1:])
+        elif isinstance(f_result, str):
+            f_code, f_text = 0, f_result
+        if f_code != 0:
+            raise BenchmarkProbeError(
+                f"EPOCpp executable {f_norm_executable!r} probe failed with exit code "
+                f"{f_code}: {f_text.strip()}"
+            )
+        if "--io-benchmark" not in f_text:
+            raise BenchmarkProbeError(
+                f"EPOCpp executable {f_norm_executable!r} has no --io-benchmark option "
+                "(it must be built with LSMIO)"
+            )
         return CapabilityState.VERIFIED
