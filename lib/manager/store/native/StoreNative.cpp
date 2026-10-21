@@ -273,7 +273,6 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
 
     if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
         m_active_memtable->sizeBytes() > 0) {
-
         if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
             m_backpressure_cv.wait(
                 lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });
@@ -308,7 +307,6 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
 
     if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
         m_active_memtable->sizeBytes() > 0) {
-
         if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
             m_backpressure_cv.wait(
                 lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });

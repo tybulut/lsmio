@@ -34,6 +34,7 @@
 #include <lsmio/manager/client/client_mpi.hpp>
 #include <lsmio/manager/manager.hpp>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -42,9 +43,21 @@
 namespace lsmio {
 
 LSMIOManager* LSMIOManager::_lm = nullptr;
-std::atomic<int> LSMIOManager::_lmInitialized = 0;
-std::atomic<int> LSMIOManager::_lmInitializing = 0;
-std::atomic<int> LSMIOManager::_lmCleaning = 0;
+std::atomic<LifecycleState> LSMIOManager::_lmState{LifecycleState::None};
+
+const char* lifecycleStateName(LifecycleState state) {
+    switch (state) {
+        case LifecycleState::None:
+            return "None";
+        case LifecycleState::Initializing:
+            return "Initializing";
+        case LifecycleState::Ready:
+            return "Ready";
+        case LifecycleState::Cleaning:
+            return "Cleaning";
+    }
+    return "Unknown";
+}
 
 
 void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values,
@@ -118,6 +131,15 @@ void LSMIOManager::_init() {
 
         if (_worldSize > 1) {
             LOG(INFO) << "LSMIOManager::_init: MPI comm world is greater than 1." << std::endl;
+
+            // The aggregator's server thread calls MPI while the application keeps calling it.
+            // Every rank checks, so that no rank is left waiting for one that gave up
+            if (!LSMIOClient::checkThreadSupport()) {
+                if (_adiosComm) MPI_Comm_free(&_mpiComm);
+                throw std::runtime_error(
+                    "ERROR: LSMIOManager::_init: aggregated I/O needs MPI_THREAD_MULTIPLE: "
+                    "initialise MPI with MPI_Init_thread");
+            }
             _isShared = true;
 
             if (gConfigLSMIO.mpiAggType == MPIAggType::Shared) {
@@ -175,10 +197,6 @@ void LSMIOManager::_init() {
 
     if (_isOpenRemote() || _isServeLocal()) {
         _lcMPI = new LSMIOClientMPI(_aggComm);
-
-        if (_isServeLocal()) {
-            _lcMPI->checkThreadSupport();
-        }
     }
 
     if (_isServeLocal()) {
@@ -196,17 +214,24 @@ LSMIOManager::~LSMIOManager() {
     close();
 }
 
-void LSMIOManager::close() {
+bool LSMIOManager::close() {
     LOG(INFO) << "LSMIOManager::close(): rank: " << _aggRank << std::endl;
+    bool success = true;
+
     // Delete MPI first because its cleanup might require RDB being open
     if (_lcMPI) {
         if (_isServeLocal()) {
-            _lcMPI->stopCollectiveIOServer();
+            // The final flush comes before the end-of-process barrier so that its result is
+            // part of what every rank of the group learns (close() then has nothing left to flush)
+            success &= _lcMPI->stopCollectiveIOServer(
+                [this] { return _lcStore->writeBarrier() && !_collectiveFailed; });
         } else if (_isOpenRemote()) {
-            _lcMPI->stopCollectiveIOClient(AGGREGATION_RANK);
+            success &= _lcMPI->stopCollectiveIOClient(AGGREGATION_RANK);
         }
         delete _lcMPI;
         _lcMPI = nullptr;
+    } else if (_lcStore) {
+        success &= _lcStore->writeBarrier();
     }
 
     if (_lcStore) {
@@ -214,6 +239,8 @@ void LSMIOManager::close() {
         delete _lcStore;
         _lcStore = nullptr;
     }
+
+    return success;
 }
 
 bool LSMIOManager::_isOpenLocal() const {
@@ -226,6 +253,13 @@ bool LSMIOManager::_isOpenRemote() const {
 
 bool LSMIOManager::_isServeLocal() const {
     return (_isShared && _aggRank == AGGREGATION_RANK && _aggSize > 1);
+}
+
+bool LSMIOManager::_noteLocalWrite(bool success) {
+    // The aggregator's own failed write is reported at close like a client's, so that every
+    // rank of the group gets the same result
+    if (!success && _isServeLocal()) _collectiveFailed = true;
+    return success;
 }
 
 std::string LSMIOManager::_rankedKey(const int rank, const std::string& key) const {
@@ -263,6 +297,9 @@ bool LSMIOManager::get(const std::string& key, std::string* value) {
         _counterReadBytes += value->length();
         _counterReadOps++;
 
+        if (cCommand == KV_CMD_RETURN::GET_FAIL) {
+            return false;
+        }
         if (cCommand != KV_CMD_RETURN::GET) {
             LOG(ERROR) << "LSMIOManager::get: received incorrect command: " << cCommand
                        << std::endl;
@@ -285,7 +322,7 @@ bool LSMIOManager::put(const std::string& key, const std::string& value, bool fl
 
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::put: LOCAL for rank: " << _aggRank << std::endl;
-        return _lcStore->put(_rankedKey(key), value, flush);
+        return _noteLocalWrite(_lcStore->put(_rankedKey(key), value, flush));
     }
 
     if (_isOpenRemote()) {
@@ -309,7 +346,7 @@ bool LSMIOManager::put(const std::string& key, std::string&& value, bool flush) 
 
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::put: LOCAL for rank: " << _aggRank << std::endl;
-        return _lcStore->put(_rankedKey(key), std::move(value), flush);
+        return _noteLocalWrite(_lcStore->put(_rankedKey(key), std::move(value), flush));
     }
 
     if (_isOpenRemote()) {
@@ -350,7 +387,7 @@ bool LSMIOManager::del(const std::string& key, bool flush) {
     LOG(INFO) << "LSMIOManager::del:flush: for rank: " << _aggRank << " key: " << key << std::endl;
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::del: LOCAL for rank: " << _aggRank << std::endl;
-        return _lcStore->del(_rankedKey(key), flush);
+        return _noteLocalWrite(_lcStore->del(_rankedKey(key), flush));
     }
 
     if (_isOpenRemote()) {
@@ -388,6 +425,9 @@ bool LSMIOManager::metaGet(const std::string& key, std::string* value) {
         _counterReadBytes += value->length();
         _counterReadOps++;
 
+        if (cCommand == KV_CMD_RETURN::META_GET_FAIL) {
+            return false;
+        }
         if (cCommand != KV_CMD_RETURN::META_GET) {
             LOG(ERROR) << "LSMIOManager::metaGet: received incorrect command: " << cCommand
                        << std::endl;
@@ -452,7 +492,7 @@ bool LSMIOManager::metaPut(const std::string& key, const std::string& value, boo
 
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::metaPut: LOCAL for rank: " << _aggRank << std::endl;
-        return _lcStore->metaPut(_rankedKey(key), value, flush);
+        return _noteLocalWrite(_lcStore->metaPut(_rankedKey(key), value, flush));
     }
 
     if (_isOpenRemote()) {
@@ -493,7 +533,7 @@ bool LSMIOManager::writeBarrier() {
     LOG(INFO) << "LSMIOManager::writeBarrier: for rank: " << _aggRank << std::endl;
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::writeBarrier: LOCAL for rank: " << _aggRank << std::endl;
-        return _lcStore->writeBarrier();
+        return _noteLocalWrite(_lcStore->writeBarrier());
     }
 
     if (_isOpenRemote()) {
@@ -513,7 +553,7 @@ bool LSMIOManager::writeBarrier() {
     return retValue;
 }
 
-void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
+bool LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
                                            const std::string& key, std::string* gValue,
                                            std::string pValue) {
     bool retValue = true;
@@ -543,8 +583,18 @@ void LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
         retValue = false;
     }
 
+    // Clients don't wait for puts: a failed write is kept and reported to every rank of the
+    // group at close
+    const bool isWrite = (command == KV_CMD::PUT || command == KV_CMD::DEL ||
+                          command == KV_CMD::META_PUT || command == KV_CMD::WRITE_BARRIER);
+    if (!retValue && isWrite && !_collectiveFailed.exchange(true)) {
+        LOG(ERROR) << "LSMIOManager::callbackForCollectiveIO: " << command << " failed for rank "
+                   << rank << " key: " << key << std::endl;
+    }
+
     LOG(INFO) << "LSMIOManager::callbackForCollectiveIO: " << command << ": COMPLETED."
               << std::endl;
+    return retValue;
 }
 
 void LSMIOManager::resetCounters() {
@@ -564,39 +614,44 @@ void LSMIOManager::getCounters(uint64_t& writeBytes, uint64_t& readBytes, uint64
 
 LSMIOManager* LSMIOManager::initialize(const std::string& dbName, const std::string& dbDir,
                                        const bool overWrite, adios2::helper::Comm* comm) {
-    if (_lmInitialized) {
-        LOG(WARNING) << "LSMIOManager::initialize: already initialiazed: " << dbName << std::endl;
+    LifecycleState state = LifecycleState::None;
+    if (!_lmState.compare_exchange_strong(state, LifecycleState::Initializing)) {
+        LOG(WARNING) << "LSMIOManager::initialize: refused, state is " << lifecycleStateName(state)
+                     << ": " << dbName << std::endl;
         return nullptr;
     }
 
-    if (_lmInitializing) {
-        LOG(WARNING) << "LSMIOManager::initialize: already initialiazing: " << dbName << std::endl;
-        return nullptr;
-    }
-
-    _lmInitializing = 1;
     LOG(INFO) << "LSMIOManager::initialize: initialiazing: " << dbName << std::endl;
 
-    _lm = new lsmio::LSMIOManager(dbName, dbDir, overWrite, comm);
+    // On failure the state goes back to None so that initialize may be called again, and the cause
+    // is logged at the default level (a manager that failed part-way may still hold its store)
+    LSMIOManager* lm = nullptr;
+    try {
+        lm = new lsmio::LSMIOManager(dbName, dbDir, overWrite, comm);
+    } catch (const std::exception& e) {
+        _lmState = LifecycleState::None;
+        LOG(ERROR) << "LSMIOManager::initialize: failed: " << dbName << ": " << e.what()
+                   << std::endl;
+        throw;
+    } catch (...) {
+        _lmState = LifecycleState::None;
+        LOG(ERROR) << "LSMIOManager::initialize: failed: " << dbName << std::endl;
+        throw;
+    }
 
-    _lmInitializing = 0;
-    _lmInitialized = 1;
+    _lm = lm;
+    _lmState = LifecycleState::Ready;
 
     LOG(INFO) << "LSMIOManager::initialize: completed: " << dbName << std::endl;
-    return _lm;
+    // Not _lm: a cleanup on another thread may already have reset it
+    return lm;
 }
 
 LSMIOManager* LSMIOManager::getManager() {
-    if (!_lmInitialized || _lmInitializing) {
-        if (!_lmInitialized)
-            LOG(WARNING) << "LSMIOManager::getManager: not initialiazed." << std::endl;
-        else
-            LOG(WARNING) << "LSMIOManager::getManager: currently initialiaizing." << std::endl;
-        return nullptr;
-    }
-
-    if (_lmCleaning) {
-        LOG(WARNING) << "LSMIOManager::getManager: currently cleaning." << std::endl;
+    LifecycleState state = _lmState;
+    if (state != LifecycleState::Ready) {
+        LOG(WARNING) << "LSMIOManager::getManager: refused, state is " << lifecycleStateName(state)
+                     << std::endl;
         return nullptr;
     }
 
@@ -604,27 +659,19 @@ LSMIOManager* LSMIOManager::getManager() {
 }
 
 bool LSMIOManager::cleanup() {
-    if (!_lmInitialized || _lmInitializing) {
-        if (!_lmInitialized)
-            LOG(WARNING) << "LSMIOManager::cleanup: not initialiazed." << std::endl;
-        else
-            LOG(WARNING) << "LSMIOManager::cleanup: currently initialiaizing." << std::endl;
+    LifecycleState state = LifecycleState::Ready;
+    if (!_lmState.compare_exchange_strong(state, LifecycleState::Cleaning)) {
+        LOG(WARNING) << "LSMIOManager::cleanup: refused, state is " << lifecycleStateName(state)
+                     << std::endl;
         return false;
     }
 
-    if (_lmCleaning) {
-        LOG(WARNING) << "LSMIOManager::cleanup: already cleaning." << std::endl;
-        return false;
-    }
-
-    _lmCleaning = 1;
     LOG(WARNING) << "LSMIOManager::cleanup: cleaning." << std::endl;
 
     delete _lm;
     _lm = nullptr;
 
-    _lmCleaning = 0;
-    _lmInitialized = 0;
+    _lmState = LifecycleState::None;
     return true;
 }
 

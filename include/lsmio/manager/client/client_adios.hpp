@@ -44,15 +44,16 @@ class LSMIOClientAdios : public LSMIOClient {
     adios2::helper::Comm *_comm;
 
   protected:
-    void _barrier();
-    char **_recvToBuffer(int *bufSizes);
+    void _barrier() override;
+    int _allreduceMax(int value) override;
+    char **_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks) override;
 
   public:
     LSMIOClientAdios(adios2::helper::Comm *comm);
 
     bool sendCommand(int rank, const std::string &command, const std::string &key,
-                     const std::string &value);
-    bool recvCommand(int rank, std::string *command, std::string *key, std::string *value);
+                     const std::string &value) override;
+    bool recvCommand(int rank, std::string *command, std::string *key, std::string *value) override;
 };
 
 }  // namespace lsmio

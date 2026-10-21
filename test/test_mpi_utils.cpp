@@ -145,6 +145,8 @@ void PrintTo(const UseComm& comm, std::ostream* os) {
 }
 
 
+int gRequestedThreadLevel = MPI_THREAD_MULTIPLE;
+
 }  // namespace lsmioTest
 
 int main(int argc, char** argv) {
@@ -154,7 +156,12 @@ int main(int argc, char** argv) {
     for (int i = 0; i < argc; i++) {
         if (!strcmp(argv[i], "--gtest_list_tests")) {
             gtestListTests = true;
-            break;
+        } else if (!strcmp(argv[i], "--mpi-thread-serialized")) {
+            // Run below MPI_THREAD_MULTIPLE, where aggregation must be refused
+            lsmioTest::gRequestedThreadLevel = MPI_THREAD_SERIALIZED;
+            std::copy(argv + i + 1, argv + argc + 1, argv + i);
+            argc--;
+            i--;
         }
     }
 
@@ -165,7 +172,7 @@ int main(int argc, char** argv) {
     }
 
     int provided;
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+    MPI_Init_thread(&argc, &argv, lsmioTest::gRequestedThreadLevel, &provided);
 
     int numProcesses;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
