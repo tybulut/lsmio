@@ -35,6 +35,7 @@
 #include <lsmio/manager/client/client.hpp>
 #include <map>
 #include <thread>  // NOLINT [build/c++11]
+#include <utility>
 
 /**
  * @brief Converts an MPI thread level to its string representation.
@@ -108,12 +109,19 @@ bool LSMIOClient::checkThreadSupport() {
     return (provided == MPI_THREAD_MULTIPLE);
 }
 
+// The value is copied once, into the message: no temporary strings are made on the way
 void LSMIOClient::serializeCmd(std::string *buf, const std::string &command, const std::string &key,
-                               const std::string &value) {
-    buf->append(command + _COL_SEPARATOR_STR + key + _COL_SEPARATOR_STR + value);
+                               std::string_view value) {
+    buf->reserve(buf->size() + command.size() + key.size() + value.size() +
+                 2 * _COL_SEPARATOR_STR.size());
+    buf->append(command);
+    buf->append(_COL_SEPARATOR_STR);
+    buf->append(key);
+    buf->append(_COL_SEPARATOR_STR);
+    buf->append(value);
     LOG(INFO) << "LSMIOClient::serializeCmd: "
-              << " size : " << buf->size()
-              << " buf : " << (buf->size() > 80 ? buf->substr(0, 80) + "..." : *buf) << std::endl;
+              << " size : " << buf->size() << " buf : " << std::string_view(*buf).substr(0, 80)
+              << (buf->size() > 80 ? "..." : "") << std::endl;
 }
 
 // "cmd;key;value"
@@ -251,9 +259,10 @@ void LSMIOClient::_waitForCommand(LSMIOClientCallback func, LSMIOManager *lm) {
                 continue;
             }
 
-            // callback time
+            // callback time: the value is moved on to the store (the native store moves it into C0)
             std::string retValue;
-            const bool success = (lm->*func)(recv_i, str_cmd, str_key, &retValue, str_val);
+            const bool success =
+                (lm->*func)(recv_i, str_cmd, str_key, &retValue, std::move(str_val));
 
             // A failed get answers in the reply it already has; failed puts are kept by the
             // manager and reported to every rank of the group at close

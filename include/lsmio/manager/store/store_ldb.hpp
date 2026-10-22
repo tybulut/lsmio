@@ -35,6 +35,7 @@
 #include <leveldb/filter_policy.h>
 
 #include <string>
+#include <string_view>
 
 #include "store.hpp"
 
@@ -57,6 +58,8 @@ class LSMIOStoreLDB : public LSMIOStore {
                         bool flush) override;
     bool _batchMutation(MutationType mType, const std::string& key, std::string&& value,
                         bool flush) override;
+    // The mutation itself: the value's bytes go to the database, which copies them
+    bool _mutate(MutationType mType, const std::string& key, std::string_view value, bool flush);
 
     /// cleanup the ENTIRE store
     /// @return bool success
@@ -67,6 +70,8 @@ class LSMIOStoreLDB : public LSMIOStore {
     ~LSMIOStoreLDB() override;
 
     void close() override;
+
+    bool putBytes(const std::string& key, std::string_view value, bool flush = true) override;
 
     /// get value given a key
     /// @return bool success

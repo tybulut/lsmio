@@ -350,7 +350,6 @@ bool LSMIOManager::put(const std::string& key, std::string&& value, bool flush) 
     }
 
     if (_isOpenRemote()) {
-        // MPI remote serialization takes const reference
         retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::PUT, key, value);
     }
 
@@ -370,15 +369,37 @@ bool LSMIOManager::put(const std::string& key, std::string&& value) {
 bool LSMIOManager::put(const std::string& key, const char* value, std::streamsize n) {
     LOG(INFO) << "LSMIOManager::put: for char* for rank: " << _aggRank << " key: " << key
               << std::endl;
-    std::string nValue(value, n);
-    return put(key, std::move(nValue), gConfigLSMIO.alwaysFlush);
+    if (n < 0) return false;
+    return putBytes(key, std::string_view(value, static_cast<size_t>(n)), gConfigLSMIO.alwaysFlush);
 }
 
 bool LSMIOManager::put(const std::string& key, const void* value, size_t size, size_t count) {
     LOG(INFO) << "LSMIOManager::put: for void* for rank: " << _aggRank << " key: " << key
               << std::endl;
-    std::string nValue(static_cast<const char*>(value), size * count);
-    return put(key, std::move(nValue), gConfigLSMIO.alwaysFlush);
+    return putBytes(key, std::string_view(static_cast<const char*>(value), size * count),
+                    gConfigLSMIO.alwaysFlush);
+}
+
+bool LSMIOManager::putBytes(const std::string& key, std::string_view value, bool flush) {
+    bool retValue = true;
+
+    LOG(INFO) << "LSMIOManager::putBytes: rank: " << _aggRank << " key: " << key << "("
+              << key.length() << ")"
+              << " value.len: " << value.size() << " flush: " << flush << std::endl;
+
+    _counterWriteBytes += value.size();
+    _counterWriteOps++;
+
+    if (_isOpenLocal()) {
+        LOG(INFO) << "LSMIOManager::putBytes: LOCAL for rank: " << _aggRank << std::endl;
+        return _noteLocalWrite(_lcStore->putBytes(_rankedKey(key), value, flush));
+    }
+
+    if (_isOpenRemote()) {
+        retValue &= _lcMPI->sendCommand(AGGREGATION_RANK, KV_CMD::PUT, key, value);
+    }
+
+    return retValue;
 }
 
 bool LSMIOManager::del(const std::string& key, bool flush) {
@@ -563,7 +584,8 @@ bool LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
     if (command == KV_CMD::GET) {
         retValue &= _lcStore->get(_rankedKey(rank, key), gValue);
     } else if (command == KV_CMD::PUT) {
-        retValue &= _lcStore->put(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
+        retValue &=
+            _lcStore->put(_rankedKey(rank, key), std::move(pValue), gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::DEL) {
         retValue &= _lcStore->del(_rankedKey(rank, key), gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::META_GET) {
@@ -574,7 +596,8 @@ bool LSMIOManager::callbackForCollectiveIO(int rank, const std::string& command,
         retValue &= _lcStore->metaGetAll(&values, inFix);
         lsmio::vectorTupleSerialize(values, *gValue);
     } else if (command == KV_CMD::META_PUT) {
-        retValue &= _lcStore->metaPut(_rankedKey(rank, key), pValue, gConfigLSMIO.alwaysFlush);
+        retValue &=
+            _lcStore->metaPut(_rankedKey(rank, key), std::move(pValue), gConfigLSMIO.alwaysFlush);
     } else if (command == KV_CMD::WRITE_BARRIER) {
         retValue &= _lcStore->writeBarrier();
     } else {

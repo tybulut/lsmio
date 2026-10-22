@@ -31,6 +31,7 @@ import argparse
 import importlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -1298,17 +1299,35 @@ class CompareNodesMain(BaseMain):
             "native": "native",
             "outputs-plugin": "plugin",
             "plugin": "plugin",
+            # The -sync arms ('run lsmio backends', --lsmio-always-flush)
+            "outputs-adios-sync": "adios2-sync",
+            "adios-sync": "adios2-sync",
+            "adios2-sync": "adios2-sync",
+            "outputs-native-sync": "native-sync",
+            "native-sync": "native-sync",
+            "outputs-plugin-sync": "plugin-sync",
+            "plugin-sync": "plugin-sync",
+            "outputs-rocksdb-sync": "rocksdb-sync",
+            "rocksdb-sync": "rocksdb-sync",
+            "outputs-leveldb-sync": "leveldb-sync",
+            "leveldb-sync": "leveldb-sync",
             "outputs-rocksdb": "rocksdb",
             "rocksdb": "rocksdb",
             "outputs-leveldb": "leveldb",
             "leveldb": "leveldb",
         }
         canonical_order: Dict[str, int] = {
+            # Each backend, then its -sync arm
             "adios2": 0,
-            "native": 1,
-            "plugin": 2,
-            "rocksdb": 3,
-            "leveldb": 4,
+            "adios2-sync": 1,
+            "native": 2,
+            "native-sync": 3,
+            "plugin": 4,
+            "plugin-sync": 5,
+            "rocksdb": 6,
+            "rocksdb-sync": 7,
+            "leveldb": 8,
+            "leveldb-sync": 9,
             # EPOCpp arms ('run epocpp backends'), by kind then backend
             "epocpp-baseline": 20,
             "epocpp-posix": 21,
@@ -1320,12 +1339,12 @@ class CompareNodesMain(BaseMain):
             "epocpp-plugin-bw": 27,
             "epocpp-native-bw": 28,
             # IOR arms archived by 'run ior' (outputs-ior[-<setup>]), charted after the backends
-            "ior": 5,
-            "ior-collective": 6,
-            "ior-hdf5": 7,
-            "ior-hdf5-collective": 8,
-            "ior-fsync": 9,
-            "ior-reverse": 10,
+            "ior": 10,
+            "ior-collective": 11,
+            "ior-hdf5": 12,
+            "ior-hdf5-collective": 13,
+            "ior-fsync": 14,
+            "ior-reverse": 15,
         }
 
         from lsmiotool.lib import epocppreport
@@ -1404,6 +1423,13 @@ class CompareNodesMain(BaseMain):
                         legend_label = canonical_backend_labels.get(entry)
                         if legend_label is None:
                             entry_lower = entry.lower()
+                            # A -sync arm (e.g. outputs-plugin-sync-1, collision-suffixed) is
+                            # labelled as its backend, then -sync
+                            f_sync = (
+                                re.search(r"-sync(-\d+)?$", entry_lower) is not None
+                            )
+                            if f_sync:
+                                entry_lower = re.sub(r"-sync(-\d+)?$", "", entry_lower)
                             # "plugin" first: plugin runs are ADIOS2 too (e.g. "adios2-plugin")
                             if "plugin" in entry_lower:
                                 legend_label = "plugin"
@@ -1417,6 +1443,8 @@ class CompareNodesMain(BaseMain):
                                 legend_label = "leveldb"
                             else:
                                 legend_label = entry
+                            if f_sync and legend_label != entry:
+                                legend_label += "-sync"
                         plot_data_list.append(
                             plot.PlotData(legend_label, x_series, y_series)
                         )
@@ -1430,7 +1458,9 @@ class CompareNodesMain(BaseMain):
             )
             return
 
-        # Sort plot series by canonical precedence: [adios2, native, plugin, rocksdb, leveldb] (INV-BACKEND-5);
+        # Sort plot series by canonical precedence: [adios2, adios2-sync, native, native-sync,
+        # plugin, plugin-sync, rocksdb, rocksdb-sync, leveldb, leveldb-sync], then the IOR arms
+        # (INV-BACKEND-5);
         # the same arm from several folders stays in folder order
         f_series = sorted(
             zip(plot_data_list, f_sources),
@@ -2633,7 +2663,14 @@ class ArchiveMain(BaseMain):
         from lsmiotool.lib.benchmarks import LsmioAdapter
 
         f_run_setup = str(f_req.get("setup") or "NATIVE").strip().upper()
-        if f_run_setup not in LsmioAdapter.ALLOWED_SETUPS:
+        if f_run_setup in LsmioAdapter.ARM_ONLY_SETUPS:
+            # A -sync arm of a backends run: archived by its arm marker, never as a run of its
+            # own (outputs-<setup> would take the 'sync' variant's name)
+            mismatch(
+                f"setup {f_run_setup!r} is a backends arm, archived with its backends run"
+            )
+            return None
+        if f_run_setup not in LsmioAdapter.RUN_SETUPS:
             mismatch(f"setup {f_run_setup!r} is no longer supported")
             return None
         if f_setup and f_setup != f_run_setup:

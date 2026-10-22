@@ -36,6 +36,7 @@
 #include <future>  // NOLINT [build/c++11]
 #include <lsmio/lsmio.hpp>
 #include <string>
+#include <string_view>
 #include <thread>  // NOLINT [build/c++11]
 #include <vector>
 
@@ -141,7 +142,7 @@ class LSMIOClient {
      * @param value The value to serialize.
      */
     void serializeCmd(std::string *buf, const std::string &command, const std::string &key,
-                      const std::string &value);
+                      std::string_view value);
 
     /**
      * @brief Deserializes the provided buffer into command, key, and value.
@@ -235,7 +236,7 @@ class LSMIOClient {
      * @return True if the command was sent successfully, false otherwise.
      */
     virtual bool sendCommand(int rank, const std::string &command, const std::string &key,
-                             const std::string &value) = 0;
+                             std::string_view value) = 0;
 
     /**
      * @brief Receives a command from a specific rank.

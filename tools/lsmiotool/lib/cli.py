@@ -124,7 +124,10 @@ Arguments:
   <benchmark>   Supported benchmarks: ior, lsmio, lmp, epocpp ('run epocpp backends')
   <scale>       Supported scales: local, bake, small, large, variants
                 (Note: 'lmp large' is strictly unsupported and rejected)
-  <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb).
+  <backends>    Optional comma-separated list of backends (default: adios2,native,plugin,rocksdb;
+                also leveldb). Each backend has a -sync arm (adios2-sync, native-sync,
+                plugin-sync, rocksdb-sync, leveldb-sync): the same benchmark with
+                --lsmio-always-flush (sync puts; for ADIOS2, Put with adios2::Mode::Sync).
                 Each scale point is one job running the backends one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
   <ior setups>  Optional comma-separated list of IOR setups for an ior scaling run
@@ -864,10 +867,15 @@ class RunCliParser:
         if f_benchmark == "lsmio" and f_setup_name is not None:
             from lsmiotool.lib.benchmarks import LsmioAdapter
 
-            if f_setup_name not in LsmioAdapter.ALLOWED_SETUPS:
+            if f_setup_name in LsmioAdapter.ARM_ONLY_SETUPS:
+                raise RunCliParseError(
+                    f"Setup {f_setup_name!r} is a backends arm: list its backend (e.g. "
+                    "'adios2-sync') in 'run lsmio backends <scale> <backends>'."
+                )
+            if f_setup_name not in LsmioAdapter.RUN_SETUPS:
                 raise RunCliParseError(
                     f"Invalid setup: {f_setup_name!r}. Must be one of: "
-                    f"{list(LsmioAdapter.ALLOWED_SETUPS)}"
+                    f"{list(LsmioAdapter.RUN_SETUPS)}"
                 )
         if (
             f_wallhour is None
@@ -1461,11 +1469,15 @@ class ArchiveCliParser:
         f_allowed = {
             "ior": IorAdapter.ALLOWED_SETUPS,
             "epocpp": EpocppAdapter.ALLOWED_SETUPS,
-        }.get(f_benchmark, LsmioAdapter.ALLOWED_SETUPS)
+        }.get(f_benchmark, LsmioAdapter.RUN_SETUPS)
         f_norm = f_setup.strip().upper()
         if f_benchmark == "ior" and f_setup.strip().lower() in IOR_ARMS:
             # An IOR setup token, as 'run ior <scale> <ior setups>' takes it
             f_norm = IOR_ARMS[f_setup.strip().lower()][0]
+        if f_benchmark == "lsmio" and f_norm in LsmioAdapter.ARM_ONLY_SETUPS:
+            raise ArchiveCliParseError(
+                f"Setup {f_setup!r} is a backends arm: it is archived with its backends run."
+            )
         if f_norm not in f_allowed:
             raise ArchiveCliParseError(
                 f"Invalid setup: {f_setup!r}. Must be one of: {list(f_allowed)}"

@@ -323,14 +323,16 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
         }
         new_index.offsets.emplace_back(f_key, current_offset);
 
+        // The header and key go through record_buf; the value is written from the memtable as it
+        // is, not copied into record_buf first
         record_buf.clear();
         appendLe32(record_buf, static_cast<uint32_t>(f_key.size()));
         record_buf.append(f_key);
         appendLe32(record_buf, static_cast<uint32_t>(f_value.size()));
-        record_buf.append(f_value);
         sst_file.write(record_buf.data(), record_buf.size());
+        sst_file.write(f_value.data(), f_value.size());
 
-        current_offset += record_buf.size();
+        current_offset += record_buf.size() + f_value.size();
     });
 
     if (footer_index) {

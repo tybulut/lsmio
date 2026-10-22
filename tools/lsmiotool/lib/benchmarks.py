@@ -982,7 +982,17 @@ class LsmioAdapter(BenchmarkAdapter):
 
     TARGET: str = "lsmio"
     DEFAULT_SETUP: str = "NATIVE"
-    ALLOWED_SETUPS: Tuple[str, ...] = (
+    # The setups of the backends' -sync arms ('run lsmio backends'), not for --setup: their
+    # names would collide with the 'sync' variant's archives (outputs-<setup>-<variant>)
+    ARM_ONLY_SETUPS: Tuple[str, ...] = (
+        "ADIOS-SYNC",
+        "NATIVE-SYNC",
+        "PLUGIN-SYNC",
+        "ROCKSDB-SYNC",
+        "LEVELDB-SYNC",
+    )
+    # The setups a run may name (--setup, BM_SETUP, archive --setup)
+    RUN_SETUPS: Tuple[str, ...] = (
         "NATIVE",
         "ADIOS",
         "PLUGIN",
@@ -990,6 +1000,7 @@ class LsmioAdapter(BenchmarkAdapter):
         "LEVELDB",
         "MANAGER",
     )
+    ALLOWED_SETUPS: Tuple[str, ...] = RUN_SETUPS + ARM_ONLY_SETUPS
 
     # Every setup runs under MPI with barriers around its timed phases
     MPI_FLAGS: Tuple[str, ...] = ("-m", "-g")
@@ -1001,6 +1012,22 @@ class LsmioAdapter(BenchmarkAdapter):
         "ROCKSDB": "bm_rocksdb",
         "LEVELDB": "bm_leveldb",
         "MANAGER": "bm_manager",
+        "ADIOS-SYNC": "bm_adios",
+        "NATIVE-SYNC": "bm_native",
+        "PLUGIN-SYNC": "bm_adios",
+        "ROCKSDB-SYNC": "bm_rocksdb",
+        "LEVELDB-SYNC": "bm_leveldb",
+    }
+
+    # Flags a setup adds to its executable: the LSMIO ADIOS2 plugin, and for a -sync arm
+    # --lsmio-always-flush (sync puts; bm_adios puts with adios2::Mode::Sync)
+    SETUP_FLAGS: Dict[str, Tuple[str, ...]] = {
+        "PLUGIN": ("--lsmio-plugin",),
+        "ADIOS-SYNC": ("--lsmio-always-flush",),
+        "NATIVE-SYNC": ("--lsmio-always-flush",),
+        "PLUGIN-SYNC": ("--lsmio-plugin", "--lsmio-always-flush"),
+        "ROCKSDB-SYNC": ("--lsmio-always-flush",),
+        "LEVELDB-SYNC": ("--lsmio-always-flush",),
     }
 
     BLOCK_SIZE_MAP: Dict[str, Tuple[int, int]] = {
@@ -1275,8 +1302,7 @@ class LsmioAdapter(BenchmarkAdapter):
 
         f_argv.extend(self.MPI_FLAGS)
 
-        if f_setup == "PLUGIN":
-            f_argv.append("--lsmio-plugin")
+        f_argv.extend(self.SETUP_FLAGS.get(f_setup, ()))
 
         if f_variant_rec.flags:
             f_argv.extend(f_variant_rec.flags)
@@ -1445,8 +1471,7 @@ class LsmioAdapter(BenchmarkAdapter):
 
         f_argv: List[str] = [f_norm_executable]
         f_argv.extend(self.MPI_FLAGS)
-        if f_norm_setup == "PLUGIN":
-            f_argv.append("--lsmio-plugin")
+        f_argv.extend(self.SETUP_FLAGS.get(f_norm_setup, ()))
         if f_variant_rec.flags:
             f_argv.extend(f_variant_rec.flags)
         f_argv.extend(

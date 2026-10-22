@@ -150,6 +150,7 @@ add_lsmio_store_test(test_sstable_manager)
 add_lsmio_store_test(test_file_pool)
 add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
+add_lsmio_store_test(test_copy_once)
 add_lsmio_posix_test(test_posix)
 
 # GTest: MPI: Base and Manager

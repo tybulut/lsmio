@@ -30,9 +30,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <lsmio/manager/store/native/StoreNative.hpp>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -471,4 +474,114 @@ TEST_F(NativeStoreExtendedTest, UnconsumedRvalueOnRejectedMutation) {
         EXPECT_EQ(oversize_val, original);
     }
     CleanDir(dbPath3);
+}
+
+// A sync put copies the caller's bytes into C0 before it returns: overwriting the caller's
+// memory afterwards changes nothing, in C0, after the flush and after a reopen
+TEST_F(NativeStoreExtendedTest, SyncPutCopiesIntoC0) {
+    const MemtableType memtables[] = {MemtableType::VectorNoSort, MemtableType::VectorSort,
+                                      MemtableType::Map, MemtableType::BTree};
+    for (MemtableType memtable : memtables) {
+        SCOPED_TRACE(static_cast<int>(memtable));
+        gConfigLSMIO.memtable = memtable;
+        std::string dbPath = "test_native_sync_c0";
+        CleanDir(dbPath);
+
+        auto expected = [](int i) {
+            std::string v(4096 + i, static_cast<char>('a' + i % 26));
+            v[v.size() / 2] = '\0';  // binary-safe
+            return v;
+        };
+        {
+            LSMIOStoreNative store(dbPath, true);
+            for (int i = 0; i < 64; ++i) {
+                const std::string key = "key" + std::to_string(i);
+                if (i % 2 == 0) {
+                    std::vector<char> buf;
+                    {
+                        const std::string e = expected(i);
+                        buf.assign(e.begin(), e.end());
+                    }
+                    EXPECT_TRUE(store.putBytes(key, std::string_view(buf.data(), buf.size())));
+                    std::fill(buf.begin(), buf.end(), 'X');
+                } else {
+                    std::string buf = expected(i);
+                    EXPECT_TRUE(store.put(key, buf));
+                    std::fill(buf.begin(), buf.end(), 'Y');
+                }
+            }
+            // overwrite every other key, through putBytes and put(const&) in turn
+            for (int i = 0; i < 64; i += 2) {
+                const std::string key = "key" + std::to_string(i);
+                std::string buf = expected(i);
+                if (i % 4 == 0) {
+                    EXPECT_TRUE(store.putBytes(key, buf));
+                } else {
+                    EXPECT_TRUE(store.put(key, buf));
+                }
+                std::fill(buf.begin(), buf.end(), 'Z');
+            }
+            std::string val;
+            for (int i = 0; i < 64; ++i) {
+                EXPECT_TRUE(store.get("key" + std::to_string(i), &val));
+                EXPECT_EQ(val, expected(i)) << "C0, key " << i;
+            }
+            EXPECT_TRUE(store.writeBarrier());
+            for (int i = 0; i < 64; ++i) {
+                EXPECT_TRUE(store.get("key" + std::to_string(i), &val));
+                EXPECT_EQ(val, expected(i)) << "flushed, key " << i;
+            }
+            store.close();
+        }
+        {
+            LSMIOStoreNative store(dbPath, false);
+            std::string val;
+            for (int i = 0; i < 64; ++i) {
+                EXPECT_TRUE(store.get("key" + std::to_string(i), &val));
+                EXPECT_EQ(val, expected(i)) << "reopened, key " << i;
+            }
+        }
+        CleanDir(dbPath);
+    }
+}
+
+// The flush writes each value from the memtable as it is: values that fit in the stream's
+// buffer (libstdc++'s default, BUFSIZ) and values that do not (written straight to the file)
+// must both round-trip
+TEST_F(NativeStoreExtendedTest, FlushWritesValuesAroundTheStreamBuffer) {
+    std::string dbPath = "test_native_flush_values";
+    CleanDir(dbPath);
+
+    gConfigLSMIO.writeBufferSize = 1 * 1024 * 1024;  // 1 MiB memtables: several SSTables
+    gConfigLSMIO.maxKeyLen = 256;
+    const size_t sizes[] = {0, 1, 10, 1000, 64 * 1024, 300 * 1024, 700 * 1024};
+    auto expected = [](size_t i, size_t size) {
+        std::string v(size, '\0');
+        for (size_t j = 0; j < size; ++j) v[j] = static_cast<char>((i * 131 + j * 7) & 0xff);
+        return v;
+    };
+    const size_t n = sizeof(sizes) / sizeof(sizes[0]);
+    {
+        LSMIOStoreNative store(dbPath, true);
+        for (int round = 0; round < 3; ++round) {
+            for (size_t i = 0; i < n; ++i) {
+                const size_t k = round * n + i;
+                EXPECT_TRUE(store.put("key" + std::to_string(k), expected(k, sizes[i])));
+            }
+        }
+        EXPECT_TRUE(store.writeBarrier());
+        store.close();
+    }
+    {
+        LSMIOStoreNative store(dbPath, false);
+        std::string val;
+        for (int round = 0; round < 3; ++round) {
+            for (size_t i = 0; i < n; ++i) {
+                const size_t k = round * n + i;
+                EXPECT_TRUE(store.get("key" + std::to_string(k), &val)) << "key " << k;
+                EXPECT_EQ(val, expected(k, sizes[i])) << "key " << k;
+            }
+        }
+    }
+    CleanDir(dbPath);
 }

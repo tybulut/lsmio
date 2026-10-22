@@ -30,10 +30,10 @@
 
 #include <gtest/gtest.h>
 
+#include <lsmio/manager/store/native/MemtableBTree.hpp>
 #include <lsmio/manager/store/native/MemtableOrdered.hpp>
 #include <lsmio/manager/store/native/MemtableVectorNoSort.hpp>
 #include <lsmio/manager/store/native/MemtableVectorSort.hpp>
-#include <tlx/container/btree_map.hpp>
 
 using namespace lsmio;
 
@@ -164,8 +164,8 @@ TEST(MemtableTest, MemtableOrderedMap_MoveAddAndOverwrite) {
     EXPECT_EQ(m.sizeBytes(), exp_bytes2);
 }
 
-TEST(MemtableTest, MemtableOrderedBTree_MoveAddAndOverwrite) {
-    MemtableOrdered<tlx::btree_map<std::string, std::string>> m;
+TEST(MemtableTest, MemtableBTree_MoveAddAndOverwrite) {
+    MemtableBTree m;
     // Insert path:
     std::string k = "btree_k";
     std::string v = "btree_val";
@@ -186,4 +186,78 @@ TEST(MemtableTest, MemtableOrderedBTree_MoveAddAndOverwrite) {
     EXPECT_EQ(out, exp_v2);
     EXPECT_EQ(m.count(), 1);
     EXPECT_EQ(m.sizeBytes(), exp_bytes2);
+}
+
+// A value added by const reference is copied: changing the caller's string afterwards does not
+// reach the memtable, on insert and on overwrite
+template <typename M>
+static void expectConstRefAddCopies() {
+    M m;
+    std::string v = "first";
+    m.add("k", v);
+    v.assign("XXXXX");
+    std::string out;
+    EXPECT_TRUE(m.get("k", out));
+    EXPECT_EQ(out, "first");
+
+    std::string v2 = "second_longer";
+    m.add("k", v2);
+    v2.assign("YYYYYYYYYYYYY");
+    EXPECT_TRUE(m.get("k", out));
+    EXPECT_EQ(out, "second_longer");
+}
+
+TEST(MemtableTest, ConstRefAddCopies) {
+    expectConstRefAddCopies<MemtableVectorNoSort>();
+    expectConstRefAddCopies<MemtableVectorSort>();
+    expectConstRefAddCopies<MemtableOrdered<std::map<std::string, std::string>>>();
+    expectConstRefAddCopies<MemtableBTree>();
+}
+
+// The B+ tree holds slots, the values live beside it: many inserts (node splits) and overwrites
+// keep every key on its own value, in key order, with exact size accounting
+TEST(MemtableTest, MemtableBTree_ManyKeysOrderAndOverwrite) {
+    MemtableBTree m;
+    std::map<std::string, std::string> model;
+    size_t bytes = 0;
+    for (int i = 0; i < 5000; ++i) {
+        const int k = (i * 7919) % 3000;  // revisits keys: inserts and overwrites interleave
+        std::string key = "key" + std::to_string(k);
+        std::string val(1 + (i % 97), static_cast<char>('a' + i % 26));
+        auto it = model.find(key);
+        if (it == model.end()) {
+            bytes += key.size() + val.size();
+        } else {
+            bytes += val.size();
+            bytes -= it->second.size();
+        }
+        model[key] = val;
+        if (i % 2) {
+            m.add(key, val);
+        } else {
+            m.add(key, std::move(val));
+        }
+    }
+    EXPECT_EQ(m.count(), model.size());
+    EXPECT_EQ(m.sizeBytes(), bytes);
+
+    auto expected = model.begin();
+    m.forEach([&](const std::string& f_key, const std::string& f_value) {
+        ASSERT_NE(expected, model.end());
+        EXPECT_EQ(f_key, expected->first);
+        EXPECT_EQ(f_value, expected->second);
+        ++expected;
+    });
+    EXPECT_EQ(expected, model.end());
+
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    m.add("key12", MEMTABLE_TOMBSTONE);
+    m.scan("key12", results, deleted);
+    EXPECT_EQ(deleted.count("key12"), 1u);
+    for (const auto& [key, value] : results) {
+        EXPECT_EQ(key.compare(0, 5, "key12"), 0);
+        EXPECT_EQ(value, model[key]);
+    }
+    EXPECT_EQ(results.size(), 110u);  // key120..key129 and key1200..key1299; key12 is deleted
 }

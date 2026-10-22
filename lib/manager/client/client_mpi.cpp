@@ -96,7 +96,7 @@ char **LSMIOClientMPI::_recvToBuffer(int *bufSizes, const std::vector<int> &eolR
 }
 
 bool LSMIOClientMPI::sendCommand(int rank, const std::string &command, const std::string &key,
-                                 const std::string &value) {
+                                 std::string_view value) {
     MPI_Request reqs[4];
     MPI_Status statuses[4];
 
@@ -106,9 +106,8 @@ bool LSMIOClientMPI::sendCommand(int rank, const std::string &command, const std
 
     LOG(INFO) << "LSMIOClientMPI::sendCommandMPI:"
               << " my rank: " << _rank << " command : " << command << " key : " << key
-              << " size : " << value.size()
-              << " value : " << (value.size() > 80 ? value.substr(0, 80) + "..." : value)
-              << " to: " << rank << std::endl;
+              << " size : " << value.size() << " value : " << value.substr(0, 80)
+              << (value.size() > 80 ? "..." : "") << " to: " << rank << std::endl;
 
     return true;
 }

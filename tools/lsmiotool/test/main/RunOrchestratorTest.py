@@ -3313,6 +3313,62 @@ class RunOrchestratorTest(unittest.TestCase):
             )
             self.assertEqual(f_orch.exitCode, 0)
 
+    def testBackendsSyncArmsRunAndArchive(self) -> None:
+        """The -sync arms run in the backends job like any backend: their sub-requests plan
+        with the -SYNC setups and their points are archived as outputs-<backend>-sync/<nodes>."""
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+
+        with tempfile.TemporaryDirectory() as f_tmpdir:
+            f_fake_runner = FakeSchedulerCommandRunner()
+            f_orch = RunOrchestrator(
+                f_profile_resolver=self.m_registry,
+                f_command_runner=f_fake_runner,
+                f_poll_interval=0.01,
+            )
+            f_fake_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+            with (
+                patch("lsmiotool.lib.export.exportPoint") as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
+            ):
+                f_orch.execute(
+                    RunRequest(
+                        "lsmio",
+                        "bake",
+                        f_mode="backends",
+                        f_backends=(
+                            "adios2",
+                            "adios2-sync",
+                            "native-sync",
+                            "plugin-sync",
+                        ),
+                        f_out_dir=f_tmpdir,
+                    ),
+                    f_site=self.m_viking_profile,
+                    f_worker_executable=self.m_worker_path,
+                )
+
+            f_runs = f_orch.groupRuns
+            self.assertEqual(
+                [f_r["plan"].request.setup for f_r in f_runs],
+                ["ADIOS", "ADIOS-SYNC", "NATIVE-SYNC", "PLUGIN-SYNC"],
+            )
+            f_points = f_runs[0]["plan"].scale_points
+            self.assertEqual(len(f_fake_runner.m_submit_calls), len(f_points))
+            self.assertEqual(
+                sorted(
+                    os.path.relpath(f_c.kwargs["f_node_dir"], f_tmpdir)
+                    for f_c in f_export.call_args_list
+                ),
+                sorted(
+                    os.path.join(f"outputs-{f_a}", str(f_sp.nodes))
+                    for f_a in ("adios", "adios-sync", "native-sync", "plugin-sync")
+                    for f_sp in f_points
+                ),
+            )
+            self.assertEqual(f_orch.exitCode, 0)
+
     def testBackendsNodesRunOnlyThosePoints(self) -> None:
         """--nodes: an lsmio backends run submits and archives only those points."""
         f_lib = os.path.join(self.m_temp_dir, "lib")
@@ -3712,6 +3768,23 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_worker_executable=self.m_worker_path,
             )
         self.assertIn("liblsmio_adios", str(f_ctx.exception))
+
+    def testBackendsPluginSyncRequiresLibrary(self) -> None:
+        """The plugin-sync backend (the plugin with --lsmio-always-flush) needs liblsmio_adios too."""
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=FakeSchedulerCommandRunner(),
+        )
+        with self.assertRaises(PreflightError) as f_ctx:
+            f_orch.execute(
+                RunRequest(
+                    "lsmio", "local", f_mode="backends", f_backends=("plugin-sync",)
+                ),
+                f_site=self.m_viking_profile,
+                f_worker_executable=self.m_worker_path,
+            )
+        self.assertIn("liblsmio_adios", str(f_ctx.exception))
+        self.assertIn("plugin-sync", str(f_ctx.exception))
 
     def testJobFailureKeepsFinishedArms(self) -> None:
         """R1: when the shared job fails (walltime, OOM, node failure), arms that finished

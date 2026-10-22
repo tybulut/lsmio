@@ -39,6 +39,7 @@ from types import SimpleNamespace
 from typing import Any, List
 
 from lsmiotool.lib.arms import (
+    DEFAULT_LSMIO_BACKENDS,
     ArmError,
     RunArm,
     iorArmToken,
@@ -146,6 +147,53 @@ class ArmResolutionTest(unittest.TestCase):
             self._group(
                 RunRequest("lsmio", "small", f_mode="backends", f_backends=["bogus"])
             )
+
+    def testSyncBackends(self) -> None:
+        """Each backend has a -sync arm (--lsmio-always-flush); they run only when listed,
+        and their setups are refused as a run's own setup."""
+        f_backends = [
+            "adios2",
+            "adios2-sync",
+            "native-sync",
+            "plugin-sync",
+            "rocksdb-sync",
+            "leveldb-sync",
+        ]
+        f_group = self._group(
+            RunRequest("lsmio", "small", f_mode="backends", f_backends=f_backends)
+        )
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.arm_id) for f_a in f_group.arms],
+            [
+                ("adios2", "ADIOS", "adios"),
+                ("adios2-sync", "ADIOS-SYNC", "adios-sync"),
+                ("native-sync", "NATIVE-SYNC", "native-sync"),
+                ("plugin-sync", "PLUGIN-SYNC", "plugin-sync"),
+                ("rocksdb-sync", "ROCKSDB-SYNC", "rocksdb-sync"),
+                ("leveldb-sync", "LEVELDB-SYNC", "leveldb-sync"),
+            ],
+        )
+        self.assertEqual(
+            [
+                f_a.arm_id
+                for f_a in self._group(
+                    RunRequest(
+                        "lsmio", "small", f_mode="backends", f_backends=["adios-sync"]
+                    )
+                ).arms
+            ],
+            ["adios-sync"],
+        )
+        self.assertEqual(
+            DEFAULT_LSMIO_BACKENDS, ("adios2", "native", "plugin", "rocksdb")
+        )
+        for f_setup in ("ADIOS-SYNC", "NATIVE-SYNC"):
+            with self.assertRaises(ArmError):
+                self._group(
+                    RunRequest("lsmio", "variants", f_variants=["btree"]), f_setup
+                )
+            with self.assertRaises(ArmError):
+                self._group(RunRequest("lsmio", "small"), f_setup)
 
     def testIorSetupsAreBackendsArms(self) -> None:
         """An ior scaling run: one archived arm per IOR setup, outputs-ior[-<setup>]."""

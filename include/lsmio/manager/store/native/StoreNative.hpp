@@ -40,11 +40,11 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include <tlx/container/btree_map.hpp>
 #include <vector>
 
 #include "FileCloser.hpp"
 #include "FilePool.hpp"
+#include "MemtableBTree.hpp"
 #include "MemtableOrdered.hpp"
 #include "MemtableVectorNoSort.hpp"
 #include "MemtableVectorSort.hpp"
@@ -72,6 +72,8 @@ class LSMIOStoreNative : public LSMIOStore {
     size_t m_max_value_len;
 
     std::unique_ptr<IMemtable> m_active_memtable;
+    // Takes the active memtable's place if an add in it throws (see dropActiveMemtable)
+    std::unique_ptr<IMemtable> m_spare_memtable;
     std::deque<std::unique_ptr<IMemtable>> m_immutable_memtables;
 
     std::unique_ptr<SSTableManager> m_sstable_manager;
@@ -90,6 +92,7 @@ class LSMIOStoreNative : public LSMIOStore {
 
     void FlushWorkLoop();
     void FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable);
+    void dropActiveMemtable();
 
     // LSMIOStore Overrides
     bool startBatch() override;
@@ -108,6 +111,8 @@ class LSMIOStoreNative : public LSMIOStore {
     void autoTuneParameters(uint64_t f_fs_magic);
 
     void close() override;
+
+    bool putBytes(const std::string& f_key, std::string_view f_value, bool f_flush = true) override;
 
     bool get(const std::string f_key, std::string* f_value) override;
     bool getPrefix(const std::string f_key,

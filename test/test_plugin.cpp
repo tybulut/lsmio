@@ -31,6 +31,7 @@
 #include <adios2.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <climits>
 #include <complex>
 #include <cstdint>
@@ -215,6 +216,56 @@ TEST(ADIOS, PluginArrays) {
     EXPECT_TRUE(sameBytes(complexes, complexesRead));
     EXPECT_TRUE(sameBytes(deferred, deferredRead));
     EXPECT_EQ(scalar, scalarRead);
+}
+
+// Mode::Sync: the caller's memory is free again as soon as Put returns. The buffers are
+// overwritten right after each Put, before PerformPuts and Close
+TEST(ADIOS, PluginSyncPutReusesCallerMemory) {
+    const std::string fileName = "test-plugin-sync-reuse.db";
+    const size_t n = 4096;
+    auto expected = [n](int i) {
+        std::vector<double> v(n);
+        for (size_t j = 0; j < n; ++j) v[j] = i * 1e6 + static_cast<double>(j);
+        return v;
+    };
+    auto expectedText = [](int i) {
+        return "text" + std::to_string(i) + std::string(500, 'a' + i);
+    };
+
+    try {
+        adios2::ADIOS adios;
+
+        adios2::IO wio = adios.DeclareIO("test-plugin-sync-reuse-writer");
+        adios2::Engine writer = openPlugin(adios, wio, fileName, adios2::Mode::Write);
+        std::vector<double> buf;
+        std::string text;
+        for (int i = 0; i < 8; ++i) {
+            buf = expected(i);
+            putArray(wio, writer, "a" + std::to_string(i), buf, adios2::Mode::Sync);
+            std::fill(buf.begin(), buf.end(), -1.0);
+            text = expectedText(i);
+            writer.Put(wio.DefineVariable<std::string>("s" + std::to_string(i)), text,
+                       adios2::Mode::Sync);
+            text.assign(text.size(), 'X');
+        }
+        writer.PerformPuts();
+        writer.Close();
+
+        adios2::IO rio = adios.DeclareIO("test-plugin-sync-reuse-reader");
+        adios2::Engine reader = openPlugin(adios, rio, fileName, adios2::Mode::Read);
+        for (int i = 0; i < 8; ++i) {
+            EXPECT_TRUE(
+                sameBytes(expected(i), getArray<double>(rio, reader, "a" + std::to_string(i))))
+                << "array " << i;
+            std::string read;
+            reader.Get(rio.InquireVariable<std::string>("s" + std::to_string(i)), read,
+                       adios2::Mode::Sync);
+            EXPECT_EQ(read, expectedText(i)) << "string " << i;
+        }
+        reader.Close();
+    } catch (const std::exception &e) {
+        FAIL() << "Adios throws an exception: " << e.what() << ".";
+    }
 }
 
 // Attributes are stored with the metadata record at Close and defined again on open for read

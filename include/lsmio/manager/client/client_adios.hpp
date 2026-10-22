@@ -52,7 +52,7 @@ class LSMIOClientAdios : public LSMIOClient {
     LSMIOClientAdios(adios2::helper::Comm *comm);
 
     bool sendCommand(int rank, const std::string &command, const std::string &key,
-                     const std::string &value) override;
+                     std::string_view value) override;
     bool recvCommand(int rank, std::string *command, std::string *key, std::string *value) override;
 };
 

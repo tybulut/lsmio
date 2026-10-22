@@ -64,7 +64,7 @@ std::unique_ptr<IMemtable> LSMIOStoreNative::createMemtable() const {
         case MemtableType::Map:
             return std::make_unique<MemtableOrdered<std::map<std::string, std::string>>>();
         case MemtableType::BTree:
-            return std::make_unique<MemtableOrdered<tlx::btree_map<std::string, std::string>>>();
+            return std::make_unique<MemtableBTree>();
         case MemtableType::VectorNoSort:
             return std::make_unique<MemtableVectorNoSort>();
         default:
@@ -82,6 +82,7 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
       m_max_key_len(gConfigLSMIO.maxKeyLen),
       m_max_value_len(gConfigLSMIO.getMaxValueLen()),
       m_active_memtable(createMemtable()),
+      m_spare_memtable(createMemtable()),
       m_flush_buffer(m_memtable_max_size_bytes),
       m_read_only(f_read_only) {
     if (m_max_value_len == 0)
@@ -270,12 +271,15 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
     const size_t entry_size = f_key.size() + val_size;
 
     std::unique_lock<std::mutex> lock(m_state_mutex);
+    // Checked again under the lock: once an add has failed the store, none may follow
+    if (m_bg_error.load(std::memory_order_relaxed)) return false;
 
     if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
         m_active_memtable->sizeBytes() > 0) {
         if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
             m_backpressure_cv.wait(
                 lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });
+            if (m_bg_error.load(std::memory_order_relaxed)) return false;
         }
 
         auto next_memtable = createMemtable();
@@ -285,10 +289,15 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
         m_flush_cv.notify_one();
     }
 
-    if (is_del) {
-        m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
-    } else {
-        m_active_memtable->add(f_key, f_value);
+    try {
+        if (is_del) {
+            m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
+        } else {
+            m_active_memtable->add(f_key, f_value);
+        }
+    } catch (...) {
+        dropActiveMemtable();
+        return false;
     }
 
     return true;
@@ -304,12 +313,15 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
     const size_t entry_size = f_key.size() + val_size;
 
     std::unique_lock<std::mutex> lock(m_state_mutex);
+    // Checked again under the lock: once an add has failed the store, none may follow
+    if (m_bg_error.load(std::memory_order_relaxed)) return false;
 
     if (m_active_memtable->sizeBytes() + entry_size > m_memtable_max_size_bytes &&
         m_active_memtable->sizeBytes() > 0) {
         if (m_immutable_memtables.size() >= m_max_immutable_memtables) {
             m_backpressure_cv.wait(
                 lock, [this] { return m_immutable_memtables.size() < m_max_immutable_memtables; });
+            if (m_bg_error.load(std::memory_order_relaxed)) return false;
         }
 
         auto next_memtable = createMemtable();
@@ -319,13 +331,39 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
         m_flush_cv.notify_one();
     }
 
-    if (is_del) {
-        m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
-    } else {
-        m_active_memtable->add(f_key, std::move(f_value));
+    try {
+        if (is_del) {
+            m_active_memtable->add(f_key, MEMTABLE_TOMBSTONE);
+        } else {
+            m_active_memtable->add(f_key, std::move(f_value));
+        }
+    } catch (...) {
+        dropActiveMemtable();
+        return false;
     }
 
     return true;
+}
+
+// An add that throws (e.g. bad_alloc) may leave the memtable inconsistent: tlx gives
+// MemtableBTree no exception guarantee, a broken leaf chain would make a flush loop forever, and
+// destroying the tree can free a node twice. The memtable is dropped: never read, flushed or
+// destroyed (its memory is leaked), and the store fails. The spare memtable takes its place, so
+// the drop allocates nothing; the store fails once, so one spare is enough. Called with
+// m_state_mutex held
+void LSMIOStoreNative::dropActiveMemtable() {
+    m_bg_error.store(true, std::memory_order_release);
+    std::cerr << "[NATIVE] ERROR: a memtable add threw; its memtable is dropped" << std::endl;
+    (void)m_active_memtable.release();
+    m_active_memtable = std::move(m_spare_memtable);
+}
+
+// _batchMutation's checks, made before the one copy: a put that cannot be stored copies nothing
+bool LSMIOStoreNative::putBytes(const std::string& f_key, std::string_view f_value, bool f_flush) {
+    if (m_read_only) return false;
+    if (m_bg_error.load(std::memory_order_relaxed)) return false;
+    if (f_key.size() > m_max_key_len || f_value.size() > m_max_value_len) return false;
+    return _batchMutation(MutationType::Put, f_key, std::string(f_value), f_flush);
 }
 
 bool LSMIOStoreNative::dbCleanup() {
@@ -366,7 +404,7 @@ bool LSMIOStoreNative::get(const std::string f_key, std::string* f_value) {
     }
 
     if (found && result != MEMTABLE_TOMBSTONE) {
-        *f_value = result;
+        *f_value = std::move(result);
         return true;
     }
 

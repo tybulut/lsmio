@@ -35,6 +35,7 @@
 #include <lsmio/lsmio.hpp>
 #include <mutex>
 #include <string>
+#include <string_view>
 
 namespace lsmio {
 
@@ -89,6 +90,12 @@ class LSMIOStore {
     /// @return bool success
     virtual bool put(const std::string& key, const std::string& value, bool flush = true);
     virtual bool put(const std::string& key, std::string&& value, bool flush = true);
+
+    /// put the bytes of value: a sync put, the caller's memory is free again on return. The
+    /// native store copies them once, into its in-memory buffer (C0); RocksDB and LevelDB take
+    /// them as they are (their DB::Put copies into a WriteBatch and then the memtable)
+    /// @return bool success
+    virtual bool putBytes(const std::string& key, std::string_view value, bool flush = true);
 
     /// delete value given a key
     /// @return bool success

@@ -80,7 +80,7 @@ char **LSMIOClientAdios::_recvToBuffer(int *bufSizes, const std::vector<int> &eo
 }
 
 bool LSMIOClientAdios::sendCommand(int rank, const std::string &command, const std::string &key,
-                                   const std::string &value) {
+                                   std::string_view value) {
     const std::string hint = "LSMIOClientADIO::sendCommand";
 
     std::string bufMPI;
@@ -90,9 +90,8 @@ bool LSMIOClientAdios::sendCommand(int rank, const std::string &command, const s
 
     LOG(INFO) << "LSMIOClientAdios::sendCommandMPI:"
               << " myRank: " << _rank << " command : " << command << " key : " << key
-              << " size : " << value.size()
-              << " value : " << (value.size() > 80 ? value.substr(0, 80) + "..." : value)
-              << " to: " << rank << std::endl;
+              << " size : " << value.size() << " value : " << value.substr(0, 80)
+              << (value.size() > 80 ? "..." : "") << " to: " << rank << std::endl;
 
     return true;
 }

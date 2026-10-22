@@ -84,7 +84,7 @@ class LSMIOClientMPI : public LSMIOClient {
      * @return True if the command was sent successfully, false otherwise.
      */
     bool sendCommand(int rank, const std::string &command, const std::string &key,
-                     const std::string &value) override;
+                     std::string_view value) override;
 
     /**
      * @brief Receives a command from a specific MPI rank.

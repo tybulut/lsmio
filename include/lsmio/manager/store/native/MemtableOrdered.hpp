@@ -33,49 +33,40 @@
 
 #include <map>
 #include <string>
-#include <type_traits>
+#include <utility>
 
 #include "IMemtable.hpp"
 
 namespace lsmio {
 
+// MapT: an ordered map with try_emplace, such as std::map (the B+ tree is MemtableBTree)
 template <typename MapT>
 class MemtableOrdered : public IMemtable {
   public:
     MemtableOrdered() : m_size_bytes(0) {}
 
+    // try_emplace copies or moves the value only when the key is new (an existing key leaves
+    // f_value untouched), so the value is copied once on either path
     void add(const std::string& f_key, const std::string& f_value) override {
-        auto result = m_data.insert({f_key, f_value});
-        if (result.second) {
+        auto [it, inserted] = m_data.try_emplace(f_key, f_value);
+        if (inserted) {
             m_size_bytes += f_key.size() + f_value.size();
         } else {
-            m_size_bytes -= result.first->second.size();
+            m_size_bytes -= it->second.size();
             m_size_bytes += f_value.size();
-            result.first->second = f_value;
+            it->second = f_value;
         }
     }
 
     void add(const std::string& f_key, std::string&& f_value) override {
         const size_t val_bytes = f_value.size();
-
-        if constexpr (std::is_same_v<MapT, std::map<std::string, std::string>>) {
-            auto [it, inserted] = m_data.try_emplace(f_key, std::move(f_value));
-            if (inserted) {
-                m_size_bytes += f_key.size() + val_bytes;
-            } else {
-                m_size_bytes -= it->second.size();
-                m_size_bytes += val_bytes;
-                it->second = std::move(f_value);
-            }
+        auto [it, inserted] = m_data.try_emplace(f_key, std::move(f_value));
+        if (inserted) {
+            m_size_bytes += f_key.size() + val_bytes;
         } else {
-            auto result = m_data.insert({f_key, f_value});
-            if (result.second) {
-                m_size_bytes += f_key.size() + val_bytes;
-            } else {
-                m_size_bytes -= result.first->second.size();
-                m_size_bytes += val_bytes;
-                result.first->second = std::move(f_value);
-            }
+            m_size_bytes -= it->second.size();
+            m_size_bytes += val_bytes;
+            it->second = std::move(f_value);
         }
     }
 

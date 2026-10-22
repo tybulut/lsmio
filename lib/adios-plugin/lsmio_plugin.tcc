@@ -147,13 +147,17 @@ inline void LsmioPlugin::WriteVariable(core::Variable<T> &variable, const T *val
                                        const Mode launch) {
     bool isSync = (launch == Mode::Sync) ? true : false;
     CheckMemorySelection(variable);
-    std::string bytes(reinterpret_cast<const char *>(values), variable.SelectionSize() * sizeof(T));
+    // Sync and Deferred alike: the bytes are copied before the put returns (by the native store
+    // once, into C0; for a client of an aggregator, into the MPI message), so the caller's memory
+    // is free again on return
+    const std::string_view bytes(reinterpret_cast<const char *>(values),
+                                 variable.SelectionSize() * sizeof(T));
 
     LOG(INFO) << "LsmioPlugin::WriteVariable<T>: key: " << variable.m_Name
               << " bytes: " << bytes.size() << std::endl;
 
     // A failed put (e.g. a value over LSMIO's maximum value length) must not be lost silently
-    if (!_lm->put(variable.m_Name, std::move(bytes), isSync)) {
+    if (!_lm->putBytes(variable.m_Name, bytes, isSync)) {
         throw std::runtime_error("ERROR: LsmioPlugin: could not write variable " + variable.m_Name);
     }
     RecordVariable(variable);

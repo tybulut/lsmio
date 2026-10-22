@@ -43,6 +43,7 @@
 #include <lsmio/manager/store/store_ldb.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -191,6 +192,15 @@ class LSMIOManager {
     bool put(const std::string &key, std::string &&value);
     bool put(const std::string &key, const char *value, std::streamsize n);
     bool put(const std::string &key, const void *ptr, size_t size, size_t count);
+
+    /**
+     * @brief Put the bytes of value: a sync put, the caller's memory is free again on return.
+     *
+     * No intermediate string is made: the native store copies the bytes once, into its in-memory
+     * buffer (C0); RocksDB and LevelDB copy them into a WriteBatch and then their memtable; a
+     * client of an aggregator copies them into the message that carries them.
+     */
+    bool putBytes(const std::string &key, std::string_view value, bool flush);
 
     /**
      * @brief Delete a value associated with a key from the database.
