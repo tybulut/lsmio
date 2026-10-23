@@ -132,7 +132,8 @@ graph TD
     CLI --> ARCHIVE["archive: Run Bundling & Storage"]
     CLI --> TEST["test: Python Test Suite"]
     CLI --> LEGACY["parseLegacy: Backward-Compat Parser"]
-    CLI --> ENV["load-modules / latex"]
+    CLI --> ENV["load-modules"]
+    CLI --> LATEX["latex: Paper Data & Figures"]
 
     RUN --> SCHED["Slurm / PBS Schedulers"]
     RUN --> MATRIX["6-Combination Matrix"]
@@ -157,7 +158,7 @@ graph TD
 | `test` | Executes the internal Python test suite across unit, functional, and integration fixtures. |
 | `parseLegacy` | Backward-compatible parser for legacy unstructured output hierarchies. |
 | `load-modules` | Dynamically configures HPC cluster environment modules defined in `environments.json`. |
-| `latex` | Generates LaTeX table and figure source snippets for academic publications. |
+| `latex` | Builds a paper's chart data (TSV files) from archived reports (`latex data`) and previews its figures (`latex plots`), driven by the paper's `sources.yaml`. See Section 7. |
 
 ---
 
@@ -821,3 +822,73 @@ The canonical sequence evaluated by `most` (`lsmiotool run lsmio variants most` 
 > `default` and variants 1 through 24 explicitly pass `--lsmio-no-autotune` (in both lsmiotool and bmtool) to ensure ablation study isolation without automatic parameter interference; `autotune` passes `--lsmio-autotune`.
 >
 > **Buffer Sizing Standard**: In accordance with experimental rigor, read-path variants (`no-pread`, `mmap`, `mmap-vsort`, `mmap-btree`, etc.) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.
+
+---
+
+## 7. Paper Data & Figures (`lsmiotool latex`)
+
+`lsmiotool latex` turns archived benchmark reports into the chart data of a paper and previews the paper's figures. It is driven by a `sources.yaml` that lives with the paper, so the figures can be traced to, and regenerated from, the raw archive.
+
+### 7.1 CLI Syntax and Usage
+
+```bash
+# Rebuild every TSV the paper's charts read, from the archived reports
+lsmiotool latex data <sources.yaml> --data-dir <dir> --output-dir <dir>
+
+# Draw a preview PDF for every figure of the sources.yaml from those TSVs
+lsmiotool latex plots <sources.yaml> --tsv-dir <dir> [--output-dir <dir>]
+```
+
+- `--data-dir <dir>`: the directory the `sources.yaml`'s report paths are relative to (for the journal paper, `lsmio-data/synthetic`).
+- `--output-dir <dir>`: where `data` writes its TSVs (required), and where `plots` writes its PDFs (default: the current working directory).
+- `--tsv-dir <dir>`: the directory holding the TSVs `data` wrote (`plots` only).
+- A bad argument exits with status 2. An unreadable or invalid `sources.yaml`, a missing or malformed report, or a series with no data (no rows, or only `nan` points) exits with status 1, as does an output file that cannot be written or a figure that cannot be drawn. `data` builds every dataset and checks that no output path is a directory before writing, then writes each TSV under a temporary name and renames them into place once all are written. A failure therefore leaves the existing TSVs as they were; only a rename failing midway, which is rare once every temporary file is written, can leave some of them replaced.
+- `data` prints each TSV it wrote with the number of rows from each source (or placeholder) on stdout; `plots` prints each PDF. Warnings and errors go to stderr.
+
+### 7.2 `sources.yaml` (schema 1)
+
+```yaml
+schema: 1
+
+grid:
+  nodes: [1, 2, 4, 8, 16, 24, 32, 40, 48]
+  stripes: [4, 16]
+  block_sizes: [1M, 64K, 8M]
+  ops: [read, write]
+
+datasets:
+  - output: hdd/bm/lsm-report-adios.tsv
+    kind: lsmio
+    source: viking/lsmio-hdd/small/output-adios
+    stitch:
+      - {source: viking/lsmio-hdd/small/output-adios-2, nodes: [24], stripes: [4], block_sizes: [1M]}
+
+  - output: hdd/ior/ior-report-hdf5.tsv
+    kind: ior
+    source: viking/ior-hdd/small/output-ior-hdf5
+    missing: placeholder
+    fill: zero
+    placeholders:
+      - {nodes: [24], stripes: [16], block_sizes: [64K], ops: [read], copy_from_node: 32}
+
+figures:
+  - file: 42-comparison-write-lsmio.pdf
+    title: HDF5 vs. ADIOS2 vs. LSMIO
+    y_label: Max Write Bandwidth (GiB/s)
+    y_divisor: 1024
+    series:
+      - {label: ADIOS2 4/64K, dataset: hdd/bm/lsm-report-adios.tsv, stripes: 4, block_size: 64K, op: write}
+```
+
+- The file is read with PyYAML's safe loader; `latex` is the only command that needs PyYAML, and its tests skip (saying why) when PyYAML is not installed. Comments, anchors and `<<` merges work. A key given twice in one mapping is an error. YAML reads an unquoted `no`, `yes`, `on` or `off` as a boolean, which the schema check rejects; quote such values. A field the schema does not know (a misspelt `stiches`, say) is an error at every level.
+- **`output`** (relative to `--output-dir`), **`kind`** (`ior` reads `ior-report.csv`, `lsmio` reads `lsm-report.csv`) and **`source`** (a directory relative to `--data-dir`) are required. Absolute paths and `..` are rejected. Two outputs that name one file (`a.tsv` and `./a.tsv`, or `a.tsv` and `A.tsv`: paths are compared ignoring case, as macOS does by default), an output named like another's temporary file (`a.tsv.tmp`), an output that is the directory of another (`hdd` and `hdd/a.tsv`) and an output that names no file (`.`, `sub/`) are rejected.
+- **`grid`** (optional, at the top level or per dataset; a dataset's grid replaces the top-level one) lists the rows every TSV must have: each of `nodes` times each (`stripes`, `block_sizes`, `ops`) combination. An omitted list takes its values from the report; without any grid the expected rows are every node count of the report times every combination the report has. A report row outside the grid is an error. Charts that pick rows by position need a full grid: without it, a node count missing from the whole report would just drop its rows and shift every later series.
+- **`stitch`** rules overlay the rows of their selection (`nodes`, `stripes`, `block_sizes`, `ops`; an omitted selector matches all) with the rows of their own source: each selected row of the rule's report replaces the dataset's row for that run, or adds it. A rule that selects no row is an error, and so is a value a rule lists that takes no row (`nodes: [24, 99]` when the rerun has no 99-node run), as are two rules that select the same run and a rule whose source is the dataset's own.
+- **`missing`** says what an expected run that no report has (a placeholder), or a run whose measurements are all empty (a failed run), becomes: `"placeholder"` (default; written as `fill` says, with a warning) or `"error"`.
+- **`fill`** says how such a run is written. `"nan"` (default): its measurements are `nan`, which leaves a gap in a chart (pgfplots needs `unbounded coords=jump`; `plots` breaks the line by itself), and a placeholder's other columns are `NA`. `"zero"`: its measurements are `0.00`, and an IOR placeholder keeps the settings of the preceding node count's run; a `placeholders` rule names another node count to copy from. A failed run keeps its reported settings either way. `placeholders` rules are allowed only on `ior` datasets with `fill: zero`, and a rule that matches no missing run, or lists a value that matches none, is an error (remove it, or the value, once the run exists). The journal paper's HDF5 dataset uses `fill: zero`, because its checked-in TSV holds zeros.
+- A report with no data row, a report that lists one run (node count, stripe count, block size, operation) twice, a row wider than the header, a run with only some of its measurements empty, a measurement that is not a plain finite number (`nan`, `1_000` and numbers too large for two decimals are rejected; `1e3` is written `1000.00`), an IOR stonewall cell that is not `NA`, empty, an integer or a decimal, and a report the csv module cannot parse are errors. A row shorter than the header (a run cut short) is kept, padded with empty cells and reported as a warning.
+- **`figures`** are only used by `plots`. Each `file` must end in `.pdf` and be unique (ignoring case), and `y_divisor` must be a positive finite number. Every series names the TSV (`dataset`, an `output` of a dataset), stripe count, block size and operation it draws. `y` is the TSV's `Max` column divided by `y_divisor` (1024 turns MiB/s into GiB/s).
+
+### 7.3 TSV Format
+
+`data` reproduces the paper's TSVs exactly: a fixed header, rows sorted by stripe count, block size (as text, so `16M` sorts before `1M`), operation and node count, and CRLF line ends. IOR rows have their nine measurement columns (`Max(MiB)` to `Mean(s)`) written with two decimals (halves rounded up); the stonewall columns keep `NA`, empty cells and integers and write decimals with two decimals; `aggs(MiB)` is an integer; the rest is kept as is, and a run cut short is padded to the header's width. LSMIO rows have their six number columns written with two decimals. A run without data is written as `fill` says (`nan`, or `0.00`). The journal paper's `sources.yaml` and its provenance notes are in `docs/paper-journal/`; a golden test (`PaperDataTest`) checks that it regenerates the paper's checked-in TSVs byte for byte.

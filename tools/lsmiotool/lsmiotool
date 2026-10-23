@@ -46,17 +46,20 @@ if srv_path not in sys.path:
 from lsmiotool.lib.cli import (
     ARCHIVE_HELP_TEXT,
     COMPARE_HELP_TEXT,
+    LATEX_HELP_TEXT,
     LSMIOTOOL_HELP,
     PARSE_HELP_TEXT,
     RUN_HELP_TEXT,
     ArchiveCliParseError,
     CompareCliParseError,
+    LatexCliParseError,
     PackageValidationError,
     ParseCliParseError,
     RunCliParseError,
     SourcePackageValidator,
     parseArchiveArguments,
     parseCompareArguments,
+    parseLatexArguments,
     parseParseArguments,
     parseRunArguments,
 )
@@ -88,6 +91,9 @@ if __name__ == '__main__':
                         sys.exit(0)
                     elif subcmd == 'compare':
                         print(COMPARE_HELP_TEXT.rstrip())
+                        sys.exit(0)
+                    elif subcmd == 'latex':
+                        print(LATEX_HELP_TEXT.rstrip())
                         sys.exit(0)
                     elif subcmd == 'parse':
                         print(PARSE_HELP_TEXT.rstrip())
@@ -150,13 +156,18 @@ if __name__ == '__main__':
         inst_main = main.CompareMain(f_request=compare_request)
     elif cmd == 'latex':
         from lsmiotool.lib import main
-        cmd_args = args[1:]
-        if not cmd_args:
-            sys.stderr.write(
-                "Latex: Needs argument such as viking, viking2, ...\n"
-            )
-            sys.exit(1)
-        inst_main = main.LatexMain(*cmd_args)
+        if any(h in args[1:] for h in ('-h', '--help')):
+            print(LATEX_HELP_TEXT.rstrip())
+            sys.exit(0)
+        try:
+            latex_request = parseLatexArguments(args)
+        except LatexCliParseError as err:
+            sys.stderr.write(f"{err}\n")
+            sys.exit(2)
+        if latex_request.mode == 'data':
+            inst_main = main.LatexDataMain(f_request=latex_request)
+        else:
+            inst_main = main.LatexMain(f_request=latex_request)
     elif cmd == 'load-modules':
         from lsmiotool.lib import main
         inst_main = main.HpcEnvMain()

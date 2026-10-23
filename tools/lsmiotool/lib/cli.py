@@ -58,7 +58,8 @@ common cmds:
   run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
 
 other cmds:
-  latex <viking|viking2|isambard>
+  latex data <sources.yaml> --data-dir <dir> --output-dir <dir>
+  latex plots <sources.yaml> --tsv-dir <dir> [--output-dir <dir>]
   shell       provide interactive access to the python tool
   test        run lsmiotool unit and functional tests
 
@@ -201,6 +202,26 @@ Global Options (preserved for legacy compatibility):
   --ssd, -s     Accepted before or after command.
 """
 
+LATEX_HELP_TEXT = """Usage:
+  lsmiotool latex data <sources.yaml> --data-dir <dir> --output-dir <dir>
+  lsmiotool latex plots <sources.yaml> --tsv-dir <dir> [--output-dir <dir>]
+
+Builds the chart data of a paper and previews its figures. The paper's sources.yaml says,
+for every TSV, which archived report it comes from, which node counts are stitched in from
+another run and how runs without data are shown (see lsmiotool/lib/paperdata.py).
+
+Modes:
+  data   rebuild every TSV of the sources.yaml under --output-dir from the benchmark
+         reports under --data-dir (paths in the sources.yaml are relative to it)
+  plots  draw a PDF for every figure of the sources.yaml from the TSVs under --tsv-dir
+
+Options:
+  --data-dir <dir>    directory the sources.yaml's report paths are relative to
+  --output-dir <dir>  where data writes its TSVs; where plots writes its PDFs (default:
+                      current working directory)
+  --tsv-dir <dir>     directory holding the TSVs that data wrote
+"""
+
 PARSE_HELP_TEXT = """Usage:
   lsmiotool parse <target> [--output-dir <dir>] [--format <csv|json>]
   lsmiotool parse lsmio backends <scale> [--output-dir <dir>] [--format <csv|json>]
@@ -307,6 +328,12 @@ class ArchiveCliParseError(CliParseError):
 
 class CompareCliParseError(CliParseError):
     """Exception raised when CLI arguments for the 'compare' command are invalid."""
+
+    pass
+
+
+class LatexCliParseError(CliParseError):
+    """Exception raised when CLI arguments for the 'latex' command are invalid."""
 
     pass
 
@@ -2257,6 +2284,107 @@ def parseCompareArchiveArguments(
 
 # Backward compatibility alias
 CompareArchiveCliParser = CompareCliParser
+
+
+class LatexRequest:
+    """Parsed and validated 'latex' request."""
+
+    __slots__ = ("mode", "sources_path", "data_dir", "tsv_dir", "output_dir")
+
+    def __init__(
+        self,
+        f_mode: str,
+        f_sources_path: str,
+        f_data_dir: Optional[str] = None,
+        f_tsv_dir: Optional[str] = None,
+        f_output_dir: Optional[str] = None,
+    ) -> None:
+        self.mode: str = f_mode
+        self.sources_path: str = f_sources_path
+        self.data_dir: Optional[str] = f_data_dir
+        self.tsv_dir: Optional[str] = f_tsv_dir
+        self.output_dir: Optional[str] = f_output_dir
+
+
+class LatexCliParser:
+    """Pure standard-library parser for 'lsmiotool latex' CLI arguments.
+
+    Grammar:
+        lsmiotool latex data <sources.yaml> --data-dir <dir> --output-dir <dir>
+        lsmiotool latex plots <sources.yaml> --tsv-dir <dir> [--output-dir <dir>]
+    """
+
+    VALID_MODES = ("data", "plots")
+    # Options each mode takes, and the ones it must be given.
+    MODE_OPTIONS = {
+        "data": ("--data-dir", "--output-dir"),
+        "plots": ("--tsv-dir", "--output-dir"),
+    }
+    MODE_REQUIRED = {
+        "data": ("--data-dir", "--output-dir"),
+        "plots": ("--tsv-dir",),
+    }
+
+    @classmethod
+    def parse(cls, f_argv: Sequence[str]) -> LatexRequest:
+        """Parse ['latex', <mode>, <sources.yaml>, options...]."""
+        if f_argv is None or isinstance(f_argv, (str, bytes)):
+            raise LatexCliParseError(
+                f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
+            )
+        f_tokens = list(f_argv)
+        if not f_tokens or f_tokens[0] != "latex":
+            raise LatexCliParseError("Not a 'latex' command.")
+        if len(f_tokens) < 2:
+            raise LatexCliParseError(
+                f"Latex: needs a mode, one of: {', '.join(cls.VALID_MODES)}"
+            )
+        f_mode = f_tokens[1]
+        if f_mode not in cls.VALID_MODES:
+            raise LatexCliParseError(
+                f"Unknown latex mode: {f_mode!r}. Must be one of: {', '.join(cls.VALID_MODES)}"
+            )
+        if len(f_tokens) < 3 or f_tokens[2].startswith("-"):
+            raise LatexCliParseError(f"Latex {f_mode}: needs the path of a sources.yaml")
+        f_sources_path = f_tokens[2].strip()
+        if not f_sources_path:
+            raise LatexCliParseError("The sources.yaml path cannot be empty.")
+        f_values: Dict[str, str] = {}
+        f_idx = 3
+        while f_idx < len(f_tokens):
+            f_tok = f_tokens[f_idx]
+            if f_tok not in cls.MODE_OPTIONS[f_mode]:
+                if f_tok.startswith("-"):
+                    raise LatexCliParseError(f"Unknown option for latex {f_mode}: {f_tok!r}")
+                raise LatexCliParseError(f"Unexpected extra positional argument: {f_tok!r}")
+            if f_tok in f_values:
+                raise LatexCliParseError(f"Duplicate {f_tok!r} option specified.")
+            if f_idx + 1 >= len(f_tokens):
+                raise LatexCliParseError(f"Missing value after {f_tok!r} option.")
+            f_val = f_tokens[f_idx + 1]
+            if f_val.startswith("-"):
+                raise LatexCliParseError(
+                    f"Missing valid value after {f_tok!r} option, got option-like token: {f_val!r}"
+                )
+            if not f_val.strip():
+                raise LatexCliParseError(f"The value of {f_tok!r} cannot be empty.")
+            f_values[f_tok] = f_val.strip()
+            f_idx += 2
+        for f_required in cls.MODE_REQUIRED[f_mode]:
+            if f_required not in f_values:
+                raise LatexCliParseError(f"Latex {f_mode}: needs {f_required} <dir>")
+        return LatexRequest(
+            f_mode=f_mode,
+            f_sources_path=f_sources_path,
+            f_data_dir=f_values.get("--data-dir"),
+            f_tsv_dir=f_values.get("--tsv-dir"),
+            f_output_dir=f_values.get("--output-dir"),
+        )
+
+
+def parseLatexArguments(f_argv: Sequence[str]) -> LatexRequest:
+    """Convenience function wrapping LatexCliParser.parse."""
+    return LatexCliParser.parse(f_argv=f_argv)
 
 
 class SourcePackageValidator:

@@ -283,6 +283,18 @@ class InstalledLayoutTest(unittest.TestCase):
         self.assertNotIn("ResourceLocator.forSource", f_public_content)
         self.assertNotIn("SourcePackageValidator", f_public_content)
 
+        # The installed wrapper dispatches 'latex' like the source wrapper: through the
+        # request parser, not the retired 'latex <env>' form
+        f_source_wrapper = os.path.join(f_source_dir, "lsmiotool")
+        with open(f_source_wrapper, "r", encoding="utf-8") as f_f:
+            f_source_content = f_f.read()
+        for f_wrapper_content in (f_public_content, f_source_content):
+            self.assertIn("parseLatexArguments(args)", f_wrapper_content)
+            self.assertIn("main.LatexDataMain(f_request=latex_request)", f_wrapper_content)
+            self.assertIn("main.LatexMain(f_request=latex_request)", f_wrapper_content)
+            self.assertIn("LATEX_HELP_TEXT", f_wrapper_content)
+            self.assertNotIn("LatexMain(*cmd_args)", f_wrapper_content)
+
         self.assertIn("ResourceLocator.forInstalled", f_worker_content)
         self.assertIn("InstalledPackageValidator", f_worker_content)
         self.assertNotIn("ResourceLocator.forSource", f_worker_content)

@@ -43,6 +43,7 @@ from lsmiotool.lib.profile import (
     ProfileSchemaError,
 )
 from lsmiotool.lib import env
+from lsmiotool.lib.cli import LatexRequest
 from lsmiotool.lib.main import (
     CompareMain,
     LatexMain,
@@ -613,7 +614,7 @@ class ProfileSchemaTest(unittest.TestCase):
         f_compare = CompareMain("test_folder", "read", "1", "1M")
         self.assertIsInstance(f_compare, CompareMain)
 
-        f_latex = LatexMain("viking")
+        f_latex = LatexMain(LatexRequest("plots", "sources.yaml", f_tsv_dir="tsv"))
         self.assertIsInstance(f_latex, LatexMain)
 
         f_hpc = HpcEnvMain()
