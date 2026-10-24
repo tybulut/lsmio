@@ -69,7 +69,9 @@ class LatexCliParserTest(unittest.TestCase):
         f_req = parseLatexArguments(
             ["latex", "data", " s.yaml ", "--data-dir", " raw ", "--output-dir", " out "]
         )
-        self.assertEqual((f_req.sources_path, f_req.data_dir, f_req.output_dir), ("s.yaml", "raw", "out"))
+        self.assertEqual(
+            (f_req.sources_path, f_req.data_dir, f_req.output_dir), ("s.yaml", "raw", "out")
+        )
 
     def assertRejected(self, f_argv: object, f_text: str) -> None:
         with self.assertRaises(LatexCliParseError) as f_ctx:

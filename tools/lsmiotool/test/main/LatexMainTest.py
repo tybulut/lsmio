@@ -133,7 +133,10 @@ class LatexMainTest(unittest.TestCase):
     def testDataReturnsOneWhenSourcesCannotBeRead(self) -> None:
         """A missing sources.yaml is an error with exit status 1 and no output."""
         f_req = LatexRequest(
-            "data", os.path.join(self.m_root, "nope.yaml"), f_data_dir=self.m_data, f_output_dir=self.m_out
+            "data",
+            os.path.join(self.m_root, "nope.yaml"),
+            f_data_dir=self.m_data,
+            f_output_dir=self.m_out,
         )
         with patch.object(paperdata.Console, "error") as f_error:
             self.assertEqual(LatexDataMain(f_req).run(), 1)
@@ -189,7 +192,9 @@ class LatexMainTest(unittest.TestCase):
         self.writeSources(f_doc)
         self.assertEqual(LatexDataMain(self.dataRequest()).run(), 0)
         with patch("lsmiotool.lib.main.log.Console.error") as f_error:
-            self.assertEqual(LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1)
+            self.assertEqual(
+                LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1
+            )
         self.assertIn("series 'W' has no data", f_error.call_args[0][0])
 
     def testPlotsReturnsOneWhenASeriesIsAllNan(self) -> None:
@@ -201,13 +206,17 @@ class LatexMainTest(unittest.TestCase):
                 f_file.write(f"{f_node}\t4\t64K\twrite" + "\tnan" * 5 + "\tNA\r\n")
                 f_file.write(f"{f_node}\t4\t64K\tread\t1024.00" + "\t1.00" * 5 + "\r\n")
         with patch("lsmiotool.lib.main.log.Console.error") as f_error:
-            self.assertEqual(LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1)
+            self.assertEqual(
+                LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1
+            )
         self.assertIn("series 'W' has no data", f_error.call_args[0][0])
 
     def testPlotsReturnsOneWhenTheTsvsAreMissing(self) -> None:
         """Running plots before data reports the missing TSV."""
         with patch("lsmiotool.lib.main.log.Console.error") as f_error:
-            self.assertEqual(LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1)
+            self.assertEqual(
+                LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1
+            )
         self.assertIn("cannot read", f_error.call_args[0][0])
 
     def testPlotsReturnsOneWhenThereAreNoFigures(self) -> None:
@@ -216,7 +225,9 @@ class LatexMainTest(unittest.TestCase):
         del f_doc["figures"]
         self.writeSources(f_doc)
         with patch("lsmiotool.lib.main.log.Console.error") as f_error:
-            self.assertEqual(LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1)
+            self.assertEqual(
+                LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1
+            )
         self.assertIn("defines no figures", f_error.call_args[0][0])
 
     def testPlotsCreatesTheDirectoryOfAFigureFile(self) -> None:

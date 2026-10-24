@@ -65,7 +65,7 @@ import csv
 import math
 import os
 import re
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from lsmiotool.lib.log import Console
@@ -155,9 +155,7 @@ _INT_RE = re.compile(r"^-?\d+$", re.ASCII)
 _NUMBER_RE = re.compile(r"^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$", re.ASCII)
 _SELECTORS = ("nodes", "stripes", "block_sizes", "ops")
 _TOP_FIELDS = ("schema", "grid", "datasets", "figures")
-_DATASET_FIELDS = (
-    "output", "kind", "source", "grid", "stitch", "missing", "fill", "placeholders"
-)
+_DATASET_FIELDS = ("output", "kind", "source", "grid", "stitch", "missing", "fill", "placeholders")
 _FIGURE_FIELDS = ("file", "title", "y_label", "y_divisor", "series")
 _SERIES_FIELDS = ("label", "dataset", "stripes", "block_size", "op")
 
@@ -276,9 +274,7 @@ class FigureSpec:
 class PaperSources:
     """A parsed sources.yaml."""
 
-    def __init__(
-        self, f_datasets: Sequence[DatasetSpec], f_figures: Sequence[FigureSpec]
-    ) -> None:
+    def __init__(self, f_datasets: Sequence[DatasetSpec], f_figures: Sequence[FigureSpec]) -> None:
         self.datasets: List[DatasetSpec] = list(f_datasets)
         self.figures: List[FigureSpec] = list(f_figures)
 
@@ -404,9 +400,7 @@ def _parseDataset(f_obj: Any, f_index: int, f_default_grid: Selection) -> Datase
     ]
     f_fill = f_obj.get("fill", FILL_NAN)
     if f_fill not in (FILL_NAN, FILL_ZERO):
-        raise PaperDataError(
-            f"{f_where}: fill {f_fill!r} must be '{FILL_NAN}' or '{FILL_ZERO}'"
-        )
+        raise PaperDataError(f"{f_where}: fill {f_fill!r} must be '{FILL_NAN}' or '{FILL_ZERO}'")
     if f_placeholders and f_kind != "ior":
         raise PaperDataError(f"{f_where}: placeholders apply to ior datasets only")
     if f_placeholders and f_fill != FILL_ZERO:
@@ -573,9 +567,7 @@ def loadSources(f_path: str) -> PaperSources:
     f_figure_objs = f_doc.get("figures", [])
     if not isinstance(f_figure_objs, list):
         raise PaperDataError(f"{f_path}: figures must be a list")
-    f_figures = [
-        _parseFigure(f_obj, f_pos, f_outputs) for f_pos, f_obj in enumerate(f_figure_objs)
-    ]
+    f_figures = [_parseFigure(f_obj, f_pos, f_outputs) for f_pos, f_obj in enumerate(f_figure_objs)]
     f_files = [os.path.normpath(f_figure.file).lower() for f_figure in f_figures]
     if len(set(f_files)) != len(f_files):
         raise PaperDataError(
@@ -700,9 +692,7 @@ def formatRow(f_kind: str, f_row: Sequence[str]) -> List[str]:
         except PaperDataError as f_err:
             f_name = f_kind_spec["header"][f_col] if f_col < len(f_kind_spec["header"]) else f_col
             f_key = (int(f_row[0]), int(f_row[1]), f_out[2], f_out[3])
-            raise PaperDataError(
-                f"{f_err} in column '{f_name}' of the row for {_describe(f_key)}"
-            )
+            raise PaperDataError(f"{f_err} in column '{f_name}' of the row for {_describe(f_key)}")
     f_out += [""] * (len(f_kind_spec["header"]) - len(f_out))
     return f_out
 
@@ -798,9 +788,7 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
         f_rule_rows = readReport(os.path.join(f_data_dir, f_rule.source, f_report))
         f_taken = [f_key for f_key in f_rule_rows if f_rule.selection.selects(f_key)]
         if not f_taken:
-            raise PaperDataError(
-                f"{f_spec.output}: stitch from {f_rule.source} selects no row"
-            )
+            raise PaperDataError(f"{f_spec.output}: stitch from {f_rule.source} selects no row")
         f_unused = _unusedValues(f_rule.selection, f_taken)
         if f_unused:
             raise PaperDataError(
@@ -826,7 +814,12 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
         )
         f_op_values = f_grid.ops if f_grid.ops is not None else {k[3] for k in f_rows}
         f_combos = sorted(
-            {(f_s, f_b, f_o) for f_s in f_stripe_values for f_b in f_size_values for f_o in f_op_values}
+            {
+                (f_s, f_b, f_o)
+                for f_s in f_stripe_values
+                for f_b in f_size_values
+                for f_o in f_op_values
+            }
         )
     f_combo_set = set(f_combos)
     f_outside = sorted(
@@ -850,8 +843,7 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
             continue
         if any(f_cells):
             raise PaperDataError(
-                f"{f_spec.output}: the run for {_describe(f_key)} has only some of its "
-                f"measurements"
+                f"{f_spec.output}: the run for {_describe(f_key)} has only some of its measurements"
             )
         if f_spec.missing == MISSING_ERROR:
             raise PaperDataError(f"{f_spec.output}: the run for {_describe(f_key)} has no data")
@@ -904,9 +896,7 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
     for f_key in f_order:
         f_counts[f_origin[f_key]] = f_counts.get(f_origin[f_key], 0) + 1
     f_provenance = [f"{f_source}: {f_count} rows" for f_source, f_count in f_counts.items()]
-    return DatasetResult(
-        f_spec, f_lines, f_provenance, sorted(f_placeholders), f_padded, f_empty
-    )
+    return DatasetResult(f_spec, f_lines, f_provenance, sorted(f_placeholders), f_padded, f_empty)
 
 
 def writeLines(f_path: str, f_lines: Sequence[str]) -> None:
@@ -917,9 +907,7 @@ def writeLines(f_path: str, f_lines: Sequence[str]) -> None:
             f_file.write(f_line + LINE_END)
 
 
-def generate(
-    f_sources: PaperSources, f_data_dir: str, f_output_dir: str
-) -> List[DatasetResult]:
+def generate(f_sources: PaperSources, f_data_dir: str, f_output_dir: str) -> List[DatasetResult]:
     """Rebuild every dataset's TSV under f_output_dir. Runs without data (placeholders and
     failed runs, written as nan or zeros as the dataset's fill says) and rows padded to the
     header's width are logged as warnings; the caller reports the written files from the

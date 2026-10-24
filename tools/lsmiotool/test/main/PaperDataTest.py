@@ -171,10 +171,23 @@ class PaperDataFormatTest(unittest.TestCase):
 
     def testLsmioRowWritesMeasurementsWithTwoDecimals(self) -> None:
         """Every measurement and count column of an LSMIO row has two decimals."""
-        f_row = paperdata.formatRow("lsmio", lsmRow("24", 4, "1M", "write", "1158", "859.94", "1035.36"))
+        f_row = paperdata.formatRow(
+            "lsmio", lsmRow("24", 4, "1M", "write", "1158", "859.94", "1035.36")
+        )
         self.assertEqual(
             f_row,
-            ["24", "4", "1M", "write", "1158.00", "859.94", "1035.36", "2559.96", "40960.00", "10.00"],
+            [
+                "24",
+                "4",
+                "1M",
+                "write",
+                "1158.00",
+                "859.94",
+                "1035.36",
+                "2559.96",
+                "40960.00",
+                "10.00",
+            ],
         )
 
     def testLsmioEmptyMeasurementsBecomeZero(self) -> None:
@@ -360,14 +373,22 @@ class PaperDataBuildTest(unittest.TestCase):
         self.iorWithAGap()
         f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "src"), self.m_dir)
         self.assertEqual(f_result.placeholders, [(4, 4, "1M", "read")])
-        f_row = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")][0]
+        f_rows = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")]
+        f_row = f_rows[0]
         self.assertEqual(f_row[4:13], ["nan"] * 9)
         self.assertEqual(f_row[13:], ["NA"] * 17)
         self.assertEqual(len(f_row), 30)
 
     def testLsmioPlaceholderIsNanByDefault(self) -> None:
         """By default a missing LSMIO run is a row of nan under its own key."""
-        self.lsmio("src", [lsmRow("1", 4, "1M", "write"), lsmRow("2", 4, "1M", "write"), lsmRow("1", 4, "1M", "read")])
+        self.lsmio(
+            "src",
+            [
+                lsmRow("1", 4, "1M", "write"),
+                lsmRow("2", 4, "1M", "write"),
+                lsmRow("1", 4, "1M", "read"),
+            ],
+        )
         f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
         f_row = [f_l for f_l in f_result.lines[1:] if f_l.startswith("2\t4\t1M\tread")][0]
         # Iterations is a setting, not a measurement: NA like an IOR placeholder's settings
@@ -377,7 +398,11 @@ class PaperDataBuildTest(unittest.TestCase):
         """A nan placeholder copies nothing, so the first node count may be missing too."""
         self.ior(
             "src",
-            [iorRow("1", 4, "1M", "write"), iorRow("2", 4, "1M", "write"), iorRow("2", 4, "1M", "read")],
+            [
+                iorRow("1", 4, "1M", "write"),
+                iorRow("2", 4, "1M", "write"),
+                iorRow("2", 4, "1M", "read"),
+            ],
         )
         f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "src"), self.m_dir)
         self.assertEqual(f_result.placeholders, [(1, 4, "1M", "read")])
@@ -390,7 +415,8 @@ class PaperDataBuildTest(unittest.TestCase):
             DatasetSpec("o.tsv", "ior", "src", f_fill=paperdata.FILL_ZERO), self.m_dir
         )
         self.assertEqual(f_result.placeholders, [(4, 4, "1M", "read")])
-        f_row = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")][0]
+        f_rows = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")]
+        f_row = f_rows[0]
         self.assertEqual(f_row[4:13], ["0.00"] * 9)
         self.assertEqual(f_row[16], "2")
         self.assertEqual(f_row[27], "128")
@@ -401,12 +427,11 @@ class PaperDataBuildTest(unittest.TestCase):
         self.iorWithAGap()
         f_rule = PlaceholderRule(Selection([4], [4], ["1M"], ["read"]), 1)
         f_result = paperdata.buildDataset(
-            DatasetSpec(
-                "o.tsv", "ior", "src", f_placeholders=[f_rule], f_fill=paperdata.FILL_ZERO
-            ),
+            DatasetSpec("o.tsv", "ior", "src", f_placeholders=[f_rule], f_fill=paperdata.FILL_ZERO),
             self.m_dir,
         )
-        f_row = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")][0]
+        f_rows = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")]
+        f_row = f_rows[0]
         self.assertEqual(f_row[16], "1")
         self.assertEqual(f_row[4:13], ["0.00"] * 9)
 
@@ -421,13 +446,19 @@ class PaperDataBuildTest(unittest.TestCase):
                 ),
                 self.m_dir,
             )
-        self.assertIn("o.tsv: no run for nodes=48 stripes=4 block size=1M read", str(f_ctx.exception))
+        self.assertIn(
+            "o.tsv: no run for nodes=48 stripes=4 block size=1M read", str(f_ctx.exception)
+        )
 
     def testPlaceholderForTheFirstNodeCountHasNothingToCopy(self) -> None:
         """With fill zero an IOR placeholder needs an earlier node count to copy from."""
         self.ior(
             "src",
-            [iorRow("1", 4, "1M", "write"), iorRow("2", 4, "1M", "write"), iorRow("2", 4, "1M", "read")],
+            [
+                iorRow("1", 4, "1M", "write"),
+                iorRow("2", 4, "1M", "write"),
+                iorRow("2", 4, "1M", "read"),
+            ],
         )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
@@ -487,14 +518,20 @@ class PaperDataBuildTest(unittest.TestCase):
 
     def testRunListedTwiceIsAnError(self) -> None:
         """Two rows for one run are not resolved silently; a stitch rule has to choose."""
-        self.lsmio("src", [lsmRow("1", 4, "1M", "write", "10"), lsmRow("01", 4, "1M", "write", "11")])
+        self.lsmio(
+            "src", [lsmRow("1", 4, "1M", "write", "10"), lsmRow("01", 4, "1M", "write", "11")]
+        )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
         self.assertIn("twice", str(f_ctx.exception))
 
     def testMeasurementThatIsNotAFiniteNumberIsAnError(self) -> None:
         """A non-number or non-finite measurement is reported with its column and run."""
-        for f_cell, f_text in [("N/A", "is not a number"), ("inf", "is not a finite number"), ("nan", "is not a finite number")]:
+        for f_cell, f_text in [
+            ("N/A", "is not a number"),
+            ("inf", "is not a finite number"),
+            ("nan", "is not a finite number"),
+        ]:
             with self.subTest(f_cell=f_cell):
                 self.lsmio("src", [lsmRow("1", 4, "1M", "write", f_cell)])
                 with self.assertRaises(PaperDataError) as f_ctx:
@@ -552,13 +589,20 @@ class PaperDataBuildTest(unittest.TestCase):
         f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
         self.assertEqual(f_result.empty, [(2, 4, "1M", "write")])
         self.assertEqual(f_result.lines[2], "2\t4\t1M\twrite" + "\tnan" * 5 + "\t0.00")
-        self.lsmio("isrc10", [lsmRow("1", 4, "1M", "write"), ["2", "4", "1M", "write", "", "", "", "", "", "10"]])
+        self.lsmio(
+            "isrc10",
+            [lsmRow("1", 4, "1M", "write"), ["2", "4", "1M", "write", "", "", "", "", "", "10"]],
+        )
         f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "isrc10"), self.m_dir)
         self.assertEqual(f_result.lines[2], "2\t4\t1M\twrite" + "\tnan" * 5 + "\t10.00")
         f_failed = iorRow("2", 4, "1M", "write")
         f_failed[4:13] = [""] * 9
         self.ior("isrc", [iorRow("1", 4, "1M", "write"), f_failed])
-        f_row = paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "isrc"), self.m_dir).lines[2].split("\t")
+        f_row = (
+            paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "isrc"), self.m_dir)
+            .lines[2]
+            .split("\t")
+        )
         self.assertEqual(f_row[4:13], ["nan"] * 9)
         self.assertEqual(f_row[16], "2")
 
@@ -575,10 +619,14 @@ class PaperDataBuildTest(unittest.TestCase):
         self.lsmio("a", [lsmRow("1", 4, "1M", "write")])
         self.lsmio("b", [lsmRow("1", 4, "1M", "write", "11")])
         self.lsmio("c", [lsmRow("1", 4, "1M", "write", "12")])
-        f_spec = DatasetSpec("o.tsv", "lsmio", "a", [StitchRule("b", Selection()), StitchRule("c", Selection())])
+        f_spec = DatasetSpec(
+            "o.tsv", "lsmio", "a", [StitchRule("b", Selection()), StitchRule("c", Selection())]
+        )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(f_spec, self.m_dir)
-        self.assertIn("stitch rules from b and c both select the run for nodes=1", str(f_ctx.exception))
+        self.assertIn(
+            "stitch rules from b and c both select the run for nodes=1", str(f_ctx.exception)
+        )
 
     def testRowWiderThanTheHeaderIsAnError(self) -> None:
         """Extra cells would be written past the header without a word."""
@@ -614,7 +662,9 @@ class PaperDataBuildTest(unittest.TestCase):
     def testGridAddsPlaceholdersForACombinationNoRunHas(self) -> None:
         """Every stripe count, block size and operation of the grid is expected."""
         self.lsmio("src", [lsmRow("1", 4, "1M", "write")])
-        f_spec = DatasetSpec("o.tsv", "lsmio", "src", f_grid=Selection(None, None, None, ["read", "write"]))
+        f_spec = DatasetSpec(
+            "o.tsv", "lsmio", "src", f_grid=Selection(None, None, None, ["read", "write"])
+        )
         f_result = paperdata.buildDataset(f_spec, self.m_dir)
         self.assertEqual(f_result.placeholders, [(1, 4, "1M", "read")])
 
@@ -716,9 +766,13 @@ class PaperDataGenerateTest(unittest.TestCase):
             with self.subTest(f_fill=f_fill):
                 f_spec = DatasetSpec("failed.tsv", "lsmio", "failed", f_fill=f_fill)
                 with patch.object(paperdata.Console, "warning") as f_warning:
-                    paperdata.generate(paperdata.PaperSources([f_spec], []), self.m_data, self.m_out)
+                    paperdata.generate(
+                        paperdata.PaperSources([f_spec], []), self.m_data, self.m_out
+                    )
                 f_warning.assert_called_once()
-                self.assertIn("nodes=2 stripes=4 block size=1M write has no data", f_warning.call_args[0][0])
+                self.assertIn(
+                    "nodes=2 stripes=4 block size=1M write has no data", f_warning.call_args[0][0]
+                )
                 self.assertIn(f_written, f_warning.call_args[0][0])
 
     def testTargetThatIsADirectoryChangesNothing(self) -> None:
@@ -836,7 +890,9 @@ class PaperSourcesTest(unittest.TestCase):
         """A valid sources.yaml yields its datasets, stitch rules, placeholder rules and figures."""
         f_sources = self.load(self.doc())
         f_spec = f_sources.datasets[0]
-        self.assertEqual((f_spec.output, f_spec.kind, f_spec.source), ("hdd/a.tsv", "ior", "viking/a"))
+        self.assertEqual(
+            (f_spec.output, f_spec.kind, f_spec.source), ("hdd/a.tsv", "ior", "viking/a")
+        )
         self.assertEqual(f_spec.missing, paperdata.MISSING_PLACEHOLDER)
         self.assertEqual(f_spec.stitch[0].source, "viking/b")
         self.assertTrue(f_spec.stitch[0].selection.selects((24, 4, "1M", "write")))
