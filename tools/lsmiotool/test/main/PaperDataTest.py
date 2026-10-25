@@ -1416,8 +1416,8 @@ class PaperDataGoldenTest(unittest.TestCase):
                 f_results = paperdata.generate(
                     f_sources, os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"), f_out
                 )
-            # The paper's 7, then 27 of the later runs (Viking2 and Archer2)
-            self.assertEqual(len(f_results), 34)
+            # The paper's 7, then 31 of the later runs (Viking2 and Archer2)
+            self.assertEqual(len(f_results), 38)
             for f_result in f_results:
                 f_name = f_result.spec.output
                 with open(os.path.join(f_out, f_name), "rb") as f_new:
@@ -1454,7 +1454,7 @@ class PaperDataGoldenTest(unittest.TestCase):
             ],
             "viking2-baking/hdd/ior/ior-report-hdf5-c.tsv": wholeNode(8),
         }
-        for f_name in ("base", "adios", "plugin"):
+        for f_name in ("base", "adios", "plugin", "native"):
             f_expected[f"archer2/ssd/bm/lsm-report-{f_name}.tsv"] = wholeNode(24)
         self.assertEqual(
             {f_k: sorted(f_v) for f_k, f_v in f_gaps.items()},
