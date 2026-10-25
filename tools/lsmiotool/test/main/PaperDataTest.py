@@ -136,6 +136,39 @@ def writeReport(f_data_dir: str, f_source: str, f_name: str, f_rows: List[List[s
             f_file.write(",".join(f_row) + "\n")
 
 
+def iterationLine(f_op: str, f_bw: str, f_iter: int) -> str:
+    """One IOR iteration line (access, bw, IOPS, latency, block, xfer, open, wr/rd, close,
+    total, iter), with the trailing space IOR prints."""
+    return (
+        f"{f_op:<10}{f_bw:<11}2533.26    77.61       64.00      64.00      1.15       "
+        f"77.61      0.037574   78.77      {f_iter:<4}"
+    )
+
+
+def writeCutShortRun(
+    f_data_dir: str,
+    f_source: str,
+    f_bandwidths: List[str],
+    f_name: str = "out-collective-4-64K-2023-10-29-node065-0.txt.2",
+    f_repetitions: Optional[int] = 10,
+) -> List[str]:
+    """Write a 2-node IOR output under f_source that stopped after its write iterations of
+    f_bandwidths, before the summary; return the report row ior-parse.sh makes of it."""
+    f_dir = os.path.join(f_data_dir, f_source, "2", "2023-10-29")
+    os.makedirs(f_dir, exist_ok=True)
+    f_lines = ["IOR-3.3.0: MPI Coordinated Test of Parallel I/O", "api                 : MPIIO"]
+    if f_repetitions is not None:
+        f_lines.append(f"repetitions         : {f_repetitions}")
+    f_lines.append("access    bw(MiB/s)  IOPS       Latency(s)  block(KiB) xfer(KiB)  iter")
+    for f_pos, f_bw in enumerate(f_bandwidths):
+        f_lines.append(iterationLine("write", f_bw, f_pos))
+        f_lines.append(iterationLine("read", "900.00", f_pos))
+    f_lines.append("ERROR: cannot open file to get file size, MPI MPI_ERR_NO_SUCH_FILE")
+    with open(os.path.join(f_dir, f_name), "w") as f_file:
+        f_file.write("\n".join(f_lines) + "\n")
+    return ["2", "4", "64K"] + iterationLine("write", f_bandwidths[-1], len(f_bandwidths) - 1).split() + [""]
+
+
 class PaperDataFormatTest(unittest.TestCase):
     """formatRow: the rules that turn a report row into a TSV row."""
 
@@ -548,6 +581,145 @@ class PaperDataBuildTest(unittest.TestCase):
         self.assertEqual(f_result.padded, [(1, 4, "1M", "write")])
         self.assertEqual(f_result.placeholders, [])
 
+    def rebuild(self) -> DatasetSpec:
+        return DatasetSpec("o.tsv", "ior", "src", f_cut_short=paperdata.CUT_SHORT_REBUILD)
+
+    def testCutShortRunIsRebuiltFromTheIterationsItFinished(self) -> None:
+        """With cut_short rebuild, a run without IOR's summary gets Max, Min and Mean over
+        the iterations it finished, their number under reps and NA elsewhere."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["100.50", "200.25", "150.00"])
+        self.ior("src", [iorRow("1", 4, "64K", "write"), f_row])
+        f_result = paperdata.buildDataset(self.rebuild(), self.m_dir)
+        f_line = f_result.lines[2].split("\t")
+        self.assertEqual(f_line[:7], ["2", "4", "64K", "write", "200.25", "100.50", "150.25"])
+        f_reps = paperdata.IOR_HEADER.index("reps")
+        self.assertEqual(f_line[f_reps], "3")
+        self.assertEqual(
+            [f_cell for f_col, f_cell in enumerate(f_line[7:], 7) if f_col != f_reps], ["NA"] * 22
+        )
+        self.assertEqual(f_result.padded, [])
+        self.assertEqual(len(f_result.rebuilt), 1)
+        f_run = f_result.rebuilt[0]
+        self.assertEqual((f_run.key, f_run.done, f_run.repetitions), ((2, 4, "64K", "write"), 3, 10))
+        self.assertTrue(f_run.output_file.endswith("node065-0.txt.2"))
+        self.assertFalse(f_run.whole_numbers)
+        # the complete run is written as before
+        self.assertEqual(f_result.lines[1].split("\t")[4:7], ["100.00", "50.00", "75.00"])
+
+    def testRebuildMeanIsRoundedHalfUp(self) -> None:
+        """The mean of 1.00 and 1.25 is 1.125, written 1.13."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["1.00", "1.25"])
+        self.ior("src", [f_row])
+        f_line = paperdata.buildDataset(self.rebuild(), self.m_dir).lines[1].split("\t")
+        self.assertEqual(f_line[4:7], ["1.25", "1.00", "1.13"])
+
+    def assertRebuildFails(self, f_text: str) -> None:
+        with self.assertRaises(PaperDataError) as f_ctx:
+            paperdata.buildDataset(self.rebuild(), self.m_dir)
+        self.assertIn(f_text, str(f_ctx.exception))
+        self.assertIn("o.tsv", str(f_ctx.exception))
+
+    def testRebuildNeedsExactlyOneOutputFileWithTheIterations(self) -> None:
+        """No raw output, or two that both hold iterations, is an error."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["100.00"])
+        os.remove(os.path.join(self.m_dir, "src", "2", "2023-10-29", os.listdir(
+            os.path.join(self.m_dir, "src", "2", "2023-10-29"))[0]))
+        self.ior("src", [f_row])
+        self.assertRebuildFails("0 IOR output files")
+        writeCutShortRun(self.m_dir, "src", ["100.00"])
+        writeCutShortRun(self.m_dir, "src", ["100.00"], "out-collective-4-64K-2023-10-29-node066-0.txt.2")
+        self.assertRebuildFails("2 IOR output files")
+
+    def testRebuildIgnoresOutputsOfOtherCombinations(self) -> None:
+        """Only out-<setup>-<stripes>-<block size>-... files of the run's combination count."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["100.00", "300.00"])
+        writeCutShortRun(self.m_dir, "src", ["5.00"], "out-collective-16-64K-2023-10-29-node065-0.txt.2")
+        writeCutShortRun(self.m_dir, "src", ["5.00"], "out-collective-4-1M-2023-10-29-node065-0.txt.2")
+        self.ior("src", [f_row])
+        f_line = paperdata.buildDataset(self.rebuild(), self.m_dir).lines[1].split("\t")
+        self.assertEqual(f_line[4:7], ["300.00", "100.00", "200.00"])
+
+    def testRebuildChecksTheReportRowIsTheLastIteration(self) -> None:
+        """A report row that is not the output's last iteration line is not rebuilt from it."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["100.00", "300.00"])
+        f_row[4] = "299.99"
+        self.ior("src", [f_row])
+        self.assertRebuildFails("is not its report row")
+
+    def testRebuildSkipsEmptyAndErrorOnlyFilesNextToTheRun(self) -> None:
+        """Other nodes' empty outputs and a file whose only 'write' line is an error, as an
+        aborted job leaves them, are not the run's output."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["100.00", "300.00"])
+        f_dir = os.path.join(self.m_dir, "src", "2", "2023-10-29")
+        open(os.path.join(f_dir, "out-collective-4-64K-2023-10-29-node066-0.txt.2"), "w").close()
+        with open(os.path.join(f_dir, "out-collective-4-64K-2023-10-29-node067-0.txt.2"), "w") as f_file:
+            f_file.write("write(): cannot open file\nreadahead failed\n")
+        self.ior("src", [f_row])
+        f_line = paperdata.buildDataset(self.rebuild(), self.m_dir).lines[1].split("\t")
+        self.assertEqual(f_line[4:7], ["300.00", "100.00", "200.00"])
+
+    def testRebuildReadsEveryIorOutputNaming(self) -> None:
+        """out-<setup>-c-<stripes>-<bs>-<date>-... and the first Viking runs'
+        out-<date>-<host>-0-<stripes>-<bs>.txt.2 are found too."""
+        for f_name in (
+            "out-hdf5-c-4-64K-2023-10-29-node065-0.txt",
+            "out-2023-03-31-node049-0-4-64K.txt.2",
+        ):
+            with self.subTest(f_name=f_name):
+                f_source = f_name[:12]
+                f_row = writeCutShortRun(self.m_dir, f_source, ["10.00", "30.00"], f_name)
+                self.ior(f_source, [f_row])
+                f_spec = DatasetSpec(
+                    "o.tsv", "ior", f_source, f_cut_short=paperdata.CUT_SHORT_REBUILD
+                )
+                f_result = paperdata.buildDataset(f_spec, self.m_dir)
+                self.assertEqual(f_result.lines[1].split("\t")[4:7], ["30.00", "10.00", "20.00"])
+                self.assertTrue(f_result.rebuilt[0].output_file.endswith(f_name))
+
+    def testRebuildReadsAStitchedRunFromTheStitchSource(self) -> None:
+        """A run taken from another report is rebuilt from that report's outputs."""
+        self.ior("src", [iorRow("1", 4, "64K", "write")])
+        f_row = writeCutShortRun(self.m_dir, "rerun", ["40.00", "60.00"])
+        self.ior("rerun", [f_row])
+        f_spec = DatasetSpec(
+            "o.tsv",
+            "ior",
+            "src",
+            [StitchRule("rerun", Selection([2]))],
+            f_cut_short=paperdata.CUT_SHORT_REBUILD,
+        )
+        f_result = paperdata.buildDataset(f_spec, self.m_dir)
+        self.assertEqual(f_result.lines[2].split("\t")[4:7], ["60.00", "40.00", "50.00"])
+        self.assertIn(os.path.join("rerun", "2"), f_result.rebuilt[0].output_file)
+
+    def testRebuildIterationWithoutABandwidthIsAnError(self) -> None:
+        """An iteration line whose bandwidth is not a number stops the build."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["n/a", "100.00"])
+        self.ior("src", [f_row])
+        self.assertRebuildFails("has no bandwidth")
+
+    def testRebuildLeavesAShortRowWithoutMeasurementsAFailedRun(self) -> None:
+        """A short row with every measurement empty is a failed run (nan), not rebuilt."""
+        self.ior("src", [["2", "4", "64K", "write", "", ""], iorRow("1", 4, "64K", "write")])
+        f_result = paperdata.buildDataset(self.rebuild(), self.m_dir)
+        self.assertEqual(f_result.empty, [(2, 4, "64K", "write")])
+        self.assertEqual(f_result.rebuilt, [])
+        self.assertEqual(f_result.lines[2].split("\t")[4:7], ["nan"] * 3)
+
+    def testRebuildFlagsBandwidthsPrintedAsWholeNumbers(self) -> None:
+        """IOR prints large bandwidths without decimals; such a rebuild is flagged."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["3601", "4000.50"])
+        self.ior("src", [f_row])
+        f_result = paperdata.buildDataset(self.rebuild(), self.m_dir)
+        self.assertTrue(f_result.rebuilt[0].whole_numbers)
+        self.assertEqual(f_result.lines[1].split("\t")[4:7], ["4000.50", "3601.00", "3800.75"])
+
+    def testRebuildNeedsTheRepetitions(self) -> None:
+        """Without IOR's 'repetitions' line the 'k of n' cannot be told."""
+        f_row = writeCutShortRun(self.m_dir, "src", ["100.00"], f_repetitions=None)
+        self.ior("src", [f_row])
+        self.assertRebuildFails("does not give its repetitions")
+
     def testPlaceholderRuleThatMatchesNoMissingRunIsAnError(self) -> None:
         """A placeholder rule for a run that exists is stale and stops the build."""
         self.iorWithAGap()
@@ -750,6 +922,33 @@ class PaperDataGenerateTest(unittest.TestCase):
         f_warning.assert_called_once()
         self.assertIn("nodes=1 stripes=4 block size=1M write", f_warning.call_args[0][0])
         self.assertIn("fewer columns than the header", f_warning.call_args[0][0])
+
+    def testWarnsForEveryRebuiltRun(self) -> None:
+        """A rebuilt run is reported with how many of its iterations it finished."""
+        f_row = writeCutShortRun(self.m_data, "short", ["100.00", "200.00", "300.00"])
+        writeReport(self.m_data, "short", "ior-report.csv", [f_row])
+        f_sources = paperdata.PaperSources(
+            [DatasetSpec("short.tsv", "ior", "short", f_cut_short=paperdata.CUT_SHORT_REBUILD)], []
+        )
+        with patch.object(paperdata.Console, "warning") as f_warning:
+            paperdata.generate(f_sources, self.m_data, self.m_out)
+        f_warning.assert_called_once()
+        f_text = f_warning.call_args[0][0]
+        self.assertIn("nodes=2 stripes=4 block size=64K write has no IOR summary", f_text)
+        self.assertIn("rebuilt from the 3 of 10 iterations it finished", f_text)
+
+    def testWarnsWhenARebuiltRunHasWholeNumberBandwidths(self) -> None:
+        """A rebuild from bandwidths printed without decimals gets a second warning."""
+        f_row = writeCutShortRun(self.m_data, "short", ["3601", "4000"])
+        writeReport(self.m_data, "short", "ior-report.csv", [f_row])
+        f_sources = paperdata.PaperSources(
+            [DatasetSpec("short.tsv", "ior", "short", f_cut_short=paperdata.CUT_SHORT_REBUILD)], []
+        )
+        with patch.object(paperdata.Console, "warning") as f_warning:
+            paperdata.generate(f_sources, self.m_data, self.m_out)
+        self.assertEqual(f_warning.call_count, 2)
+        self.assertIn("as whole numbers", f_warning.call_args_list[1][0][0])
+        self.assertIn("good to 0.5 MiB/s", f_warning.call_args_list[1][0][0])
 
     def testWarnsForEveryRunWithoutData(self) -> None:
         """Each failed run is reported as a warning naming the run and how it was written."""
@@ -1095,6 +1294,20 @@ class PaperSourcesTest(unittest.TestCase):
         del f_doc["datasets"][0]["fill"]
         self.assertEqual(self.load(f_doc).datasets[0].fill, paperdata.FILL_NAN)
 
+    def testCutShortIsKeepOrRebuildAndRebuildIsForIorOnly(self) -> None:
+        """cut_short defaults to keep; rebuild reads IOR outputs, so an lsmio dataset
+        cannot have it."""
+        self.assertEqual(self.load(self.doc()).datasets[0].cut_short, paperdata.CUT_SHORT_KEEP)
+        f_doc = self.doc()
+        f_doc["datasets"][0]["cut_short"] = "rebuild"
+        self.assertEqual(self.load(f_doc).datasets[0].cut_short, paperdata.CUT_SHORT_REBUILD)
+        f_doc["datasets"][0]["cut_short"] = "drop"
+        self.assertRejected(f_doc, "cut_short 'drop' must be 'keep' or 'rebuild'")
+        f_doc = self.doc()
+        f_doc["datasets"][0].update(kind="lsmio", cut_short="rebuild")
+        del f_doc["datasets"][0]["placeholders"]
+        self.assertRejected(f_doc, "cut_short 'rebuild' applies to ior datasets only")
+
     def testRejectsOutputsThatAreNotFilesOrNestInEachOther(self) -> None:
         """An output must name a file, and one output cannot be the directory of another."""
         for f_output in (".", "sub/"):
@@ -1203,15 +1416,18 @@ class PaperDataGoldenTest(unittest.TestCase):
                 f_results = paperdata.generate(
                     f_sources, os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"), f_out
                 )
-            self.assertEqual(len(f_results), 7)
+            # The paper's 7, then 27 of the later runs (Viking2 and Archer2)
+            self.assertEqual(len(f_results), 34)
             for f_result in f_results:
                 f_name = f_result.spec.output
                 with open(os.path.join(f_out, f_name), "rb") as f_new:
                     with open(os.path.join(f_paper, "data", f_name), "rb") as f_old:
                         self.assertEqual(f_new.read(), f_old.read(), f_name)
 
-    def testTheFourMissingHdf5RunsAreThePlaceholders(self) -> None:
-        """Only the HDF5 TSV has placeholders: the four runs that never completed."""
+    def testTheMissingRunsAreThePlaceholders(self) -> None:
+        """The paper's HDF5 TSV has four placeholders, the runs that never completed; of
+        the later runs, Viking2 - Baking's HDF5 collective has no 8-node run and Archer2's
+        SSD runs have no 24-node run."""
         f_paper = os.path.join(_REPO_ROOT, "docs", "paper-journal")
         f_sources = paperdata.loadSources(os.path.join(f_paper, "sources.yaml"))
         with tempfile.TemporaryDirectory() as f_out:
@@ -1220,16 +1436,29 @@ class PaperDataGoldenTest(unittest.TestCase):
                     f_sources, os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"), f_out
                 )
         f_gaps = {f_r.spec.output: f_r.placeholders for f_r in f_results if f_r.placeholders}
+
+        def wholeNode(f_node: int) -> list:
+            return [
+                (f_node, f_stripes, f_size, f_op)
+                for f_stripes in (4, 16)
+                for f_size in ("1M", "64K", "8M")
+                for f_op in ("read", "write")
+            ]
+
+        f_expected = {
+            "hdd/ior/ior-report-hdf5.tsv": [
+                (16, 4, "8M", "read"),
+                (16, 4, "8M", "write"),
+                (24, 4, "64K", "read"),
+                (24, 16, "64K", "read"),
+            ],
+            "viking2-baking/hdd/ior/ior-report-hdf5-c.tsv": wholeNode(8),
+        }
+        for f_name in ("base", "adios", "plugin"):
+            f_expected[f"archer2/ssd/bm/lsm-report-{f_name}.tsv"] = wholeNode(24)
         self.assertEqual(
-            f_gaps,
-            {
-                "hdd/ior/ior-report-hdf5.tsv": [
-                    (16, 4, "8M", "read"),
-                    (16, 4, "8M", "write"),
-                    (24, 4, "64K", "read"),
-                    (24, 16, "64K", "read"),
-                ]
-            },
+            {f_k: sorted(f_v) for f_k, f_v in f_gaps.items()},
+            {f_k: sorted(f_v) for f_k, f_v in f_expected.items()},
         )
 
 

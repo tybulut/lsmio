@@ -48,6 +48,7 @@ sources.yaml (schema 1):
              nodes: [24], stripes: [4], block_sizes: [1M]}
         missing: placeholder                           # or error; default placeholder
         fill: nan                                      # or zero; default nan
+        cut_short: keep                                # or rebuild (ior); default keep
     figures: [...]                                     # used by 'latex plots'
 
 The grid lists the rows every TSV must have (each node count times each stripe count,
@@ -59,6 +60,11 @@ has no data either; both are warned about. With fill nan their measurements are 
 as nan (a gap in a chart) and a placeholder's other columns as NA. With fill zero the
 measurements are zeros and an IOR placeholder copies its other columns from the
 preceding node count's run, or from the one a placeholders rule names.
+
+A row shorter than the header is a run cut short: IOR stopped before its summary, and
+the report holds the last iteration's line instead. cut_short keep pads it with empty
+cells; cut_short rebuild (IOR only) rewrites it from the run's raw output, with Max, Min
+and Mean over the iterations that finished and their number under reps.
 """
 
 import csv
@@ -149,13 +155,32 @@ MISSING_PLACEHOLDER = "placeholder"
 MISSING_ERROR = "error"
 FILL_NAN = "nan"
 FILL_ZERO = "zero"
+CUT_SHORT_KEEP = "keep"
+CUT_SHORT_REBUILD = "rebuild"
 
 _FLOAT_RE = re.compile(r"^-?\d+\.\d+$", re.ASCII)
 _INT_RE = re.compile(r"^-?\d+$", re.ASCII)
 _NUMBER_RE = re.compile(r"^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$", re.ASCII)
 _SELECTORS = ("nodes", "stripes", "block_sizes", "ops")
 _TOP_FIELDS = ("schema", "grid", "datasets", "figures")
-_DATASET_FIELDS = ("output", "kind", "source", "grid", "stitch", "missing", "fill", "placeholders")
+_DATASET_FIELDS = (
+    "output",
+    "kind",
+    "source",
+    "grid",
+    "stitch",
+    "missing",
+    "fill",
+    "placeholders",
+    "cut_short",
+)
+# An IOR output file: out-<setup>[-c]-<stripes>-<block size>-<date>-<host>-0.txt[.2], or
+# as the first Viking runs named it, out-<date>-<host>-0-<stripes>-<block size>.txt[.2]
+_IOR_OUTPUT_RES = (
+    re.compile(r"^out-[a-z0-9]+-(?:c-)?(\d+)-(\d+[MK])-"),
+    re.compile(r"^out-\d{4}-\d\d-\d\d-[^-]+-\d+-(\d+)-(\d+[MK])\.txt"),
+)
+_IOR_REPETITIONS_RE = re.compile(r"^repetitions\s*:\s*(\d+)\s*$")
 _FIGURE_FIELDS = ("file", "title", "y_label", "y_divisor", "series")
 _SERIES_FIELDS = ("label", "dataset", "stripes", "block_size", "op")
 
@@ -224,6 +249,7 @@ class DatasetSpec:
         f_placeholders: Sequence[PlaceholderRule] = (),
         f_grid: Optional[Selection] = None,
         f_fill: str = FILL_NAN,
+        f_cut_short: str = CUT_SHORT_KEEP,
     ) -> None:
         self.output: str = f_output
         self.kind: str = f_kind
@@ -233,6 +259,7 @@ class DatasetSpec:
         self.placeholders: List[PlaceholderRule] = list(f_placeholders)
         self.grid: Selection = f_grid if f_grid is not None else Selection()
         self.fill: str = f_fill
+        self.cut_short: str = f_cut_short
 
 
 class SeriesSpec:
@@ -408,11 +435,19 @@ def _parseDataset(f_obj: Any, f_index: int, f_default_grid: Selection) -> Datase
             f"{f_where}: placeholders rules copy settings into zero-filled rows; they need "
             f"fill '{FILL_ZERO}'"
         )
+    f_cut_short = f_obj.get("cut_short", CUT_SHORT_KEEP)
+    if f_cut_short not in (CUT_SHORT_KEEP, CUT_SHORT_REBUILD):
+        raise PaperDataError(
+            f"{f_where}: cut_short {f_cut_short!r} must be '{CUT_SHORT_KEEP}' or "
+            f"'{CUT_SHORT_REBUILD}'"
+        )
+    if f_cut_short == CUT_SHORT_REBUILD and f_kind != "ior":
+        raise PaperDataError(f"{f_where}: cut_short '{CUT_SHORT_REBUILD}' applies to ior datasets only")
     f_grid = f_default_grid
     if "grid" in f_obj:
         f_grid = _parseGrid(f_obj["grid"], f"{f_where}.grid")
     return DatasetSpec(
-        f_output, f_kind, f_source, f_stitch, f_missing, f_placeholders, f_grid, f_fill
+        f_output, f_kind, f_source, f_stitch, f_missing, f_placeholders, f_grid, f_fill, f_cut_short
     )
 
 
@@ -750,6 +785,121 @@ def _placeholderRow(
     return f_base
 
 
+class RebuiltRun:
+    """A run cut short whose IOR row was rebuilt from the iterations it finished."""
+
+    def __init__(
+        self,
+        f_key: RowKey,
+        f_done: int,
+        f_repetitions: int,
+        f_output_file: str,
+        f_whole_numbers: bool = False,
+    ) -> None:
+        self.key: RowKey = f_key
+        self.done: int = f_done
+        self.repetitions: int = f_repetitions
+        self.output_file: str = f_output_file
+        # IOR printed some bandwidths without decimals (it does from about 3600 MiB/s), so
+        # the rebuilt values are only good to 0.5 MiB/s
+        self.whole_numbers: bool = f_whole_numbers
+
+
+def _iorOutputCombination(f_name: str) -> Optional[Tuple[int, str]]:
+    """(stripes, block size) of an IOR output file name, or None for another file."""
+    for f_re in _IOR_OUTPUT_RES:
+        f_match = f_re.match(f_name)
+        if f_match:
+            return int(f_match.group(1)), f_match.group(2)
+    return None
+
+
+def _rebuildCutShort(
+    f_key: RowKey, f_row: Sequence[str], f_run_dir: str
+) -> Tuple[List[str], RebuiltRun]:
+    """The IOR row of a run cut short, rebuilt from its raw output under f_run_dir.
+
+    A run that stopped before IOR printed its summary leaves ior-parse.sh only its last
+    iteration's line, so the report row holds that iteration's bandwidth, IOPS, latency and
+    so on under the summary's headers. The rebuilt row has Max, Min and Mean (MiB) over the
+    iterations that finished (as IOR computes them; its StdDev cannot be reproduced from the
+    printed values), the number of those iterations under reps, and NA elsewhere. Max and
+    Min are exact and Mean within 0.01 when IOR printed the bandwidths with decimals; a
+    bandwidth printed as a whole number is flagged on the result.
+
+    Raises:
+        PaperDataError: no single output file under f_run_dir/<nodes>/ holds the run's
+            iterations, its last iteration is not the report row, an iteration has no
+            bandwidth, or the output does not say how many repetitions were asked for.
+    """
+    f_node, f_stripes, f_block_size, f_op = f_key
+    f_node_dir = os.path.join(f_run_dir, str(f_node))
+    f_found: List[Tuple[str, List[str]]] = []
+    try:
+        f_dates = sorted(os.listdir(f_node_dir))
+    except OSError as f_err:
+        raise PaperDataError(f"cannot list {f_node_dir} to rebuild {_describe(f_key)}: {f_err}")
+    for f_date in f_dates:
+        f_dir = os.path.join(f_node_dir, f_date)
+        if not os.path.isdir(f_dir):
+            continue
+        try:
+            f_names = sorted(os.listdir(f_dir))
+        except OSError as f_err:
+            raise PaperDataError(f"cannot list {f_dir} to rebuild {_describe(f_key)}: {f_err}")
+        for f_name in f_names:
+            f_path = os.path.join(f_dir, f_name)
+            if _iorOutputCombination(f_name) != (f_stripes, f_block_size):
+                continue
+            if not os.path.isfile(f_path) or os.path.getsize(f_path) == 0:
+                continue
+            try:
+                with open(f_path, errors="replace") as f_file:
+                    f_lines = f_file.read().splitlines()
+            except OSError as f_err:
+                raise PaperDataError(f"cannot read {f_path}: {f_err}")
+            # Iterations of this operation; a 'write(): ...' error line is not one
+            if any(f_l.split()[:1] == [f_op] for f_l in f_lines):
+                f_found.append((f_path, f_lines))
+    if len(f_found) != 1:
+        raise PaperDataError(
+            f"cannot rebuild the run for {_describe(f_key)} (a run cut short): "
+            f"{len(f_found)} IOR output files under {f_node_dir} hold its iterations, not one"
+        )
+    f_path, f_lines = f_found[0]
+    f_iterations = [f_l.split() for f_l in f_lines if f_l.split()[:1] == [f_op]]
+    f_reported = list(f_row[3:])
+    while f_reported and not f_reported[-1]:  # the line's trailing space, as an empty cell
+        f_reported.pop()
+    if not f_iterations or f_iterations[-1] != f_reported:
+        raise PaperDataError(
+            f"cannot rebuild the run for {_describe(f_key)}: the last {f_op} line of {f_path} "
+            f"is not its report row"
+        )
+    f_repetitions = [
+        int(f_m.group(1)) for f_m in map(_IOR_REPETITIONS_RE.match, f_lines) if f_m
+    ]
+    if not f_repetitions:
+        raise PaperDataError(
+            f"cannot rebuild the run for {_describe(f_key)}: {f_path} does not give its repetitions"
+        )
+    f_bandwidths: List[Decimal] = []
+    for f_fields in f_iterations:
+        if len(f_fields) < 2 or not _NUMBER_RE.match(f_fields[1]):
+            raise PaperDataError(
+                f"cannot rebuild the run for {_describe(f_key)}: '{' '.join(f_fields)}' in "
+                f"{f_path} has no bandwidth"
+            )
+        f_bandwidths.append(Decimal(f_fields[1]))
+    f_mean = sum(f_bandwidths) / len(f_bandwidths)
+    f_out = [str(f_node), str(f_stripes), f_block_size, f_op]
+    f_out += [_twoDecimals(str(f_v)) for f_v in (max(f_bandwidths), min(f_bandwidths), f_mean)]
+    f_out += ["NA"] * (len(IOR_HEADER) - len(f_out))
+    f_out[IOR_HEADER.index("reps")] = str(len(f_bandwidths))
+    f_whole = any("." not in f_fields[1] for f_fields in f_iterations)
+    return f_out, RebuiltRun(f_key, len(f_bandwidths), f_repetitions[0], f_path, f_whole)
+
+
 class DatasetResult:
     """The built lines of one TSV and where its rows came from."""
 
@@ -761,6 +911,7 @@ class DatasetResult:
         f_placeholders: List[RowKey],
         f_padded: Optional[List[RowKey]] = None,
         f_empty: Optional[List[RowKey]] = None,
+        f_rebuilt: Optional[List[RebuiltRun]] = None,
     ) -> None:
         self.spec: DatasetSpec = f_spec
         self.lines: List[str] = f_lines
@@ -768,6 +919,7 @@ class DatasetResult:
         self.placeholders: List[RowKey] = f_placeholders
         self.padded: List[RowKey] = f_padded if f_padded is not None else []
         self.empty: List[RowKey] = f_empty if f_empty is not None else []
+        self.rebuilt: List[RebuiltRun] = f_rebuilt if f_rebuilt is not None else []
 
 
 def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
@@ -872,10 +1024,22 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
             )
     f_header_width = len(f_kind_spec["header"])
     f_padded = sorted(f_key for f_key, f_row in f_rows.items() if len(f_row) < f_header_width)
+    f_rebuilt: List[RebuiltRun] = []
     try:
         f_out_rows: Dict[RowKey, List[str]] = {
-            f_key: formatRow(f_spec.kind, f_row) for f_key, f_row in f_rows.items()
+            f_key: formatRow(f_spec.kind, f_row)
+            for f_key, f_row in f_rows.items()
+            if not (
+                f_spec.cut_short == CUT_SHORT_REBUILD and f_key in f_padded and f_key not in f_empty
+            )
         }
+        if f_spec.cut_short == CUT_SHORT_REBUILD:
+            # a short row without measurements is a failed run, written as fill says
+            for f_key in (f_k for f_k in f_padded if f_k not in f_empty):
+                f_run_dir = os.path.join(f_data_dir, f_origin[f_key])
+                f_out_rows[f_key], f_run = _rebuildCutShort(f_key, f_rows[f_key], f_run_dir)
+                f_rebuilt.append(f_run)
+            f_padded = []
         for f_key in f_placeholders:
             f_out_rows[f_key] = _placeholderRow(
                 f_spec.kind, f_key, f_rows, f_spec.placeholders, f_spec.fill
@@ -896,7 +1060,9 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
     for f_key in f_order:
         f_counts[f_origin[f_key]] = f_counts.get(f_origin[f_key], 0) + 1
     f_provenance = [f"{f_source}: {f_count} rows" for f_source, f_count in f_counts.items()]
-    return DatasetResult(f_spec, f_lines, f_provenance, sorted(f_placeholders), f_padded, f_empty)
+    return DatasetResult(
+        f_spec, f_lines, f_provenance, sorted(f_placeholders), f_padded, f_empty, f_rebuilt
+    )
 
 
 def writeLines(f_path: str, f_lines: Sequence[str]) -> None:
@@ -962,6 +1128,18 @@ def generate(f_sources: PaperSources, f_data_dir: str, f_output_dir: str) -> Lis
                 f"  {f_output}: the run for {_describe(f_key)} has fewer columns than the "
                 f"header (a run cut short); padded with empty cells"
             )
+        for f_run in f_result.rebuilt:
+            Console.warning(
+                f"  {f_output}: the run for {_describe(f_run.key)} has no IOR summary (a run "
+                f"cut short); Max, Min and Mean rebuilt from the {f_run.done} of "
+                f"{f_run.repetitions} iterations it finished ({f_run.output_file})"
+            )
+            if f_run.whole_numbers:
+                Console.warning(
+                    f"  {f_output}: IOR printed some bandwidths of the run for "
+                    f"{_describe(f_run.key)} as whole numbers; its Max, Min and Mean are good "
+                    f"to 0.5 MiB/s, not to their two decimals"
+                )
     return f_results
 
 
