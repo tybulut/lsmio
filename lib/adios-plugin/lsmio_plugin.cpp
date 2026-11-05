@@ -332,7 +332,7 @@ void LsmioPlugin::CheckMemorySelection(const core::VariableBase &variable) {
 }
 
 // Reads return the block a rank wrote: a selection must match its stored start and count
-// (reading across blocks is BACKLOG.md P2)
+// (reading across blocks is deferred)
 void LsmioPlugin::CheckSelection(const core::VariableBase &variable) const {
     const auto it = _blocks.find(variable.m_Name);
     if (it == _blocks.end()) return;
