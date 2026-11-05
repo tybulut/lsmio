@@ -209,10 +209,31 @@ gtest_discover_tests(
 )
 
 # The plugin's MPI tests again with 3 ranks: with 2 there is a single client, so ranks never
-# send different numbers of commands, and Split and Shared form the same group as Entire
+# send different numbers of commands, and Split and Shared form the same group as Entire.
+# Open MPI's mpirun counts one slot per physical core, so a host with fewer than 3 (such as a
+# GitHub hosted runner) refuses to start 3 ranks. So this test always passes --oversubscribe
+# when the launcher is Open MPI's mpirun (checked on its --version), whatever the host size.
+# No other launcher gets it: MPICH's mpirun and aprun reject it, and srun's --oversubscribe
+# means something else.
 set(test_parameters_3 ${test_parameters})
 list(POP_BACK test_parameters_3)
 list(APPEND test_parameters_3 3)
+set(mpi_oversubscribe OFF)
+get_filename_component(mpi_cmd_name "${mpi_cmd}" NAME)
+if(mpi_cmd_name STREQUAL "mpirun")
+  execute_process(
+    COMMAND ${mpi_cmd} --version
+    OUTPUT_VARIABLE mpi_cmd_version
+    ERROR_VARIABLE mpi_cmd_version
+    RESULT_VARIABLE mpi_cmd_version_result
+    TIMEOUT 30
+  )
+  if(mpi_cmd_version_result EQUAL 0 AND mpi_cmd_version MATCHES "Open MPI|OpenRTE")
+    set(mpi_oversubscribe ON)
+    list(INSERT test_parameters_3 0 --oversubscribe)
+  endif()
+endif()
+message(STATUS "Test module: ThreeRanks oversubscribe (Open MPI mpirun)=${mpi_oversubscribe}")
 add_test(
   NAME lsmioTest/pluginMPITests.ThreeRanks
   COMMAND ${mpi_cmd} ${test_parameters_3} $<TARGET_FILE:test_mpi_adios>
