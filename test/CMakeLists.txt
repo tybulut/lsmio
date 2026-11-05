@@ -212,28 +212,44 @@ gtest_discover_tests(
 # send different numbers of commands, and Split and Shared form the same group as Entire.
 # Open MPI's mpirun counts one slot per physical core, so a host with fewer than 3 (such as a
 # GitHub hosted runner) refuses to start 3 ranks. So this test always passes --oversubscribe
-# when the launcher is Open MPI's mpirun (checked on its --version), whatever the host size.
+# when the launcher is named mpirun and the MPI is Open MPI, whatever the host size.
+# Open MPI is detected first from the library version string FindMPI read from the MPI
+# library (MPI_C_/MPI_CXX_LIBRARY_VERSION_STRING, saved by cmake/PackageAdios.cmake),
+# because `mpirun --version` takes its text from help files that some packages leave out
+# (Ubuntu 26.04's PMIx and PRRTE 3 ship none, so the output lacks "Open MPI"). The
+# `mpirun --version` match is the fallback, for when that step was skipped (cross-compiling
+# without an emulator) or failed, or the string does not say Open MPI.
 # No other launcher gets it: MPICH's mpirun and aprun reject it, and srun's --oversubscribe
 # means something else.
 set(test_parameters_3 ${test_parameters})
 list(POP_BACK test_parameters_3)
 list(APPEND test_parameters_3 3)
 set(mpi_oversubscribe OFF)
+set(mpi_oversubscribe_check "none")
 get_filename_component(mpi_cmd_name "${mpi_cmd}" NAME)
 if(mpi_cmd_name STREQUAL "mpirun")
-  execute_process(
-    COMMAND ${mpi_cmd} --version
-    OUTPUT_VARIABLE mpi_cmd_version
-    ERROR_VARIABLE mpi_cmd_version
-    RESULT_VARIABLE mpi_cmd_version_result
-    TIMEOUT 30
-  )
-  if(mpi_cmd_version_result EQUAL 0 AND mpi_cmd_version MATCHES "Open MPI|OpenRTE")
+  get_property(mpi_library_version GLOBAL PROPERTY LSMIO_MPI_LIBRARY_VERSION_STRING)
+  if(mpi_library_version MATCHES "Open MPI")
     set(mpi_oversubscribe ON)
+    set(mpi_oversubscribe_check "library version string")
+  else()
+    execute_process(
+      COMMAND ${mpi_cmd} --version
+      OUTPUT_VARIABLE mpi_cmd_version
+      ERROR_VARIABLE mpi_cmd_version
+      RESULT_VARIABLE mpi_cmd_version_result
+      TIMEOUT 30
+    )
+    if(mpi_cmd_version_result EQUAL 0 AND mpi_cmd_version MATCHES "Open MPI|OpenRTE")
+      set(mpi_oversubscribe ON)
+      set(mpi_oversubscribe_check "mpirun --version")
+    endif()
+  endif()
+  if(mpi_oversubscribe)
     list(INSERT test_parameters_3 0 --oversubscribe)
   endif()
 endif()
-message(STATUS "Test module: ThreeRanks oversubscribe (Open MPI mpirun)=${mpi_oversubscribe}")
+message(STATUS "Test module: ThreeRanks oversubscribe (Open MPI mpirun)=${mpi_oversubscribe} (matched: ${mpi_oversubscribe_check})")
 add_test(
   NAME lsmioTest/pluginMPITests.ThreeRanks
   COMMAND ${mpi_cmd} ${test_parameters_3} $<TARGET_FILE:test_mpi_adios>

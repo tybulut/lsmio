@@ -235,7 +235,7 @@ Second review (all fixed and staged):
 - **Scope of the close result:** docs and comments said every rank gets the same result; it is every rank of the aggregation group.
 - **Command-count limit** documented ("Unequal command counts"), and the Append-mode read recorded as an accepted exception to the I/O constraint.
 - **Corrupt records:** an unknown type, an unknown kind, a single-value attribute without exactly one element and an attribute element count that would overflow are reported as a corrupt record. Struct attributes are skipped when writing.
-- **Tests:** a corrupt-record test, a joined-array round-trip, and a ctest entry running the plugin MPI tests with 3 ranks (under Open MPI's `mpirun` it always passes `--oversubscribe`, so a host with fewer than 3 slots, such as a GitHub hosted runner, can run it; with any other launcher it needs 3 MPI slots, and an allocation of exactly 2 fails that one test).
+- **Tests:** a corrupt-record test, a joined-array round-trip, and a ctest entry running the plugin MPI tests with 3 ranks (under Open MPI's `mpirun` (detected from the MPI library version string, with `mpirun --version` as the fallback) it always passes `--oversubscribe`, so a host with fewer than 3 slots, such as a GitHub hosted runner, can run it; with any other launcher it needs 3 MPI slots, and an allocation of exactly 2 fails that one test).
 - **Checked, no change:** the RocksDB store's extra flush at close (`writeBarrier` before the store's own close) does no I/O: 13 `write`, 7 `fdatasync` and 6 `fsync` before and after (`scratchpad/rdbcheck`).
 - **Not covered by tests:** `LSMIOClientAdios` (the aggregation client over an ADIOS communicator) is compiled but unused, so its EOL change is untested.
 

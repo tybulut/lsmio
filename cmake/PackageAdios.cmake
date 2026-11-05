@@ -1,7 +1,18 @@
 include_guard(GLOBAL)
 
 # Packages
+# Ask FindMPI to run MPI_Get_library_version; it does not by default. That step uses try_run,
+# which fails the configure when cross-compiling without an emulator, so it is skipped then
+# (the Open MPI check in test/CMakeLists.txt falls back to `mpirun --version`). A -D setting wins.
+if(NOT DEFINED MPI_DETERMINE_LIBRARY_VERSION AND
+   (NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR))
+  set(MPI_DETERMINE_LIBRARY_VERSION TRUE)
+endif()
 find_package(MPI REQUIRED GLOBAL)
+# FindMPI's result variables are directory scoped and this file is included once (include_guard),
+# so keep the MPI library's version string where any directory can read it (test/CMakeLists.txt).
+set_property(GLOBAL PROPERTY LSMIO_MPI_LIBRARY_VERSION_STRING
+  "${MPI_C_LIBRARY_VERSION_STRING} ${MPI_CXX_LIBRARY_VERSION_STRING}")
 find_package(Threads REQUIRED GLOBAL)
 
 # ADIOS2
