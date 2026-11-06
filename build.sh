@@ -319,12 +319,12 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Optional out-of-tree builds. If $HOME/scratch/builds exists, the build tree
-# lives in $HOME/scratch/builds/lsmio-<name>/build and ./build is a symlink to
+# Optional out-of-tree builds. If $HOME/builds exists, the build tree
+# lives in $HOME/builds/lsmio-<name>/build and ./build is a symlink to
 # it. <name> is the checked-out branch, detached-<path hash>, or
 # nogit-<path hash>, so each branch keeps its own tree. Otherwise ./build is a
 # normal in-tree directory.
-SCRATCH_ROOT="$HOME/scratch/builds"
+SCRATCH_ROOT="$HOME/builds"
 SCRATCH_DIR=""
 PROF_DIR=""
 if [ -d "$SCRATCH_ROOT" ]; then
