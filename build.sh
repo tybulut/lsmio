@@ -544,7 +544,7 @@ configure_tree() {
     -DCMAKE_INSTALL_PREFIX:PATH="$INSTALL_PREFIX" \
     -DCMAKE_INSTALL_LIBDIR:PATH=lib \
     -DLSMIO_ENABLE_COVERAGE=$DO_COVERAGE \
-    "${EXTRA_CMAKE_ARGS[@]}"
+    "${EXTRA_CMAKE_ARGS[@]}" || { log_err "ERROR: the CMake configure failed"; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -596,7 +596,8 @@ py_prepare() {
     if [ ! -f "$cache" ]; then
       configure_tree || return 1
     else
-      cmake -S "$ROOT_DIR" -B "$PY_BUILD" "${EXTRA_CMAKE_ARGS[@]}" || return 1
+      cmake -S "$ROOT_DIR" -B "$PY_BUILD" "${EXTRA_CMAKE_ARGS[@]}" \
+        || { log_err "ERROR: the CMake configure failed"; return 1; }
     fi
     PY_EXE=$(sed -n 's/^_Python3_EXECUTABLE:INTERNAL=//p' "$cache" 2>/dev/null)
     if [ -z "$PY_EXE" ] || { [ "$1" = true ] && ! "$PY_EXE" -c "import coverage" >/dev/null 2>&1; }; then
@@ -849,7 +850,7 @@ if [ "$DO_COVERAGE" = true ]; then
   fi
 fi
 
-configure_tree
+configure_tree || exit 1
 
 pushd "$BUILD_DIR" > /dev/null || exit 1
 
