@@ -124,7 +124,7 @@ add_lsmio_dual_library(store
   SOURCES ${LIB_STORE_SOURCE_FILES}
   INTERNAL_DEPS base
   PUBLIC_LIBS fmt::fmt glog::glog
-    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
+    leveldb::leveldb RocksDB::rocksdb-shared
     MPI::MPI_CXX Threads::Threads
     adios2::cxx_mpi adios2::core_mpi
     tlx
@@ -134,9 +134,7 @@ add_lsmio_dual_library(store
 add_library(lsmio_adios ${LIB_ADIOS_SOURCE_FILES})
 add_library(lsmio::adios ALIAS lsmio_adios)
 target_link_libraries(lsmio_adios
-  PUBLIC fmt::fmt glog::glog lsmio_store
-    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
-    MPI::MPI_CXX Threads::Threads
+  PUBLIC glog::glog lsmio_store
     adios2::cxx_mpi adios2::core_mpi
 )
 lsmio_add_props(lsmio_adios)
@@ -145,10 +143,7 @@ lsmio_add_props(lsmio_adios)
 add_lsmio_dual_library(posix
   SOURCES ${LIB_POSIX_SOURCE_FILES}
   INTERNAL_DEPS store
-  PUBLIC_LIBS fmt::fmt glog::glog
-    Snappy::snappy leveldb::leveldb RocksDB::rocksdb-shared
-    MPI::MPI_CXX Threads::Threads
-    adios2::cxx_mpi adios2::core_mpi
+  PUBLIC_LIBS glog::glog
 )
 
 # Install: BASE
