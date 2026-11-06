@@ -68,4 +68,12 @@ jobs:
     - name: Test - Ubuntu
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
       run: |
-        ctest --build-config ${{ matrix.build_type }}
+        ctest --build-config ${{ matrix.build_type }} --output-on-failure
+
+    - name: Upload test log on failure - Ubuntu
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: LastTest-ubuntu-depend-${{ matrix.os }}-${{ matrix.c_compiler }}-${{ matrix.build_type }}
+        path: ${{ steps.strings.outputs.build-output-dir }}/Testing/Temporary/LastTest.log
+        if-no-files-found: ignore

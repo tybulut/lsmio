@@ -30,7 +30,9 @@
 import argparse
 import importlib
 import json
+import math
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -1298,17 +1300,35 @@ class CompareNodesMain(BaseMain):
             "native": "native",
             "outputs-plugin": "plugin",
             "plugin": "plugin",
+            # The -sync arms ('run lsmio backends', --lsmio-always-flush)
+            "outputs-adios-sync": "adios2-sync",
+            "adios-sync": "adios2-sync",
+            "adios2-sync": "adios2-sync",
+            "outputs-native-sync": "native-sync",
+            "native-sync": "native-sync",
+            "outputs-plugin-sync": "plugin-sync",
+            "plugin-sync": "plugin-sync",
+            "outputs-rocksdb-sync": "rocksdb-sync",
+            "rocksdb-sync": "rocksdb-sync",
+            "outputs-leveldb-sync": "leveldb-sync",
+            "leveldb-sync": "leveldb-sync",
             "outputs-rocksdb": "rocksdb",
             "rocksdb": "rocksdb",
             "outputs-leveldb": "leveldb",
             "leveldb": "leveldb",
         }
         canonical_order: Dict[str, int] = {
+            # Each backend, then its -sync arm
             "adios2": 0,
-            "native": 1,
-            "plugin": 2,
-            "rocksdb": 3,
-            "leveldb": 4,
+            "adios2-sync": 1,
+            "native": 2,
+            "native-sync": 3,
+            "plugin": 4,
+            "plugin-sync": 5,
+            "rocksdb": 6,
+            "rocksdb-sync": 7,
+            "leveldb": 8,
+            "leveldb-sync": 9,
             # EPOCpp arms ('run epocpp backends'), by kind then backend
             "epocpp-baseline": 20,
             "epocpp-posix": 21,
@@ -1320,12 +1340,12 @@ class CompareNodesMain(BaseMain):
             "epocpp-plugin-bw": 27,
             "epocpp-native-bw": 28,
             # IOR arms archived by 'run ior' (outputs-ior[-<setup>]), charted after the backends
-            "ior": 5,
-            "ior-collective": 6,
-            "ior-hdf5": 7,
-            "ior-hdf5-collective": 8,
-            "ior-fsync": 9,
-            "ior-reverse": 10,
+            "ior": 10,
+            "ior-collective": 11,
+            "ior-hdf5": 12,
+            "ior-hdf5-collective": 13,
+            "ior-fsync": 14,
+            "ior-reverse": 15,
         }
 
         from lsmiotool.lib import epocppreport
@@ -1404,6 +1424,13 @@ class CompareNodesMain(BaseMain):
                         legend_label = canonical_backend_labels.get(entry)
                         if legend_label is None:
                             entry_lower = entry.lower()
+                            # A -sync arm (e.g. outputs-plugin-sync-1, collision-suffixed) is
+                            # labelled as its backend, then -sync
+                            f_sync = (
+                                re.search(r"-sync(-\d+)?$", entry_lower) is not None
+                            )
+                            if f_sync:
+                                entry_lower = re.sub(r"-sync(-\d+)?$", "", entry_lower)
                             # "plugin" first: plugin runs are ADIOS2 too (e.g. "adios2-plugin")
                             if "plugin" in entry_lower:
                                 legend_label = "plugin"
@@ -1417,6 +1444,8 @@ class CompareNodesMain(BaseMain):
                                 legend_label = "leveldb"
                             else:
                                 legend_label = entry
+                            if f_sync and legend_label != entry:
+                                legend_label += "-sync"
                         plot_data_list.append(
                             plot.PlotData(legend_label, x_series, y_series)
                         )
@@ -1430,7 +1459,9 @@ class CompareNodesMain(BaseMain):
             )
             return
 
-        # Sort plot series by canonical precedence: [adios2, native, plugin, rocksdb, leveldb] (INV-BACKEND-5);
+        # Sort plot series by canonical precedence: [adios2, adios2-sync, native, native-sync,
+        # plugin, plugin-sync, rocksdb, rocksdb-sync, leveldb, leveldb-sync], then the IOR arms
+        # (INV-BACKEND-5);
         # the same arm from several folders stays in folder order
         f_series = sorted(
             zip(plot_data_list, f_sources),
@@ -2633,7 +2664,14 @@ class ArchiveMain(BaseMain):
         from lsmiotool.lib.benchmarks import LsmioAdapter
 
         f_run_setup = str(f_req.get("setup") or "NATIVE").strip().upper()
-        if f_run_setup not in LsmioAdapter.ALLOWED_SETUPS:
+        if f_run_setup in LsmioAdapter.ARM_ONLY_SETUPS:
+            # A -sync arm of a backends run: archived by its arm marker, never as a run of its
+            # own (outputs-<setup> would take the 'sync' variant's name)
+            mismatch(
+                f"setup {f_run_setup!r} is a backends arm, archived with its backends run"
+            )
+            return None
+        if f_run_setup not in LsmioAdapter.RUN_SETUPS:
             mismatch(f"setup {f_run_setup!r} is no longer supported")
             return None
         if f_setup and f_setup != f_run_setup:
@@ -3084,365 +3122,95 @@ class DemoMain(BaseMain):
         return self.demoRunMulti()
 
 
-class LatexMain(BaseMain):
-    """LaTeX document generation mode for paper plots."""
+class LatexDataMain(BaseMain):
+    """latex data: rebuild a paper's chart data (TSV files) from the benchmark reports.
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Initialize with HPC environment selection.
+    Command:
+        latex data <sources.yaml> --data-dir <dir> --output-dir <dir>
 
-        Args:
-            *args: Variable length argument list
-            **kwargs: Arbitrary keyword arguments
-        """
+    The sources.yaml names, for every TSV, the report it is built from (see
+    lsmiotool.lib.paperdata). Nothing is written when any TSV cannot be built.
+    """
+
+    def __init__(self, f_request: Any) -> None:
+        """Initialize with a parsed latex request (lsmiotool.lib.cli.LatexRequest)."""
         super().__init__()
-        self.hpc: str = args[0]
-        if self.hpc == "viking2":
-            self._results_from_viking2()
-        elif self.hpc == "isambard":
-            self._results_from_isambard()
-        else:  # "viking":
-            self._results_from_viking()
+        self.m_request = f_request
 
-    def _results_from_viking(self) -> None:
-        """Set up paths for Viking HPC environment."""
-        from lsmiotool.lib import env
+    def run(self) -> int:
+        """Rebuild the TSVs and print each written file with the sources of its rows;
+        returns 0, or 1 when sources.yaml or a report is unusable."""
+        from lsmiotool.lib import paperdata
 
-        self.ior_data: str = env.ior_data
-        self.lsmio_dir: str = env.lsmio_dir
-        self.lsmio_data: str = env.lsmio_data
-        self.plots_dir: str = env.plots_dir
+        f_request = self.m_request
+        f_output_dir = os.path.expanduser(f_request.output_dir)
+        try:
+            f_sources = paperdata.loadSources(os.path.expanduser(f_request.sources_path))
+            f_results = paperdata.generate(
+                f_sources, os.path.expanduser(f_request.data_dir), f_output_dir
+            )
+        except paperdata.PaperDataError as f_err:
+            log.Console.error(str(f_err))
+            return 1
+        for f_result in f_results:
+            sys.stdout.write(f"Wrote {os.path.join(f_output_dir, f_result.spec.output)}\n")
+            for f_line in f_result.provenance:
+                sys.stdout.write(f"  {f_line}\n")
+        return 0
 
-    def _results_from_viking2(self) -> None:
-        """Set up paths for Viking2 HPC environment."""
-        from lsmiotool.lib import env
 
-        self.ior_data: str = env.ior_data
-        self.lsmio_dir: str = env.lsmio_dir
-        self.lsmio_data: str = env.lsmio_data
-        self.plots_dir: str = env.plots_dir
+class LatexMain(BaseMain):
+    """latex plots: draw preview PDFs of a paper's figures from its chart data.
 
-    def _results_from_isambard(self) -> None:
-        """Set up paths for Isambard HPC environment."""
-        from lsmiotool.lib import env
+    Command:
+        latex plots <sources.yaml> --tsv-dir <dir> [--output-dir <dir>]
 
-        self.ior_data: str = env.ior_data
-        self.lsmio_dir: str = env.lsmio_dir
-        self.lsmio_data: str = env.lsmio_data
-        self.plots_dir: str = env.plots_dir
+    The figures are the sources.yaml's; each series is read from a TSV that
+    'latex data' wrote under <dir>. The PDFs go to --output-dir (default: the current
+    working directory).
+    """
 
-    def _gen_png_name(
-        self, title: str, is_read: bool, num_stripes: int, stripe_size: str
-    ) -> str:
-        """
-        Generate PNG filename from plot parameters.
+    def __init__(self, f_request: Any) -> None:
+        """Initialize with a parsed latex request (lsmiotool.lib.cli.LatexRequest)."""
+        super().__init__()
+        self.m_request = f_request
 
-        Args:
-            title: Plot title
-            is_read: Whether plot is for read operation
-            num_stripes: Number of stripes
-            stripe_size: Size of stripes
+    def run(self) -> int:
+        """Draw every figure; returns 0, or 1 when sources.yaml or a TSV is unusable."""
+        from lsmiotool.lib import paperdata, plot
 
-        Returns:
-            Generated filename
-        """
-        operation = "read" if is_read else "write"
-        return f"{title}-{operation}-{num_stripes}-{stripe_size}.pdf"
-
-    def _gen_png_path(self, file_name: str) -> str:
-        """
-        Generate full path for PNG file.
-
-        Args:
-            file_name: Name of the file
-
-        Returns:
-            Full path to the file
-        """
-        return os.path.join(self.plots_dir, file_name)
-
-    def run_step_paper41(self) -> None:
-        """Generate write performance plot for paper section 4.1."""
-        from lsmiotool.lib import data, plot
-
-        ior_run = data.IorSummaryData(os.path.join(self.ior_dir, "ior-report.csv"))
-        fn = self._gen_png_name("ior", False, 4, "64K")
-        md = plot.PlotMetaData("IOR Data", "# of Nodes", "Max BW in MB")
-
-        x_series, y_series = ior_run.time_series(False, 4, "64K")
-        pda = plot.PlotData("ior-base-4-64k", x_series, y_series)
-
-        p = plot.Plot(md, pda)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper42(self) -> None:
-        """Generate read performance plot for paper section 4.2."""
-        from lsmiotool.lib import data, plot
-
-        hdf5_run = data.IorSummaryData(
-            os.path.join(self.ior_dir, "hdf5", "ior-report.csv")
-        )
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", True, 4, "64K")
-        md = plot.PlotMetaData("HDF5 vs. ADIOS vs. LSMIO", "# of Nodes", "Max BW in MB")
-
-        x_series, y_series = hdf5_run.time_series(True, 4, "64K")
-        pda = plot.PlotData("hdf5-4-64k", x_series, y_series)
-        x_series, y_series = adios_run.time_series(True, 4, "64K")
-        pdb = plot.PlotData("adios-4-64k", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(True, 4, "64K")
-        pdc = plot.PlotData("lsmio-4-64k", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper43(self) -> None:
-        """Generate write performance plot for paper section 4.3."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", False, 4, "64K")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(False, 4, "64K")
-        pda = plot.PlotData("adios-4-64k", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(False, 4, "64K")
-        pdb = plot.PlotData("lsmio-4-64k", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(False, 4, "64K")
-        pdc = plot.PlotData("plugin-4-64k", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper44(self) -> None:
-        """Generate read performance plot for paper section 4.4."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", True, 16, "64K")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(True, 16, "64K")
-        pda = plot.PlotData("adios-16-64k", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(True, 16, "64K")
-        pdb = plot.PlotData("lsmio-16-64k", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(True, 16, "64K")
-        pdc = plot.PlotData("plugin-16-64k", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper45(self) -> None:
-        """Generate write performance plot for paper section 4.5."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", False, 16, "64K")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(False, 16, "64K")
-        pda = plot.PlotData("adios-16-64k", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(False, 16, "64K")
-        pdb = plot.PlotData("lsmio-16-64k", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(False, 16, "64K")
-        pdc = plot.PlotData("plugin-16-64k", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper46(self) -> None:
-        """Generate read performance plot for paper section 4.6."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", True, 4, "1M")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(True, 4, "1M")
-        pda = plot.PlotData("adios-4-1m", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(True, 4, "1M")
-        pdb = plot.PlotData("lsmio-4-1m", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(True, 4, "1M")
-        pdc = plot.PlotData("plugin-4-1m", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper91(self) -> None:
-        """Generate write performance plot for paper section 9.1."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", False, 4, "1M")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(False, 4, "1M")
-        pda = plot.PlotData("adios-4-1m", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(False, 4, "1M")
-        pdb = plot.PlotData("lsmio-4-1m", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(False, 4, "1M")
-        pdc = plot.PlotData("plugin-4-1m", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper92(self) -> None:
-        """Generate read performance plot for paper section 9.2."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", True, 16, "1M")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(True, 16, "1M")
-        pda = plot.PlotData("adios-16-1m", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(True, 16, "1M")
-        pdb = plot.PlotData("lsmio-16-1m", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(True, 16, "1M")
-        pdc = plot.PlotData("plugin-16-1m", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper93(self) -> None:
-        """Generate write performance plot for paper section 9.3."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", False, 16, "1M")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(False, 16, "1M")
-        pda = plot.PlotData("adios-16-1m", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(False, 16, "1M")
-        pdb = plot.PlotData("lsmio-16-1m", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(False, 16, "1M")
-        pdc = plot.PlotData("plugin-16-1m", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run_step_paper95(self) -> None:
-        """Generate read performance plot for paper section 9.5."""
-        from lsmiotool.lib import data, plot
-
-        adios_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "adios", "lsm-report.csv")
-        )
-        lsmio_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "lsmio", "lsm-report.csv")
-        )
-        plugin_run = data.LsmioSummaryData(
-            os.path.join(self.lsmio_dir, "plugin", "lsm-report.csv")
-        )
-        fn = self._gen_png_name("lsmio", True, 4, "4M")
-        md = plot.PlotMetaData(
-            "ADIOS vs. LSMIO vs. PLUGIN", "# of Nodes", "Max BW in MB"
-        )
-
-        x_series, y_series = adios_run.time_series(True, 4, "4M")
-        pda = plot.PlotData("adios-4-4m", x_series, y_series)
-        x_series, y_series = lsmio_run.time_series(True, 4, "4M")
-        pdb = plot.PlotData("lsmio-4-4m", x_series, y_series)
-        x_series, y_series = plugin_run.time_series(True, 4, "4M")
-        pdc = plot.PlotData("plugin-4-4m", x_series, y_series)
-
-        p = plot.MultiPlot(md, pda, pdb, pdc)
-        p.plot(self._gen_png_path(fn))
-        log.Console.debug(f"Image generated: {fn}.")
-
-    def run(self) -> None:
-        """Execute LaTeX document generation with all paper plots."""
-        self.run_step_paper41()
-        self.run_step_paper42()
-        self.run_step_paper43()
-        self.run_step_paper44()
-        self.run_step_paper45()
-        self.run_step_paper46()
-        self.run_step_paper91()
-        self.run_step_paper92()
-        self.run_step_paper93()
-        self.run_step_paper95()
+        f_request = self.m_request
+        f_tsv_dir = os.path.expanduser(f_request.tsv_dir)
+        f_output_dir = os.path.expanduser(f_request.output_dir or os.getcwd())
+        try:
+            f_sources = paperdata.loadSources(os.path.expanduser(f_request.sources_path))
+            if not f_sources.figures:
+                raise paperdata.PaperDataError(
+                    f"{f_request.sources_path} defines no figures"
+                )
+            for f_figure in f_sources.figures:
+                f_plots = []
+                for f_series in f_figure.series:
+                    f_x, f_y = paperdata.readSeries(
+                        os.path.join(f_tsv_dir, f_series.dataset), f_series
+                    )
+                    # a series of nan points only (runs without data) would draw nothing
+                    if all(math.isnan(f_v) for f_v in f_y):
+                        raise paperdata.PaperDataError(
+                            f"{f_figure.file}: series '{f_series.label}' has no data in "
+                            f"{f_series.dataset}"
+                        )
+                    f_plots.append(
+                        plot.PlotData(
+                            f_series.label, f_x, [f_v / f_figure.y_divisor for f_v in f_y]
+                        )
+                    )
+                f_meta = plot.PlotMetaData(f_figure.title, "# of Nodes", f_figure.y_label)
+                f_path = os.path.join(f_output_dir, f_figure.file)
+                os.makedirs(os.path.dirname(f_path), exist_ok=True)
+                plot.MultiPlot(f_meta, *f_plots).plot(f_path)
+                sys.stdout.write(f"Image generated: {f_path}\n")
+        except (paperdata.PaperDataError, OSError, ValueError) as f_err:
+            log.Console.error(str(f_err))
+            return 1
+        return 0

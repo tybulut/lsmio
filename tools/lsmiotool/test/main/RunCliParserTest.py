@@ -853,6 +853,36 @@ class RunCliParserTest(unittest.TestCase):
         d = req.toDict()
         self.assertEqual(d["backends"], ["native", "rocksdb"])
 
+    def testBackendsModeSyncBackends(self) -> None:
+        """Each backend's -sync arm is listed like any backend; its setup is refused as a
+        run's own setup (--setup or BM_SETUP)."""
+        req = parseRunArguments(
+            [
+                "lsmio",
+                "backends",
+                "small",
+                "adios2,adios2-sync,native-sync,plugin-sync,rocksdb-sync,leveldb-sync",
+            ]
+        )
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(
+            req.backends,
+            (
+                "adios2",
+                "adios2-sync",
+                "native-sync",
+                "plugin-sync",
+                "rocksdb-sync",
+                "leveldb-sync",
+            ),
+        )
+        with self.assertRaisesRegex(RunCliParseError, "backends arm"):
+            parseRunArguments(["lsmio", "variants", "btree", "--setup", "ADIOS-SYNC"])
+        with self.assertRaisesRegex(RunCliParseError, "backends arm"):
+            RunCliParser.parse(
+                ["run", "lsmio", "small"], f_environ={"BM_SETUP": "native-sync"}
+            )
+
     def testBackendsModeTrailingOptions(self) -> None:
         """Validates that trailing options like --ssd, --resume, --time, --out-dir are handled in backends mode."""
         req = parseRunArguments(

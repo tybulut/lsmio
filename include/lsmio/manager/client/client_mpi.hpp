@@ -57,12 +57,16 @@ class LSMIOClientMPI : public LSMIOClient {
      */
     void _barrier() override;
 
+    /// @brief Implements _allreduceMax with MPI_Allreduce.
+    int _allreduceMax(int value) override;
+
     /**
      * @brief Receives data from all other MPI processes.
      * @param bufSizes Pointer to an integer array storing the sizes of the received buffers.
+     * @param eolRanks Ranks that have sent their end-of-life command and are skipped.
      * @return A pointer to the array of received data buffers.
      */
-    char **_recvToBuffer(int *bufSizes) override;
+    char **_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks) override;
 
   public:
     /**
@@ -80,7 +84,7 @@ class LSMIOClientMPI : public LSMIOClient {
      * @return True if the command was sent successfully, false otherwise.
      */
     bool sendCommand(int rank, const std::string &command, const std::string &key,
-                     const std::string &value) override;
+                     std::string_view value) override;
 
     /**
      * @brief Receives a command from a specific MPI rank.

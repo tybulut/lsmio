@@ -781,6 +781,28 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         self.assertEqual(f_code, 1)
         self.assertIn("Nothing to archive", f_err)
 
+    def testSyncArmRunRootIsNotArchivedAlone(self) -> None:
+        """A -sync arm's run root without its arm marker is not archived as a run of its own
+        (outputs-adios-sync is the 'sync' variant's name)."""
+        import json
+
+        f_run_root = self._lsmiotoolRun("run-20261010T000000Z-eeee", f_variant=None)
+        f_manifest = os.path.join(f_run_root, "manifest.json")
+        with open(f_manifest, "r", encoding="utf-8") as f_f:
+            f_doc = json.load(f_f)
+        f_doc["request"]["setup"] = "ADIOS-SYNC"
+        with open(f_manifest, "w", encoding="utf-8") as f_f:
+            json.dump(f_doc, f_f)
+
+        f_code, f_err = self._archive(["lsmio", "variants", "--source", f_run_root])
+        self.assertEqual(f_code, 1)
+        self.assertIn("'ADIOS-SYNC' is a backends arm", f_err)
+        # archive --setup refuses the -SYNC setups too
+        from lsmiotool.lib.cli import ArchiveCliParseError, parseArchiveArguments
+
+        with self.assertRaisesRegex(ArchiveCliParseError, "is a backends arm"):
+            parseArchiveArguments(["lsmio", "variants", "--setup", "ADIOS-SYNC"])
+
     def testRunRootWithRemovedSetupIsRefused(self) -> None:
         """A run made before the '-M' setups were removed is not archived as 'native-m'."""
         import json

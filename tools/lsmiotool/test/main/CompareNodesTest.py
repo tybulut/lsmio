@@ -162,6 +162,83 @@ class CompareNodesTest(unittest.TestCase):
                 legends, ["adios2", "native", "plugin", "rocksdb", "leveldb"]
             )
 
+    def testSyncArmsPlottedAfterTheirBackends(self) -> None:
+        """outputs-<backend>-sync folders are labelled <backend>-sync (adios2-sync for
+        outputs-adios-sync), not folded into their backend, and each is plotted right after
+        its backend."""
+        target_dir = os.path.join(self.m_base_path, "archive", "backends", "bake")
+        for f_arm, f_bw in (
+            ("leveldb-sync", 400.0),
+            ("rocksdb-sync", 600.0),
+            ("plugin-sync", 1000.0),
+            ("native-sync", 1150.0),
+            ("adios-sync", 900.0),
+            ("rocksdb", 700.0),
+            ("plugin", 1100.0),
+            ("native", 1200.0),
+            ("adios", 950.0),
+        ):
+            self._create_report(
+                os.path.join(target_dir, f"outputs-{f_arm}"), 4, "1M", "write", f_bw
+            )
+        cnm = main.CompareNodesMain(
+            f_folder=target_dir,
+            f_op="write",
+            f_stripes=4,
+            f_blocksize="1M",
+            f_output_dir=os.path.join(self.m_base_path, "png"),
+        )
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            self.assertEqual(cnm.run(), 0)
+            args, _ = mock_plot_cls.call_args
+            self.assertEqual(
+                [p.legend for p in args[1:]],
+                [
+                    "adios2",
+                    "adios2-sync",
+                    "native",
+                    "native-sync",
+                    "plugin",
+                    "plugin-sync",
+                    "rocksdb",
+                    "rocksdb-sync",
+                    "leveldb-sync",
+                ],
+            )
+
+    def testSyncArmsWithSuffixAndIorArms(self) -> None:
+        """A collision-suffixed -sync folder keeps its -sync label, and IOR arms charted
+        alongside come after every backend, the -sync arms included."""
+        from lsmiotool.test.main.ArmGroupTest import IOR_SUMMARY
+
+        target_dir = os.path.join(self.m_base_path, "archive", "backends", "small")
+        for f_arm in ("plugin-sync-1", "rocksdb-sync-2", "adios-sync", "native"):
+            self._create_report(
+                os.path.join(target_dir, f"outputs-{f_arm}"), 4, "1M", "write", 1000.0
+            )
+        f_day = os.path.join(target_dir, "outputs-ior", "2", "2026-10-14")
+        os.makedirs(f_day)
+        with open(
+            os.path.join(f_day, "out-base-4-1M-2026-10-14-node097-0.txt"), "w"
+        ) as f_f:
+            f_f.write(IOR_SUMMARY)
+        cnm = main.CompareNodesMain(
+            f_folder=target_dir,
+            f_op="write",
+            f_stripes=4,
+            f_blocksize="1M",
+            f_output_dir=os.path.join(self.m_base_path, "png"),
+        )
+        with patch("lsmiotool.lib.plot.MultiBarPlot") as mock_plot_cls:
+            mock_plot_cls.return_value = MagicMock()
+            self.assertEqual(cnm.run(), 0)
+            args, _ = mock_plot_cls.call_args
+            self.assertEqual(
+                [p.legend for p in args[1:]],
+                ["adios2-sync", "native", "plugin-sync", "rocksdb-sync", "ior"],
+            )
+
     def testIorArmsPlottedAfterBackends(self) -> None:
         """IOR arms in an archive folder are charted from ior-report.csv (built
         from their bmtool-layout outputs when missing), after the backends, by arm."""

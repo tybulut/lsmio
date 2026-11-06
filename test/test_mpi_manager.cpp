@@ -118,6 +118,36 @@ TEST_P(managerMPITests, Flush) {
     delete lm;
 }
 
+// Aggregation runs a server thread that calls MPI, so it is refused below MPI_THREAD_MULTIPLE.
+// The ThreadSerialized ctest runs this with --mpi-thread-serialized
+TEST(managerMPIThreadTests, AggregationNeedsThreadMultiple) {
+    int provided, worldRank;
+    MPI_Query_thread(&provided);
+    MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
+    if (gRequestedThreadLevel < MPI_THREAD_MULTIPLE && provided == MPI_THREAD_MULTIPLE) {
+        GTEST_SKIP() << "MPI gave MPI_THREAD_MULTIPLE when asked for less: nothing to refuse";
+    }
+    lsmio::gConfigLSMIO.mpiAggType = lsmio::MPIAggType::Entire;
+    lsmio::LSMIOManager *lm = nullptr;
+    // Both runs may go at once under ctest -j
+    std::string dbFile = "test-mpi-mgr-thread-" + std::to_string(provided);
+    std::string rankFile = dbFile + "-" + std::to_string(worldRank) + ".db";
+    dbFile += ".db";
+
+    if (provided == MPI_THREAD_MULTIPLE) {
+        EXPECT_NO_THROW(lm = new lsmio::LSMIOManager(dbFile, TEST_DIR_MGR, true, MPI_COMM_WORLD));
+    } else {
+        EXPECT_THROW(lm = new lsmio::LSMIOManager(dbFile, TEST_DIR_MGR, true, MPI_COMM_WORLD),
+                     std::runtime_error);
+    }
+    delete lm;
+    lm = nullptr;
+
+    // One rank on its own never aggregates
+    EXPECT_NO_THROW(lm = new lsmio::LSMIOManager(rankFile, TEST_DIR_MGR, true, MPI_COMM_SELF));
+    delete lm;
+}
+
 
 auto managerTV = ::testing::Values(std::make_tuple(UseComm::CommSelf, MPIWorld::Shared),
                                    std::make_tuple(UseComm::CommWorld, MPIWorld::Shared),

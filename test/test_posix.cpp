@@ -30,8 +30,13 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <lsmio/posix/posix.hpp>
+#include <thread>
+#include <vector>
 
 const std::string TEST_DIR_PSX = "";
 
@@ -76,6 +81,45 @@ TEST(lsmioPosix, Stream) {
     EXPECT_EQ(value, value2);
 
     EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
+}
+
+// A failed initialize throws and leaves the stream uninitialised, so a later one can succeed
+TEST(lsmioPosix, StreamInitializeFailure) {
+    std::string blocker = "test-psx-init-blocker";
+    std::ofstream(blocker) << "not a directory";
+    std::string dbName = "test-psx-init.db";
+
+    // The database directory would go under a regular file
+    EXPECT_THROW(lsmio::LSMIOStream::initialize(dbName, blocker),
+                 std::filesystem::filesystem_error);
+    EXPECT_FALSE(lsmio::LSMIOStream::cleanup());
+
+    EXPECT_TRUE(lsmio::LSMIOStream::initialize(dbName, TEST_DIR_PSX));
+    EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
+    std::filesystem::remove(blocker);
+    std::filesystem::remove_all(dbName);
+}
+
+// Threads that initialize at once: exactly one opens the database
+TEST(lsmioPosix, StreamConcurrentInitialize) {
+    std::string dbName = "test-psx-init-race.db";
+    std::atomic<bool> go{false};
+    std::atomic<int> opened{0};
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < 8; i++) {
+        threads.emplace_back([&] {
+            while (!go) std::this_thread::yield();
+            if (lsmio::LSMIOStream::initialize(dbName, TEST_DIR_PSX)) opened++;
+        });
+    }
+    go = true;
+    for (auto &thread : threads) thread.join();
+
+    EXPECT_EQ(opened, 1);
+    EXPECT_TRUE(lsmio::LSMIOStream::cleanup());
+    EXPECT_FALSE(lsmio::LSMIOStream::cleanup());
+    std::filesystem::remove_all(dbName);
 }
 
 TEST(lsmioPosix, StreamMulti) {

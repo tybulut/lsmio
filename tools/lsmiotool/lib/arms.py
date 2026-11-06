@@ -48,14 +48,22 @@ from typing import Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tup
 
 DEFAULT_VARIANT_TOKENS = (None, "", "default", "base")
 
-# Backend token -> (setup, arm ID), as in batch.in.sh's backends loop
+# Backend token -> (setup, arm ID), as in batch.in.sh's backends loop. Each backend also has a
+# -sync arm (lsmiotool only, not in bmtool): the same benchmark with --lsmio-always-flush (for
+# ADIOS2, Put with adios2::Mode::Sync); they run only when listed
 BACKEND_ARMS: Dict[str, Tuple[str, str]] = {
     "adios2": ("ADIOS", "adios"),
     "adios": ("ADIOS", "adios"),
+    "adios2-sync": ("ADIOS-SYNC", "adios-sync"),
+    "adios-sync": ("ADIOS-SYNC", "adios-sync"),
     "native": ("NATIVE", "native"),
+    "native-sync": ("NATIVE-SYNC", "native-sync"),
     "plugin": ("PLUGIN", "plugin"),
+    "plugin-sync": ("PLUGIN-SYNC", "plugin-sync"),
     "rocksdb": ("ROCKSDB", "rocksdb"),
+    "rocksdb-sync": ("ROCKSDB-SYNC", "rocksdb-sync"),
     "leveldb": ("LEVELDB", "leveldb"),
+    "leveldb-sync": ("LEVELDB-SYNC", "leveldb-sync"),
 }
 
 # IOR setup token -> (setup, arm ID); bmtool's ior-benchmark.sh ran one hard-coded setup
@@ -227,10 +235,10 @@ def resolveArmGroup(
 
     if (
         f_target == "lsmio"
-        and str(f_setup).strip().upper() not in LsmioAdapter.ALLOWED_SETUPS
+        and str(f_setup).strip().upper() not in LsmioAdapter.RUN_SETUPS
     ):
         raise ArmError(
-            f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.ALLOWED_SETUPS)}"
+            f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.RUN_SETUPS)}"
         )
 
     if f_target == "ior" and f_mode == "backends":

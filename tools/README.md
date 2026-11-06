@@ -132,7 +132,8 @@ graph TD
     CLI --> ARCHIVE["archive: Run Bundling & Storage"]
     CLI --> TEST["test: Python Test Suite"]
     CLI --> LEGACY["parseLegacy: Backward-Compat Parser"]
-    CLI --> ENV["load-modules / latex"]
+    CLI --> ENV["load-modules"]
+    CLI --> LATEX["latex: Paper Data & Figures"]
 
     RUN --> SCHED["Slurm / PBS Schedulers"]
     RUN --> MATRIX["6-Combination Matrix"]
@@ -157,7 +158,7 @@ graph TD
 | `test` | Executes the internal Python test suite across unit, functional, and integration fixtures. |
 | `parseLegacy` | Backward-compatible parser for legacy unstructured output hierarchies. |
 | `load-modules` | Dynamically configures HPC cluster environment modules defined in `environments.json`. |
-| `latex` | Generates LaTeX table and figure source snippets for academic publications. |
+| `latex` | Builds a paper's chart data (TSV files) from archived reports (`latex data`) and previews its figures (`latex plots`), driven by the paper's `sources.yaml`. See Section 7. |
 
 ---
 
@@ -240,9 +241,9 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 - `backends`: Positional mode token for `lsmio` selecting Multi-Backend Intra-Allocation Scaling (`INV-BACKEND-1`).
   - Positional syntax: `lsmiotool run lsmio backends <scale> [<backends>] [options]`.
   - Supported `<scale>` values: `local`, `bake`, `small`, `large` (`variants` is rejected).
-  - Optional `[<backends>]`: Comma-separated list of backends (defaults to `adios2,native,plugin,rocksdb`). Supported backend tokens: `adios2` (or `adios`), `native`, `plugin` (ADIOS2 with the LSMIO engine plugin), `rocksdb`, `leveldb`.
+  - Optional `[<backends>]`: Comma-separated list of backends (defaults to `adios2,native,plugin,rocksdb`). Supported backend tokens: `adios2` (or `adios`), `native`, `plugin` (ADIOS2 with the LSMIO engine plugin), `rocksdb`, `leveldb`. Each backend has a `-sync` arm, run only when listed: `adios2-sync` (or `adios-sync`), `native-sync`, `plugin-sync`, `rocksdb-sync` and `leveldb-sync` (setups `ADIOS-SYNC`, `NATIVE-SYNC`, `PLUGIN-SYNC`, `ROCKSDB-SYNC`, `LEVELDB-SYNC`, archived as `outputs-<arm>`, e.g. `outputs-adios-sync`). A `-sync` arm runs the same benchmark with `--lsmio-always-flush`: LSMIO's stores get `flush=true` (the native store and RocksDB ignore it, as their puts are readable on return anyway; LevelDB puts straight away instead of batching, which it never does for the benchmark's 64 KiB values), and `bm_adios` puts with `adios2::Mode::Sync` instead of `Deferred` (by value: ADIOS2 copies each value first, a known issue tracked separately; reads stay `Deferred`). For BP5 and the plugin, `Mode::Sync` only frees the caller's buffer on return; the plugin passes it on as `flush=true` (in aggregated mode the aggregator's own `--lsmio-always-flush` does), which its native store ignores. So with these benchmarks every `-sync` arm measures like its backend, apart from that extra copy in `adios2-sync` and `plugin-sync`. The `-SYNC` setups are for these arms only: `--setup`, `BM_SETUP` and `archive --setup` refuse them, so variant and standalone runs (archived as `outputs-<setup>-<variant>:run`/`:base` and `outputs-<setup>[-<variant>]`, where `outputs-adios-sync` is the `sync` (fsync) variant) are unchanged (e.g. `run lsmio backends small adios2,adios2-sync,plugin,plugin-sync`).
   - **Single Cluster Allocation**: Submits a single job allocation for each scale point ($K$). Backends execute one after another within that allocation on identical physical nodes, ensuring fair cross-engine comparisons. The same holds for `variants` (baseline and each variant) and `--versioned` (reference baseline and each variant). Each backend or variant keeps its own run root under `<root>/runs/`.
-  - **Per-point archiving**: Unless `--no-archive` is given, each backend's `<nodes>` directory is archived to `<dest>/outputs-<arm>/<nodes>` (`adios`, `native`, `plugin`, `rocksdb`, `leveldb`; `adios2` is `adios`) as soon as its scale point finishes, with `agg-*-report.csv` and `lsm-report.csv` regenerated. A rerun replaces the `<nodes>` directories it archives again.
+  - **Per-point archiving**: Unless `--no-archive` is given, each backend's `<nodes>` directory is archived to `<dest>/outputs-<arm>/<nodes>` (`adios`, `native`, `plugin`, `rocksdb`, `leveldb` and their `-sync` arms, e.g. `adios-sync`; `adios2` is `adios`) as soon as its scale point finishes, with `agg-*-report.csv` and `lsm-report.csv` regenerated. A rerun replaces the `<nodes>` directories it archives again.
   - **Data cleanup**: Each combination's data directory is emptied before the next combination runs.
   - **`--nodes <list>`**: runs only these node counts of the scale (comma-separated, each one of the scale's), in the scale's order, each with its own walltime; also for `ior` scaling runs and `epocpp backends`, not for plain scaling, `variants` or `lmp` runs. Their points are archived and resumed like a full run's (without `--resume`, a rerun replaces the `<nodes>` directories it archives again).
   - **Dynamic Walltime Calculation (`INV-BACKEND-2`)**: Automatically scales allocation walltime based on backend count and node count:
@@ -289,7 +290,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
 
 #### Benchmark Setups:
 - **IOR setups**: `BASE` (default), `HDF5`, `HDF5-C`, `COLLECTIVE`, `FSYNC`, `REVERSE`.
-- **LSMIO setups**: `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`. Every setup runs its binary with `-m -g`: `-m` runs it under MPI with barriers around the timed phases, `-g` installs a SIGSEGV handler. The former `-M` names (`NATIVE-M`, …) and the non-MPI setups were removed; old names are rejected.
+- **LSMIO setups**: `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`. The backends' `-sync` arms use `ADIOS-SYNC`, `NATIVE-SYNC`, `PLUGIN-SYNC`, `ROCKSDB-SYNC` and `LEVELDB-SYNC` (each adds `--lsmio-always-flush`), which `--setup` does not accept. Every setup runs its binary with `-m -g`: `-m` runs it under MPI with barriers around the timed phases, `-g` installs a SIGSEGV handler. The former `-M` names (`NATIVE-M`, …) and the non-MPI setups were removed; old names are rejected.
 - **LMP setups**: `LSMIO` (default), `LSMIO-MMAP`, `FS`.
 
 ---
@@ -685,9 +686,10 @@ Renders 12 clustered bar charts, e.g. `~/png/backends/small/compare-small-write-
 
 #### Canonical Legend Mapping & Precedence Sorting (`INV-BACKEND-5`):
 When comparing multi-backend archive directories:
-- **Canonical Legend Labels**: Raw folder names (`outputs-adios`, `outputs-native`, `outputs-plugin`, `outputs-rocksdb`, `outputs-leveldb`) are automatically mapped to clean canonical labels: `adios2`, `native`, `plugin`, `rocksdb`, and `leveldb`.
-- **Precedence Ordering**: Series bars are strictly ordered by canonical precedence `[adios2, native, plugin, rocksdb, leveldb]`.
-- **Clustered Grouped Bars**: Displays one clustered bar per backend (up to $N=5$) per node category on the X-axis (`# of Nodes`).
+- **Canonical Legend Labels**: Raw folder names (`outputs-adios`, `outputs-native`, `outputs-plugin`, `outputs-rocksdb`, `outputs-leveldb`, and their `-sync` arms, e.g. `outputs-adios-sync`) are automatically mapped to clean canonical labels: `adios2`, `native`, `plugin`, `rocksdb`, `leveldb`, and `adios2-sync`, `native-sync`, ….
+- **Precedence Ordering**: Series bars are strictly ordered by canonical precedence `[adios2, adios2-sync, native, native-sync, plugin, plugin-sync, rocksdb, rocksdb-sync, leveldb, leveldb-sync]`, then IOR arms.
+- **Clustered Grouped Bars**: Displays one clustered bar per backend (up to $N=10$ backends) per node category on the X-axis (`# of Nodes`).
+- **Backends archives**: `compare nodes` is for backends (and IOR, EPOCpp) archives, where `outputs-<backend>-sync` is a `-sync` arm and is labelled `<backend>-sync`. In a baseline or variants archive a folder of that name is the `sync` (fsync) variant; compare those with `compare variants`.
 - **Default Workload**: When omitted, workload parameters strictly default to 4 stripes and 1M block size (`stripes=4, bs=1M`).
 
 ---
@@ -820,3 +822,79 @@ The canonical sequence evaluated by `most` (`lsmiotool run lsmio variants most` 
 > `default` and variants 1 through 24 explicitly pass `--lsmio-no-autotune` (in both lsmiotool and bmtool) to ensure ablation study isolation without automatic parameter interference; `autotune` passes `--lsmio-autotune`.
 >
 > **Buffer Sizing Standard**: In accordance with experimental rigor, read-path variants (`no-pread`, `mmap`, `mmap-vsort`, `mmap-btree`, etc.) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.
+
+---
+
+## 7. Paper Data & Figures (`lsmiotool latex`)
+
+`lsmiotool latex` turns archived benchmark reports into the chart data of a paper and previews the paper's figures. It is driven by a `sources.yaml` that lives with the paper, so the figures can be traced to, and regenerated from, the raw archive.
+
+### 7.1 CLI Syntax and Usage
+
+```bash
+# Rebuild every TSV the paper's charts read, from the archived reports
+lsmiotool latex data <sources.yaml> --data-dir <dir> --output-dir <dir>
+
+# Draw a preview PDF for every figure of the sources.yaml from those TSVs
+lsmiotool latex plots <sources.yaml> --tsv-dir <dir> [--output-dir <dir>]
+```
+
+- `--data-dir <dir>`: the directory the `sources.yaml`'s report paths are relative to (for the journal paper, `lsmio-data/synthetic`).
+- `--output-dir <dir>`: where `data` writes its TSVs (required), and where `plots` writes its PDFs (default: the current working directory). The previews replace files of the same name: the journal paper's figure `file` names match its pdflatex-compiled `pdfs/`, so preview into another directory.
+- `--tsv-dir <dir>`: the directory holding the TSVs `data` wrote (`plots` only).
+- A bad argument exits with status 2. An unreadable or invalid `sources.yaml`, a missing or malformed report, or a series with no data (no rows, or only `nan` points) exits with status 1, as does an output file that cannot be written or a figure that cannot be drawn. `data` builds every dataset and checks that no output path is a directory before writing, then writes each TSV under a temporary name and renames them into place once all are written. A failure therefore leaves the existing TSVs as they were; only a rename failing midway, which is rare once every temporary file is written, can leave some of them replaced.
+- `data` prints each TSV it wrote with the number of rows from each source (or placeholder) on stdout; `plots` prints each PDF. Warnings and errors go to stderr.
+
+### 7.2 `sources.yaml` (schema 1)
+
+```yaml
+schema: 1
+
+grid:
+  nodes: [1, 2, 4, 8, 16, 24, 32, 40, 48]
+  stripes: [4, 16]
+  block_sizes: [1M, 64K, 8M]
+  ops: [read, write]
+
+datasets:
+  - output: hdd/bm/lsm-report-adios.tsv
+    kind: lsmio
+    source: viking/lsmio-hdd/small/output-adios
+    stitch:
+      - {source: viking/lsmio-hdd/small/output-adios-2, nodes: [24], stripes: [4], block_sizes: [1M]}
+
+  - output: hdd/ior/ior-report-hdf5.tsv
+    kind: ior
+    source: viking/ior-hdd/small/output-ior-hdf5
+    missing: placeholder
+    fill: zero
+    placeholders:
+      - {nodes: [24], stripes: [16], block_sizes: [64K], ops: [read], copy_from_node: 32}
+
+  - output: viking2-baking/hdd/ior/ior-report-collective.tsv
+    kind: ior
+    source: viking2.baking/ior-small-hdd/ior-collective
+    cut_short: rebuild
+
+figures:
+  - file: 42-comparison-write-lsmio.pdf
+    title: HDF5 vs. ADIOS2 vs. LSMIO
+    y_label: Max Write Bandwidth (GiB/s)
+    y_divisor: 1024
+    series:
+      - {label: ADIOS2 4/64K, dataset: hdd/bm/lsm-report-adios.tsv, stripes: 4, block_size: 64K, op: write}
+```
+
+- The file is read with PyYAML's safe loader; `latex` is the only command that needs PyYAML, and its tests skip (saying why) when PyYAML is not installed. Comments, anchors and `<<` merges work. A key given twice in one mapping is an error. YAML reads an unquoted `no`, `yes`, `on` or `off` as a boolean, which the schema check rejects; quote such values. A field the schema does not know (a misspelt `stiches`, say) is an error at every level.
+- **`output`** (relative to `--output-dir`), **`kind`** (`ior` reads `ior-report.csv`, `lsmio` reads `lsm-report.csv`) and **`source`** (a directory relative to `--data-dir`) are required. Absolute paths and `..` are rejected. Two outputs that name one file (`a.tsv` and `./a.tsv`, or `a.tsv` and `A.tsv`: paths are compared ignoring case, as macOS does by default), an output named like another's temporary file (`a.tsv.tmp`), an output that is the directory of another (`hdd` and `hdd/a.tsv`) and an output that names no file (`.`, `sub/`) are rejected.
+- **`grid`** (optional, at the top level or per dataset; a dataset's grid replaces the top-level one) lists the rows every TSV must have: each of `nodes` times each (`stripes`, `block_sizes`, `ops`) combination. An omitted list takes its values from the report; without any grid the expected rows are every node count of the report times every combination the report has. A report row outside the grid is an error. Charts that pick rows by position need a full grid: without it, a node count missing from the whole report would just drop its rows and shift every later series.
+- **`stitch`** rules overlay the rows of their selection (`nodes`, `stripes`, `block_sizes`, `ops`; an omitted selector matches all) with the rows of their own source: each selected row of the rule's report replaces the dataset's row for that run, or adds it. A rule that selects no row is an error, and so is a value a rule lists that takes no row (`nodes: [24, 99]` when the rerun has no 99-node run), as are two rules that select the same run and a rule whose source is the dataset's own.
+- **`missing`** says what an expected run that no report has (a placeholder), or a run whose measurements are all empty (a failed run), becomes: `"placeholder"` (default; written as `fill` says, with a warning) or `"error"`.
+- **`fill`** says how such a run is written. `"nan"` (default): its measurements are `nan`, which leaves a gap in a chart (pgfplots needs `unbounded coords=jump`; `plots` breaks the line by itself), and a placeholder's other columns are `NA`. `"zero"`: its measurements are `0.00`, and an IOR placeholder keeps the settings of the preceding node count's run; a `placeholders` rule names another node count to copy from. A failed run keeps its reported settings either way. `placeholders` rules are allowed only on `ior` datasets with `fill: zero`, and a rule that matches no missing run, or lists a value that matches none, is an error (remove it, or the value, once the run exists). The journal paper's HDF5 dataset uses `fill: zero`, because its checked-in TSV holds zeros.
+- A report with no data row, a report that lists one run (node count, stripe count, block size, operation) twice, a row wider than the header, a run with only some of its measurements empty, a measurement that is not a plain finite number (`nan`, `1_000` and numbers too large for two decimals are rejected; `1e3` is written `1000.00`), an IOR stonewall cell that is not `NA`, empty, an integer or a decimal, and a report the csv module cannot parse are errors.
+- **`cut_short`** says what a row shorter than the header becomes. Such a row is a run cut short: IOR stopped (an MPI abort, say) before printing its summary, so `ior-parse.sh` took the last iteration's line instead, and the row holds that one iteration's bandwidth, IOPS, latency and so on under the summary's headers. `"keep"` (default): the row is kept, padded with empty cells and reported as a warning; the journal paper's HDF5 rows at 24 nodes are kept this way. `"rebuild"` (`ior` datasets only): the row is rewritten from the run's raw output: the one file under `<source>/<nodes>/*/` (the stitch source for a stitched run) named `out-<setup>[-c]-<stripes>-<block size>-<date>-...` or, as the first Viking runs are, `out-<date>-<host>-0-<stripes>-<block size>.txt[.2]`, that has iteration lines of the operation (empty files and error lines are skipped); its last such line must be the report row. `Max(MiB)`, `Min(MiB)` and `Mean(MiB)` are the maximum, minimum and mean bandwidth of the iterations the run finished, `reps` is how many finished, and the other columns are `NA` (IOR's `StdDev` cannot be reproduced from its printed values). Checked against every complete Viking and Viking2 run: where IOR prints the bandwidths with decimals, Max and Min equal its summary and Mean is within 0.01. IOR prints bandwidths from about 3600 MiB/s as whole numbers, which leaves the rebuilt values good to 0.5 MiB/s only; such a row gets a second warning. Each rebuilt row is reported as a warning naming the output file and "k of n iterations" (n from the output's `repetitions` line). A short row with every measurement empty is a failed run and is written as `fill` says, not rebuilt. No such file, more than one, a last line that is not the report row, an iteration without a bandwidth, or no `repetitions` line is an error.
+- **`figures`** are only used by `plots`. Each `file` must end in `.pdf` and be unique (ignoring case), and `y_divisor` must be a positive finite number. Every series names the TSV (`dataset`, an `output` of a dataset), stripe count, block size and operation it draws. `y` is the TSV's `Max` column divided by `y_divisor` (1024 turns MiB/s into GiB/s).
+
+### 7.3 TSV Format
+
+`data` reproduces the paper's TSVs exactly: a fixed header, rows sorted by stripe count, block size (as text, so `16M` sorts before `1M`), operation and node count, and CRLF line ends. IOR rows have their nine measurement columns (`Max(MiB)` to `Mean(s)`) written with two decimals (halves rounded up); the stonewall columns keep `NA`, empty cells and integers and write decimals with two decimals; `aggs(MiB)` is an integer; the rest is kept as is, and a run cut short is padded to the header's width or rebuilt (`cut_short`). LSMIO rows have their six number columns written with two decimals. A run without data is written as `fill` says (`nan`, or `0.00`). The journal paper's `sources.yaml` and its provenance notes are in `docs/paper-journal/`; a golden test (`PaperDataTest`) checks that it regenerates the paper's checked-in TSVs byte for byte.

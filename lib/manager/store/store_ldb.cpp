@@ -150,6 +150,15 @@ bool LSMIOStoreLDB::getPrefix(const std::string key,
 
 bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key,
                                    const std::string& value, bool flush) {
+    return _mutate(mType, key, value, flush);
+}
+
+bool LSMIOStoreLDB::putBytes(const std::string& key, std::string_view value, bool flush) {
+    return _mutate(MutationType::Put, key, value, flush);
+}
+
+bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::string_view value,
+                            bool flush) {
     leveldb::Status s;
     bool retValue;
     std::string origValue, finalValue;
@@ -167,7 +176,7 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key,
         LOG(INFO) << "LSMIOStoreLDB::_batchMutation: mutation: " << getMutationType(mType)
                   << std::endl;
         if (mType == MutationType::Put) {
-            s = _db->Put(_wOptions, key, value);
+            s = _db->Put(_wOptions, key, leveldb::Slice(value.data(), value.size()));
         } else if (mType == MutationType::Del) {
             s = _db->Delete(_wOptions, key);
         } else {
@@ -190,7 +199,7 @@ bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key,
             }
 
             if (mType == MutationType::Put) {
-                _batch->Put(key, value);
+                _batch->Put(key, leveldb::Slice(value.data(), value.size()));
             } else if (mType == MutationType::Del) {
                 _batch->Delete(key);
             }

@@ -70,6 +70,9 @@ void PrintTo(const MPIWorld& worldSize, std::ostream* os);
 void PrintTo(const AdiosEngine& engine, std::ostream* os);
 void PrintTo(const UseComm& comm, std::ostream* os);
 
+/// The thread level main() asked MPI_Init_thread for (--mpi-thread-serialized lowers it)
+extern int gRequestedThreadLevel;
+
 }  // namespace lsmioTest
 
 #endif

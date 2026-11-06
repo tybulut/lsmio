@@ -179,6 +179,15 @@ bool LSMIOStoreRDB::getPrefix(const std::string key,
 
 bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key,
                                    const std::string& value, bool flush) {
+    return _mutate(mType, key, value, flush);
+}
+
+bool LSMIOStoreRDB::putBytes(const std::string& key, std::string_view value, bool flush) {
+    return _mutate(MutationType::Put, key, value, flush);
+}
+
+bool LSMIOStoreRDB::_mutate(MutationType mType, const std::string& key, std::string_view value,
+                            bool flush) {
     rocksdb::Status s;
     bool retValue;
 
@@ -191,7 +200,7 @@ bool LSMIOStoreRDB::_batchMutation(MutationType mType, const std::string& key,
 
     LOG(INFO) << "LSMIOStoreRDB::_batchMutation: mutation: " << getMutationType(mType) << std::endl;
     if (mType == MutationType::Put) {
-        s = _db->Put(_wOptions, key, value);
+        s = _db->Put(_wOptions, key, rocksdb::Slice(value.data(), value.size()));
     } else if (mType == MutationType::Del) {
         s = _db->Delete(_wOptions, key);
     } else {

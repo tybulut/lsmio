@@ -92,6 +92,14 @@ bool LSMIOStore::put(const std::string& key, std::string&& value, bool flush) {
     return _batchMutation(MutationType::Put, key, std::move(value), flush);
 }
 
+bool LSMIOStore::putBytes(const std::string& key, std::string_view value, bool flush) {
+    LOG(INFO) << "LSMIOStore::putBytes: key: " << key << " flush: " << flush
+              << " size: " << value.size() << std::endl;
+
+    // The one copy: the store moves it into its buffer
+    return _batchMutation(MutationType::Put, key, std::string(value), flush);
+}
+
 bool LSMIOStore::del(const std::string& key, bool flush) {
     LOG(INFO) << "LSMIOStore::del: key: " << key << " flush: " << flush << std::endl;
 

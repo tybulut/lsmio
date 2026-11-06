@@ -47,13 +47,22 @@ void LSMIOClientAdios::_barrier() {
     _comm->Barrier("LSMIOClientAdios::_barrier");
 }
 
-char **LSMIOClientAdios::_recvToBuffer(int *bufSizes) {
+int LSMIOClientAdios::_allreduceMax(int value) {
+    int result = value;
+    _comm->Allreduce(&value, &result, 1, adios2::helper::Comm::Op::Max,
+                     "LSMIOClientAdios::_allreduceMax");
+    return result;
+}
+
+char **LSMIOClientAdios::_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks) {
     const std::string hint = "LSMIOClientADIO::_recvToBuffer";
     int recv_i, req_count;
 
     char **buffer = new char *[_size];
     for (recv_i = 0, req_count = 0; recv_i < _size; recv_i++) {
-        if (recv_i == _rank) continue;
+        buffer[recv_i] = nullptr;
+        bufSizes[recv_i] = 0;
+        if (recv_i == _rank || eolRanks[recv_i]) continue;
 
         MPI_Status status;
         int bSize = 0;
@@ -71,7 +80,7 @@ char **LSMIOClientAdios::_recvToBuffer(int *bufSizes) {
 }
 
 bool LSMIOClientAdios::sendCommand(int rank, const std::string &command, const std::string &key,
-                                   const std::string &value) {
+                                   std::string_view value) {
     const std::string hint = "LSMIOClientADIO::sendCommand";
 
     std::string bufMPI;
@@ -81,9 +90,8 @@ bool LSMIOClientAdios::sendCommand(int rank, const std::string &command, const s
 
     LOG(INFO) << "LSMIOClientAdios::sendCommandMPI:"
               << " myRank: " << _rank << " command : " << command << " key : " << key
-              << " size : " << value.size()
-              << " value : " << (value.size() > 80 ? value.substr(0, 80) + "..." : value)
-              << " to: " << rank << std::endl;
+              << " size : " << value.size() << " value : " << value.substr(0, 80)
+              << (value.size() > 80 ? "..." : "") << " to: " << rank << std::endl;
 
     return true;
 }

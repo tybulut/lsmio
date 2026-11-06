@@ -36,12 +36,14 @@
 #include <adios2/helper/adiosCommMPI.h>
 #include <mpi.h>
 
+#include <atomic>
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/client/client.hpp>
 #include <lsmio/manager/store/native/StoreNative.hpp>
 #include <lsmio/manager/store/store_ldb.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -51,6 +53,10 @@
 #endif
 
 namespace lsmio {
+
+enum class LifecycleState { None, Initializing, Ready, Cleaning };
+
+const char *lifecycleStateName(LifecycleState state);
 
 /**
  * @class LSMIOManager
@@ -74,6 +80,10 @@ class LSMIOManager {
     bool _isOverWrite = false;
     /// @brief Flag to indicate sharing mode.
     bool _isShared = false;
+    /// @brief Aggregator only: a put, delete or barrier failed, for a client or for the
+    /// aggregator itself (reported to every rank of the aggregation group at close). Set by
+    /// the server thread as well.
+    std::atomic<bool> _collectiveFailed{false};
     /// @brief Flag to indicate shared split mode.
     bool _isSharedSplit = false;
 
@@ -104,12 +114,8 @@ class LSMIOManager {
 
     /// @brief Static instance of LSMIOManager.
     static LSMIOManager *_lm;
-    /// @brief Initialization status.
-    static std::atomic<int> _lmInitialized;
-    /// @brief Initializing status.
-    static std::atomic<int> _lmInitializing;
-    /// @brief Cleaning status.
-    static std::atomic<int> _lmCleaning;
+    /// @brief Lifecycle of the static instance.
+    static std::atomic<LifecycleState> _lmState;
 
     /**
      * @brief Initialize the LSMIOManager instance.
@@ -119,6 +125,8 @@ class LSMIOManager {
     bool _isOpenLocal() const;
     bool _isOpenRemote() const;
     bool _isServeLocal() const;
+    /// Returns success; on the aggregator a failure is also kept for close.
+    bool _noteLocalWrite(bool success);
 
     std::string _rankedKey(const int rank, const std::string &key) const;
     std::string _rankedKey(const std::string &key) const;
@@ -148,11 +156,14 @@ class LSMIOManager {
 
     /**
      * @brief Close the manager and its underlying store.
+     * @return False if the final flush failed or, in aggregated mode, if the aggregator could
+     * not store any rank's data (every rank of the aggregation group gets the same result; other
+     * groups, under Split or Shared across nodes, have their own).
      */
-    void close();
+    bool close();
 
-    /// callback for collective I/O
-    void callbackForCollectiveIO(int rank, const std::string &command, const std::string &key,
+    /// callback for collective I/O: returns false if the command failed
+    bool callbackForCollectiveIO(int rank, const std::string &command, const std::string &key,
                                  std::string *gValue, std::string pValue);
 
     /// Get DB path
@@ -181,6 +192,15 @@ class LSMIOManager {
     bool put(const std::string &key, std::string &&value);
     bool put(const std::string &key, const char *value, std::streamsize n);
     bool put(const std::string &key, const void *ptr, size_t size, size_t count);
+
+    /**
+     * @brief Put the bytes of value: a sync put, the caller's memory is free again on return.
+     *
+     * No intermediate string is made: the native store copies the bytes once, into its in-memory
+     * buffer (C0); RocksDB and LevelDB copy them into a WriteBatch and then their memtable; a
+     * client of an aggregator copies them into the message that carries them.
+     */
+    bool putBytes(const std::string &key, std::string_view value, bool flush);
 
     /**
      * @brief Delete a value associated with a key from the database.

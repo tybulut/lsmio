@@ -60,14 +60,22 @@ void LSMIOClientMPI::_barrier() {
     MPI_Barrier(*_mpiComm);
 }
 
-char **LSMIOClientMPI::_recvToBuffer(int *bufSizes) {
+int LSMIOClientMPI::_allreduceMax(int value) {
+    int result = value;
+    MPI_Allreduce(&value, &result, 1, MPI_INT, MPI_MAX, *_mpiComm);
+    return result;
+}
+
+char **LSMIOClientMPI::_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks) {
     MPI_Request reqs[_size - 1];
     MPI_Status statuses[_size - 1];
     int recv_i, req_count;
 
     char **buffer = new char *[_size];
     for (recv_i = 0, req_count = 0; recv_i < _size; recv_i++) {
-        if (recv_i == _rank) continue;
+        buffer[recv_i] = nullptr;
+        bufSizes[recv_i] = 0;
+        if (recv_i == _rank || eolRanks[recv_i]) continue;
 
         int bSize = 0;
         MPI_Probe(recv_i, MPI_ANY_TAG, *_mpiComm, &statuses[req_count]);
@@ -88,7 +96,7 @@ char **LSMIOClientMPI::_recvToBuffer(int *bufSizes) {
 }
 
 bool LSMIOClientMPI::sendCommand(int rank, const std::string &command, const std::string &key,
-                                 const std::string &value) {
+                                 std::string_view value) {
     MPI_Request reqs[4];
     MPI_Status statuses[4];
 
@@ -98,9 +106,8 @@ bool LSMIOClientMPI::sendCommand(int rank, const std::string &command, const std
 
     LOG(INFO) << "LSMIOClientMPI::sendCommandMPI:"
               << " my rank: " << _rank << " command : " << command << " key : " << key
-              << " size : " << value.size()
-              << " value : " << (value.size() > 80 ? value.substr(0, 80) + "..." : value)
-              << " to: " << rank << std::endl;
+              << " size : " << value.size() << " value : " << value.substr(0, 80)
+              << (value.size() > 80 ? "..." : "") << " to: " << rank << std::endl;
 
     return true;
 }

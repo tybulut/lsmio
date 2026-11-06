@@ -33,8 +33,6 @@ else()
   endif()
 endif()
 
-# Disable RTTI
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
 include(CMakeParseArguments)
 
@@ -152,11 +150,26 @@ add_lsmio_store_test(test_sstable_manager)
 add_lsmio_store_test(test_file_pool)
 add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
+add_lsmio_store_test(test_copy_once)
 add_lsmio_posix_test(test_posix)
 
 # GTest: MPI: Base and Manager
 add_lsmio_mpi_test(test_mpi_base lsmio::base_static)
 add_lsmio_mpi_test(test_mpi_manager lsmio::store_static)
+
+# Below MPI_THREAD_MULTIPLE aggregation must be refused on every rank, not hang
+add_test(
+  NAME lsmioTest/managerMPIThreadTests.ThreadSerialized
+  COMMAND ${mpi_cmd} ${test_parameters} $<TARGET_FILE:test_mpi_manager>
+    --mpi-thread-serialized --gtest_filter=managerMPIThreadTests.*
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(lsmioTest/managerMPIThreadTests.ThreadSerialized PROPERTIES
+  SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+  ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  TIMEOUT 30
+  PROCESSORS ${mpi_processes}
+)
 
 # GTest: Adios and Plugin
 add_executable(test_adios test_adios.cpp test_plugin.cpp)
@@ -170,7 +183,9 @@ gtest_discover_tests(
   NO_PRETTY_VALUES
   PROPERTIES
     TIMEOUT 30
-    ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+    # One value per property: a ; inside a PROPERTIES value splits it, dropping the second variable
+    ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib"
+    ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${CMAKE_BINARY_DIR}/lib"
   DISCOVERY_TIMEOUT 30
 )
 
@@ -186,10 +201,65 @@ gtest_discover_tests(
   NO_PRETTY_VALUES
   CMD_WRAPPER ${mpi_cmd} ${test_parameters}
   PROPERTIES
-    ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+    ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib"
+    ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:${CMAKE_BINARY_DIR}/lib"
     TIMEOUT 30
     PROCESSORS ${mpi_processes}
   DISCOVERY_TIMEOUT 30
+)
+
+# The plugin's MPI tests again with 3 ranks: with 2 there is a single client, so ranks never
+# send different numbers of commands, and Split and Shared form the same group as Entire.
+# Open MPI's mpirun counts one slot per physical core, so a host with fewer than 3 (such as a
+# GitHub hosted runner) refuses to start 3 ranks. So this test always passes --oversubscribe
+# when the launcher is named mpirun and the MPI is Open MPI, whatever the host size.
+# Open MPI is detected first from the library version string FindMPI read from the MPI
+# library (MPI_C_/MPI_CXX_LIBRARY_VERSION_STRING, saved by cmake/PackageAdios.cmake),
+# because `mpirun --version` takes its text from help files that some packages leave out
+# (Ubuntu 26.04's PMIx and PRRTE 3 ship none, so the output lacks "Open MPI"). The
+# `mpirun --version` match is the fallback, for when that step was skipped (cross-compiling
+# without an emulator) or failed, or the string does not say Open MPI.
+# No other launcher gets it: MPICH's mpirun and aprun reject it, and srun's --oversubscribe
+# means something else.
+set(test_parameters_3 ${test_parameters})
+list(POP_BACK test_parameters_3)
+list(APPEND test_parameters_3 3)
+set(mpi_oversubscribe OFF)
+set(mpi_oversubscribe_check "none")
+get_filename_component(mpi_cmd_name "${mpi_cmd}" NAME)
+if(mpi_cmd_name STREQUAL "mpirun")
+  get_property(mpi_library_version GLOBAL PROPERTY LSMIO_MPI_LIBRARY_VERSION_STRING)
+  if(mpi_library_version MATCHES "Open MPI")
+    set(mpi_oversubscribe ON)
+    set(mpi_oversubscribe_check "library version string")
+  else()
+    execute_process(
+      COMMAND ${mpi_cmd} --version
+      OUTPUT_VARIABLE mpi_cmd_version
+      ERROR_VARIABLE mpi_cmd_version
+      RESULT_VARIABLE mpi_cmd_version_result
+      TIMEOUT 30
+    )
+    if(mpi_cmd_version_result EQUAL 0 AND mpi_cmd_version MATCHES "Open MPI|OpenRTE")
+      set(mpi_oversubscribe ON)
+      set(mpi_oversubscribe_check "mpirun --version")
+    endif()
+  endif()
+  if(mpi_oversubscribe)
+    list(INSERT test_parameters_3 0 --oversubscribe)
+  endif()
+endif()
+message(STATUS "Test module: ThreeRanks oversubscribe (Open MPI mpirun)=${mpi_oversubscribe} (matched: ${mpi_oversubscribe_check})")
+add_test(
+  NAME lsmioTest/pluginMPITests.ThreeRanks
+  COMMAND ${mpi_cmd} ${test_parameters_3} $<TARGET_FILE:test_mpi_adios>
+    --gtest_filter=lsmioTest/pluginMPITests.*
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+set_tests_properties(lsmioTest/pluginMPITests.ThreeRanks PROPERTIES
+  ENVIRONMENT "ADIOS2_PLUGIN_PATH=${CMAKE_BINARY_DIR}/lib;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}"
+  TIMEOUT 120
+  PROCESSORS 3
 )
 
 if(LSMIO_ENABLE_COVERAGE)

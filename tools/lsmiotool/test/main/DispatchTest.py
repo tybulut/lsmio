@@ -54,6 +54,7 @@ from lsmiotool.lib.cli import (
 from lsmiotool.lib.main import (
     CompareMain,
     HpcEnvMain,
+    LatexDataMain,
     LatexMain,
     ParseLegacyMain,
     ParseMain,
@@ -251,21 +252,46 @@ class DispatchTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 0)
                 mock_run.assert_called_once()
 
-        # 2. latex command
-        with patch.object(sys, "argv", [f_exec_str, "latex", "viking"]):
+        # 2. latex command: data and plots modes, and the global --ssd option
+        with patch.object(
+            sys,
+            "argv",
+            [
+                f_exec_str,
+                "latex",
+                "data",
+                "sources.yaml",
+                "--data-dir",
+                "d",
+                "--output-dir",
+                "o",
+            ],
+        ):
+            with patch.object(LatexDataMain, "run", return_value=0) as mock_run:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                mock_run.assert_called_once()
+
+        with patch.object(
+            sys,
+            "argv",
+            [f_exec_str, "--ssd", "latex", "plots", "sources.yaml", "--tsv-dir", "t"],
+        ):
             with patch.object(LatexMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 0)
                 mock_run.assert_called_once()
 
-        # latex with global --ssd
-        with patch.object(sys, "argv", [f_exec_str, "--ssd", "latex", "viking2"]):
-            with patch.object(LatexMain, "run", return_value=0) as mock_run:
+        # A failing latex run exits with its non-zero status
+        with patch.object(
+            sys, "argv", [f_exec_str, "latex", "plots", "sources.yaml", "--tsv-dir", "t"]
+        ):
+            with patch.object(LatexMain, "run", return_value=1):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 0)
-                mock_run.assert_called_once()
+                self.assertEqual(ctx.exception.code, 1)
 
         # 3. load-modules command
         with patch.object(sys, "argv", [f_exec_str, "load-modules"]):
@@ -366,11 +392,21 @@ class DispatchTest(unittest.TestCase):
                 self.assertIn("Usage:", mock_stdout.getvalue())
                 self.assertIn("compare <nodes|variants>", mock_stdout.getvalue())
 
-        # latex with no arguments
+        # latex with no arguments is a usage error
         with patch.object(sys, "argv", [f_exec_str, "latex"]):
-            with self.assertRaises(SystemExit) as ctx:
-                runpy.run_path(f_exec_str, run_name="__main__")
-            self.assertEqual(ctx.exception.code, 1)
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("needs a mode", mock_stderr.getvalue())
+
+        # latex --help prints its usage
+        with patch.object(sys, "argv", [f_exec_str, "latex", "--help"]):
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 0)
+                self.assertIn("latex data <sources.yaml>", mock_stdout.getvalue())
 
         # parseLegacy with insufficient arguments
         with patch.object(sys, "argv", [f_exec_str, "parseLegacy", "ior"]):

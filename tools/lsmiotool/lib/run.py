@@ -1565,6 +1565,13 @@ class RunPlanner:
             "ROCKSDB",
             "LEVELDB",
             "MANAGER",
+            # The backends' -sync arms (LsmioAdapter.ARM_ONLY_SETUPS): planned per arm; the
+            # CLI and resolveArmGroup refuse them as a run's own setup
+            "ADIOS-SYNC",
+            "NATIVE-SYNC",
+            "PLUGIN-SYNC",
+            "ROCKSDB-SYNC",
+            "LEVELDB-SYNC",
         },
         "lmp": {"LSMIO", "LSMIO-MMAP", "FS"},
         # EpocppAdapter.ALLOWED_SETUPS: the baseline, each backend's wall-time arm and
@@ -4301,7 +4308,7 @@ class RunOrchestrator:
                 f"Benchmark executable for arm '{f_arm.label}' is not usable: {f_err}.{f_hint}"
             ) from f_err
 
-        if f_arm.setup == "PLUGIN":
+        if f_arm.setup in ("PLUGIN", "PLUGIN-SYNC"):
             from lsmiotool.lib.site import findAdiosPluginLibrary
 
             if findAdiosPluginLibrary(f_profile.install_prefix) is None:

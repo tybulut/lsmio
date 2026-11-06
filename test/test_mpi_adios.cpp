@@ -31,9 +31,11 @@
 #include <adios2.h>
 #include <mpi.h>
 
+#include <cstring>
 #include <iostream>
 #include <lsmio/lsmio.hpp>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "test_mpi_utils.hpp"
@@ -193,5 +195,165 @@ auto adiosTV = ::testing::Values(std::make_tuple(AdiosEngine::BP5, MPIWorld::Sha
 
 
 INSTANTIATE_TEST_SUITE_P(lsmioTest, adiosMPITests, adiosTV);
+
+// The plugin under each aggregation layout: arrays, local values and attributes round-trip,
+// and a put the aggregator cannot store fails the Close of every rank in its group
+class pluginMPITests : public ::testing::TestWithParam<MPIWorld> {
+  protected:
+    std::string getFile(const std::string &name, MPIWorld worldSize, int worldRank) {
+        std::string file = "test-mpi-plugin-" + name + "-" + genPreFix(true, worldSize);
+        if (worldSize == MPIWorld::Self) file += "-" + std::to_string(worldRank);
+        return file + ".db";
+    }
+
+    adios2::Params getParams(const std::string &file, MPIWorld worldSize) {
+        adios2::Params params;
+        params["PluginName"] = "LSMIOPlugin";
+        params["PluginLibrary"] = "liblsmio_adios";
+        params["FileName"] = file;
+        if (worldSize == MPIWorld::Entire) {
+            params["AggregationType"] = "EveryoneWrites";
+        } else if (worldSize == MPIWorld::Split) {
+            params["AggregationType"] = "EveryoneWrites";
+            params["AggregatorRatio"] = "2";
+        } else if (worldSize == MPIWorld::EntireSerial) {
+            params["AggregationType"] = "EveryoneWritesSerial";
+        } else if (worldSize == MPIWorld::Shared) {
+            params["AggregationType"] = "TwoLevelShm";
+        }
+        return params;
+    }
+
+    // This rank's rank and size in its aggregation group, formed as LSMIOManager forms it
+    // (group rank 0 is the aggregator)
+    std::pair<int, int> aggGroup(MPIWorld worldSize, int worldRank) {
+        if (worldSize == MPIWorld::Self) return {0, 1};
+        MPI_Comm comm = MPI_COMM_WORLD;
+        if (worldSize == MPIWorld::Shared) {
+            MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &comm);
+        } else if (worldSize == MPIWorld::Split) {
+            MPI_Comm_split(MPI_COMM_WORLD, worldRank / 2, worldRank, &comm);
+        }
+        int rank, size;
+        MPI_Comm_rank(comm, &rank);
+        MPI_Comm_size(comm, &size);
+        if (comm != MPI_COMM_WORLD) MPI_Comm_free(&comm);
+        return {rank, size};
+    }
+
+    adios2::Engine open(adios2::ADIOS &adios, const std::string &ioName, const std::string &file,
+                        MPIWorld worldSize, adios2::Mode mode) {
+        adios2::IO io = adios.DeclareIO(ioName);
+        io.SetEngine("Plugin");
+        io.SetParameters(getParams(file, worldSize));
+        return io.Open(file, mode);
+    }
+};
+
+TEST_P(pluginMPITests, ArraysAndAttributes) {
+    const MPIWorld worldSize = GetParam();
+    int numProcesses, worldRank;
+    MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
+    MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    const size_t n = 1000;
+    std::vector<double> block(n);
+    for (size_t i = 0; i < n; i++) block[i] = (worldRank * 1e6 + i) / 3.0;
+    const std::string basePath = "/data/%T/;x";
+    const std::string file = getFile("arrays", worldSize, worldRank);
+
+    adios2::ADIOS adios(worldSize == MPIWorld::Self ? MPI_COMM_SELF : MPI_COMM_WORLD);
+    const size_t ranks = (worldSize == MPIWorld::Self) ? 1 : numProcesses;
+    const size_t offset = (worldSize == MPIWorld::Self) ? 0 : n * worldRank;
+
+    {
+        adios2::Engine writer = open(adios, "writer", file, worldSize, adios2::Mode::Write);
+        adios2::IO io = adios.AtIO("writer");
+        auto field = io.DefineVariable<double>("field", {n * ranks}, {offset}, {n});
+        auto rank = io.DefineVariable<int>("rank", {adios2::LocalValueDim});
+        io.DefineAttribute<int>("io_version", 3);
+        io.DefineAttribute<std::string>("basePath", basePath);
+        writer.Put(field, block.data(), adios2::Mode::Sync);
+        writer.Put(rank, worldRank, adios2::Mode::Sync);
+        writer.Close();
+    }
+
+    std::vector<double> read;
+    int rankRead = -1;
+    {
+        adios2::Engine reader = open(adios, "reader", file, worldSize, adios2::Mode::Read);
+        adios2::IO io = adios.AtIO("reader");
+        auto field = io.InquireVariable<double>("field");
+        ASSERT_TRUE(field);
+        field.SetSelection({{offset}, {n}});
+        reader.Get(field, read, adios2::Mode::Sync);
+        reader.Get(io.InquireVariable<int>("rank"), rankRead, adios2::Mode::Sync);
+
+        auto version = io.InquireAttribute<int>("io_version");
+        ASSERT_TRUE(version);
+        EXPECT_EQ(version.Data(), std::vector<int>{3});
+        auto base = io.InquireAttribute<std::string>("basePath");
+        ASSERT_TRUE(base);
+        EXPECT_EQ(base.Data(), std::vector<std::string>{basePath});
+        reader.Close();
+    }
+
+    ASSERT_EQ(read.size(), n);
+    EXPECT_EQ(std::memcmp(read.data(), block.data(), n * sizeof(double)), 0);
+    EXPECT_EQ(rankRead, worldRank);
+}
+
+// A put the store refuses (a key longer than maxKeyLen), made by a client (group rank 1) and
+// then by an aggregator (group rank 0): the rank that puts to its own store throws at Put, and
+// with aggregation every rank of the group throws at Close. Works for any number of ranks
+TEST_P(pluginMPITests, FailedPutReportedAtClose) {
+    const MPIWorld worldSize = GetParam();
+    int numProcesses, worldRank;
+    MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
+    MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
+    if (numProcesses < 2) GTEST_SKIP() << "needs at least 2 ranks";
+    const auto [aggRank, aggSize] = aggGroup(worldSize, worldRank);
+
+    for (const int badRank : {1, 0}) {
+        MPI_Barrier(MPI_COMM_WORLD);
+        const std::string file =
+            getFile("failed-put-" + std::to_string(badRank), worldSize, worldRank);
+        adios2::ADIOS adios(worldSize == MPIWorld::Self ? MPI_COMM_SELF : MPI_COMM_WORLD);
+        adios2::Engine writer = open(adios, "writer", file, worldSize, adios2::Mode::Write);
+        adios2::IO io = adios.AtIO("writer");
+
+        auto ok = io.DefineVariable<int>("ok", {adios2::LocalValueDim});
+        writer.Put(ok, worldRank, adios2::Mode::Sync);
+
+        bool putThrew = false, closeThrew = false;
+        if (aggRank == badRank) {
+            auto bad = io.DefineVariable<int>(std::string(lsmio::gConfigLSMIO.maxKeyLen + 1, 'k'));
+            try {
+                writer.Put(bad, 1, adios2::Mode::Sync);
+            } catch (const std::exception &) {
+                putThrew = true;
+            }
+        }
+        try {
+            writer.Close();
+        } catch (const std::exception &) {
+            closeThrew = true;
+        }
+        // ADIOS keeps an engine open when its Close throws: closing again must be safe
+        if (closeThrew) EXPECT_NO_THROW(writer.Close());
+
+        const bool aggregated = (aggSize > 1);
+        EXPECT_EQ(putThrew, aggRank == badRank && (!aggregated || aggRank == 0))
+            << "rank " << worldRank << " bad rank " << badRank;
+        EXPECT_EQ(closeThrew, aggregated && badRank < aggSize)
+            << "rank " << worldRank << " bad rank " << badRank;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(lsmioTest, pluginMPITests,
+                         ::testing::Values(MPIWorld::Shared, MPIWorld::Entire,
+                                           MPIWorld::EntireSerial, MPIWorld::Self,
+                                           MPIWorld::Split));
 
 }  // namespace lsmioTest

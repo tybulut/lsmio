@@ -30,9 +30,15 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <lsmio/manager/manager.hpp>
+#include <string_view>
+#include <thread>
+#include <vector>
 
 const std::string TEST_DIR_MGR = "";
 
@@ -146,6 +152,55 @@ TEST(lsmioManager, Deferred) {
     std::filesystem::remove_all(dbPath);
 }
 
+// The raw-pointer puts and putBytes copy the caller's bytes before they return: the buffers are
+// overwritten or freed right after, and the counters count each put once
+TEST(lsmioManager, RawPutsCopyCallerBytes) {
+    std::string dbName = "test-mgr-store-raw.db";
+    std::string dbPath = TEST_DIR_MGR.empty() ? dbName : TEST_DIR_MGR + "/" + dbName;
+    std::filesystem::remove_all(dbPath);
+
+    auto expected = [](int i) {
+        std::string v(1000 + i, static_cast<char>('a' + i));
+        v[10] = '\0';  // binary-safe
+        return v;
+    };
+    {
+        lsmio::LSMIOManager lm(dbName, TEST_DIR_MGR);
+        lm.resetCounters();
+        uint64_t bytes = 0;
+        for (int i = 0; i < 12; ++i) {
+            const std::string key = "raw" + std::to_string(i);
+            const std::string e = expected(i);
+            char *buf = new char[e.size()];
+            std::memcpy(buf, e.data(), e.size());
+            switch (i % 3) {
+                case 0:
+                    EXPECT_TRUE(lm.put(key, buf, static_cast<std::streamsize>(e.size())));
+                    break;
+                case 1:
+                    EXPECT_TRUE(lm.put(key, static_cast<const void *>(buf), 1, e.size()));
+                    break;
+                default:
+                    EXPECT_TRUE(lm.putBytes(key, std::string_view(buf, e.size()), i % 2 == 0));
+                    break;
+            }
+            std::memset(buf, 'X', e.size());
+            delete[] buf;
+            bytes += e.size();
+        }
+        std::string value;
+        for (int i = 0; i < 12; ++i) {
+            EXPECT_TRUE(lm.get("raw" + std::to_string(i), &value));
+            EXPECT_EQ(value, expected(i)) << "key " << i;
+        }
+        uint64_t rb, wb, ro, wo;
+        lm.getCounters(wb, rb, wo, ro);
+        EXPECT_EQ(wb, bytes);
+        EXPECT_EQ(wo, 12u);
+    }
+    std::filesystem::remove_all(dbPath);
+}
+
 TEST(lsmioManager, ReOpen_Write) {
     bool success = true;
     std::string value;
@@ -242,6 +297,52 @@ TEST(lsmioManager, CounterAccountingRvalueAndRawBuffers) {
         EXPECT_EQ(wo, 3);
     }
     std::filesystem::remove_all(dbPath);
+}
+
+// A failed initialize leaves no instance, so a later one can succeed; misuse is refused
+TEST(lsmioManager, InitializeLifecycle) {
+    std::string blocker = "test-mgr-init-blocker";
+    std::ofstream(blocker) << "not a directory";
+    std::string dbName = "test-mgr-init.db";
+    std::filesystem::remove_all(dbName);
+
+    // The database directory would go under a regular file
+    EXPECT_THROW(lsmio::LSMIOManager::initialize(dbName, blocker),
+                 std::filesystem::filesystem_error);
+    std::filesystem::remove(blocker);
+    EXPECT_EQ(lsmio::LSMIOManager::getManager(), nullptr);
+    EXPECT_FALSE(lsmio::LSMIOManager::cleanup());
+
+    lsmio::LSMIOManager *lm = lsmio::LSMIOManager::initialize(dbName, TEST_DIR_MGR, true);
+    ASSERT_NE(lm, nullptr);
+    EXPECT_EQ(lsmio::LSMIOManager::initialize(dbName, TEST_DIR_MGR, true), nullptr);
+    EXPECT_EQ(lsmio::LSMIOManager::getManager(), lm);
+
+    EXPECT_TRUE(lsmio::LSMIOManager::cleanup());
+    EXPECT_EQ(lsmio::LSMIOManager::getManager(), nullptr);
+    EXPECT_FALSE(lsmio::LSMIOManager::cleanup());
+    std::filesystem::remove_all(dbName);
+}
+
+// Threads that initialize at once: exactly one opens the database
+TEST(lsmioManager, ConcurrentInitialize) {
+    std::string dbName = "test-mgr-init-race.db";
+    std::atomic<bool> go{false};
+    std::atomic<int> opened{0};
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < 8; i++) {
+        threads.emplace_back([&] {
+            while (!go) std::this_thread::yield();
+            if (lsmio::LSMIOManager::initialize(dbName, TEST_DIR_MGR, true)) opened++;
+        });
+    }
+    go = true;
+    for (auto &thread : threads) thread.join();
+
+    EXPECT_EQ(opened, 1);
+    EXPECT_TRUE(lsmio::LSMIOManager::cleanup());
+    std::filesystem::remove_all(dbName);
 }
 
 int main(int argc, char **argv) {

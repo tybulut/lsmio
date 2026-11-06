@@ -30,8 +30,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <filesystem>
 #include <iostream>
 #include <lsmio/manager/store/store_ldb.hpp>
+#include <string>
+#include <string_view>
+#include <vector>
 
 const std::string TEST_DIR_LDB = "";
 
@@ -135,6 +140,44 @@ TEST(lsmioLevelDB, Deferred) {
 
     success = lc.writeBarrier();
     EXPECT_EQ(success, true);
+}
+
+// putBytes hands the caller's bytes to LevelDB, which copies them: the caller's buffer can change
+// right after, with or without flush (LevelDB batches small values put without flush)
+TEST(lsmioLevelDB, PutBytesCopiesCallerBytes) {
+    std::string dbName = "test-ldb-store-putbytes.db";
+    std::string dbPath = TEST_DIR_LDB.empty() ? dbName : TEST_DIR_LDB + "/" + dbName;
+    std::filesystem::remove_all(dbPath);
+
+    auto expected = [](int i) {
+        std::string v(i % 2 ? 100 : 4096, static_cast<char>('a' + i % 26));
+        v[v.size() / 2] = '\0';  // binary-safe
+        return v;
+    };
+    {
+        lsmio::LSMIOStoreLDB lc(dbPath);
+        for (int i = 0; i < 16; ++i) {
+            const bool flush = (i % 4) < 2;
+            const std::string e = expected(i);
+            std::vector<char> buf(e.begin(), e.end());
+            EXPECT_TRUE(lc.putBytes("key" + std::to_string(i),
+                                    std::string_view(buf.data(), buf.size()), flush));
+            std::fill(buf.begin(), buf.end(), 'X');
+            if (flush) {
+                std::string value;
+                EXPECT_TRUE(lc.get("key" + std::to_string(i), &value));
+                EXPECT_EQ(value, e) << "key " << i;
+            }
+        }
+        EXPECT_TRUE(lc.writeBarrier());
+        for (int i = 0; i < 16; ++i) {
+            std::string value;
+            EXPECT_TRUE(lc.get("key" + std::to_string(i), &value));
+            EXPECT_EQ(value, expected(i)) << "key " << i;
+        }
+        lc.close();
+    }
+    std::filesystem::remove_all(dbPath);
 }
 
 int main(int argc, char** argv) {

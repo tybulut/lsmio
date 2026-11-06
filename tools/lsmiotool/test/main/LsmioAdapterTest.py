@@ -96,8 +96,8 @@ class LsmioAdapterTest(unittest.TestCase):
             f_segment_count=16384,
         )
 
-    def testExactEighteenMappings(self) -> None:
-        """Validate all 18 exact setup/block permutations (6 setups x 3 block sizes)."""
+    def testExactSetupBlockMappings(self) -> None:
+        """Validate all 33 exact setup/block permutations (11 setups x 3 block sizes)."""
         f_setups = [
             "NATIVE",
             "ADIOS",
@@ -105,6 +105,11 @@ class LsmioAdapterTest(unittest.TestCase):
             "ROCKSDB",
             "LEVELDB",
             "MANAGER",
+            "ADIOS-SYNC",
+            "NATIVE-SYNC",
+            "PLUGIN-SYNC",
+            "ROCKSDB-SYNC",
+            "LEVELDB-SYNC",
         ]
         f_combos = [self.m_combo_64k, self.m_combo_1m, self.m_combo_8m]
         f_expected_executables = {
@@ -114,6 +119,19 @@ class LsmioAdapterTest(unittest.TestCase):
             "ROCKSDB": "bm_rocksdb",
             "LEVELDB": "bm_leveldb",
             "MANAGER": "bm_manager",
+            "ADIOS-SYNC": "bm_adios",
+            "NATIVE-SYNC": "bm_native",
+            "PLUGIN-SYNC": "bm_adios",
+            "ROCKSDB-SYNC": "bm_rocksdb",
+            "LEVELDB-SYNC": "bm_leveldb",
+        }
+        f_setup_flags = {
+            "PLUGIN": ["--lsmio-plugin"],
+            "ADIOS-SYNC": ["--lsmio-always-flush"],
+            "NATIVE-SYNC": ["--lsmio-always-flush"],
+            "PLUGIN-SYNC": ["--lsmio-plugin", "--lsmio-always-flush"],
+            "ROCKSDB-SYNC": ["--lsmio-always-flush"],
+            "LEVELDB-SYNC": ["--lsmio-always-flush"],
         }
         f_block_params = {
             "64K": ("65536", "32768"),
@@ -159,8 +177,7 @@ class LsmioAdapterTest(unittest.TestCase):
 
                 # Assemble expected argv
                 f_expected_argv_list: List[str] = [f_expected_exe, "-m", "-g"]
-                if f_setup == "PLUGIN":
-                    f_expected_argv_list.append("--lsmio-plugin")
+                f_expected_argv_list.extend(f_setup_flags.get(f_setup, []))
                 f_expected_argv_list.extend(
                     [
                         "--lsmio-no-autotune",
@@ -190,7 +207,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 self.assertTrue(f_bound.isRankLocal)
                 f_tested_count += 1
 
-        self.assertEqual(f_tested_count, 18)
+        self.assertEqual(f_tested_count, 33)
 
     def testTemplateUnbound(self) -> None:
         """Confirm template from createLaunchSpec is unbound and rank-local."""
@@ -562,7 +579,22 @@ class LsmioAdapterTest(unittest.TestCase):
                 "ROCKSDB",
                 "LEVELDB",
                 "MANAGER",
+                "ADIOS-SYNC",
+                "NATIVE-SYNC",
+                "PLUGIN-SYNC",
+                "ROCKSDB-SYNC",
+                "LEVELDB-SYNC",
             },
+        )
+        self.assertEqual(
+            set(LsmioAdapter.ALLOWED_SETUPS) - set(LsmioAdapter.RUN_SETUPS),
+            set(LsmioAdapter.ARM_ONLY_SETUPS),
+        )
+        # The planner plans each arm's sub-request: it accepts every setup the adapter runs
+        from lsmiotool.lib.run import RunPlanner
+
+        self.assertEqual(
+            RunPlanner.ALLOWED_SETUPS["lsmio"], set(LsmioAdapter.ALLOWED_SETUPS)
         )
         self.assertEqual(LsmioAdapter.getBlockParameters("64K"), (65536, 32768))
         self.assertEqual(LsmioAdapter.getBlockParameters("1M"), (1048576, 4096))

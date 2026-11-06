@@ -62,8 +62,8 @@ class LSMIOStream {
     /// @brief Static instance of the LSMIO manager.
     static LSMIOManager* _lm;
 
-    /// @brief Atomic flags to indicate the initialization status of LSMIO.
-    static std::atomic<int> _lsmioInitialized, _lsmioInitializing, _lsmioCleaning;
+    /// @brief Lifecycle of the static manager.
+    static std::atomic<LifecycleState> _lsmioState;
 
     /**
      * @brief Generates a unique key for LSM database operations.

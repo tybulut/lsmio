@@ -41,8 +41,10 @@
 #include <fstream>
 #include <lsmio/lsmio.hpp>
 #include <lsmio/manager/manager.hpp>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 
 using namespace adios2;
 
@@ -89,22 +91,44 @@ class LsmioPlugin : public adios2::plugin::PluginEngineInterface {
     void DoClose(const int transportIndex = -1) override;
 
   private:
-    const std::string _variableStoreKey = "__adios_metadata";
+    /** Key of the metadata record: one per DB (per rank in aggregated mode), written once at
+     ** Close in write mode, holding every variable put and every attribute **/
+    const std::string _metadataKey = "__adios_metadata";
 
     std::string _dbName;
+    std::string _fileName;
     LSMIOManager *_lm = nullptr;
     size_t _currentStep = 0;
+
+    /** Stored start and count of each variable read from the metadata (read mode) **/
+    std::map<std::string, std::pair<Dims, Dims>> _blocks;
+
+    /** Encoded metadata entries keyed by kind and name: those of an existing DB opened in
+     ** append mode, then each variable as it is put (the last put of a name wins) **/
+    std::map<std::pair<uint8_t, std::string>, std::string> _entries;
+
+    bool IsWriter() const;
+
+    std::string EncodeMetadata() const;
+    void DecodeMetadata(const std::string &record, bool defineInIO);
+
+    void RecordVariable(const core::VariableBase &variable);
+
+    static void CheckMemorySelection(const core::VariableBase &variable);
+    void CheckSelection(const core::VariableBase &variable) const;
 
     template <typename T>
     void AddVariable(const std::string &name, Dims shape, Dims start, Dims count);
 
-    template <class T>
-    void ReadVariable(core::Variable<T> &variable, T *values);
-
-    void WriteVarsFromIO(const Mode launch);
+    template <typename T>
+    static void EncodeAttribute(std::string &entry, const core::AttributeBase &attribute);
 
     template <typename T>
-    std::string WriteVariableInfo(core::Variable<T> &variable);
+    void DefineAttribute(const std::string &name, bool singleValue, size_t elements,
+                         const char *data, size_t size);
+
+    template <class T>
+    void ReadVariable(core::Variable<T> &variable, T *values);
 
     template <typename T>
     void WriteVariable(core::Variable<T> &variable, const T *values, const Mode launch);
