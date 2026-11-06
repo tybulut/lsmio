@@ -29,6 +29,7 @@
 #
 
 import errno
+import functools
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import stat
 import subprocess
 import sys
 import time
+import types
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -2015,6 +2017,18 @@ class Launcher:
     launch_rank_workers = launchRankWorkers
 
 
+class _ClassOrInstanceMethod:
+    """A method bound to its instance when called on one and to its class otherwise:
+    a classmethod would bind the class either way, losing the instance's settings."""
+
+    def __init__(self, f_func: Any) -> None:
+        self.m_func = f_func
+        functools.update_wrapper(self, f_func)
+
+    def __get__(self, f_obj: Any, f_owner: Optional[type] = None) -> Any:
+        return types.MethodType(self.m_func, f_owner if f_obj is None else f_obj)
+
+
 class AllocationController:
     """Ordered matrix allocation controller and execution supervisor.
 
@@ -2238,7 +2252,7 @@ class AllocationController:
         f_point_dir_name = f"{f_matched_ord:02d}-tasks-{f_matched_sp.tasks}"
         return f_matched_sp, f_matched_ord, f_point_dir_name
 
-    @classmethod
+    @_ClassOrInstanceMethod
     def run(
         cls,
         f_manifest_path: Union[str, Any],
@@ -2267,7 +2281,8 @@ class AllocationController:
         Raises:
             AllocationControllerError: On preflight validation failures, manifest mismatch, or existing results.
         """
-        # Resolve defaults if invoked on instance
+        # Called on an instance (the lsmiotool-worker wrappers), cls is that instance:
+        # its constructor arguments are the defaults
         if not isinstance(cls, type):
             if f_runner is None:
                 f_runner = cls.m_runner
