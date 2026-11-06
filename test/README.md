@@ -80,11 +80,14 @@ All tests should be run through `./build.sh` or `ctest`.
 ./build.sh xtest
 ```
 
-### 2.3 Python Toolchain Suite (`ptest`)
+### 2.3 Python Toolchain Suite (`py-xtest`, `py-itest`)
 
 ```bash
-# Runs all lsmiotool unit, functional, and integration tests
-./build.sh ptest
+# Runs all lsmiotool unit, functional, and integration tests quietly (no C++ build)
+./build.sh py-xtest
+
+# Runs one module, class or method (a dotted name as `lsmiotool test` takes it)
+./build.sh py-itest lsmiotool.test.main.VersionTest
 
 # Equivalent direct execution
 cd tools/lsmiotool && ./lsmiotool test
@@ -214,12 +217,30 @@ ctest --test-dir build -R "SSTableManagerTest" -V
 
 ### 4.5 Code Coverage Analysis
 
-To measure test code coverage across C++ libraries and Python modules:
+The target is 95% line and 95% branch coverage for every changed in-scope file (`lib/**/*.cpp` and `tools/lsmiotool/**/*.py`, excluding tests); see the Code Coverage Invariant in `DEVELOPERS.md`. C++ and Python are measured by separate commands.
 
 ```bash
-# Build with instrumentation and run tests
+# C++: build with instrumentation, run the C++ tests, print the report
 ./build.sh coverage
+./build.sh results          # reprint it
+./build.sh results-fail     # only files below 95% on line or branch
+./build.sh cov-show lib/manager/store/store.cpp
+
+# Python: run the lsmiotool suite under coverage.py (branch mode), print the report
+./build.sh py-coverage
+./build.sh py-results       # reprint it
+./build.sh py-results-fail  # only files below 95% on line or branch
+./build.sh cov-show tools/lsmiotool/lib/archive.py
+
+# Quick check of one test target (a lower bound: other tests may cover more)
+./build.sh fast-cov test_version lib/Version.cpp                         # C++; invalidates the last `coverage` run
+./build.sh fast-cov lsmiotool.test.main.VersionTest tools/lsmiotool/lib/version.py   # Python; leaves py-coverage data alone
 ```
 
-- Linux/GCC and macOS/LLVM generate terminal coverage summaries and line-by-line inspection (`./build.sh results`, `results-fail`, `cov-show <file>`).
-- Python coverage for `lsmiotool` is generated at `build/lsmiotool-python-coverage.json`.
+- C++ coverage uses llvm-cov on a Clang build; the report names its backend. lsmio builds with Clang by default when Clang 19 or newer is installed; otherwise with the default compilers. On a tree built with another compiler, `coverage` stops with a message: run `./build.sh clean coverage` with `CC` and `CXX` unset. To build with GCC for ordinary tests, choose it on the cleaning call: `env CC=gcc CXX=g++ ./build.sh clean test`; to return to Clang, `env -u CC -u CXX ./build.sh clean coverage`. Each switch costs a full rebuild.
+- If Clang cannot link out of the box, CMake looks for a GCC installation that has libstdc++ and that Clang builds with, and caches `--gcc-install-dir` for it. Compiler or linker flags you need for one compiler go on the cleaning command only; do not export them.
+- Each test process writes its own profile file (`test-<pid>.profraw`), and only `.cpp` code is instrumented (`cmake/lsmio-profile-list.txt`).
+- If llvm-cov reports functions with mismatched data, or an in-scope file has no row, `coverage`, `results` and `results-fail` print the table and then fail: that run gives no verdict.
+- Some tests take timing-dependent paths (e.g. in `manager.cpp`, `SSTableManager.cpp`, `StoreNative.cpp`, `posix.cpp`, `benchmark.cpp`), so executed counts can differ slightly between runs while the totals stay fixed.
+- Python coverage data is stored in the build tree (`build/lsmiotool-python-coverage.json`). `./build.sh clean-cov` removes both languages' coverage data.
+- Ubuntu CI builds with GCC (macOS CI with AppleClang) and runs ctest without coverage, so both compilers are exercised.

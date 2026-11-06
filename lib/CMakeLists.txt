@@ -78,14 +78,21 @@ macro(lsmio_add_props MY_TARGET)
   # FetchContent) compiles against these headers rather than an older installed copy
   target_include_directories(${MY_TARGET} PUBLIC $<BUILD_INTERFACE:${LSMIO_INCLUDE_DIR}>)
   target_compile_definitions(${MY_TARGET} PRIVATE LSMIO_VERSION="${PROJECT_VERSION}")
-  if(LSMIO_ENABLE_COVERAGE)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      target_compile_options(${MY_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-      target_link_libraries(${MY_TARGET} PUBLIC -fprofile-instr-generate)
-    else()
-      target_compile_options(${MY_TARGET} PRIVATE -fprofile-arcs -ftest-coverage)
-      target_link_libraries(${MY_TARGET} PUBLIC --coverage)
-    endif()
+  # Coverage needs Clang (llvm-cov); the root CMakeLists.txt refuses any other compiler.
+  if(LSMIO_ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Only .cpp code is instrumented (cmake/lsmio-profile-list.txt), so header
+    # functions that several objects hold cannot disagree in the profile. The
+    # list is a dependency of the objects, so editing it recompiles them.
+    set(LSMIO_PROFILE_LIST "${LSMIO_SOURCE_DIR}/cmake/lsmio-profile-list.txt")
+    target_compile_options(${MY_TARGET} PRIVATE -fprofile-instr-generate -fcoverage-mapping
+                                                "-fprofile-list=${LSMIO_PROFILE_LIST}")
+    target_link_libraries(${MY_TARGET} PUBLIC -fprofile-instr-generate)
+    get_target_property(_lsmio_srcs ${MY_TARGET} SOURCES)
+    foreach(_src IN LISTS _lsmio_srcs)
+      if(_src MATCHES "\\.cpp$")
+        set_property(SOURCE ${_src} APPEND PROPERTY OBJECT_DEPENDS "${LSMIO_PROFILE_LIST}")
+      endif()
+    endforeach()
   endif()
 endmacro()
 
