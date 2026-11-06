@@ -1646,5 +1646,364 @@ class SchedulerRendererTest(unittest.TestCase):
         self.assertEqual(f_pbs_runner.m_invoked_kwargs[0].get("f_timeout"), 120.0)
 
 
+_BASE_JOB_SPEC_KWARGS = {
+    "f_point_id": "0-tasks-1",
+    "f_script_path": "/tmp/job.sh",
+    "f_working_dir": "/tmp/work",
+}
+
+
+class SchedulerDomainValidationTest(unittest.TestCase):
+    """Pure validation of JobSpec, JobResult and the renderer validators."""
+
+    def _assertRaisesMessage(self, f_exc_type, f_message, f_call) -> None:
+        with self.assertRaises(f_exc_type) as f_cm:
+            f_call()
+        self.assertEqual(str(f_cm.exception), f_message)
+
+    def _fullSpec(self) -> JobSpec:
+        return JobSpec(
+            f_point_id=" 3 ",
+            f_script_path=" /tmp/job.sh ",
+            f_working_dir="/tmp/work",
+            f_resources={"a": 1},
+            f_mail_user=" u@example.com ",
+            f_mail_mode=SlurmMailMode.END_FAIL,
+            f_account=" acct ",
+            f_output_path=" /tmp/o.log ",
+            f_error_path=" /tmp/e.log ",
+            f_job_name=" lm-abc ",
+        )
+
+    def testJobSpecPointIdRequired(self) -> None:
+        """point_id may not be None or blank; an int is stringified."""
+        self._assertRaisesMessage(
+            SchedulerScriptError,
+            "point_id cannot be None",
+            lambda: JobSpec(**{**_BASE_JOB_SPEC_KWARGS, "f_point_id": None}),
+        )
+        for f_v in ("", "   ", "\t"):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    "point_id cannot be empty",
+                    lambda: JobSpec(**{**_BASE_JOB_SPEC_KWARGS, "f_point_id": f_v}),
+                )
+        f_spec = JobSpec(**{**_BASE_JOB_SPEC_KWARGS, "f_point_id": 0})
+        self.assertEqual(f_spec.point_id, "0")
+
+    def testJobSpecRequiredPathsMustBeNonBlankStrings(self) -> None:
+        """script_path and working_dir are required non-blank strings."""
+        for f_field in ("f_script_path", "f_working_dir"):
+            for f_v in ("", "  ", None, 5):
+                with self.subTest(f_field=f_field, f_v=f_v):
+                    self._assertRaisesMessage(
+                        SchedulerScriptError,
+                        f"{f_field[2:]} must be a non-empty string, got: {f_v!r}",
+                        lambda: JobSpec(**{**_BASE_JOB_SPEC_KWARGS, f_field: f_v}),
+                    )
+
+    def testJobSpecOptionalFieldsRejectBlankOrNonString(self) -> None:
+        """Optional string fields reject blank and non-string values."""
+        for f_field in (
+            "f_mail_user",
+            "f_account",
+            "f_output_path",
+            "f_error_path",
+            "f_job_name",
+        ):
+            for f_v in ("", "  ", 5, b"x"):
+                with self.subTest(f_field=f_field, f_v=f_v):
+                    self._assertRaisesMessage(
+                        SchedulerScriptError,
+                        f"{f_field[2:]} must be a non-empty string or None, got: {f_v!r}",
+                        lambda: JobSpec(**{**_BASE_JOB_SPEC_KWARGS, f_field: f_v}),
+                    )
+
+    def testJobSpecAliasesStripPaddedValues(self) -> None:
+        """The constructor stores stripped values; both alias styles read them."""
+        f_full = self._fullSpec()
+        self.assertEqual(f_full.pointId, "3")
+        self.assertEqual(f_full.point_id, "3")
+        self.assertEqual(f_full.mailUser, "u@example.com")
+        self.assertIs(f_full.mailMode, SlurmMailMode.END_FAIL)
+        self.assertEqual(f_full.outputPath, "/tmp/o.log")
+        self.assertEqual(f_full.output_path, "/tmp/o.log")
+        self.assertEqual(f_full.errorPath, "/tmp/e.log")
+        self.assertEqual(f_full.error_path, "/tmp/e.log")
+        self.assertEqual(f_full.jobName, "lm-abc")
+        self.assertEqual(f_full.account, "acct")
+        self.assertEqual(f_full.resources, {"a": 1})
+        self.assertEqual(
+            repr(f_full), "JobSpec(point_id='3', script_path='/tmp/job.sh', job_name='lm-abc')"
+        )
+
+    def testJobSpecEqualityAndHash(self) -> None:
+        """Equality uses all fields; the hash uses a subset."""
+        f_full = self._fullSpec()
+        f_same = JobSpec(
+            f_point_id="3",
+            f_script_path="/tmp/job.sh",
+            f_working_dir="/tmp/work",
+            f_resources={"a": 1},
+            f_mail_user="u@example.com",
+            f_mail_mode=SlurmMailMode.END_FAIL,
+            f_account="acct",
+            f_output_path="/tmp/o.log",
+            f_error_path="/tmp/e.log",
+            f_job_name="lm-abc",
+        )
+        f_diff = JobSpec(
+            f_point_id="3",
+            f_script_path="/tmp/job.sh",
+            f_working_dir="/tmp/other",
+            f_job_name="lm-abc",
+        )
+        self.assertTrue(f_full == f_same)
+        f_hash = hash(("3", "/tmp/job.sh", "lm-abc"))
+        self.assertEqual(hash(f_full), f_hash)
+        self.assertEqual(hash(f_same), f_hash)
+        self.assertEqual(len({f_full, f_same}), 1)
+        self.assertTrue(f_full != f_diff)
+        self.assertEqual(hash(f_full), hash(f_diff))
+        self.assertIs(f_full.__eq__("3"), False)
+        self.assertFalse(f_full == None)  # noqa: E711
+        self.assertFalse(f_full == ("3",))
+
+    def testJobSpecFrozenDeleteAndUnfrozenSlots(self) -> None:
+        """A frozen JobSpec refuses del and set; an unfrozen one allows both."""
+        f_full = self._fullSpec()
+        with self.assertRaises(AttributeError) as f_cm:
+            del f_full.m_job_name
+        self.assertEqual(
+            str(f_cm.exception), "Cannot delete attribute from immutable JobSpec"
+        )
+        with self.assertRaises(AttributeError) as f_cm:
+            f_full.m_job_name = "x"
+        self.assertEqual(str(f_cm.exception), "Cannot modify immutable JobSpec")
+        self.assertEqual(f_full.job_name, "lm-abc")
+        f_raw = JobSpec.__new__(JobSpec)
+        setattr(f_raw, "m_point_id", "p")
+        self.assertEqual(f_raw.m_point_id, "p")
+        delattr(f_raw, "m_point_id")
+        with self.assertRaises(AttributeError):
+            getattr(f_raw, "m_point_id")
+
+    def testJobSpecScalePointIdUsesDirName(self) -> None:
+        """A ScalePoint point id is stored as its point directory name."""
+        f_sp = ScalePoint(f_tasks=8, f_ppn=1, f_nodes=8)
+        f_spec = JobSpec(**{**_BASE_JOB_SPEC_KWARGS, "f_point_id": f_sp})
+        self.assertEqual(f_spec.point_id, "tasks-8")
+        self.assertEqual(f_spec.toDict()["point_id"], f_spec.point_id)
+
+    def testJobResultRequiresJobHandle(self) -> None:
+        """JobResult rejects anything but a JobHandle."""
+        for f_v in (None, "slurm:123", {"backend": "slurm", "job_id": "123"}, 123):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerError,
+                    f"job_handle must be JobHandle, got: {type(f_v).__name__}",
+                    lambda: JobResult(f_v),
+                )
+
+    def testJobResultStringStatusNormalisation(self) -> None:
+        """String statuses are stripped and mapped to SchedulerJobState when known."""
+        f_h = JobHandle("slurm", "123")
+        f_rows = (
+            ("RUNNING", "RUNNING", str, False, "RUNNING"),
+            (" odd ", "odd", str, False, "odd"),
+            ("Queued", SchedulerJobState.QUEUED, SchedulerJobState, True, "queued"),
+            (
+                " SUCCEEDED ",
+                SchedulerJobState.SUCCEEDED,
+                SchedulerJobState,
+                True,
+                "succeeded",
+            ),
+            ("", "", str, False, ""),
+            ("unknown", SchedulerJobState.UNKNOWN, SchedulerJobState, False, "unknown"),
+        )
+        for f_v, f_stored, f_type, f_ok, f_dict in f_rows:
+            with self.subTest(f_v=f_v):
+                f_r = JobResult(f_h, f_status=f_v)
+                self.assertEqual(f_r.status, f_stored)
+                self.assertIsInstance(f_r.status, f_type)
+                self.assertIs(f_r.isSuccess, f_ok)
+                self.assertEqual(f_r.toDict()["status"], f_dict)
+
+    def testJobResultDiagnosticsReprAndEquality(self) -> None:
+        """Diagnostics are stringified; repr and equality cover the stored fields."""
+        f_h = JobHandle("slurm", "123")
+        f_r = JobResult(
+            f_h,
+            f_raw_output=None,
+            f_exit_code="2",
+            f_status="failed",
+            f_diagnostics=["a", 3],
+        )
+        f_r2 = JobResult(
+            JobHandle("slurm", "123"),
+            f_raw_output=None,
+            f_exit_code=2,
+            f_status=SchedulerJobState.FAILED,
+            f_diagnostics=("a", "3"),
+        )
+        self.assertEqual(f_r.diagnostics, ("a", "3"))
+        self.assertEqual(f_r.raw_output, "")
+        self.assertEqual(f_r.exit_code, 2)
+        self.assertIs(f_r.status, SchedulerJobState.FAILED)
+        self.assertEqual(JobResult(f_h).diagnostics, ())
+        self.assertEqual(
+            repr(f_r),
+            "JobResult(job_handle=JobHandle(backend='slurm', job_id='123'), "
+            "exit_code=2, status=<SchedulerJobState.FAILED: 'failed'>)",
+        )
+        self.assertTrue(f_r == f_r2)
+        self.assertFalse(f_r == JobResult(f_h, f_exit_code=2, f_status="failed"))
+        self.assertFalse(f_r == "x")
+        self.assertFalse(f_r == f_h)
+
+    def testJobResultFrozenDeleteAndUnfrozenSlots(self) -> None:
+        """A frozen JobResult refuses del; an unfrozen one allows set and del."""
+        f_r = JobResult(JobHandle("slurm", "123"), f_exit_code=2, f_status="failed")
+        with self.assertRaises(AttributeError) as f_cm:
+            del f_r.m_status
+        self.assertEqual(
+            str(f_cm.exception), "Cannot delete attribute from immutable JobResult"
+        )
+        self.assertIs(f_r.status, SchedulerJobState.FAILED)
+        f_raw = JobResult.__new__(JobResult)
+        setattr(f_raw, "m_exit_code", 7)
+        self.assertEqual(f_raw.m_exit_code, 7)
+        delattr(f_raw, "m_exit_code")
+        with self.assertRaises(AttributeError):
+            getattr(f_raw, "m_exit_code")
+
+    def testRendererJobNameChecks(self) -> None:
+        """validateJobName type, blank and correlation-token checks."""
+        f_r = SchedulerScriptRenderer
+        self.assertIsInstance(f_r(), SchedulerScriptRenderer)
+        for f_v in (None, 5, b"lm", ["x"]):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    f"Job name must be a string, got: {type(f_v).__name__}",
+                    lambda: f_r.validateJobName(f_v),
+                )
+        for f_v in ("", "   "):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    "Job name cannot be empty",
+                    lambda: f_r.validateJobName(f_v),
+                )
+        f_tok = "lm-abcdef0123456789abcdef01"
+        self.assertEqual(f_r.validateJobName(f_tok), f_tok)
+        self.assertEqual(f_r.validateJobName(f_tok, f_strict_token=True), f_tok)
+        self.assertEqual(f_r.validateJobName(" " + f_tok + " "), f_tok)
+        self.assertEqual(
+            f_r.validateJobName(" " + f_tok + " ", f_strict_token=True), f_tok
+        )
+        for f_v in (
+            "lm-ABCDEF0123456789ABCDEF01",
+            "lm-abc",
+            "job-1",
+            "lm-abcdef0123456789abcdef012",
+        ):
+            with self.subTest(f_v=f_v):
+                self.assertEqual(f_r.validateJobName(f_v), f_v)
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    "Job name does not match correlation token format "
+                    f"'^lm-[0-9a-f]{{24}}$': {f_v!r}",
+                    lambda: f_r.validateJobName(f_v, f_strict_token=True),
+                )
+
+    def testRendererQueueOrPartitionChecks(self) -> None:
+        """validateQueueOrPartition type, blank and pattern checks."""
+        f_q = SchedulerScriptRenderer.validateQueueOrPartition
+        for f_v in (None, 5):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    f"queue/partition must be a string, got: {type(f_v).__name__}",
+                    lambda: f_q(f_v),
+                )
+        for f_v in ("", "   "):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    "queue/partition cannot be empty",
+                    lambda: f_q(f_v),
+                )
+        for f_v in ("-bad", "a b", "_x", "nodes=2"):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    "queue/partition does not match pattern "
+                    f"'^[A-Za-z0-9][A-Za-z0-9_.-]*$': {f_v!r}",
+                    lambda: f_q(f_v),
+                )
+        self._assertRaisesMessage(
+            SchedulerScriptError, "qos cannot be empty", lambda: f_q("", "qos")
+        )
+        self._assertRaisesMessage(
+            SchedulerScriptError,
+            "partition must be a string, got: int",
+            lambda: f_q(3, f_field_name="partition"),
+        )
+        self.assertEqual(f_q(" standard "), "standard")
+
+    def testRendererMailModeBackendTypeAndFake(self) -> None:
+        """validateMailMode checks the backend type and the fake/typed-enum rules."""
+        f_m = SchedulerScriptRenderer.validateMailMode
+        for f_b in ("slurm", None, 1):
+            with self.subTest(f_b=f_b):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    f"Backend must be SchedulerKind, got: {type(f_b).__name__}",
+                    lambda: f_m(f_b, SlurmMailMode.END_FAIL),
+                )
+        self.assertEqual(f_m(SchedulerKind.FAKE, None), "")
+        for f_mode in (SlurmMailMode.END_FAIL, PbsMailMode.ABE, 0):
+            with self.subTest(f_mode=f_mode):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    f"Fake scheduler does not accept mail mode, got: {f_mode!r}",
+                    lambda: f_m(SchedulerKind.FAKE, f_mode),
+                )
+        self._assertRaisesMessage(
+            SchedulerScriptError,
+            "Raw mail mode string '' is rejected; must use typed backend enum",
+            lambda: f_m(SchedulerKind.FAKE, ""),
+        )
+        self._assertRaisesMessage(
+            SchedulerScriptError,
+            "Slurm backend requires SlurmMailMode enum, got: NoneType (None)",
+            lambda: f_m(SchedulerKind.SLURM, None),
+        )
+        self._assertRaisesMessage(
+            SchedulerScriptError,
+            "PBS backend requires PbsMailMode enum, got: NoneType (None)",
+            lambda: f_m(SchedulerKind.PBS, None),
+        )
+
+    def testRendererValidatePathRejectsNonString(self) -> None:
+        """validatePath requires a string and names the field."""
+        f_p = SchedulerScriptRenderer.validatePath
+        for f_v in (None, 5, b"/x", ["/x"]):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    SchedulerScriptError,
+                    f"path must be a string, got: {type(f_v).__name__}",
+                    lambda: f_p(f_v),
+                )
+        self._assertRaisesMessage(
+            SchedulerScriptError,
+            "worker_path must be a string, got: NoneType",
+            lambda: f_p(None, "worker_path"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

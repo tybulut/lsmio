@@ -31,6 +31,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 import json
+import math
 import os
 import re
 import stat
@@ -565,6 +566,14 @@ class EvidenceSerializer:
         return EvidenceRecord.fromDict(f_parsed)
 
 
+def _isFiniteNumber(f_value: Union[int, float]) -> bool:
+    """True when the number converts to a finite float (an int beyond float range is not finite)."""
+    try:
+        return math.isfinite(f_value)
+    except OverflowError:
+        return False
+
+
 class ResultPayloadValidator:
     """Validator enforcing exact schema, type, identity, and artifact constraints on terminal result payloads."""
 
@@ -735,6 +744,7 @@ class ResultPayloadValidator:
             if (
                 isinstance(f_raw_el, bool)
                 or not isinstance(f_raw_el, (int, float))
+                or not _isFiniteNumber(f_raw_el)
                 or f_raw_el < 0.0
             ):
                 raise EvidenceSchemaError(
@@ -1102,6 +1112,33 @@ class EvidenceStore:
     def plan(self) -> Optional[RunPlan]:
         return self.m_plan
 
+    def _resolvePoint(
+        self,
+        f_point: Union[ScalePoint, str, int],
+        f_ordinal: Optional[int],
+    ) -> Tuple[Union[ScalePoint, str, int], Optional[int]]:
+        """Resolve an int point (plan index or task count, first match in plan order) to the plan's ScalePoint and its index.
+
+        Other point kinds are returned unchanged. An int without a plan is returned unchanged (the layout
+        rejects it with ArtifactError). With a plan, an int that matches no plan point, a bool, or an
+        explicit ordinal that differs from the matched index raises EvidencePlanError.
+        """
+        if not isinstance(f_point, int) or self.m_plan is None:
+            return f_point, f_ordinal
+        if not isinstance(f_point, bool):
+            for f_idx, f_plan_point in enumerate(
+                getattr(self.m_plan, "scale_points", ())
+            ):
+                if f_idx == f_point or f_plan_point.tasks == f_point:
+                    if f_ordinal is not None and f_ordinal != f_idx:
+                        raise EvidencePlanError(
+                            f"Ordinal {f_ordinal} contradicts point '{f_point}' matched at plan index {f_idx} for run '{self.m_layout.runId}'"
+                        )
+                    return f_plan_point, f_idx
+        raise EvidencePlanError(
+            f"Point '{f_point}' is not part of plan for run '{self.m_layout.runId}'"
+        )
+
     def _validatePlanMembership(
         self,
         f_point: Optional[Union[ScalePoint, str, int]] = None,
@@ -1455,6 +1492,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record a scheduler observation event under points/<point>/scheduler/observations/<writer>/<seq>.json."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
 
         f_obs_dir = self.m_layout.pointSchedulerObservationsDir(
@@ -1489,6 +1527,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record submission_requested before scheduler invocation."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
         f_path = os.path.join(
             self.m_layout.pointSchedulerDir(f_point, f_ordinal),
@@ -1518,6 +1557,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record submission_dispatched immediately before the process call."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
         f_path = os.path.join(
             self.m_layout.pointSchedulerDir(f_point, f_ordinal),
@@ -1548,6 +1588,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record submission_recorded persisting the returned JobHandle."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
         if not isinstance(f_handle, JobHandle):
             raise EvidenceSchemaError(
@@ -1586,6 +1627,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record cancel_requested event when cancellation is initiated."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
         f_path = os.path.join(
             self.m_layout.pointSchedulerDir(f_point, f_ordinal),
@@ -1620,6 +1662,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record cancel_recorded event confirming cancellation."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
         f_path = os.path.join(
             self.m_layout.pointSchedulerDir(f_point, f_ordinal),
@@ -1656,6 +1699,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record an allocation-controller event under points/<point>/worker/events/<seq>.json."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(f_point=f_point, f_ordinal=f_ordinal)
 
         f_worker_events_dir = self.m_layout.pointWorkerEventsDir(f_point, f_ordinal)
@@ -1686,6 +1730,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record combination controller result under points/<point>/combinations/<combo>/controller-result.json."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(
             f_point=f_point, f_combination=f_combination, f_ordinal=f_ordinal
         )
@@ -1722,6 +1767,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> EvidenceRecord:
         """Record task rank result under points/<point>/ranks/<global_rank>/<combo>/result.json."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         self._validatePlanMembership(
             f_point=f_point,
             f_combination=f_combination,
@@ -1808,6 +1854,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> List[EvidenceRecord]:
         """Read all scheduler observations for a writer at a point in monotonic sequence order."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         f_dir = self.m_layout.pointSchedulerObservationsDir(
             f_point, f_writer=f_writer_id, f_ordinal=f_ordinal
         )
@@ -1838,6 +1885,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> List[EvidenceRecord]:
         """Read all worker events for a point in monotonic sequence order."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         f_dir = self.m_layout.pointWorkerEventsDir(f_point, f_ordinal)
         if not os.path.exists(f_dir):
             return []
@@ -1867,6 +1915,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> Optional[EvidenceRecord]:
         """Read controller result for a point and combination if present."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         f_path = self.m_layout.pointControllerResultPath(
             f_point, f_combination, f_ordinal
         )
@@ -1880,6 +1929,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> Optional[EvidenceRecord]:
         """Read task rank result for a point, rank, and combination if present."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         f_path = self.m_layout.pointRankResultPath(
             f_point, f_global_rank, f_combination, f_ordinal
         )
@@ -1891,6 +1941,7 @@ class EvidenceStore:
         f_ordinal: Optional[int] = None,
     ) -> Dict[str, Optional[EvidenceRecord]]:
         """Read standard submission records for a point (requested, dispatched, recorded, cancel_req, cancel_rec)."""
+        f_point, f_ordinal = self._resolvePoint(f_point, f_ordinal)
         f_sched_dir = self.m_layout.pointSchedulerDir(f_point, f_ordinal)
         f_names = [
             "submission_requested",

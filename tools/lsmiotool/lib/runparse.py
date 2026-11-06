@@ -129,7 +129,7 @@ def parseInt(f_val: Any, f_fallback: int = 0) -> int:
         if not f_val_str or f_val_str.upper() in ["NA", "NAN", "N/A", "NULL", "NONE"]:
             return f_fallback
         return int(float(f_val_str))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return f_fallback
 
 

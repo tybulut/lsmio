@@ -601,5 +601,221 @@ class ArtifactStoreTest(unittest.TestCase):
         finally:
             shutil.rmtree(f_target_outside, ignore_errors=True)
 
+    def _assertRaisesMessage(self, f_exc_type, f_message, f_call) -> None:
+        with self.assertRaises(f_exc_type) as f_cm:
+            f_call()
+        self.assertIs(type(f_cm.exception), f_exc_type)
+        self.assertEqual(str(f_cm.exception), f_message)
+
+    def testValidatePathContainmentArgumentChecks(self) -> None:
+        """Path and base argument checks, relative '..' and absolute '..' collapse."""
+        f_root = os.path.abspath(self.m_temp_dir)
+        for f_p in (None, 5, "", "   "):
+            with self.subTest(f_p=f_p):
+                self._assertRaisesMessage(
+                    ContainmentError,
+                    f"Path must be a non-empty string, got: {f_p!r}",
+                    lambda: validatePathContainment(f_p, f_root),
+                )
+        for f_b in (None, 5, "", "  "):
+            with self.subTest(f_b=f_b):
+                self._assertRaisesMessage(
+                    ContainmentError,
+                    f"Base path must be a non-empty string, got: {f_b!r}",
+                    lambda: validatePathContainment(f_root + "/x", f_b),
+                )
+        for f_p in ("../x", "a/../../x", ".."):
+            with self.subTest(f_p=f_p):
+                self._assertRaisesMessage(
+                    ContainmentError,
+                    f"Path traversal '..' detected in path: {f_p!r}",
+                    lambda: validatePathContainment(f_p, f_root),
+                )
+        self.assertEqual(
+            validatePathContainment(f_root + "/a/../b", f_root), f_root + "/b"
+        )
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testArtifactLayoutConstructorChecks(self) -> None:
+        """Constructor argument checks, NUL bytes and run id stripping."""
+        for f_r in (None, 5, "", "   "):
+            with self.subTest(f_r=f_r):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    f"benchmark_root must be a non-empty string, got: {f_r!r}",
+                    lambda: ArtifactLayout(f_r, "run-1"),
+                )
+        for f_v in (None, 5, "", "   "):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    f"run_id must be a non-empty string, got: {f_v!r}",
+                    lambda: ArtifactLayout(self.m_temp_dir, f_v),
+                )
+        for f_r, f_text in (
+            ("/tmp/a\0b", "benchmark_root contains NUL byte: '/tmp/a\\x00b'"),
+            ("a\0b", "benchmark_root contains NUL byte: 'a\\x00b'"),
+        ):
+            with self.subTest(f_r=f_r):
+                self._assertRaisesMessage(
+                    ContainmentError, f_text, lambda: ArtifactLayout(f_r, "run-1")
+                )
+        self.assertEqual(ArtifactLayout(self.m_temp_dir, " run-1 ").runId, "run-1")
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testArtifactLayoutUnfrozenSlotWrites(self) -> None:
+        """An unfrozen instance allows slot set and delete; a frozen one refuses."""
+        f_raw = ArtifactLayout.__new__(ArtifactLayout)
+        setattr(f_raw, "m_run_id", "r")
+        self.assertEqual(f_raw.m_run_id, "r")
+        delattr(f_raw, "m_run_id")
+        with self.assertRaises(AttributeError):
+            getattr(f_raw, "m_run_id")
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        self._assertRaisesMessage(
+            AttributeError,
+            "Cannot modify immutable ArtifactLayout",
+            lambda: setattr(f_layout, "m_run_id", "x"),
+        )
+        self.assertEqual(f_layout.runId, "run-1")
+
+    def testArtifactLayoutSnakeCaseAliases(self) -> None:
+        """Each snake_case property equals its camelCase twin and the expected path."""
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        f_root = os.path.abspath(self.m_temp_dir)
+        f_run = f_root + "/runs/run-1"
+        f_rows = (
+            ("benchmark_root", "benchmarkRoot", f_root),
+            ("run_id", "runId", "run-1"),
+            ("runs_dir", "runsDir", f_root + "/runs"),
+            ("run_root", "runRoot", f_run),
+            ("manifest_path", "manifestPath", f_run + "/manifest.json"),
+            ("control_dir", "controlDir", f_run + "/control"),
+            ("control_lock_path", "controlLockPath", f_run + "/control/lock"),
+            ("control_events_dir", "controlEventsDir", f_run + "/control/events"),
+            ("points_dir", "pointsDir", f_run + "/points"),
+        )
+        for f_snake, f_camel, f_expected in f_rows:
+            with self.subTest(f_snake=f_snake):
+                self.assertEqual(getattr(f_layout, f_snake), f_expected)
+                self.assertEqual(getattr(f_layout, f_camel), f_expected)
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testWriterNameValidation(self) -> None:
+        """Writer names must be non-blank and free of separators and '..'."""
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        f_run = os.path.abspath(self.m_temp_dir) + "/runs/run-1"
+        for f_w in (None, 5, "", "   "):
+            with self.subTest(f_w=f_w):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    f"writer must be a non-empty string, got: {f_w!r}",
+                    lambda: f_layout.controlEventPath(f_w, "7"),
+                )
+        self.assertEqual(
+            f_layout.controlEventPath(" control ", "7"),
+            f_run + "/control/events/control/7.json",
+        )
+        for f_w in ("", "   ", 5):
+            with self.subTest(f_w=f_w):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    f"writer must be a non-empty string, got: {f_w!r}",
+                    lambda: f_layout.pointSchedulerObservationsDir("00-tasks-1", f_w),
+                )
+        for f_w in ("a/b", "a\\b", "..", "x..y", "a\0b"):
+            with self.subTest(f_w=f_w):
+                self._assertRaisesMessage(
+                    ContainmentError,
+                    f"Invalid writer name: {f_w!r}",
+                    lambda: f_layout.pointSchedulerObservationsDir("00-tasks-1", f_w),
+                )
+        f_obs = f_run + "/points/00-tasks-1/scheduler/observations"
+        self.assertEqual(
+            f_layout.pointSchedulerObservationsDir("00-tasks-1", " slurm "),
+            f_obs + "/slurm",
+        )
+        self.assertEqual(f_layout.pointSchedulerObservationsDir("00-tasks-1"), f_obs)
+        self._assertRaisesMessage(
+            ContainmentError,
+            "Invalid writer name: 'a/b'",
+            lambda: f_layout.pointSchedulerObservationPath("00-tasks-1", "a/b", 1),
+        )
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testPointDirNameIntegerAndResourceDescriptors(self) -> None:
+        """Integer and ScheduledPointResources descriptors map to directory names."""
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        f_points = os.path.abspath(self.m_temp_dir) + "/runs/run-1/points"
+        self._assertRaisesMessage(
+            ArtifactError,
+            "Integer point needs a plan to be named; resolve it to a ScalePoint and ordinal first",
+            lambda: f_layout.pointDirName(-1),
+        )
+        f_spr = ScheduledPointResources("01:00:00")
+        self.assertEqual(f_layout.pointDirName(f_spr), "point")
+        self.assertEqual(f_layout.pointDirName(f_spr, 3), "point-03")
+        self.assertEqual(f_layout.pointDirName(f_spr, 0), "point-00")
+        self.assertEqual(f_layout.pointDir(f_spr, 4), f_points + "/point-04")
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testPointDirNameRejectsBareInteger(self) -> None:
+        """A bare integer has no plan to name it from; the layout rejects it (EvidenceStore resolves ints)."""
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        f_sp = ScalePoint(f_tasks=4, f_ppn=1, f_nodes=4)
+        for f_args in ((2,), (2, 5), (0,), (True,)):
+            with self.subTest(f_args=f_args):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    "Integer point needs a plan to be named; resolve it to a ScalePoint and ordinal first",
+                    lambda: f_layout.pointDirName(*f_args),
+                )
+        self.assertEqual(f_layout.pointDirName(f_sp, 2), "02-tasks-4")
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testUnsupportedPointAndCombinationTypes(self) -> None:
+        """Unsupported point and combination descriptors are rejected by type name."""
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        for f_v in (None, 1.0, ("a",), b"x"):
+            with self.subTest(f_v=f_v):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    f"Unsupported point descriptor: {type(f_v).__name__}",
+                    lambda: f_layout.pointDirName(f_v),
+                )
+        for f_c in (None, 5, ("c16", "8M"), {"name": "c16_b8M"}):
+            with self.subTest(f_c=f_c):
+                self._assertRaisesMessage(
+                    ArtifactError,
+                    f"Unsupported combination type: {type(f_c).__name__}",
+                    lambda: f_layout.combinationName(f_c),
+                )
+        self._assertRaisesMessage(
+            ArtifactError,
+            "Unsupported combination type: int",
+            lambda: f_layout.pointCombinationDir("00-tasks-1", 7),
+        )
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+    def testArtifactLayoutReprAndEquality(self) -> None:
+        """repr, equality (abspath based) and the missing __hash__."""
+        f_layout = ArtifactLayout(self.m_temp_dir, "run-1")
+        f_root = os.path.abspath(self.m_temp_dir)
+        self.assertEqual(
+            repr(f_layout), f"ArtifactLayout(benchmark_root={f_root!r}, run_id='run-1')"
+        )
+        self.assertTrue(f_layout == ArtifactLayout(self.m_temp_dir, "run-1"))
+        self.assertTrue(f_layout == ArtifactLayout(self.m_temp_dir + "/", "run-1"))
+        self.assertFalse(f_layout == ArtifactLayout(self.m_temp_dir, "run-2"))
+        self.assertFalse(f_layout == ArtifactLayout(self.m_temp_dir + "/x", "run-1"))
+        self.assertFalse(f_layout == f_layout.runRoot)
+        self.assertIs(f_layout.__eq__(None), False)
+        self.assertTrue(f_layout != "x")
+        # Observation O-A1: __eq__ without __hash__ makes layouts unhashable.
+        with self.assertRaises(TypeError):
+            hash(f_layout)
+        self.assertEqual(os.listdir(self.m_temp_dir), [])
+
+
 if __name__ == "__main__":
     unittest.main()

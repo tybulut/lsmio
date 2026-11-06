@@ -30,7 +30,9 @@
 
 """Detached runs (lib/detach.py), the orchestrator pid file, and 'lsmiotool cancel'."""
 
+import builtins
 import io
+import json
 import os
 import signal
 import socket
@@ -39,10 +41,16 @@ import sys
 import tempfile
 import time
 import unittest
-from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from typing import Any, Dict, List, Optional, Tuple
+from unittest.mock import call, patch
 
-from lsmiotool.lib.detach import consoleLogPath
+from lsmiotool.lib import detach
+from lsmiotool.lib.detach import (
+    FOLLOW_INTERVAL_SECONDS,
+    consoleLogFor,
+    consoleLogPath,
+    detachAndFollow,
+)
 from lsmiotool.lib.main import CancelMain
 from lsmiotool.lib.run import (
     liveOrchestratorMessage,
@@ -278,6 +286,359 @@ class OrchestratorPidTest(unittest.TestCase):
         with patch("sys.stderr", new_callable=io.StringIO) as f_err:
             self.assertEqual(CancelMain(f_root).run(), 1)
         self.assertIn("no lsmiotool run is running", f_err.getvalue())
+
+
+def _fdIds() -> List[Optional[Tuple[int, int, int]]]:
+    """Identify the runner's fds 0, 1 and 2 (None for a closed one)."""
+    f_ids: List[Optional[Tuple[int, int, int]]] = []
+    for f_fd in (0, 1, 2):
+        try:
+            f_st = os.fstat(f_fd)
+            f_ids.append((f_st.st_dev, f_st.st_ino, f_st.st_mode))
+        except OSError:
+            f_ids.append(None)
+    return f_ids
+
+
+class _BrokenFlush(io.StringIO):
+    """A text stream whose flush counts its calls and fails like a closed pipe."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.m_flushes = 0
+
+    def flush(self) -> None:
+        self.m_flushes += 1
+        raise OSError(32, "Broken pipe")
+
+
+class ConsoleLogForTest(unittest.TestCase):
+    """consoleLogFor follows the first run of an arm marker's group."""
+
+    def testConsoleLogForFollowsTheFirstArm(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="lsmiotool-detach-") as f_tmp:
+            f_root = os.path.join(f_tmp, "runs", "run-b")
+            os.makedirs(f_root)
+            f_own = os.path.join(f_root, "control", "console.log")
+            f_marker = os.path.join(f_root, ".lsmiotool-arm.json")
+            self.assertEqual(consoleLogFor(f_root), f_own)
+            f_rows = [
+                (
+                    json.dumps({"group_run_ids": ["run-a", "run-b"]}),
+                    os.path.join(f_tmp, "runs", "run-a", "control", "console.log"),
+                ),
+                (
+                    json.dumps({"group_run_ids": [7]}),
+                    os.path.join(f_tmp, "runs", "7", "control", "console.log"),
+                ),
+                (json.dumps({"group_run_ids": []}), f_own),
+                (json.dumps({"group_run_ids": None}), f_own),
+                (json.dumps({}), f_own),
+                (json.dumps(["run-a"]), f_own),
+                ("{broken", f_own),
+                ("", f_own),
+            ]
+            for f_text, f_expected in f_rows:
+                with self.subTest(f_marker=f_text):
+                    with open(f_marker, "w", encoding="utf-8") as f_f:
+                        f_f.write(f_text)
+                    self.assertEqual(consoleLogFor(f_root), f_expected)
+            self.assertFalse(os.path.exists(os.path.join(f_root, "control")))
+
+
+class DetachInProcessTest(unittest.TestCase):
+    """In-process tests of detachAndFollow with fork, sessions, fds and exits mocked.
+
+    Deliberately not a DetachTest subclass: DetachTest.tearDown kills the pid in
+    control/orchestrator.pid, and the in-process child path records this runner's pid there.
+    """
+
+    _SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+    def setUp(self) -> None:
+        self.m_fd_ids = _fdIds()
+        f_tmp = tempfile.TemporaryDirectory(prefix="lsmiotool-detach-")
+        self.addCleanup(f_tmp.cleanup)
+        self.m_runs = os.path.join(f_tmp.name, "runs")
+        self.m_root = os.path.join(self.m_runs, "run-a")
+        self.m_root2 = os.path.join(self.m_runs, "run-b")
+        os.makedirs(self.m_root)
+        os.makedirs(os.path.join(self.m_root2, "control"))
+        self.m_log = consoleLogPath(self.m_root)
+
+        # Process state detach.py really changes: restored after every patch is stopped.
+        self.m_handlers = {f_s: signal.getsignal(f_s) for f_s in self._SIGNALS}
+        self.m_mask = signal.pthread_sigmask(signal.SIG_BLOCK, ())
+
+        def restore() -> None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, self.m_mask)
+            for f_s, f_h in self.m_handlers.items():
+                signal.signal(f_s, f_h)
+
+        self.addCleanup(restore)
+
+        # Never fork, leave the session, redirect fds, wait or exit for real.
+        self.m_fork = self._patch(
+            "os.fork", side_effect=AssertionError("unscripted fork")
+        )
+        self.m_setsid = self._patch("os.setsid")
+        self.m_dup2 = self._patch("os.dup2")
+        self.m_exit = self._patch("os._exit")
+        self.m_waitpid = self._patch(
+            "os.waitpid", side_effect=AssertionError("unscripted waitpid")
+        )
+        self.m_sleep = self._patch("time.sleep")
+
+        # The follower's writes to fd 1 go to a buffer; any other fd is written for real.
+        self.m_out = bytearray()
+        self.m_write_error: Optional[BaseException] = None
+        f_real_write = os.write
+
+        def write(f_fd: int, f_data: bytes) -> int:
+            if f_fd != 1:
+                return f_real_write(f_fd, f_data)
+            if self.m_write_error is not None:
+                raise self.m_write_error
+            self.m_out.extend(f_data)
+            return len(f_data)
+
+        self._patch("os.write", side_effect=write)
+
+        # Record the fds detach.py opens, to prove they are closed.
+        self.m_opened_fds: List[int] = []
+        f_real_open = os.open
+
+        def osopen(*f_args: Any, **f_kwargs: Any) -> int:
+            f_fd = f_real_open(*f_args, **f_kwargs)
+            self.m_opened_fds.append(f_fd)
+            return f_fd
+
+        self._patch("os.open", side_effect=osopen)
+
+        # The log file _follow opens and never closes (observation O8): close it here.
+        self.m_files: List[Any] = []
+
+        def fopen(*f_args: Any, **f_kwargs: Any) -> Any:
+            f_file = builtins.open(*f_args, **f_kwargs)
+            self.m_files.append(f_file)
+            return f_file
+
+        f_open_patch = patch.object(detach, "open", create=True, side_effect=fopen)
+        f_open_patch.start()
+        self.addCleanup(f_open_patch.stop)
+        self.addCleanup(lambda: [f_f.close() for f_f in self.m_files])
+
+        # Python-level streams only; the runner's own stream objects and fds stay untouched.
+        self.m_stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        self.m_stderr = io.StringIO()
+        self._patch("sys.stdout", new=self.m_stdout)
+        self._patch("sys.stderr", new=self.m_stderr)
+
+    def _patch(self, f_target: str, **f_kwargs: Any) -> Any:
+        f_patch = patch(f_target, **f_kwargs)
+        f_mock = f_patch.start()
+        self.addCleanup(f_patch.stop)
+        return f_mock
+
+    def _assertRunnerFdsUntouched(self) -> None:
+        self.assertEqual(_fdIds(), self.m_fd_ids)
+
+    def _assertOpenedFdsClosed(self) -> None:
+        for f_fd in self.m_opened_fds:
+            with self.assertRaises(OSError):
+                os.fstat(f_fd)
+
+    def _mask(self) -> Any:
+        return signal.pthread_sigmask(signal.SIG_BLOCK, ())
+
+    def _header(self, f_pid: int = 4242) -> bytes:
+        return (
+            f"Run detached (PID {f_pid}); its output is in {self.m_log}.\n"
+            f"Ctrl-C stops following, the run goes on; stop it with: "
+            f"lsmiotool cancel {self.m_root}\n"
+        ).encode()
+
+    def _script(self, *f_steps: Any) -> None:
+        f_iter = iter(f_steps)
+
+        def waitpid(f_pid: int, f_options: int) -> Any:
+            f_step = next(f_iter)
+            return f_step() if callable(f_step) else f_step
+
+        self.m_waitpid.side_effect = waitpid
+
+    def _writeLog(self, f_data: bytes, f_mode: str = "wb") -> None:
+        os.makedirs(os.path.dirname(self.m_log), exist_ok=True)
+        with builtins.open(self.m_log, f_mode) as f_f:
+            f_f.write(f_data)
+
+    def _forkReturns(self, f_pid: int) -> None:
+        self.m_fork.side_effect = None
+        self.m_fork.return_value = f_pid
+
+    def testEmptyRunRootsReturnAtOnce(self) -> None:
+        for f_roots in ([], ()):
+            with self.subTest(f_roots=f_roots):
+                self.assertIsNone(detachAndFollow(f_roots))
+        self.m_fork.assert_not_called()
+        self.assertEqual(self.m_opened_fds, [])
+        self.assertFalse(os.path.exists(os.path.join(self.m_root, "control")))
+
+    def testForkFailureRestoresMaskAndClosesLog(self) -> None:
+        f_broken = _BrokenFlush()
+        with patch("sys.stdout", new=f_broken):
+            for f_exc in (
+                OSError(11, "Resource temporarily unavailable"),
+                KeyboardInterrupt(),
+            ):
+                with self.subTest(f_exc=type(f_exc).__name__):
+                    self.m_fork.side_effect = f_exc
+                    self.m_opened_fds.clear()
+                    with self.assertRaises(type(f_exc)) as f_cm:
+                        detachAndFollow([self.m_root])
+                    self.assertIs(f_cm.exception, f_exc)
+                    self.assertEqual(self._mask(), self.m_mask)
+                    self.assertEqual(len(self.m_opened_fds), 1)
+                    self._assertOpenedFdsClosed()
+                    self.assertTrue(os.path.isfile(self.m_log))
+                    self.assertEqual(os.path.getsize(self.m_log), 0)
+                    self.assertIsNone(readOrchestratorPid(self.m_root))
+        self.assertEqual(f_broken.m_flushes, 2)
+        self.m_setsid.assert_not_called()
+        self.m_dup2.assert_not_called()
+        self._assertRunnerFdsUntouched()
+
+    def testChildLeavesSessionAndWritesBanner(self) -> None:
+        self._forkReturns(0)
+        self.assertFalse(hasattr(self.m_stderr, "reconfigure"))
+        self.assertIsNone(detachAndFollow([self.m_root, self.m_root2]))
+        self.m_setsid.assert_called_once_with()
+        f_log_fd, f_null_fd = self.m_opened_fds
+        self.assertEqual(
+            self.m_dup2.call_args_list,
+            [call(f_null_fd, 0), call(f_log_fd, 1), call(f_log_fd, 2)],
+        )
+        self._assertOpenedFdsClosed()
+        self.assertEqual(
+            {f_s: signal.getsignal(f_s) for f_s in self._SIGNALS}, self.m_handlers
+        )
+        self.assertEqual(self._mask(), self.m_mask)
+        self.assertTrue(self.m_stdout.line_buffering)
+        for f_root in (self.m_root, self.m_root2):
+            self.assertEqual(readOrchestratorPid(f_root)["pid"], os.getpid())
+        self.m_stdout.flush()
+        f_text = self.m_stdout.buffer.getvalue().decode()
+        self.assertRegex(f_text, r"^\[\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\] ")
+        self.assertEqual(
+            f_text.split("] ", 1)[1],
+            f"lsmiotool run detached from the terminal (PID {os.getpid()})\n"
+            f"  run root: {self.m_root}\n  run root: {self.m_root2}\n"
+            f"  stop it:  lsmiotool cancel {self.m_root}\n",
+        )
+        self.assertEqual(os.path.getsize(self.m_log), 0)
+        self.m_exit.assert_not_called()
+        self.m_waitpid.assert_not_called()
+        self._assertRunnerFdsUntouched()
+
+    def testParentRecordsChildAndExitsWithFollowStatus(self) -> None:
+        self._forkReturns(4242)
+        with patch("lsmiotool.lib.detach._follow", return_value=7) as f_follow:
+            self.assertIsNone(detachAndFollow([self.m_root, self.m_root2]))
+        f_follow.assert_called_once_with(4242, self.m_log, self.m_root, self.m_mask)
+        self.m_exit.assert_called_once_with(7)
+        for f_root in (self.m_root, self.m_root2):
+            self.assertEqual(readOrchestratorPid(f_root)["pid"], 4242)
+        self._assertOpenedFdsClosed()
+        self.assertTrue({signal.SIGINT, signal.SIGHUP} <= self._mask())
+        self.m_setsid.assert_not_called()
+        self.m_dup2.assert_not_called()
+        self._assertRunnerFdsUntouched()
+
+    def testParentExitsZeroWhenFollowRaises(self) -> None:
+        self._forkReturns(4242)
+        f_err = RuntimeError("follower broke")
+        with patch("lsmiotool.lib.detach._follow", side_effect=f_err):
+            with self.assertRaises(RuntimeError) as f_cm:
+                detachAndFollow([self.m_root])
+        self.assertIs(f_cm.exception, f_err)
+        self.m_exit.assert_called_once_with(0)
+        self.assertEqual(readOrchestratorPid(self.m_root)["pid"], 4242)
+
+    def testFollowCopiesTheGrowingLogAndReturnsTheExitStatus(self) -> None:
+        self._writeLog(b"A\n")
+
+        def done() -> Tuple[int, int]:
+            self._writeLog(b"B\n", "ab")
+            return (4242, 3 << 8)
+
+        self._script((0, 0), done)
+        self.assertEqual(detach._follow(4242, self.m_log, self.m_root, set()), 3)
+        self.assertEqual(bytes(self.m_out), self._header() + b"A\nB\n")
+        self.m_sleep.assert_called_once_with(FOLLOW_INTERVAL_SECONDS)
+        self.assertEqual(self.m_waitpid.call_args_list, [call(4242, os.WNOHANG)] * 2)
+        self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_DFL)
+        self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_DFL)
+        self.assertTrue(callable(signal.getsignal(signal.SIGINT)))
+        self.assertIsNot(signal.getsignal(signal.SIGINT), self.m_handlers[signal.SIGINT])
+        self.assertEqual(self._mask(), set())
+        self.assertEqual([f_f.mode for f_f in self.m_files], ["rb"])
+
+    def testFollowWithoutLogWaitsAndMapsASignalDeath(self) -> None:
+        self._script((0, 0), (4242, signal.SIGKILL))
+        self.assertEqual(
+            detach._follow(4242, self.m_log, self.m_root, None), 128 + signal.SIGKILL
+        )
+        f_err = f"[Errno 2] No such file or directory: '{self.m_log}'"
+        self.assertEqual(
+            bytes(self.m_out),
+            self._header()
+            + f"Cannot follow {self.m_log} ({f_err}); waiting for the run to end.\n".encode(),
+        )
+        self.assertEqual(self.m_files, [])
+        self.assertEqual(self._mask(), set())
+
+    def testFollowEmptyLogOfAFinishedRun(self) -> None:
+        self._writeLog(b"")
+        self._script((4242, 0))
+        self.assertEqual(detach._follow(4242, self.m_log, self.m_root, set()), 0)
+        self.assertEqual(bytes(self.m_out), self._header())
+        self.m_sleep.assert_not_called()
+
+    def testCtrlCStopsFollowingOnly(self) -> None:
+        self._writeLog(b"")
+
+        def ctrlc() -> Tuple[int, int]:
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            return (0, 0)
+
+        self._script(ctrlc)
+        self.assertEqual(detach._follow(4242, self.m_log, self.m_root, set()), 0)
+        self.assertEqual(
+            bytes(self.m_out),
+            self._header()
+            + (
+                f"\nStopped following; the run goes on (PID 4242).\n"
+                f"  Follow it:  tail -f {self.m_log}\n"
+                f"  Stop it:    lsmiotool cancel {self.m_root}\n"
+            ).encode(),
+        )
+        self.m_sleep.assert_not_called()
+        self.m_exit.assert_not_called()
+
+    def testFollowerEndsQuietlyWhenTheTerminalIsGone(self) -> None:
+        self._writeLog(b"x\n")
+        self.m_write_error = OSError(5, "Input/output error")
+        self.assertEqual(detach._follow(4242, self.m_log, self.m_root, set()), 0)
+        self.m_waitpid.assert_not_called()
+
+    def testParentFollowsTheRunAndExitsWithItsStatus(self) -> None:
+        self._forkReturns(4242)
+        self._script((4242, 5 << 8))
+        self.assertIsNone(detachAndFollow([self.m_root]))
+        self.m_exit.assert_called_once_with(5)
+        self.assertEqual(bytes(self.m_out), self._header())
+        self.assertEqual(self._mask(), self.m_mask)
+        self._assertRunnerFdsUntouched()
 
 
 if __name__ == "__main__":

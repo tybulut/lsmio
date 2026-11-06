@@ -36,8 +36,9 @@ import shutil
 import tempfile
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 import unittest
+from unittest.mock import patch
 
-from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore
+from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore, ContainmentError
 from lsmiotool.lib.evidence import (
     EvidenceKind,
     EvidenceRecord,
@@ -55,6 +56,7 @@ from lsmiotool.lib.run import (
     ScalePoint,
 )
 from lsmiotool.lib.runparse import (
+    ArchivedArtifactLayout,
     ConsoleSummaryFormatter,
     ExtractionError,
     IOR_SUMMARY_COLUMNS,
@@ -72,6 +74,8 @@ from lsmiotool.lib.runparse import (
     RunRootResolver,
     extractRun,
     generateReports,
+    parseFloat,
+    parseInt,
 )
 from lsmiotool.lib.site import EnvironmentResolver
 from lsmiotool.lib.state import OverallRunState, PointRunState
@@ -702,6 +706,654 @@ class RunParseTest(unittest.TestCase):
         with self.assertRaises(RunRootResolutionError) as f_ctx:
             RunRootResolver.resolvePoint(f_run_root, 999)
         self.assertIn("not found in manifest scale points", str(f_ctx.exception))
+
+    def testParseFloatAndParseIntFallbacks(self) -> None:
+        """Asserts parseFloat and parseInt return the fallback for blank or non-numeric input and parse numbers."""
+        f_float_rows: List[Tuple[Any, ...]] = [
+            (None,),
+            ("",),
+            ("   ",),
+            ("NA",),
+            ("nan",),
+            (" n/a ",),
+            ("Null",),
+            ("none",),
+            ("abc",),
+            ([1],),
+        ]
+        for f_row in f_float_rows:
+            with self.subTest(f_function="parseFloat", f_row=f_row):
+                f_got = parseFloat(*f_row)
+                self.assertEqual(f_got, 0.0)
+                self.assertIsInstance(f_got, float)
+        for f_row, f_want in [
+            ((None, -1.0), -1.0),
+            (("x", 7.5), 7.5),
+            ((" 2.5 ",), 2.5),
+            ((3,), 3.0),
+            (("1e3",), 1000.0),
+        ]:
+            with self.subTest(f_function="parseFloat", f_row=f_row):
+                f_got = parseFloat(*f_row)
+                self.assertEqual(f_got, f_want)
+                self.assertIsInstance(f_got, float)
+
+        for f_row in [(None,), ("",), ("NA",), ("abc",), ({},)]:
+            with self.subTest(f_function="parseInt", f_row=f_row):
+                f_got = parseInt(*f_row)
+                self.assertEqual(f_got, 0)
+                self.assertIsInstance(f_got, int)
+        for f_row, f_want in [
+            ((None, -1), -1),
+            (("x", 9), 9),
+            (("3.7",), 3),
+            (("-3.7",), -3),
+            ((" 42 ",), 42),
+            (("1e3",), 1000),
+        ]:
+            with self.subTest(f_function="parseInt", f_row=f_row):
+                f_got = parseInt(*f_row)
+                self.assertEqual(f_got, f_want)
+                self.assertIsInstance(f_got, int)
+
+    def testParseIntInfinityOverflows(self) -> None:
+        """Asserts parseInt returns the fallback for infinite values instead of raising OverflowError."""
+        for f_val in ["inf", "-inf", "1e400"]:
+            with self.subTest(f_val=f_val):
+                self.assertEqual(parseInt(f_val), 0)
+                self.assertEqual(parseInt(f_val, 5), 5)
+        # Contrast: parseFloat keeps infinity, and NaN falls back in parseInt.
+        self.assertEqual(parseFloat("inf"), math.inf)
+        self.assertEqual(parseInt("nan"), 0)
+
+    def _pointKwargs(self, f_pt: ResolvedPoint) -> Dict[str, Any]:
+        return dict(
+            f_point_id=f_pt.point_id,
+            f_scale_point=f_pt.scale_point,
+            f_ordinal=f_pt.ordinal,
+            f_point_dir=f_pt.point_dir,
+            f_state_view=f_pt.state_view,
+            f_controller_results={},
+            f_rank_results={},
+        )
+
+    def testResolvedPointConstructorRejectsInvalidArguments(self) -> None:
+        """Asserts ResolvedPoint rejects each invalid constructor argument with its exact message."""
+        f_root, _, _ = self._setupSucceededRun("run-c10-001", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+        f_pt = f_run.points[0]
+        f_rows: List[Tuple[str, Any, str]] = []
+        for f_val in ["", "  ", None, 5]:
+            f_rows.append(("f_point_id", f_val, "point_id must be a non-empty string"))
+        for f_val in [None, "x"]:
+            f_rows.append(("f_scale_point", f_val, "scale_point must be a ScalePoint"))
+        for f_val in [-1, "0", 1.0]:
+            f_rows.append(("f_ordinal", f_val, "ordinal must be non-negative integer"))
+        for f_val in ["", "  ", None]:
+            f_rows.append(("f_point_dir", f_val, "point_dir must be a non-empty string"))
+        for f_val in [None, "x"]:
+            f_rows.append(("f_state_view", f_val, "state_view must be a PointStateView"))
+        for f_key, f_val, f_prefix in f_rows:
+            with self.subTest(f_key=f_key, f_val=f_val):
+                f_kwargs = self._pointKwargs(f_pt)
+                f_kwargs[f_key] = f_val
+                with self.assertRaises(RunParseError) as f_cm:
+                    ResolvedPoint(**f_kwargs)
+                self.assertEqual(str(f_cm.exception), f"{f_prefix}, got: {f_val!r}")
+        self.assertEqual(RunRootResolver.resolve(f_root), f_run)
+
+    def testResolvedPointConstructorNormalisesAndCopies(self) -> None:
+        """Asserts ResolvedPoint strips the point id, keeps the directory and copies the result mappings."""
+        f_root, _, _ = self._setupSucceededRun("run-c10-002", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+        f_pt = f_run.points[0]
+        f_ctrl: Dict[str, Any] = {"c": None}
+        f_rank: Dict[Any, Any] = {(0, "c"): None}
+        f_kwargs = self._pointKwargs(f_pt)
+        f_kwargs.update(
+            f_point_id="  p-x  ",
+            f_point_dir=" d ",
+            f_controller_results=f_ctrl,
+            f_rank_results=f_rank,
+        )
+        f_new = ResolvedPoint(**f_kwargs)
+        f_ctrl["z"] = None
+        f_rank[(1, "z")] = None
+        self.assertEqual(f_new.point_id, "p-x")
+        self.assertEqual(f_new.point_dir, " d ")
+        self.assertEqual(f_new.controller_results, {"c": None})
+        self.assertEqual(f_new.rank_results, {(0, "c"): None})
+
+        # Observation O2: a bool is an int, so ordinal=True is accepted.
+        f_kwargs = self._pointKwargs(f_pt)
+        f_kwargs["f_ordinal"] = True
+        self.assertEqual(
+            repr(ResolvedPoint(**f_kwargs)),
+            "ResolvedPoint(point_id='00-tasks-1', ordinal=True, tasks=1, state='succeeded')",
+        )
+        self.assertEqual(RunRootResolver.resolve(f_root), f_run)
+
+    def testUnfrozenResolvedObjectsSetAndDelete(self) -> None:
+        """Asserts an object not yet frozen allows slot assignment and deletion, and unknown attributes fail."""
+        for f_cls, f_slot, f_value in [
+            (ResolvedPoint, "m_ordinal", 5),
+            (ResolvedRun, "m_variant", "v"),
+        ]:
+            with self.subTest(f_cls=f_cls.__name__):
+                f_raw = f_cls.__new__(f_cls)
+                setattr(f_raw, f_slot, f_value)
+                self.assertTrue(hasattr(f_raw, f_slot))
+                self.assertEqual(getattr(f_raw, f_slot), f_value)
+                delattr(f_raw, f_slot)
+                self.assertFalse(hasattr(f_raw, f_slot))
+                with self.assertRaises(AttributeError):
+                    getattr(f_raw, f_slot)
+                with self.assertRaises(AttributeError):
+                    f_raw.m_bogus = 1
+
+    def testComboKeyDescriptors(self) -> None:
+        """Asserts combination descriptors map to keys and invalid descriptors are rejected."""
+        f_root, f_plan, _ = self._setupSucceededRun("run-c10-003", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+        f_pt = f_run.points[0]
+        for f_val, f_want in [
+            (" c16_b8M ", "c16_b8M"),
+            ((16, "8M"), "c16_b8M"),
+            ([4, "64K"], "c4_b64K"),
+            ("", ""),
+        ]:
+            with self.subTest(f_val=f_val):
+                self.assertEqual(ResolvedPoint._comboKey(f_val), f_want)
+        for f_val in [(1, 2, 3), 5, None, (1,)]:
+            with self.subTest(f_val=f_val):
+                with self.assertRaises(RunParseError) as f_cm:
+                    ResolvedPoint._comboKey(f_val)
+                self.assertEqual(
+                    str(f_cm.exception), f"Invalid combination descriptor: {f_val!r}"
+                )
+        f_c = f_plan.combinations[0]
+        f_by_tuple = f_pt.getControllerResult((f_c.stripe_count, f_c.block_size))
+        self.assertIsNotNone(f_by_tuple)
+        self.assertIs(f_by_tuple, f_pt.getControllerResult(f_c.name))
+        self.assertIs(
+            f_pt.getRankResult(0, [f_c.stripe_count, f_c.block_size]),
+            f_pt.getRankResult(0, f_c),
+        )
+
+    def testResolvedPointAliasesReprAndEquality(self) -> None:
+        """Asserts ResolvedPoint aliases, repr and equality, and that result views are copies."""
+        f_root, _, _ = self._setupSucceededRun("run-c10-004", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+        f_pt = f_run.points[0]
+        self.assertEqual(f_pt.point_dir, f_pt.pointDir)
+        self.assertIs(f_pt.stateView, f_pt.state_view)
+        self.assertIs(f_pt.isTerminal, True)
+        self.assertEqual(f_pt.isTerminal, f_pt.is_terminal)
+        self.assertEqual(f_pt.controllerResults, f_pt.controller_results)
+        self.assertEqual(len(f_pt.controllerResults), 6)
+        self.assertEqual(f_pt.rankResults, f_pt.rank_results)
+        self.assertEqual(len(f_pt.rankResults), 6)
+        self.assertEqual(
+            repr(f_pt),
+            "ResolvedPoint(point_id='00-tasks-1', ordinal=0, tasks=1, state='succeeded')",
+        )
+        self.assertEqual(
+            repr(f_run.points[3]),
+            "ResolvedPoint(point_id='03-tasks-8', ordinal=3, tasks=8, state='succeeded')",
+        )
+        self.assertFalse(f_pt == "x")
+        self.assertFalse(f_pt.__eq__(5))
+        self.assertTrue(f_pt != None)  # noqa: E711
+        self.assertFalse(f_pt == f_run.points[1])
+        f_view = f_pt.controllerResults
+        self.assertIsNot(f_view, f_pt.controllerResults)
+        f_view.clear()
+        self.assertEqual(len(f_pt.controller_results), 6)
+
+    def testResolvedRunConstructorRejectsInvalidArguments(self) -> None:
+        """Asserts ResolvedRun rejects each invalid constructor argument and copies the points."""
+        f_root, _, _ = self._setupSucceededRun("run-c10-005", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+
+        def kwargs() -> Dict[str, Any]:
+            return dict(
+                f_run_root=f_run.run_root,
+                f_manifest=f_run.manifest,
+                f_plan=f_run.plan,
+                f_run_state=f_run.run_state,
+                f_points=list(f_run.points),
+                f_evidence_store=f_run.evidence_store,
+            )
+
+        f_rows: List[Tuple[str, Any, str]] = []
+        for f_val in ["", "  ", None]:
+            f_rows.append(("f_run_root", f_val, "run_root must be a non-empty string"))
+        for f_val in [None, {}]:
+            f_rows.append(("f_manifest", f_val, "manifest must be a ManifestDocument"))
+        f_rows.append(("f_plan", None, "plan must be a RunPlan"))
+        for f_val in [None, "x"]:
+            f_rows.append(("f_run_state", f_val, "run_state must be a RunStateView"))
+        f_rows.append(
+            ("f_evidence_store", None, "evidence_store must be an EvidenceStore")
+        )
+        for f_key, f_val, f_prefix in f_rows:
+            with self.subTest(f_key=f_key, f_val=f_val):
+                f_kwargs = kwargs()
+                f_kwargs[f_key] = f_val
+                with self.assertRaises(RunParseError) as f_cm:
+                    ResolvedRun(**f_kwargs)
+                self.assertEqual(str(f_cm.exception), f"{f_prefix}, got: {f_val!r}")
+
+        f_kwargs = kwargs()
+        f_list = f_kwargs["f_points"]
+        f_copy = ResolvedRun(**f_kwargs)
+        f_list.pop()
+        self.assertIs(type(f_copy.points), tuple)
+        self.assertEqual(len(f_copy.points), 4)
+        self.assertEqual(f_copy, f_run)
+
+    def testResolvedRunAliasesAndEquality(self) -> None:
+        """Asserts ResolvedRun aliases and that it never equals a foreign type."""
+        f_root, _, _ = self._setupSucceededRun("run-c10-006", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+        self.assertIs(f_run.manifest, f_run.m_manifest)
+        self.assertEqual(f_run.pointStates, f_run.run_state.point_states)
+        self.assertEqual(len(f_run.pointStates), 4)
+        self.assertIs(f_run.evidence_store, f_run.evidenceStore)
+        self.assertFalse(f_run == "x")
+        self.assertFalse(f_run.__eq__(None))
+
+    def testResolvedRunGetPointFallbacksAndMisses(self) -> None:
+        """Asserts ResolvedRun.getPoint resolves digit strings and reports unknown identifiers."""
+        f_root, _, _ = self._setupSucceededRun("run-c10-007", "lsmio", "bake")
+        f_run = RunRootResolver.resolve(f_root)
+        for f_val, f_want in [("2", 2), (" 1 ", 1), ("4", 2)]:
+            with self.subTest(f_val=f_val):
+                self.assertEqual(f_run.getPoint(f_val).ordinal, f_want)
+        for f_val, f_text in [
+            ("999", "999"),
+            (None, "None"),
+            (3.5, "3.5"),
+            (ScalePoint(16, 1, 16), "ScalePoint(tasks=16, ppn=1, nodes=16)"),
+            (ScalePoint(4, 4, 1), "ScalePoint(tasks=4, ppn=4, nodes=1)"),
+        ]:
+            with self.subTest(f_val=f_val):
+                with self.assertRaises(RunParseError) as f_cm:
+                    f_run.getPoint(f_val)
+                self.assertEqual(
+                    str(f_cm.exception),
+                    f"Scale point '{f_text}' not found in resolved run 'run-c10-007'",
+                )
+
+    @staticmethod
+    def _failingFor(f_real: Any, f_match: Any, f_error: Optional[Exception] = None) -> Any:
+        """Return a side_effect raising PermissionError for matching paths and delegating otherwise."""
+
+        def f_side_effect(f_path: Any, *f_args: Any, **f_kwargs: Any) -> Any:
+            if f_match(str(f_path)):
+                raise f_error or PermissionError(13, "Permission denied")
+            return f_real(f_path, *f_args, **f_kwargs)
+
+        return f_side_effect
+
+    @staticmethod
+    def _writeText(f_path: str, f_text: str) -> None:
+        os.makedirs(os.path.dirname(f_path), exist_ok=True)
+        with open(f_path, "w", encoding="utf-8") as f_f:
+            f_f.write(f_text)
+
+    def _buildInferTree(self) -> str:
+        """Create the inferLatestRun candidate tree under the temp dir and return its benchmark root."""
+        f_bm = os.path.join(self.m_temp_dir, "bm")
+        f_runs = os.path.join(f_bm, "runs")
+        self._writeText(
+            os.path.join(f_runs, "run-a", "manifest.json"),
+            json.dumps({"request": {"target": "lsmio", "scale": "local"}}),
+        )
+        self._writeText(
+            os.path.join(f_runs, "run-b", "manifest.json"),
+            json.dumps({"request": {"target": "lammps", "scale": "baseline"}}),
+        )
+        self._writeText(
+            os.path.join(f_runs, "run-c", "manifest.json"),
+            json.dumps({"plan": {"target": "ior", "scale": "bake"}}),
+        )
+        self._writeText(os.path.join(f_runs, "run-d", "manifest.json"), "{not json")
+        self._writeText(os.path.join(f_runs, "run-e", "manifest.json"), "[1, 2]")
+        os.makedirs(os.path.join(f_runs, "run-f"))
+        self._writeText(os.path.join(f_runs, "run-g"), "plain file")
+        os.symlink(os.path.join(f_runs, "run-a"), os.path.join(f_runs, "run-h"))
+        os.makedirs(os.path.join(f_runs, "run-i", "manifest.json"))
+        os.makedirs(os.path.join(f_runs, "run-j"))
+        os.symlink(
+            os.path.join(f_runs, "run-a", "manifest.json"),
+            os.path.join(f_runs, "run-j", "manifest.json"),
+        )
+        return f_bm
+
+    def testArchivedRootResolvesInPlace(self) -> None:
+        """Asserts a run root copied to an archive location resolves in place with an archived layout."""
+        f_root, _, _ = self._setupSucceededRun("run-c11-001", "lsmio", "bake")
+        f_arch = os.path.join(self.m_temp_dir, "lsmio-archive", "outputs-native:run")
+        os.makedirs(os.path.dirname(f_arch))
+        shutil.copytree(f_root, f_arch, symlinks=True)
+        f_run = RunRootResolver.resolve(f_arch)
+        self.assertEqual(f_run.run_root, f_arch)
+        self.assertTrue(f_run.is_success)
+        self.assertEqual(len(f_run.points), 4)
+        f_lay = ArchivedArtifactLayout(f_arch, "run-c11-001")
+        self.assertEqual(f_lay.run_root, f_arch)
+        self.assertEqual(f_lay.runRoot, f_arch)
+        self.assertEqual(f_lay.runsDir, os.path.join(self.m_temp_dir, "lsmio-archive"))
+        self.assertEqual(f_lay.runs_dir, f_lay.runsDir)
+        self.assertTrue(RunRootResolver.resolve(f_root).is_success)
+
+    def testRootAndManifestAccessErrorsAreWrapped(self) -> None:
+        """Asserts OS and containment failures while loading a run root are wrapped with their cause."""
+        f_root, _, _ = self._setupSucceededRun("run-c11-001", "lsmio", "bake")
+        f_man = os.path.join(f_root, "manifest.json")
+        f_denied = PermissionError(13, "Permission denied")
+        f_contain = ContainmentError("escapes")
+        f_rows: List[Tuple[str, Any, str, Any]] = [
+            (
+                "root",
+                patch(
+                    "os.lstat",
+                    side_effect=self._failingFor(
+                        os.lstat, lambda f_p: f_p == f_root, f_denied
+                    ),
+                ),
+                f"Failed to access run root directory '{f_root}': [Errno 13] Permission denied",
+                f_denied,
+            ),
+            (
+                "manifest-lstat",
+                patch(
+                    "os.lstat",
+                    side_effect=self._failingFor(
+                        os.lstat, lambda f_p: f_p.endswith("manifest.json"), f_denied
+                    ),
+                ),
+                f"Failed to access manifest.json '{f_man}': [Errno 13] Permission denied",
+                f_denied,
+            ),
+            (
+                "manifest-open",
+                patch(
+                    "builtins.open",
+                    side_effect=self._failingFor(
+                        open, lambda f_p: f_p.endswith("manifest.json"), f_denied
+                    ),
+                ),
+                f"Failed to read manifest.json '{f_man}': [Errno 13] Permission denied",
+                f_denied,
+            ),
+            (
+                "containment",
+                patch(
+                    "lsmiotool.lib.runparse.validatePathContainment",
+                    side_effect=f_contain,
+                ),
+                f"Layout containment validation failed for '{f_root}': escapes",
+                f_contain,
+            ),
+        ]
+        for f_name, f_patch, f_message, f_cause in f_rows:
+            with self.subTest(f_name=f_name):
+                with f_patch:
+                    with self.assertRaises(RunRootResolutionError) as f_cm:
+                        RunRootResolver.resolve(f_root)
+                self.assertEqual(str(f_cm.exception), f_message)
+                self.assertIs(f_cm.exception.__cause__, f_cause)
+                self.assertTrue(RunRootResolver.resolve(f_root).is_success)
+
+    def testReconcileFailureIsWrapped(self) -> None:
+        """Asserts a reconciler failure is wrapped by resolve and resolvePoint."""
+        f_root, _, _ = self._setupSucceededRun("run-c11-001", "lsmio", "bake")
+        f_boom = RuntimeError("boom")
+        for f_name, f_call in [
+            ("resolve", lambda: RunRootResolver.resolve(f_root)),
+            ("resolvePoint", lambda: RunRootResolver.resolvePoint(f_root, 0)),
+        ]:
+            with self.subTest(f_name=f_name):
+                with patch(
+                    "lsmiotool.lib.runparse.StateReconciler.reconcile",
+                    side_effect=f_boom,
+                ):
+                    with self.assertRaises(RunRootResolutionError) as f_cm:
+                        f_call()
+                self.assertEqual(
+                    str(f_cm.exception),
+                    "State reconciliation failed for run 'run-c11-001': boom",
+                )
+                self.assertIs(f_cm.exception.__cause__, f_boom)
+        self.assertTrue(RunRootResolver.resolve(f_root).is_success)
+
+    def testResolvePointIdentifierForms(self) -> None:
+        """Asserts resolvePoint accepts every identifier form and reports unknown ones with the available points."""
+        f_root, _, _ = self._setupSucceededRun("run-c11-001", "lsmio", "bake")
+        for f_val, f_want in [
+            (8, 3),
+            ("tasks-8", 3),
+            ("point-03", 3),
+            ("03-tasks-8", 3),
+            (" 2 ", 2),
+            ("8", 3),
+            (ScalePoint(4, 1, 4), 2),
+        ]:
+            with self.subTest(f_val=f_val):
+                self.assertEqual(
+                    RunRootResolver.resolvePoint(f_root, f_val).ordinal, f_want
+                )
+        f_sel = RunRootResolver.selectPoint(f_root, 1)
+        self.assertEqual(f_sel.ordinal, 1)
+        self.assertEqual(f_sel, RunRootResolver.resolvePoint(f_root, 1))
+        f_avail = "['00-tasks-1', '01-tasks-2', '02-tasks-4', '03-tasks-8']"
+        for f_val, f_text in [
+            ("999", "999"),
+            ("nope", "nope"),
+            (ScalePoint(16, 1, 16), "ScalePoint(tasks=16, ppn=1, nodes=16)"),
+            (None, "None"),
+            (2.0, "2.0"),
+        ]:
+            with self.subTest(f_val=f_val):
+                with self.assertRaises(RunRootResolutionError) as f_cm:
+                    RunRootResolver.resolvePoint(f_root, f_val)
+                self.assertEqual(
+                    str(f_cm.exception),
+                    f"Point identifier '{f_text}' not found in manifest scale points: {f_avail}",
+                )
+        self.assertTrue(RunRootResolver.resolve(f_root).is_success)
+
+    def testResolvePointOfNonLsmioRunHasNoRankResults(self) -> None:
+        """Asserts resolvePoint of a non-lsmio run returns controller results and no rank results."""
+        f_ior, _, _ = self._setupSucceededRun("run-c11-ior", "ior", "local", "BASE")
+        f_pt = RunRootResolver.resolvePoint(f_ior, 0)
+        self.assertEqual(len(f_pt.controller_results), 6)
+        self.assertEqual(f_pt.rank_results, {})
+        self.assertTrue(f_pt.is_success)
+
+    def testManifestMatchesFilters(self) -> None:
+        """Asserts manifest filtering by target and scale normalises aliases and skips unreadable manifests."""
+        f_bm = self._buildInferTree()
+        f_runs = os.path.join(f_bm, "runs")
+
+        def man(f_name: str) -> str:
+            return os.path.join(f_runs, f_name, "manifest.json")
+
+        self.assertTrue(RunRootResolver._manifestMatches(man("run-d"), None, None))
+        self.assertFalse(RunRootResolver._manifestMatches(man("run-d"), "lsmio", None))
+        self.assertFalse(RunRootResolver._manifestMatches(man("run-e"), "lsmio", None))
+        self.assertFalse(
+            RunRootResolver._manifestMatches(man("nope"), "lsmio", None)
+        )
+        for f_args, f_want in [
+            ((f_bm, "lmp"), "run-b"),
+            ((f_bm, "lammps"), "run-b"),
+            ((f_bm, None, "variants"), "run-b"),
+            ((f_bm, None, "baseline"), "run-b"),
+            ((f_bm, "ior", "bake"), "run-c"),
+            ((f_bm, None, "local"), "run-a"),
+            ((f_bm, "lsmio"), "run-a"),
+        ]:
+            with self.subTest(f_args=f_args):
+                self.assertEqual(
+                    RunRootResolver.inferLatestRun(*f_args),
+                    os.path.join(f_runs, f_want),
+                )
+
+    def testInferLatestRunArgumentAndEntryChecks(self) -> None:
+        """Asserts inferLatestRun validates its argument, skips invalid entries and reports OS errors as not found."""
+        f_bm = self._buildInferTree()
+        f_runs = os.path.join(f_bm, "runs")
+        f_before = sorted(os.listdir(f_runs))
+        for f_val in ["", "  ", None]:
+            with self.subTest(f_val=f_val):
+                with self.assertRaises(RunRootResolutionError) as f_cm:
+                    RunRootResolver.inferLatestRun(f_val)  # type: ignore[arg-type]
+                self.assertEqual(
+                    str(f_cm.exception),
+                    f"benchmark_name_or_dir must be a non-empty string, got: {f_val!r}",
+                )
+        with self.assertRaises(RunRootResolutionError) as f_cm:
+            RunRootResolver.inferLatestRun("a\0b")
+        self.assertEqual(
+            str(f_cm.exception), "benchmark_name_or_dir contains NUL byte: 'a\\x00b'"
+        )
+        # Observation O4: without a filter the newest directory with a regular manifest wins.
+        self.assertEqual(
+            RunRootResolver.inferLatestRun(f_bm), os.path.join(f_runs, "run-e")
+        )
+        self.assertEqual(
+            RunRootResolver.inferLatestRun(f_runs), os.path.join(f_runs, "run-e")
+        )
+        f_run_a = os.path.join(f_runs, "run-a")
+        self.assertEqual(RunRootResolver.inferLatestRun(f_run_a), f_run_a)
+        f_cant = "no valid run directories containing manifest.json found in"
+        f_error_rows: List[Tuple[Tuple[Any, ...], str]] = [
+            (
+                (f_run_a, "ior"),
+                f"Cannot infer latest run for '{f_run_a}' (target='ior', scale=None): {f_cant} ['{f_run_a}']",
+            ),
+            (
+                (os.path.join(f_runs, "run-h"),),
+                f"Cannot infer latest run for '{f_runs}/run-h': {f_cant} ['{f_runs}/run-h']",
+            ),
+            (
+                (f_bm, "ior", "local"),
+                f"Cannot infer latest run for '{f_bm}' (target='ior', scale='local'): {f_cant} ['{f_bm}']",
+            ),
+        ]
+        for f_args, f_message in f_error_rows:
+            with self.subTest(f_args=f_args):
+                with self.assertRaises(RunRootResolutionError) as f_cm:
+                    RunRootResolver.inferLatestRun(*f_args)
+                self.assertEqual(str(f_cm.exception), f_message)
+
+        f_denied = PermissionError(13, "Permission denied")
+        with patch(
+            "os.listdir",
+            side_effect=self._failingFor(os.listdir, lambda f_p: f_p == f_runs, f_denied),
+        ):
+            with self.assertRaises(RunRootResolutionError) as f_cm:
+                RunRootResolver.inferLatestRun(f_bm)
+        self.assertEqual(
+            str(f_cm.exception),
+            f"Cannot infer latest run for '{f_bm}': {f_cant} ['{f_bm}']",
+        )
+        with patch(
+            "os.lstat",
+            side_effect=self._failingFor(
+                os.lstat, lambda f_p: os.path.basename(f_p) == "run-b", f_denied
+            ),
+        ):
+            with self.assertRaises(RunRootResolutionError) as f_cm:
+                RunRootResolver.inferLatestRun(f_bm, "lmp")
+        self.assertEqual(
+            str(f_cm.exception),
+            f"Cannot infer latest run for '{f_bm}' (target='lmp', scale=None): {f_cant} ['{f_bm}']",
+        )
+        with patch(
+            "os.lstat",
+            side_effect=self._failingFor(
+                os.lstat, lambda f_p: os.path.basename(f_p) == "run-a", f_denied
+            ),
+        ):
+            with self.assertRaises(RunRootResolutionError) as f_cm:
+                RunRootResolver.inferLatestRun(f_run_a)
+        self.assertEqual(
+            str(f_cm.exception),
+            f"Cannot infer latest run for '{f_run_a}': {f_cant} ['{f_run_a}']",
+        )
+        self.assertEqual(sorted(os.listdir(f_runs)), f_before)
+
+    def testInferLatestRunByBenchmarkName(self) -> None:
+        """Asserts a benchmark name implies its target, an explicit target wins and unknown trees are reported."""
+        f_home = os.path.join(self.m_temp_dir, "home")
+        f_hr = os.path.join(f_home, "scratch", "benchmark", "lsmio", "runs")
+        self._writeText(
+            os.path.join(f_hr, "run-1", "manifest.json"),
+            json.dumps({"request": {"target": "lsmio", "scale": "bake"}}),
+        )
+        self._writeText(
+            os.path.join(f_hr, "run-2", "manifest.json"),
+            json.dumps({"request": {"target": "ior", "scale": "bake"}}),
+        )
+        f_cwd = os.getcwd()
+        self.addCleanup(os.chdir, f_cwd)
+        os.chdir(f_home)
+        with patch.dict(os.environ, {"HOME": f_home}):
+            self.assertEqual(
+                RunRootResolver.inferLatestRun("lsmio"), os.path.join(f_hr, "run-1")
+            )
+            self.assertEqual(
+                RunRootResolver.inferLatestRun(" LSMIO "), os.path.join(f_hr, "run-1")
+            )
+            self.assertEqual(
+                RunRootResolver.inferLatestRun("lsmio", f_target="ior"),
+                os.path.join(f_hr, "run-2"),
+            )
+            with self.assertRaises(RunRootResolutionError) as f_cm:
+                RunRootResolver.inferLatestRun("lammps")
+        f_text = str(f_cm.exception)
+        self.assertTrue(
+            f_text.startswith(
+                "Cannot infer latest run for 'lammps' (target='lammps', scale=None): "
+                "no valid run directories containing manifest.json found in ["
+            )
+        )
+        self.assertIn(
+            "[" + repr(os.path.join(f_home, "scratch", "benchmark", "lammps")), f_text
+        )
+
+    def testResolveTargetArgumentChecksAndFallbacks(self) -> None:
+        """Asserts resolveTarget validates its argument and falls back to the benchmark root."""
+        f_root, _, _ = self._setupSucceededRun("run-c11-001", "lsmio", "bake")
+        shutil.copytree(
+            f_root,
+            os.path.join(self.m_temp_dir, "lsmio", "runs", "run-c11-001"),
+            symlinks=True,
+        )
+        for f_val in ["", "  ", None]:
+            with self.subTest(f_val=f_val):
+                with self.assertRaises(RunRootResolutionError) as f_cm:
+                    RunRootResolver.resolveTarget(f_val)  # type: ignore[arg-type]
+                self.assertEqual(
+                    str(f_cm.exception),
+                    f"Target must be a non-empty string, got: {f_val!r}",
+                )
+        with self.assertRaises(RunRootResolutionError) as f_cm:
+            RunRootResolver.resolveTarget("x\0y")
+        self.assertEqual(str(f_cm.exception), "Target contains NUL byte: 'x\\x00y'")
+        f_run = RunRootResolver.resolveTarget("lsmio", f_benchmark_root=self.m_temp_dir)
+        self.assertEqual(
+            f_run.run_root, os.path.join(self.m_temp_dir, "lsmio", "runs", "run-c11-001")
+        )
+        f_run = RunRootResolver.resolveTarget(
+            "no-such-target", f_benchmark_root=" " + self.m_temp_dir + " "
+        )
+        self.assertEqual(f_run.run_id, "run-c11-001")
+        self.assertEqual(f_run.run_root, f_root)
 
     def testIorLogExtractor(self) -> None:
         """Tests extraction of 26 summary metrics for write and read operations from IOR output logs."""

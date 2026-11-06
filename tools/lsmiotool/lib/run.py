@@ -4470,7 +4470,7 @@ class RunOrchestrator:
 
                 f_is_slurm = f_profile.scheduler == SchedulerKind.SLURM
                 f_spec = JobSpec(
-                    f_point_id=f_sp,
+                    f_point_id=f_point_name,
                     f_script_path=f_script_path,
                     f_working_dir=f_layout.pointDir(f_sp, f_idx),
                     f_resources=f_point_res,
@@ -6276,7 +6276,7 @@ class RunOrchestrator:
                 os.chmod(f_script_path, 0o755)
 
                 f_spec = JobSpec(
-                    f_point_id=f_scale_point,
+                    f_point_id=f_point_name,
                     f_script_path=f_script_path,
                     f_working_dir=f_artifact_store.layout.pointDir(
                         f_scale_point, f_idx

@@ -34,7 +34,7 @@ import os
 import stat
 import tempfile
 import unittest
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from lsmiotool.lib.profile import (
     ProfileDocument,
@@ -52,6 +52,9 @@ from lsmiotool.lib.main import (
     TestMain,
     RunMain,
 )
+
+# Sentinel for _mutated: remove the key instead of setting it.
+_DELETE = object()
 
 
 class ProfileSchemaTest(unittest.TestCase):
@@ -606,6 +609,349 @@ class ProfileSchemaTest(unittest.TestCase):
             f_dev_rec.m_scheduler = "slurm"  # type: ignore
         with self.assertRaises(AttributeError):
             del f_dev_rec.m_name
+
+    def _validDocument(self) -> Dict[str, Any]:
+        """A fresh parse of the checked-in environments.json."""
+        with open(self.m_env_json_path, "r", encoding="utf-8") as f_file:
+            return json.load(f_file)
+
+    def _mutated(
+        self,
+        f_site: str,
+        f_path: Tuple[str, ...],
+        f_value: Any,
+        f_doc: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Set (or, for _DELETE, remove) one value inside a site record."""
+        f_result = f_doc if f_doc is not None else self._validDocument()
+        f_profiles = f_result["RUN_PROFILES"]["profiles"]
+        if not f_path:
+            f_profiles[f_site] = f_value
+            return f_result
+        f_node = f_profiles[f_site]
+        for f_key in f_path[:-1]:
+            f_node = f_node[f_key]
+        if f_value is _DELETE:
+            del f_node[f_path[-1]]
+        else:
+            f_node[f_path[-1]] = f_value
+        return f_result
+
+    def _assertRejected(self, f_doc: Any, f_message: str) -> None:
+        """Assert ProfileLoader.load rejects the document with exactly f_message."""
+        f_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(f_tmp.cleanup)
+        f_path = os.path.join(f_tmp.name, "profile.json")
+        with open(f_path, "w", encoding="utf-8") as f_file:
+            json.dump(f_doc, f_file)
+        with self.assertRaises(ProfileSchemaError) as f_ctx:
+            ProfileLoader.load(f_path)
+        self.assertEqual(str(f_ctx.exception), f_message)
+
+    def _assertCanonicalStillLoads(self) -> None:
+        """No cached or partial document leaks from a rejected load."""
+        self.assertEqual(len(ProfileLoader.load(self.m_env_json_path).profiles), 5)
+
+    def _assertMutationRows(
+        self, f_rows: Sequence[Tuple[str, Tuple[str, ...], Any, str]]
+    ) -> None:
+        for f_site, f_path, f_value, f_message in f_rows:
+            with self.subTest(f_site=f_site, f_path=f_path, f_value=repr(f_value)):
+                self._assertRejected(self._mutated(f_site, f_path, f_value), f_message)
+        self._assertCanonicalStillLoads()
+
+    def testRecordAndDocumentAssignableOnlyUntilFrozen(self) -> None:
+        """Before _frozen is set writes and deletes work; afterwards both are rejected."""
+        for f_cls, f_slot, f_value in (
+            (ProfileRecord, "m_name", "X"),
+            (ProfileDocument, "m_schema_version", 1),
+        ):
+            with self.subTest(f_cls=f_cls.__name__):
+                f_obj = f_cls.__new__(f_cls)
+                setattr(f_obj, f_slot, f_value)
+                self.assertEqual(getattr(f_obj, f_slot), f_value)
+                delattr(f_obj, f_slot)
+                self.assertFalse(hasattr(f_obj, f_slot))
+                f_obj._frozen = True
+                with self.assertRaises(AttributeError) as f_ctx:
+                    setattr(f_obj, f_slot, f_value)
+                self.assertEqual(
+                    str(f_ctx.exception), f"Cannot modify immutable {f_cls.__name__}"
+                )
+                with self.assertRaises(AttributeError) as f_ctx:
+                    del f_obj._frozen
+                self.assertEqual(
+                    str(f_ctx.exception),
+                    f"Cannot delete attribute from immutable {f_cls.__name__}",
+                )
+                self.assertFalse(hasattr(f_obj, f_slot))
+                self.assertIs(f_obj._frozen, True)
+
+    def testLoadedDocumentRejectsDelete(self) -> None:
+        """A loaded ProfileDocument refuses attribute deletion and keeps its content."""
+        f_doc = ProfileLoader.load(self.m_env_json_path)
+        with self.assertRaises(AttributeError) as f_ctx:
+            del f_doc.m_profiles
+        self.assertEqual(
+            str(f_ctx.exception), "Cannot delete attribute from immutable ProfileDocument"
+        )
+        self.assertEqual(f_doc.schema_version, 1)
+        self.assertEqual(
+            sorted(f_doc.profiles), ["ARCHER2", "DEV", "ISAMBARD", "VIKING", "VIKING2"]
+        )
+
+    def testProfilesMemberMustBeDictionary(self) -> None:
+        """A non-dictionary 'profiles' member is rejected."""
+        for f_value in ([], "x", "", None, 1):
+            with self.subTest(f_value=repr(f_value)):
+                f_doc = self._validDocument()
+                f_doc["RUN_PROFILES"]["profiles"] = f_value
+                self._assertRejected(f_doc, "'profiles' member must be a dictionary")
+        self._assertCanonicalStillLoads()
+
+    def testSiteRecordMustBeDictionary(self) -> None:
+        """A site record that is not a dictionary is rejected and named."""
+        for f_site, f_value in (("DEV", []), ("DEV", ""), ("DEV", None), ("VIKING", "x")):
+            with self.subTest(f_site=f_site, f_value=repr(f_value)):
+                self._assertRejected(
+                    self._mutated(f_site, (), f_value),
+                    f"Profile '{f_site}' must be a dictionary",
+                )
+        self._assertCanonicalStillLoads()
+
+    def testSiteScalarFieldsMustBeNonEmptyStrings(self) -> None:
+        """scheduler, launcher, certification and install_prefix need non-empty strings."""
+        f_rows = []
+        for f_field in ("scheduler", "launcher", "certification", "install_prefix"):
+            for f_value in ("", None, 5):
+                f_rows.append(
+                    (
+                        "DEV",
+                        (f_field,),
+                        f_value,
+                        f"Profile 'DEV'.{f_field} must be a non-empty string",
+                    )
+                )
+        f_rows.append(
+            ("DEV", ("launcher",), ["srun"], "Profile 'DEV'.launcher must be a non-empty string")
+        )
+        f_rows.append(
+            (
+                "VIKING",
+                ("scheduler",),
+                "",
+                "Profile 'VIKING'.scheduler must be a non-empty string",
+            )
+        )
+        self._assertMutationRows(f_rows)
+
+    def testBenchmarkRootsAndExecutablesShape(self) -> None:
+        """benchmark_roots and executables must have the exact shape and string values."""
+        f_prefix = "Profile 'DEV'.benchmark_roots"
+        f_rows: List[Tuple[str, Tuple[str, ...], Any, str]] = []
+        for f_value in ([], None, "x"):
+            f_rows.append(("DEV", ("benchmark_roots",), f_value, f"{f_prefix} must be a dictionary"))
+        f_rows += [
+            (
+                "DEV",
+                ("benchmark_roots",),
+                {},
+                f"{f_prefix} keys mismatch: missing=['hdd', 'ssd'], extra=[]",
+            ),
+            (
+                "DEV",
+                ("benchmark_roots", "ssd"),
+                _DELETE,
+                f"{f_prefix} keys mismatch: missing=['ssd'], extra=[]",
+            ),
+            (
+                "DEV",
+                ("benchmark_roots", "scratch"),
+                "/s",
+                f"{f_prefix} keys mismatch: missing=[], extra=['scratch']",
+            ),
+            (
+                "DEV",
+                ("benchmark_roots", "hdd"),
+                "",
+                f"{f_prefix}['hdd'] must be a non-empty string",
+            ),
+            (
+                "DEV",
+                ("benchmark_roots", "ssd"),
+                None,
+                f"{f_prefix}['ssd'] must be a non-empty string",
+            ),
+            (
+                "DEV",
+                ("benchmark_roots", "hdd"),
+                3,
+                f"{f_prefix}['hdd'] must be a non-empty string",
+            ),
+        ]
+        for f_value in ([], None):
+            f_rows.append(
+                ("DEV", ("executables",), f_value, "Profile 'DEV'.executables must be a dictionary")
+            )
+        for f_key, f_value in (("ior", ""), ("lmp", None), ("epocpp", 1)):
+            f_rows.append(
+                (
+                    "DEV",
+                    ("executables", f_key),
+                    f_value,
+                    f"Profile 'DEV'.executables['{f_key}'] must be a non-empty string",
+                )
+            )
+        self._assertMutationRows(f_rows)
+
+        # Missing and extra keys together: the lists are sorted.
+        f_doc = self._mutated("DEV", ("benchmark_roots", "ssd"), _DELETE)
+        self._mutated("DEV", ("benchmark_roots", "zz"), "/z", f_doc)
+        self._mutated("DEV", ("benchmark_roots", "aa"), "/a", f_doc)
+        self._assertRejected(
+            f_doc, f"{f_prefix} keys mismatch: missing=['ssd'], extra=['aa', 'zz']"
+        )
+        self._assertCanonicalStillLoads()
+
+    def testModulesAndResourcesShape(self) -> None:
+        """modules entries and resources values are type checked."""
+        f_rows: List[Tuple[str, Tuple[str, ...], Any, str]] = []
+        for f_value in ([""], ["ok", 5], [None]):
+            f_rows.append(
+                (
+                    "DEV",
+                    ("modules",),
+                    f_value,
+                    "Profile 'DEV'.modules entries must be non-empty strings",
+                )
+            )
+        for f_value in ([], None):
+            f_rows.append(
+                ("DEV", ("resources",), f_value, "Profile 'DEV'.resources must be a dictionary")
+            )
+        f_rows += [
+            (
+                "DEV",
+                ("resources", "small"),
+                [],
+                "Profile 'DEV'.resources['small'] must be a dictionary",
+            ),
+            (
+                "DEV",
+                ("resources", "large"),
+                None,
+                "Profile 'DEV'.resources['large'] must be a dictionary",
+            ),
+            (
+                "DEV",
+                ("resources", "small", "queue"),
+                5,
+                "Profile 'DEV'.resources['small']['queue'] must be a string or null",
+            ),
+            (
+                "DEV",
+                ("resources", "large", "memory"),
+                False,
+                "Profile 'DEV'.resources['large']['memory'] must be a string or null",
+            ),
+            (
+                "DEV",
+                ("resources", "small", "pmem"),
+                ["x"],
+                "Profile 'DEV'.resources['small']['pmem'] must be a string or null",
+            ),
+        ]
+        self._assertMutationRows(f_rows)
+
+    def testRankIdentityCancellationAndPoolsShape(self) -> None:
+        """rank_identity, cancellation and lustre_pools are shape and type checked."""
+        f_rank = "Profile 'DEV'.rank_identity"
+        f_cancel = "Profile 'DEV'.cancellation"
+        f_rows: List[Tuple[str, Tuple[str, ...], Any, str]] = []
+        for f_value in ([], None):
+            f_rows.append(("DEV", ("rank_identity",), f_value, f"{f_rank} must be a dictionary"))
+        for f_value in ("", None, 1):
+            f_rows.append(
+                ("DEV", ("rank_identity", "global"), f_value, f"{f_rank}['global'] must be a non-empty string")
+            )
+        for f_value in ("", None):
+            f_rows.append(
+                ("DEV", ("rank_identity", "node"), f_value, f"{f_rank}['node'] must be a non-empty string")
+            )
+        for f_value in (5, False):
+            f_rows.append(
+                ("DEV", ("rank_identity", "local"), f_value, f"{f_rank}['local'] must be a string or null")
+            )
+        for f_value in ([], None):
+            f_rows.append(("DEV", ("cancellation",), f_value, f"{f_cancel} must be a dictionary"))
+        f_rows += [
+            (
+                "DEV",
+                ("cancellation",),
+                {},
+                f"{f_cancel} keys mismatch: missing=['grace_seconds', 'poll_interval_seconds'], extra=[]",
+            ),
+            (
+                "DEV",
+                ("cancellation", "extra"),
+                1,
+                f"{f_cancel} keys mismatch: missing=[], extra=['extra']",
+            ),
+        ]
+        for f_value in ([], None):
+            f_rows.append(
+                ("DEV", ("lustre_pools",), f_value, "Profile 'DEV'.lustre_pools must be a dictionary")
+            )
+        f_rows += [
+            (
+                "DEV",
+                ("lustre_pools", "hdd"),
+                5,
+                "Profile 'DEV'.lustre_pools['hdd'] must be a string or null",
+            ),
+            (
+                "DEV",
+                ("lustre_pools", "ssd"),
+                True,
+                "Profile 'DEV'.lustre_pools['ssd'] must be a string or null",
+            ),
+        ]
+        self._assertMutationRows(f_rows)
+
+        # Missing and extra keys together.
+        f_doc = self._mutated("DEV", ("cancellation", "poll_interval_seconds"), _DELETE)
+        self._mutated("DEV", ("cancellation", "x"), 1, f_doc)
+        self._assertRejected(
+            f_doc,
+            f"{f_cancel} keys mismatch: missing=['poll_interval_seconds'], extra=['x']",
+        )
+        self._assertCanonicalStillLoads()
+
+    def testNullableFieldsAcceptNullAndEmptyString(self) -> None:
+        """Fields documented as 'string or null' accept the empty string."""
+        f_canonical = ProfileLoader.load(self.m_env_json_path).getProfile("DEV").toDict()
+        for f_local in ("", None):
+            with self.subTest(f_local=repr(f_local)):
+                f_doc = self._mutated("DEV", ("resources", "small", "queue"), "")
+                self._mutated("DEV", ("rank_identity", "local"), f_local, f_doc)
+                self._mutated("DEV", ("lustre_pools", "hdd"), "", f_doc)
+                f_tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(f_tmp.cleanup)
+                f_path = os.path.join(f_tmp.name, "profile.json")
+                with open(f_path, "w", encoding="utf-8") as f_file:
+                    json.dump(f_doc, f_file)
+                f_rec = ProfileLoader.load(f_path).getProfile("DEV")
+                self.assertEqual(f_rec.resources["small"]["queue"], "")
+                if f_local is None:
+                    self.assertIsNone(f_rec.rank_identity["local"])
+                else:
+                    self.assertEqual(f_rec.rank_identity["local"], "")
+                self.assertEqual(f_rec.lustre_pools["hdd"], "")
+                f_expected = copy.deepcopy(f_canonical)
+                f_expected["resources"]["small"]["queue"] = ""
+                f_expected["rank_identity"]["local"] = f_local
+                f_expected["lustre_pools"]["hdd"] = ""
+                self.assertEqual(f_rec.toDict(), f_expected)
 
     def testLegacyCommandImportsAndEntryDispatch(self) -> None:
         """Verify legacy command classes import correctly and accept expected parameters."""

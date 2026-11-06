@@ -66,6 +66,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.CompareArchiveCliParserTest",
     "lsmiotool.test.main.CompareCliParserTest",
     "lsmiotool.test.main.CompareNodesTest",
+    "lsmiotool.test.main.CompatTest",
     "lsmiotool.test.main.CoverageContractTest",
     "lsmiotool.test.main.DeltaBarPlotTest",
     "lsmiotool.test.main.DetachTest",
@@ -83,6 +84,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.LatexMainTest",
     "lsmiotool.test.main.LauncherTest",
     "lsmiotool.test.main.LegacyEnvDetectionTest",
+    "lsmiotool.test.main.LibPackageTest",
     "lsmiotool.test.main.LmpAdapterTest",
     "lsmiotool.test.main.LoaderTest",
     "lsmiotool.test.main.LsmioAdapterTest",
@@ -288,9 +290,9 @@ class LoaderTest(unittest.TestCase):
             _PREEXISTING_MODULE_NAMES,
         )
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
-        self.assertEqual(len(preexisting_test_ids), 44)
+        self.assertEqual(len(preexisting_test_ids), 59)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 1049)
+        self.assertEqual(len(all_test_ids), 1184)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),
