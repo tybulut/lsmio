@@ -48,7 +48,6 @@ from lsmiotool.lib.main import (
     CompareMain,
     LatexMain,
     HpcEnvMain,
-    ParseLegacyMain,
     ShellMain,
     TestMain,
     RunMain,
@@ -619,9 +618,6 @@ class ProfileSchemaTest(unittest.TestCase):
 
         f_hpc = HpcEnvMain()
         self.assertIsInstance(f_hpc, HpcEnvMain)
-
-        f_parse = ParseLegacyMain("ior", "small", ssd=True)
-        self.assertIsInstance(f_parse, ParseLegacyMain)
 
         f_shell = ShellMain()
         self.assertIsInstance(f_shell, ShellMain)

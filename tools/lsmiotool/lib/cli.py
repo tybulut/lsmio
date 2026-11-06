@@ -50,9 +50,7 @@ common cmds:
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parse ior <local|bake|small|large> [--output-dir <dir>]
-  parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
-  parseLegacy lsmio backends <local|bake|small|large> [<path>]
-  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--versioned] [--fast] [--foreground]
   run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
@@ -66,7 +64,7 @@ other cmds:
 options:
   --debug     enable debug mode and run
   --help      print this help screen
-  --ssd       use SSD storage instead
+  --ssd       use SSD storage instead (applies to run)
   --version   print version and exit
 """
 
@@ -85,15 +83,15 @@ Arguments:
 Options:
   --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline};
                 ior/<scale> for ior, epocpp/<scale> for epocpp).
-                Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
+                Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
   --setup <name>
                 LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE;
                 for an lsmiotool run, the run's own setup). For ior: the IOR setup of the
                 run to archive (BASE, COLLECTIVE, HDF5, HDF5-C, FSYNC, REVERSE).
   --source <path>
-                What to archive: an lsmiotool run root, or bmtool's live outputs directory
-                <benchmark_root>/lsmio/outputs (the only bmtool directory moved, as in bmtool).
+                What to archive: an lsmiotool run root (manifest.json). Any other directory
+                is refused and left untouched.
                 The run root of any arm of a variants, --versioned or backends run archives that
                 whole run: each finished point (every combination and rank succeeded) not
                 archived yet, as :run/:base pairs or outputs-<backend>/<nodes>, in the run's own
@@ -102,13 +100,11 @@ Options:
                 e.g. after --no-archive or when its process ended before its jobs did; a run
                 still running is refused.
 
-Source (default): <benchmark_root> is the site profile's benchmark root.
-  - <benchmark_root>/lsmio/outputs, when it holds bmtool outputs: moved to
-    <dest>/outputs-<arm> and recreated empty, like bmtool archive.
-  - otherwise the latest lsmiotool run of 'lsmio <scale>' (and <variant>) under
-    <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
-    in bmtool's layout with reports; the run root is left in place.
-  Both present is an error: pick one with --source.
+Source (default): <benchmark_root> is the site profile's benchmark root. The latest
+  standalone lsmiotool run of 'lsmio <scale>' (and <variant>) under
+  <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
+  with reports; the run root is left in place. The arms of a multi-arm run are not
+  taken: archive one with --source <its run root>.
   For ior, only lsmiotool runs: the latest standalone run of 'ior <scale>' (made before
   'run ior' ran its setups as arms); its points go to <dest>/outputs-ior[-<setup>]/<nodes>
   with ior-report.csv. A 'run ior' run archives itself, or with --source <one of its
@@ -116,7 +112,7 @@ Source (default): <benchmark_root> is the site profile's benchmark root.
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--versioned] [--fast] [--foreground]
   lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
@@ -198,8 +194,8 @@ Options:
                 it ends. Ctrl-C then only stops the following; 'lsmiotool cancel <run root>'
                 stops the run (and cancels its job).
 
-Global Options (preserved for legacy compatibility):
-  --ssd, -s     Accepted before or after command.
+Global Options:
+  --ssd, -s     Accepted before or after the command; applies to 'run' only.
 """
 
 LATEX_HELP_TEXT = """Usage:
@@ -233,6 +229,10 @@ Arguments:
                 'parse ior <scale>' regenerates ior-report.csv in every outputs-* of
                 <benchmark_root>/lsmio-archive/ior/<scale> (or --output-dir), where
                 'run ior <scale>' archives its IOR setups.
+  <target>      A directory of rank logs (<nodes>/<date>/out-*) is an IOR outputs
+                directory, whatever it is named, when a rank log starts with the IOR
+                banner; it gets ior-report.csv. Other such directories get the LSMIO
+                reports.
 
 Options:
   --output-dir <dir>
@@ -746,8 +746,7 @@ class RunCliParser:
                         f"Destination path after {f_tok!r} cannot be empty."
                     )
                 # Absolute paths are normalised here; relative paths stay verbatim and
-                # are resolved against the benchmark root by archive.resolveArchiveDest,
-                # matching bmtool/include/archive-dest.in.sh.
+                # are resolved against the benchmark root by archive.resolveArchiveDest.
                 f_dest_val = f_val.strip()
                 f_out_dir = (
                     str(Path(f_dest_val).resolve())
@@ -1080,20 +1079,21 @@ class ParseCliParser:
         lsmiotool parse ior <local|bake|small|large> [options]
 
     Arguments:
-        <target>: Run root path (also an archived one), manifest file path, bmtool-layout
-            outputs directory, or benchmark name ('ior', 'lsmio', 'lmp'). A benchmark
-            name selects the latest run of that benchmark under the site profile's
-            benchmark root.
+        <target>: Run root path (also an archived one), manifest file path, archive-layout
+            outputs directory (<nodes>/<date>/out-* rank logs; an IOR directory is
+            recognised by name or by the IOR banner in its rank logs), or benchmark
+            name ('ior', 'lsmio', 'lmp'). A benchmark name selects the latest run of
+            that benchmark under the site profile's benchmark root.
         <scale>: With 'lsmio', restricts the latest-run search to that scale.
             'parse lsmio variants' and 'parse lsmio backends <scale>' instead
             regenerate the reports of every outputs-* directory in the archive
-            destination, like bmtool. 'parse ior <scale>' regenerates the
+            destination. 'parse ior <scale>' regenerates the
             ior-report.csv of every IOR setup 'run ior <scale>' archived
             (<root>/lsmio-archive/ior/<scale>/outputs-*).
 
     Options:
         --output-dir <dir>: Destination directory for reports (default: current working
-            directory; for a bmtool-layout directory, the directory itself; for the
+            directory; for an archive-layout directory, the directory itself; for the
             archive forms, the archive destination to regenerate).
         --format <format>: Report format ('csv' or 'json', default: 'csv').
     """
@@ -1259,7 +1259,7 @@ class ParseCliParser:
 
         if f_target.lower() == "ior" and f_mode == "backends" and f_format != "csv":
             raise ParseCliParseError(
-                "'parse ior <scale>' writes ior-report.csv only (bmtool ior-parse.sh); "
+                "'parse ior <scale>' writes ior-report.csv only; "
                 "--format json is not supported"
             )
         if f_target.lower() == "epocpp" and f_format != "csv":
@@ -1302,8 +1302,8 @@ class ArchiveCliParser:
         --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE;
             for an lsmiotool run, the run's own setup); for ior, the IOR setup of the
             run to archive.
-        --source <path>: What to archive: an lsmiotool run root or a bmtool outputs
-            directory (default: resolved from the benchmark root, see ArchiveMain).
+        --source <path>: What to archive: an lsmiotool run root (default: the
+            latest standalone run under the benchmark root, see ArchiveMain).
     """
 
     VALID_BENCHMARKS = frozenset({"lsmio", "ior", "epocpp"})

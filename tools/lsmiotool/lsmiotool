@@ -179,15 +179,6 @@ if __name__ == '__main__':
             sys.stderr.write(f"{err}\n")
             sys.exit(2)
         inst_main = main.ParseMain(f_request=parse_request)
-    elif cmd == 'parseLegacy':
-        from lsmiotool.lib import main
-        cmd_args = args[1:]
-        if len(cmd_args) < 2:
-            sys.stderr.write(
-                "ParseLegacy: Needs two arguments: <ior|lsmio|lmp> <local|bake|small|large>\n"
-            )
-            sys.exit(1)
-        inst_main = main.ParseLegacyMain(*cmd_args, ssd=is_ssd)
     elif cmd == 'cancel':
         from lsmiotool.lib import main
         if len(args) != 2 or args[1].startswith('-'):

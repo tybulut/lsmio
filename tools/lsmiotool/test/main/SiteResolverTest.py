@@ -603,7 +603,7 @@ class SiteResolverTest(unittest.TestCase):
             EnvironmentResolver.detect(f_env={"LSMIO_ENV": "UNKNOWN_SITE"})
 
     def testDetectionIsFirstMatchInBmtoolOrder(self) -> None:
-        """Hosts matching several rules resolve first-match: viking, viking2, archer2, isambard (H12)."""
+        """Hosts matching several rules resolve first-match: viking, viking2, archer2, isambard."""
         # ARCHER2 compute/login nodes: nid* in group archer2 is ARCHER2, not ISAMBARD/ambiguous
         self.assertEqual(
             EnvironmentResolver.detect(

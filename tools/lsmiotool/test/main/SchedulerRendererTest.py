@@ -329,7 +329,7 @@ class SchedulerRendererTest(unittest.TestCase):
         )
 
     def testLibraryEnvironmentRenderedAfterModulesBeforeExec(self) -> None:
-        """Job script exports LD_LIBRARY_PATH/ADIOS2_PLUGIN_PATH from install_prefix like bmtool vars.in.sh (H9)."""
+        """Job script exports LD_LIBRARY_PATH/ADIOS2_PLUGIN_PATH from install_prefix."""
         f_prefix = self.m_archer2_profile.install_prefix
         self.assertEqual(f_prefix, "/work/e281/e281/testuser/usr")
         f_expected_env = [
@@ -409,7 +409,7 @@ class SchedulerRendererTest(unittest.TestCase):
                 SchedulerScriptRenderer.renderLibraryEnvironment(f_prof)
 
     def testSubmitArgvExportsEnvironment(self) -> None:
-        """sbatch passes --export=ALL and qsub passes -V so the job inherits the submit environment (H10, L6)."""
+        """sbatch passes --export=ALL and qsub passes -V so the job inherits the submit environment."""
         self.assertEqual(
             SlurmSchedulerAdapter.submitCommand("/tmp/job.sh"),
             ["sbatch", "--parsable", "--export=ALL", "/tmp/job.sh"],

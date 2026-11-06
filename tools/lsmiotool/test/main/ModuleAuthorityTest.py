@@ -31,7 +31,6 @@
 import hashlib
 import io
 import os
-import re
 import subprocess
 import sys
 import unittest
@@ -191,46 +190,15 @@ class ModuleAuthorityTest(unittest.TestCase):
         with self.assertRaises((ProfileSchemaError, SiteResolutionError)):
             self.m_hpc_modules.shellCommands("NONEXISTENT_SITE_XYZ")
 
-    def testAllFourModuleInventoriesMatchBmtool(self) -> None:
-        """Assert every site's module inventory matches bmtool's load-modules.in.sh.
+    def testAllFourModuleInventoriesAreNonEmptyAndUnique(self) -> None:
+        """Assert every site has a non-empty module inventory without duplicates.
 
-        Both inventories are read from their files, so a site re-tooling only has to
-        keep the two in step; no module name is pinned here.
+        No module name is pinned here.
         """
-        f_load_modules_path = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "..",
-                "..",
-                "bmtool",
-                "include",
-                "load-modules.in.sh",
-            )
-        )
-        with open(f_load_modules_path, "r", encoding="utf-8") as f_file:
-            f_shell_source = f_file.read()
-
-        # load_modules_<site>() { MODULES="<one module per line>" ... }
-        f_bmtool_inventories = {
-            f_match.group(1).upper(): tuple(
-                f_line for f_line in f_match.group(2).split("\n") if f_line
-            )
-            for f_match in re.finditer(
-                r'^load_modules_(\w+)\(\) \{\n  MODULES="\n(.*?)"$',
-                f_shell_source,
-                re.MULTILINE | re.DOTALL,
-            )
-        }
-        self.assertEqual(
-            set(f_bmtool_inventories), {"VIKING", "VIKING2", "ISAMBARD", "ARCHER2"}
-        )
-
-        for f_site_name, f_bmtool_mods in f_bmtool_inventories.items():
+        for f_site_name in ("VIKING", "VIKING2", "ISAMBARD", "ARCHER2"):
             f_mods = self.m_hpc_modules.getModules(f_site_name)
             self.assertTrue(f_mods, f"{f_site_name} has no modules")
             self.assertEqual(len(set(f_mods)), len(f_mods), f"{f_site_name} duplicates")
-            self.assertEqual(f_mods, f_bmtool_mods, f"{f_site_name} differs from bmtool")
 
         # DEV (0 modules)
         f_dev_mods = self.m_hpc_modules.getModules("DEV")

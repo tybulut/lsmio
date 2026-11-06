@@ -70,7 +70,7 @@ class LmpAdapterTest(unittest.TestCase):
         - FS: -lsmio-fallback
         """
         f_setups = ["LSMIO", "LSMIO-MMAP", "FS"]
-        # Literal upstream tuning values from tools/bmtool/jobs/lmp-benchmark.sh:34-64
+        # Literal upstream tuning values (the LMP benchmark's per-node buffer sizes)
         f_upstream_tuning: Dict[int, Tuple[int, int]] = {
             1: (4, 32),
             2: (5, 32),

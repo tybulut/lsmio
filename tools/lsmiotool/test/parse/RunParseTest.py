@@ -606,29 +606,6 @@ class RunParseTest(unittest.TestCase):
             RunRootResolver.resolve("/path/with/\0/null")
         self.assertIn("contains NUL byte", str(f_ctx.exception))
 
-    def testLegacyParseUnchanged(self) -> None:
-        """Asserts legacy parse routines and compatibility remain unchanged."""
-        from lsmiotool.lib.main import ParseLegacyMain
-
-        # Legacy ParseLegacyMain initialization for ior, lsmio, lmp
-        inst_ior = ParseLegacyMain("ior", "local")
-        self.assertEqual(inst_ior.m_command, "ior")
-        self.assertEqual(inst_ior.m_mode, "local")
-        self.assertFalse(inst_ior.m_is_ssd)
-
-        inst_lsmio = ParseLegacyMain("lsmio", "small", ssd=True)
-        self.assertEqual(inst_lsmio.m_command, "lsmio")
-        self.assertEqual(inst_lsmio.m_mode, "small")
-        self.assertTrue(inst_lsmio.m_is_ssd)
-
-        inst_lmp = ParseLegacyMain("lmp", "bake")
-        self.assertEqual(inst_lmp.m_command, "lmp")
-        self.assertEqual(inst_lmp.m_mode, "bake")
-
-        # Assert ParseLegacyMain does not import or call RunRootResolver
-        self.assertFalse(hasattr(inst_ior, "resolve"))
-        self.assertFalse(hasattr(inst_ior, "select"))
-
     def testResolvedRunAndPointImmutability(self) -> None:
         """Asserts ResolvedRun and ResolvedPoint instances are strictly immutable."""
         f_run_root, f_plan, _ = self._setupSucceededRun(

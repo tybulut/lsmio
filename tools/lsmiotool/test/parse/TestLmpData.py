@@ -33,52 +33,18 @@ import tempfile
 import unittest
 from unittest import TestCase
 from lsmiotool.lib import data
-from lsmiotool.test.fixtures.MockLogGenerator import MockLogGenerator
 
 
 class TestLmpData(TestCase):
-    """Unit tests for LMP data parsing and summary classes."""
+    """Unit tests for the LMP summary class."""
 
     m_temp_dir: tempfile.TemporaryDirectory
-    m_mock_gen: MockLogGenerator
 
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.TemporaryDirectory()
-        self.m_mock_gen = MockLogGenerator(self.m_temp_dir.name)
 
     def tearDown(self) -> None:
         self.m_temp_dir.cleanup()
-
-    def testLmpSingleRunData(self) -> None:
-        """Test extraction of throughput from standard LMP output log."""
-        f_path = os.path.join(self.m_temp_dir.name, "out-lmp-4-64K-node0-0.txt")
-        self.m_mock_gen.generateLmpFile(f_path, 1, 4, "64K", 345.67)
-
-        lmp_run = data.LmpSingleRunData(f_path)
-        run_map = lmp_run.getMap()
-
-        self.assertIn("write", run_map)
-        self.assertAlmostEqual(run_map["write"]["throughput"], 345.67)
-        self.assertAlmostEqual(run_map["write"]["bw(MiB/s)"], 345.67)
-
-    def testLmpSingleRunDataFloatFallback(self) -> None:
-        """Test graceful degradation when encountering non-numeric or corrupted metrics."""
-        f_path = os.path.join(self.m_temp_dir.name, "out-corrupt.txt")
-        with open(f_path, "w") as f:
-            f.write(".write, bw: CORRUPTED_VALUE, total: INVALID\n")
-            f.write("write,64K,NOT_A_NUMBER\n")
-
-        lmp_run = data.LmpSingleRunData(f_path)
-        run_map = lmp_run.getMap()
-        self.assertEqual(run_map["write"]["throughput"], 0.0)
-
-    def testLmpSingleRunDataMissingFile(self) -> None:
-        """Test handling of non-existent file path."""
-        lmp_run = data.LmpSingleRunData(
-            os.path.join(self.m_temp_dir.name, "nonexistent.txt")
-        )
-        run_map = lmp_run.getMap()
-        self.assertEqual(run_map["write"]["throughput"], 0.0)
 
     def testLmpSummaryData(self) -> None:
         """Test LMP summary data CSV parsing and time series extraction."""

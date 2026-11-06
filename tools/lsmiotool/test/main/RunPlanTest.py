@@ -761,7 +761,7 @@ class RunPlanTest(unittest.TestCase):
             self.assertEqual(sp.walltime, "15:00:00")
 
     def testPbsFixedWalltimeIgnoresTimeOverride(self) -> None:
-        """M1: a PBS site's fixed walltime wins over --time, as in bmtool, so the job script
+        """A PBS site's fixed walltime wins over --time, as in bmtool, so the job script
         still renders instead of failing on another walltime. It is per run: a job running
         several arms gets it once per arm, up to 48 hours."""
         from lsmiotool.lib.scheduler import PbsScriptRenderer
@@ -899,7 +899,7 @@ class RunPlanTest(unittest.TestCase):
         f_plan_day_dhm = RunPlanner.createPlan(f_req_day_dhm, self.m_archer2_profile)
         self.assertEqual(f_plan_day_dhm.scheduled_points[0].qos, "long")
 
-        # 7/8. Requested walltimes are clamped to 48h like bmtool's --time (M11), so
+        # 7/8. Requested walltimes are clamped to 48h like --time, so
         # 96h, 4 days and anything beyond become 48:00:00 on the long QoS
         for f_long in ("96:00:00", "4-00:00:00", "97:00:00", "4-01:00:00"):
             f_plan_long = RunPlanner.createPlan(

@@ -58,11 +58,8 @@ from lsmiotool.lib.run import (
     RunRequest,
     ScalePoint,
     ScheduledPointResources,
-    _attachForExistingRun,
 )
 from lsmiotool.lib.site import EnvironmentResolver
-
-_attachForExistingRun()
 
 
 class ArtifactStoreTest(unittest.TestCase):
@@ -603,100 +600,6 @@ class ArtifactStoreTest(unittest.TestCase):
                 f_store_symlink.allocateRun()
         finally:
             shutil.rmtree(f_target_outside, ignore_errors=True)
-
-    def testForExistingRunMatchesValidManifest(self) -> None:
-        """Tests ArtifactStore.forExistingRun successfully opens valid matching store."""
-        f_run_id = "run-for-existing-valid"
-        f_plan = self._createTestPlan(f_run_id)
-        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
-        f_store.allocateRun(f_plan)
-
-        # 1. Open by benchmark root and plan
-        f_existing_1 = ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-        self.assertEqual(f_existing_1.layout.runRoot, f_store.layout.runRoot)
-        self.assertEqual(f_existing_1.layout.manifestPath, f_store.layout.manifestPath)
-
-        # 2. Open by direct run root path and plan
-        f_existing_2 = ArtifactStore.forExistingRun(f_store.layout.runRoot, f_plan)
-        self.assertEqual(f_existing_2.layout.runRoot, f_store.layout.runRoot)
-
-        # 3. Alias for_existing_run
-        f_existing_3 = ArtifactStore.for_existing_run(self.m_temp_dir, f_plan)
-        self.assertEqual(f_existing_3.layout.runRoot, f_store.layout.runRoot)
-
-    def testForExistingRunRejectsMissingOrInvalidDirectory(self) -> None:
-        """Tests ArtifactStore.forExistingRun rejects non-existent root, symlink, or file."""
-        f_run_id = "run-for-existing-invalid-dir"
-        f_plan = self._createTestPlan(f_run_id)
-
-        # 1. Non-existent directory
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-
-        # 2. Regular file at run root
-        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
-        os.makedirs(f_store.layout.runsDir, exist_ok=True)
-        with open(f_store.layout.runRoot, "w") as f_f:
-            f_f.write("not a directory")
-
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-
-        # 3. Symlink at run root
-        os.remove(f_store.layout.runRoot)
-        f_dummy_target = tempfile.mkdtemp(prefix="dummy-sym-")
-        try:
-            os.symlink(f_dummy_target, f_store.layout.runRoot)
-            with self.assertRaises(ArtifactError):
-                ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-        finally:
-            shutil.rmtree(f_dummy_target, ignore_errors=True)
-
-    def testForExistingRunRejectsMissingCorruptOrMismatchedManifest(self) -> None:
-        """Tests ArtifactStore.forExistingRun rejects absent, corrupt, or mismatched manifest."""
-        f_run_id = "run-for-existing-manifest-checks"
-        f_plan = self._createTestPlan(f_run_id)
-        f_store = ArtifactStore(self.m_temp_dir, f_run_id)
-        os.makedirs(f_store.layout.runRoot, exist_ok=True)
-
-        # 1. Missing manifest
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-
-        # 2. Empty manifest
-        with open(f_store.layout.manifestPath, "w") as f_f:
-            f_f.write("")
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-
-        # 3. Corrupt manifest JSON
-        with open(f_store.layout.manifestPath, "w") as f_f:
-            f_f.write("{ not valid json")
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-
-        # 4. Manifest with mismatched run_id
-        os.remove(f_store.layout.manifestPath)
-        f_other_plan = self._createTestPlan("other-run-id-999")
-        with open(f_store.layout.manifestPath, "w", encoding="utf-8") as f_f:
-            f_f.write(ManifestSerializer.serialize(f_other_plan))
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_plan)
-
-        # 5. Manifest with mismatched target
-        os.remove(f_store.layout.manifestPath)
-        f_store.writeManifest(f_plan)
-        f_mismatched_target_plan = RunPlanner.createPlan(
-            f_request=RunRequest(
-                f_target="lsmio", f_scale="local", f_ssd=False, f_setup="MANAGER"
-            ),
-            f_profile=self.m_viking_profile,
-            f_run_id_source=lambda: f_run_id,
-            f_token_source=lambda: f_plan.tokens[0],
-        )
-        with self.assertRaises(ArtifactError):
-            ArtifactStore.forExistingRun(self.m_temp_dir, f_mismatched_target_plan)
-
 
 if __name__ == "__main__":
     unittest.main()

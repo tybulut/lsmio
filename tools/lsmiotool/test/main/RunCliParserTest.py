@@ -531,7 +531,7 @@ class RunCliParserTest(unittest.TestCase):
         )
 
     def testScalingRunsRejectArchiveOptions(self) -> None:
-        """M4: like bmtool, plain scaling runs accept only --ssd/--fast (and --setup); archive,
+        """Plain scaling runs accept only --ssd/--fast (and --setup); archive,
         resume, destination and walltime options belong to variants and backends runs."""
         for f_opts in (
             ["--archive"],
@@ -615,7 +615,7 @@ class RunCliParserTest(unittest.TestCase):
                 self.assertIn(f_msg, str(f_ctx.exception))
 
     def testBmtoolEnvironmentDefaults(self) -> None:
-        """M6: BM_SETUP picks the setup and BM_WALLHOUR the walltime when the options are absent."""
+        """BM_SETUP picks the setup and BM_WALLHOUR the walltime when the options are absent."""
         f_req = parseRunArguments(
             ["lsmio", "small"], f_environ={"BM_SETUP": "rocksdb", "BM_WALLHOUR": "7"}
         )
@@ -645,7 +645,7 @@ class RunCliParserTest(unittest.TestCase):
             with self.subTest(argv=f_argv, env=f_env):
                 with self.assertRaises(RunCliParseError):
                     parseRunArguments(f_argv, f_environ=f_env)
-        # BM_SETUP is lsmio's: bmtool hard-sets the ior and lmp setups (M19)
+        # BM_SETUP is lsmio's: the ior and lmp setups are fixed by the benchmark
         for f_target in ("ior", "lmp"):
             self.assertIsNone(
                 parseRunArguments(

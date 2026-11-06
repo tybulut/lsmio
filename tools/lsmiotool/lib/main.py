@@ -28,6 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import glob
 import importlib
 import json
 import math
@@ -42,7 +43,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    FrozenSet,
     List,
     Mapping,
     NamedTuple,
@@ -116,199 +116,6 @@ def siteBenchmarkRoots(f_storages: Sequence[str] = ("hdd", "ssd")) -> List[str]:
         if f_root and f_root not in f_roots:
             f_roots.append(f_root)
     return f_roots
-
-
-class ParseLegacyMain(BaseMain):
-    """parseLegacy: bmtool's 'parse' command on a bmtool-layout outputs directory.
-
-    Command:
-        parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>] [--ssd]
-        parseLegacy lsmio backends <local|bake|small|large> [<path>] [--ssd]
-
-    Like tools/bmtool/parse/*-parse.sh, the outputs directory defaults to
-    $BM_PATH/<benchmark>/outputs (jobs/<benchmark>-vars.in.sh), where $BM_PATH is the
-    site profile's benchmark root (its ssd root with --ssd), and the reports are
-    written into it. 'lsmio backends <scale>' regenerates every outputs-* arm of the
-    archive destination <BM_PATH>/lsmio-archive/backends/<scale> (bmtool's archive
-    mode). <path> overrides the outputs directory (archive destination for backends).
-    """
-
-    VALID_MODES: FrozenSet[str] = frozenset(
-        {"local", "bake", "small", "large", "variants", "baseline"}
-    )
-    BACKENDS_SCALES: FrozenSet[str] = frozenset({"local", "bake", "small", "large"})
-
-    m_command: str
-    m_mode: str
-    m_is_ssd: bool
-    m_backends: bool
-    m_path: Optional[str]
-    m_benchmark_root: Optional[str]
-
-    def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
-        """Initialize ParseLegacyMain.
-
-        Args:
-            *f_args: <ior|lsmio|lmp> <scale> [<path>], or lsmio backends <scale> [<path>]
-            **f_kwargs: ssd=True/False; f_benchmark_root overrides the site profile's
-                benchmark root.
-        """
-        super().__init__()
-        f_usage = (
-            "ParseLegacy: Needs <ior|lsmio|lmp> <local|bake|small|large|variants> "
-            "[<path>] or lsmio backends <local|bake|small|large> [<path>]"
-        )
-        if len(f_args) < 2:
-            log.Console.error(f_usage)
-            sys.exit(1)
-        f_tokens = [str(f_a) for f_a in f_args]
-        self.m_command = f_tokens[0]
-        self.m_is_ssd = bool(f_kwargs.get("ssd", False))
-        self.m_benchmark_root = f_kwargs.get("f_benchmark_root")
-        self.m_backends = False
-
-        allowed_commands = ["ior", "lsmio", "lmp"]
-        if self.m_command not in allowed_commands:
-            log.Console.error(
-                "Command to execute has to be in: " + str(allowed_commands)
-            )
-            sys.exit(1)
-
-        f_rest = f_tokens[1:]
-        if self.m_command == "lsmio" and f_rest[0] == "backends":
-            self.m_backends = True
-            f_rest = f_rest[1:]
-            if not f_rest or f_rest[0] not in self.BACKENDS_SCALES:
-                log.Console.error(
-                    "Backends scale has to be in: " + str(sorted(self.BACKENDS_SCALES))
-                )
-                sys.exit(1)
-        allowed_modes = ["local", "bake", "small", "large", "variants", "baseline"]
-        if f_rest[0] not in self.VALID_MODES:
-            log.Console.error("Command mode has to be in: " + str(allowed_modes))
-            sys.exit(1)
-        self.m_mode = f_rest[0]
-        if len(f_rest) > 2:
-            log.Console.error(f_usage)
-            sys.exit(1)
-        self.m_path = (
-            os.path.abspath(os.path.expanduser(f_rest[1])) if len(f_rest) > 1 else None
-        )
-
-    def _benchmarkRoot(self) -> Optional[str]:
-        """$BM_PATH: the explicit root, else the site profile's (ssd with --ssd)."""
-        if self.m_benchmark_root:
-            return os.path.abspath(os.path.expanduser(self.m_benchmark_root))
-        f_roots = siteBenchmarkRoots(("ssd",) if self.m_is_ssd else ("hdd",))
-        return f_roots[0] if f_roots else None
-
-    def _getTargetDir(self, f_bench_type: str, f_mode: str, f_is_ssd: bool) -> str:
-        """Outputs directory bmtool parses: <path>, else $BM_PATH/<benchmark>/outputs.
-
-        Raises:
-            ValueError: When no path was given and the benchmark root is unknown.
-        """
-        if self.m_path:
-            return self.m_path
-        f_root = self._benchmarkRoot()
-        if not f_root:
-            raise ValueError(
-                "cannot resolve the benchmark root from the site profile; "
-                "pass the outputs directory as <path>"
-            )
-        return os.path.join(f_root, f_bench_type, "outputs")
-
-    def _checkTargetDir(self, f_bench_type: str, f_mode: str, f_is_ssd: bool) -> str:
-        f_dir = self._getTargetDir(f_bench_type, f_mode, f_is_ssd)
-        if not os.path.isdir(f_dir):
-            raise ValueError(f"outputs directory not found: {f_dir}")
-        return f_dir
-
-    def parseIor(self, f_mode: str, f_is_ssd: bool) -> None:
-        """Parse IOR outputs into ior-report.csv (bmtool parse/ior-parse.sh)."""
-        from lsmiotool.lib import output
-
-        target_dir = self._checkTargetDir("ior", f_mode, f_is_ssd)
-        log.Console.debug(f"Parsing IOR logs from: {target_dir}")
-        agg = output.IorAggOutput(target_dir)
-        agg.generateReports(target_dir)
-
-    def parseLsmio(self, f_mode: str, f_is_ssd: bool) -> None:
-        """Parse LSMIO outputs into agg files and lsm-report.csv (lsmio-parse.sh)."""
-        from lsmiotool.lib import output
-
-        target_dir = self._checkTargetDir("lsmio", f_mode, f_is_ssd)
-        log.Console.debug(f"Parsing LSMIO logs from: {target_dir}")
-        agg = output.LsmioAggOutput(target_dir, f_scale=f_mode)
-        agg.generateReports(target_dir)
-
-    def parseLmp(self, f_mode: str, f_is_ssd: bool) -> None:
-        """Parse LMP outputs into lmp-report.csv (bmtool parse/lmp-parse.sh)."""
-        from lsmiotool.lib import output
-
-        target_dir = self._checkTargetDir("lmp", f_mode, f_is_ssd)
-        log.Console.debug(f"Parsing LMP logs from: {target_dir}")
-        agg = output.LmpAggOutput(target_dir)
-        agg.generateReports(target_dir)
-
-    def parseLsmioBackends(self, f_scale: str) -> int:
-        """lsmio-parse.sh archive mode, through 'parse lsmio backends <scale>'."""
-        from lsmiotool.lib.cli import ParseRequest
-
-        f_root = self._benchmarkRoot()
-        if not self.m_path and not f_root:
-            sys.stderr.write(
-                "Error: cannot resolve the benchmark root from the site profile; "
-                "pass the archive destination as <path>\n"
-            )
-            return 3
-        f_request = ParseRequest(
-            f_target="lsmio",
-            f_mode="backends",
-            f_scale=f_scale,
-            f_output_dir=self.m_path,
-        )
-        return ParseMain(f_request=f_request, f_benchmark_root=f_root).run()
-
-    def run(self) -> int:
-        """Execute parsing dispatch.
-
-        Returns:
-            0 when the report was written, 1 when the outputs directory is missing or
-            holds no results; backends mode returns 'parse lsmio backends' codes.
-        """
-        if self.m_backends:
-            return self.parseLsmioBackends(self.m_mode)
-
-        f_report_names = {
-            "ior": "ior-report.csv",
-            "lsmio": "lsm-report.csv",
-            "lmp": "lmp-report.csv",
-        }
-        try:
-            if self.m_command == "ior":
-                self.parseIor(self.m_mode, self.m_is_ssd)
-            elif self.m_command == "lsmio":
-                self.parseLsmio(self.m_mode, self.m_is_ssd)
-            elif self.m_command == "lmp":
-                self.parseLmp(self.m_mode, self.m_is_ssd)
-            f_report = os.path.join(
-                self._getTargetDir(self.m_command, self.m_mode, self.m_is_ssd),
-                f_report_names[self.m_command],
-            )
-        except ValueError as f_err:
-            sys.stderr.write(f"Error: {f_err}\n")
-            return 1
-
-        from lsmiotool.lib.data import isUsableReport
-
-        if not isUsableReport(f_report):
-            sys.stderr.write(
-                f"Warning: no {self.m_command} results; {f_report} not written\n"
-            )
-            return 1
-        sys.stdout.write(f"{f_report}\n")
-        return 0
 
 
 class ParseMain(BaseMain):
@@ -713,21 +520,22 @@ class ParseMain(BaseMain):
 
     @staticmethod
     def _regenerateIorDirs(f_dirs: Sequence[str]) -> int:
-        """Regenerate ior-report.csv (bmtool ior-parse.sh) in each IOR archive dir.
+        """Regenerate ior-report.csv in each IOR outputs dir, through IorAggOutput.
 
         Returns:
             0 when at least one ior-report.csv was produced, 5 otherwise.
         """
         from lsmiotool.lib.data import IOR_REPORT_FILE
-        from lsmiotool.lib.export import generateIorReports
+        from lsmiotool.lib.output import IorAggOutput
 
         f_written = 0
         for f_dir in f_dirs:
-            sys.stdout.write(
-                f"=== Generating report for {os.path.basename(f_dir)[len('outputs-') :]} ===\n"
-            )
+            f_base = os.path.basename(os.path.normpath(f_dir))
+            f_label = f_base[len("outputs-") :] if f_base.startswith("outputs-") else f_base
+            sys.stdout.write(f"=== Generating report for {f_label} ===\n")
             try:
-                if not generateIorReports(f_dir):
+                # None (no summary rows) is the failure; an old report may exist
+                if IorAggOutput(f_dir).generateReports() is None:
                     sys.stderr.write(f"Warning: no IOR results found in {f_dir}\n")
                     continue
             except Exception as f_err:
@@ -746,11 +554,46 @@ class ParseMain(BaseMain):
         f_name = os.path.basename(f_dir.rstrip(os.sep))
         return f_name.startswith("outputs-") and isIorArmId(f_name[len("outputs-") :])
 
+    @staticmethod
+    def _hasIorBanner(f_dir: str) -> bool:
+        """True when a rank log <dir>/<nodes>/<date>/out-* starts with the IOR banner.
+
+        Only the first line of each regular, non-empty log is read, in sorted path
+        order, until the first banner. Some IOR logs have no banner (they start with
+        an HDF5 or MPI error), so one banner anywhere is enough.
+        """
+        f_paths = sorted(
+            glob.iglob(os.path.join(glob.escape(f_dir), "*", "*", "out-*"))
+        )
+        for f_path in f_paths:
+            if not os.path.relpath(f_path, f_dir).split(os.sep)[0].isdigit():
+                continue
+            try:
+                if not os.path.isfile(f_path) or os.path.getsize(f_path) == 0:
+                    continue
+                with open(f_path, errors="replace") as f_file:
+                    f_first = f_file.readline()
+            except OSError:
+                continue
+            if f_first.startswith("IOR-") and (
+                "MPI Coordinated Test of Parallel I/O" in f_first
+            ):
+                return True
+        return False
+
+    def _isIorOutputsDir(self, f_dir: str) -> bool:
+        """An IOR outputs dir: outputs-ior[-<setup>] by name, else by the IOR banner in
+        its rank logs. An EPOCpp arm (by name) is never IOR."""
+        if self._isEpocppArmDir(f_dir):
+            return False
+        return self._isIorArmDir(f_dir) or self._hasIorBanner(f_dir)
+
     def _parseBmtoolLayout(self, f_dir: str) -> int:
         """Regenerate reports for a bmtool-layout outputs dir or an archive of them; an
-        IOR arm (outputs-ior[-<setup>]) gets its ior-report.csv and an epocpp arm
-        (outputs-epocpp-*) its epocpp-report.csv, never LSMIO reports."""
-        from lsmiotool.lib.output import isBmtoolOutputDir
+        IOR dir (outputs-ior[-<setup>] or any dir whose rank logs carry the IOR banner)
+        gets its ior-report.csv and an epocpp arm (outputs-epocpp-*) its
+        epocpp-report.csv, never LSMIO reports."""
+        from lsmiotool.lib.output import IorAggOutput, isBmtoolOutputDir
 
         f_scale = self.m_request.scale
         f_epocpp_dirs = (
@@ -778,26 +621,24 @@ class ParseMain(BaseMain):
                 return 2
             return self._regenerateEpocppDirs([f_dir])
         if self.m_request.format != "csv" and (
-            self._isIorArmDir(f_dir)
+            self._isIorOutputsDir(f_dir)
             or any(
-                self._isIorArmDir(os.path.join(f_dir, f_entry))
+                f_entry.startswith("outputs-")
                 and os.path.isdir(os.path.join(f_dir, f_entry))
+                and self._isIorOutputsDir(os.path.join(f_dir, f_entry))
                 for f_entry in os.listdir(f_dir)
             )
         ):
             # As 'parse ior <scale>' rejects it: IOR outputs give ior-report.csv only
             sys.stderr.write(
-                f"Error: {f_dir} holds IOR outputs, reported as ior-report.csv only "
-                "(bmtool ior-parse.sh); --format json is not supported\n"
+                f"Error: {f_dir} holds IOR outputs, reported as ior-report.csv only; "
+                "--format json is not supported\n"
             )
             return 2
-        if self._isIorArmDir(f_dir):
+        if self._isIorOutputsDir(f_dir):
             if self.m_request.output_dir:
-                from lsmiotool.lib.data import generateBmtoolIorReport
-
-                f_report = generateBmtoolIorReport(
-                    f_dir,
-                    f_report_dir=os.path.abspath(self.m_request.output_dir),
+                f_report = IorAggOutput(f_dir).generateReports(
+                    os.path.abspath(self.m_request.output_dir)
                 )
                 if f_report is None:
                     sys.stderr.write(f"Warning: no IOR results found in {f_dir}\n")
@@ -829,7 +670,7 @@ class ParseMain(BaseMain):
             if f_entry.startswith("outputs-")
             and os.path.isdir(os.path.join(f_dir, f_entry))
         ]
-        f_ior = [f_c for f_c in f_children if self._isIorArmDir(f_c)]
+        f_ior = [f_c for f_c in f_children if self._isIorOutputsDir(f_c)]
         f_lsmio = [
             f_c for f_c in f_children if f_c not in f_ior and f_c not in f_epocpp_dirs
         ]
@@ -2455,24 +2296,23 @@ class RunMain(BaseMain):
 
 
 class ArchiveMain(BaseMain):
-    """'lsmiotool archive': bmtool's archive command (include/archive.in.sh).
+    """'lsmiotool archive': export a finished lsmiotool run into the archive.
 
     Benchmark root: f_benchmark_root, else the site profile's benchmark root (hdd,
-    as bmtool's archive has no --ssd) - never the working directory.
-    Destination: --dest (resolved like bmtool's include/archive-dest.in.sh), else
-    <root>/lsmio-archive/{variants|baseline}; for ior, <root>/lsmio-archive/ior/<scale>,
-    where 'run ior' archives (an epocpp run archives to <root>/lsmio-archive/epocpp/<scale>
-    from --source). An inherited BM_ARCHIVE_DEST is ignored:
-    bmtool clears it before resolving the archive command's destination.
+    no --ssd) - never the working directory.
+    Destination: --dest, else <root>/lsmio-archive/{variants|baseline}; for ior,
+    <root>/lsmio-archive/ior/<scale>, where 'run ior' archives (an epocpp run archives
+    to <root>/lsmio-archive/epocpp/<scale> from --source). An inherited BM_ARCHIVE_DEST
+    is ignored.
     Arm: outputs-<arm>, arm = resolveArmId(setup, variant) with setup from --setup,
     else $BM_SETUP, else NATIVE (an lsmiotool run root: the run's own setup).
-    Source (--source, else resolved from the root):
-      - <root>/lsmio/outputs ($LSM_DIR_OBASE) holding bmtool outputs is moved like
-        bmtool does (reports generated first, an empty directory recreated);
-      - otherwise the latest lsmiotool run of 'lsmio <scale>' [variant] under
-        <root>/runs is exported in bmtool's layout (lib/export.py) for its succeeded
-        points; the run root stays where it is (no empty runs/run-* left behind) and
-        a run already exported to the destination is not archived again.
+    Source: --source takes an lsmiotool run root (manifest.json) only; any other
+    directory is refused and left untouched. Without --source, the latest standalone
+    lsmiotool run of 'lsmio <scale>' [variant] under <root>/runs is exported in the
+    archive layout (lib/export.py) for its succeeded points; the run root stays where
+    it is (no empty runs/run-* left behind) and a run already exported to the
+    destination is not archived again. Arms of a multi-arm run are archived with
+    --source <one of its run roots>.
     """
 
     m_request: Any
@@ -2713,13 +2553,28 @@ class ArchiveMain(BaseMain):
                 return f_run_root
         return None
 
-    @staticmethod
-    def _holdsOutputs(f_dir: str) -> bool:
-        """True for a directory with entries other than bmtool's .bm-job-ok marker."""
+    def _groupArmRunRoots(self, f_root: str, f_setup: Optional[str]) -> List[str]:
+        """Names of the runs under <f_root>/runs that match the request but were
+        skipped by _latestRunRoot as arms of a multi-arm run (readArmMarker)."""
+        from lsmiotool.lib.archive import ArchiveEngine
+
+        f_runs = os.path.join(f_root, "runs")
         try:
-            return any(f_entry != ".bm-job-ok" for f_entry in os.listdir(f_dir))
+            f_entries = sorted(os.listdir(f_runs), reverse=True)
         except OSError:
-            return False
+            return []
+        f_names: List[str] = []
+        for f_entry in f_entries:
+            f_run_root = os.path.join(f_runs, f_entry)
+            if os.path.islink(f_run_root) or not os.path.isfile(
+                os.path.join(f_run_root, "manifest.json")
+            ):
+                continue
+            if ArchiveEngine.readArmMarker(
+                f_run_root
+            ) is not None and self._runArmId(f_run_root, f_setup, False):
+                f_names.append(f_entry)
+        return f_names
 
     def run(self) -> int:
         """Archive the resolved source into the destination; 0 on success, 1 on error."""
@@ -2769,7 +2624,7 @@ class ArchiveMain(BaseMain):
                 f_target=self.m_request.target,
             )
 
-            # Source: explicit, else bmtool's $LSM_DIR_OBASE or the latest lsmiotool run
+            # Source: an explicit run root, else the latest standalone lsmiotool run
             f_run_root: Optional[str] = None
             if f_source:
                 if os.path.isfile(os.path.join(f_source, "manifest.json")):
@@ -2781,61 +2636,51 @@ class ArchiveMain(BaseMain):
                         "(manifest.json); an ior archive takes only an ior run root"
                     )
                 else:
-                    # bmtool's archive only ever moves its live outputs dir
-                    # (include/archive.in.sh moves $LSM_DIR_OBASE): never an archive, a copy
-                    # or outputs-failed, which moving would break or misfile
-                    f_bm_outputs = (
-                        os.path.realpath(os.path.join(f_root, "lsmio", "outputs"))
-                        if f_root
-                        else None
+                    # Only an lsmiotool run root is archived: never an archive, a copy
+                    # or any other directory, which moving would break or misfile
+                    raise ArchiveError(
+                        f"--source {f_source} is not an lsmiotool run root "
+                        "(manifest.json); refusing to archive it (--source takes the "
+                        "run root of an lsmiotool run)"
                     )
-                    if os.path.realpath(f_source) != f_bm_outputs:
-                        raise ArchiveError(
-                            f"--source {f_source} is neither an lsmiotool run root "
-                            "(manifest.json) nor bmtool's live outputs directory "
-                            f"({f_bm_outputs or '<benchmark_root>/lsmio/outputs'}); refusing "
-                            "to move it (move bmtool outputs there first)"
-                        )
             else:
                 if f_root is None:
                     raise ArchiveError(
                         "cannot resolve the benchmark root from the site profile; "
                         "pass --source"
                     )
-                f_outputs = os.path.join(f_root, "lsmio", "outputs")
+                f_runs_root = os.path.join(f_root, "runs")
                 f_latest = self._latestRunRoot(f_root, f_setup)
-                # bmtool's live outputs are LSMIO's: an ior archive takes only runs
-                f_has_outputs = not f_ior and self._holdsOutputs(f_outputs)
-                if f_has_outputs and f_latest is not None:
-                    raise ArchiveError(
-                        f"Both bmtool outputs ({f_outputs}) and an lsmiotool run "
-                        f"({f_latest}) could be archived; pick one with --source"
-                    )
                 if f_latest is not None:
                     f_run_root = f_latest
-                elif f_has_outputs:
-                    f_source = f_outputs
-                elif f_ior:
-                    raise ArchiveError(
-                        f"Nothing to archive: no lsmiotool run of 'ior {f_scale}'"
-                        + (f" ({f_setup})" if f_setup else "")
-                        + f" was found under {os.path.join(f_root, 'runs')} (a multi-setup "
-                        "ior run is archived with --source <one of its run roots>)"
-                    )
                 else:
+                    f_skipped = self._groupArmRunRoots(f_root, f_setup)
+                    f_hint = (
+                        f"; {len(f_skipped)} matching run(s) belong to a multi-arm "
+                        f"run and are not taken ({', '.join(f_skipped)}): archive one "
+                        "with --source <its run root>"
+                        if f_skipped
+                        else ""
+                    )
+                    if f_ior:
+                        raise ArchiveError(
+                            f"Nothing to archive: no lsmiotool run of 'ior {f_scale}'"
+                            + (f" ({f_setup})" if f_setup else "")
+                            + f" was found under {f_runs_root} (a multi-setup "
+                            "ior run is archived with --source <one of its run roots>)"
+                            + f_hint
+                        )
                     raise ArchiveError(
-                        f"Nothing to archive: {f_outputs} is missing or empty and no "
-                        f"lsmiotool run of 'lsmio {f_scale}'"
+                        f"Nothing to archive: no lsmiotool run of 'lsmio {f_scale}'"
                         + (
                             f" ({self.m_request.variant})"
                             if self.m_request.variant
                             else ""
                         )
-                        + f" was found under {os.path.join(f_root, 'runs')}"
-                        " (a failed bmtool job leaves its outputs in "
-                        f"{os.path.join(f_root, 'lsmio', 'outputs-failed')}; a variants, "
-                        "--versioned or backends run is archived with --source <one of "
-                        "its run roots>)"
+                        + f" was found under {f_runs_root} (a variants, --versioned "
+                        "or backends run is archived with --source <one of its run "
+                        "roots>)"
+                        + f_hint
                     )
 
             if f_run_root is not None:
@@ -2865,20 +2710,7 @@ class ArchiveMain(BaseMain):
                 log.Console.info(f"Archived {f_run_root} -> {f_target_dir}")
                 return 0
 
-            # bmtool outputs directory: include/archive.in.sh move-on-archive
-            f_arm_id = ArchiveEngine.resolveArmId(
-                f_setup=f_setup or "NATIVE",
-                f_variant=self.m_request.variant,
-            )
-            f_target_dir = ArchiveEngine.executeArchive(
-                f_source_dir=f_source,
-                f_dest_root=f_dest_root,
-                f_arm_id=f_arm_id,
-                f_scale=f_scale,
-            )
-            sys.stdout.write(f"Archived {f_source} -> {f_target_dir}\n")
-            log.Console.info(f"Archived {f_source} -> {f_target_dir}")
-            return 0
+            raise ArchiveError("Nothing to archive")
         except ArchiveError as f_err:
             sys.stderr.write(f"Archive error: {f_err}\n")
             log.Console.error(f"Archive error: {f_err}")

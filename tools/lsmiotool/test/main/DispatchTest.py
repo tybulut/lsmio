@@ -56,7 +56,6 @@ from lsmiotool.lib.main import (
     HpcEnvMain,
     LatexDataMain,
     LatexMain,
-    ParseLegacyMain,
     ParseMain,
     RunMain,
     ShellMain,
@@ -408,15 +407,13 @@ class DispatchTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 0)
                 self.assertIn("latex data <sources.yaml>", mock_stdout.getvalue())
 
-        # parseLegacy with insufficient arguments
-        with patch.object(sys, "argv", [f_exec_str, "parseLegacy", "ior"]):
+        # parseLegacy was removed: an unknown command
+        with patch.object(sys, "argv", [f_exec_str, "parseLegacy", "ior", "small"]):
             with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 1)
-                self.assertIn(
-                    "ParseLegacy: Needs two arguments:", mock_stderr.getvalue()
-                )
+                self.assertNotEqual(ctx.exception.code, 0)
+                self.assertIn("Unknown command", mock_stderr.getvalue())
 
         # parse command with no additional arguments
         with patch.object(sys, "argv", [f_exec_str, "parse"]):
@@ -458,47 +455,6 @@ class DispatchTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 runpy.run_path(f_exec_str, run_name="__main__")
             self.assertEqual(ctx.exception.code, 1)
-
-    def testParseLegacyReceivesSsd(self) -> None:
-        """Asserts parseLegacy command receives the SSD boolean flag."""
-        f_exec_str = str(self.m_executable)
-
-        # 1. parseLegacy without SSD
-        with patch.object(sys, "argv", [f_exec_str, "parseLegacy", "ior", "local"]):
-            with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
-                mock_inst = MagicMock()
-                mock_inst.run.return_value = 0
-                mock_parse_cls.return_value = mock_inst
-                with self.assertRaises(SystemExit) as ctx:
-                    runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 0)
-                mock_parse_cls.assert_called_once_with("ior", "local", ssd=False)
-
-        # 2. parseLegacy with global --ssd
-        with patch.object(
-            sys, "argv", [f_exec_str, "--ssd", "parseLegacy", "lsmio", "small"]
-        ):
-            with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
-                mock_inst = MagicMock()
-                mock_inst.run.return_value = 0
-                mock_parse_cls.return_value = mock_inst
-                with self.assertRaises(SystemExit) as ctx:
-                    runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 0)
-                mock_parse_cls.assert_called_once_with("lsmio", "small", ssd=True)
-
-        # 3. parseLegacy with global -s
-        with patch.object(
-            sys, "argv", [f_exec_str, "-s", "parseLegacy", "lmp", "bake"]
-        ):
-            with patch("lsmiotool.lib.main.ParseLegacyMain") as mock_parse_cls:
-                mock_inst = MagicMock()
-                mock_inst.run.return_value = 0
-                mock_parse_cls.return_value = mock_inst
-                with self.assertRaises(SystemExit) as ctx:
-                    runpy.run_path(f_exec_str, run_name="__main__")
-                self.assertEqual(ctx.exception.code, 0)
-                mock_parse_cls.assert_called_once_with("lmp", "bake", ssd=True)
 
     def testParseCommandDispatch(self) -> None:
         """Asserts parse command dispatches to ParseMain with parsed ParseRequest."""
@@ -578,7 +534,6 @@ with patch("os.getlogin", side_effect=AssertionError("os.getlogin was called")):
         "matplotlib",
         "matplotlib.pyplot",
         "lsmiotool.lib.plot",
-        "lsmiotool.lib.dirs",
         "lsmiotool.lib.env",
     ):
         assert mod_name not in sys.modules, f"Module '{mod_name}' was eagerly imported into sys.modules"
@@ -997,14 +952,14 @@ print("LAZY_IMPORT_OK")
         for f_scale in RunCliParser.VALID_SCALES:
             self.assertIn(f_scale, f_readme)
 
-        # 3. 6 combinations in fixed sequence
+        # 3. 6 combinations in fixed sequence (RunPlanner.ORDERED_COMBINATIONS)
         f_expected_combinations = [
-            "(16, 8M)",
-            "(16, 1M)",
-            "(16, 64K)",
-            "(4, 8M)",
             "(4, 1M)",
             "(4, 64K)",
+            "(4, 8M)",
+            "(16, 1M)",
+            "(16, 64K)",
+            "(16, 8M)",
         ]
         f_last_pos = -1
         for f_combo in f_expected_combinations:
@@ -1082,7 +1037,6 @@ print("LAZY_IMPORT_OK")
 
         # Parse limitations (no auto-discovery, RunRootResolver)
         self.assertIn("RunRootResolver", f_readme)
-        self.assertIn("lsmiotool parseLegacy", f_readme)
 
     def testReadmeInstallAndStateConstants(self) -> None:
         """Asserts documentation records installed layout paths and state precedence rules."""
@@ -1298,12 +1252,12 @@ print("LAZY_IMPORT_OK")
 
         # 3. 6-combination execution matrix and fixed sequence
         f_expected_combinations = [
-            "(16, 8M)",
-            "(16, 1M)",
-            "(16, 64K)",
-            "(4, 8M)",
             "(4, 1M)",
             "(4, 64K)",
+            "(4, 8M)",
+            "(16, 1M)",
+            "(16, 64K)",
+            "(16, 8M)",
         ]
         f_last_pos = -1
         for f_combo in f_expected_combinations:
@@ -1325,8 +1279,6 @@ print("LAZY_IMPORT_OK")
 
         # 5. Parse command boundary and limitations
         self.assertIn("RunRootResolver", f_readme)
-        self.assertIn("lsmiotool parseLegacy", f_readme)
-        self.assertIn("does not perform automatic run-root discovery", f_readme)
 
     def testRunMainPrintsIdsTokensRootFinalStateAndExit(self) -> None:
         """Chunk 019: Asserts RunMain emits Run ID, Run Root, point tokens/job IDs, final state, and exit code to stdout without duplicates."""

@@ -405,7 +405,7 @@ class AllocationControllerTest(unittest.TestCase):
             self.assertEqual(f_res.payload["status"], "success")
 
     def testStepSettlePauseDefaultsToBmtool(self) -> None:
-        """M13: bmtool sleeps 3 s after each benchmark step; LSMIO_STEP_SETTLE_SECONDS overrides."""
+        """The worker sleeps 3 s after each benchmark step; LSMIO_STEP_SETTLE_SECONDS overrides."""
         from unittest.mock import patch
 
         with patch.dict(os.environ, {}, clear=False):

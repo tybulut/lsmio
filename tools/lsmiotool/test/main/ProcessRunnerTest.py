@@ -183,7 +183,7 @@ class ProcessRunnerTest(unittest.TestCase):
             self.assertIsNotNone(f_ctx2.exception.result)
 
     def testLogIsWrittenWhileProcessRuns(self) -> None:
-        """M13: output reaches the log as it is produced (like 'CMD 2>&1 | tee LOG'), so a
+        """Output reaches the log as it is produced (like 'CMD 2>&1 | tee LOG'), so a
         step killed at its time limit still leaves what it printed; both streams are kept."""
         import threading
 

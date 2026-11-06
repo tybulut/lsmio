@@ -28,7 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""Legacy env.py site detection and library prefix parity with bmtool vars.in.sh (H12)."""
+"""Legacy env.py site detection and library prefix."""
 
 import json
 import os
