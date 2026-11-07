@@ -33,9 +33,27 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <lsmio/benchmark.hpp>
 #include <lsmio/lsmio.hpp>
+#include <stdexcept>
+#include <string>
 #include <thread>
+
+namespace {
+
+// Runs f_fn, which must throw std::invalid_argument with exactly the given message.
+template <typename F>
+void expectInvalidArgument(F &&f_fn, const std::string &f_expected) {
+    try {
+        f_fn();
+        ADD_FAILURE() << "expected std::invalid_argument: " << f_expected;
+    } catch (const std::invalid_argument &e) {
+        EXPECT_EQ(std::string(e.what()), f_expected);
+    }
+}
+
+}  // namespace
 
 TEST(lsmioBenchmark, Duration) {
     lsmio::Benchmark bm;
@@ -203,6 +221,164 @@ TEST(lsmioBenchmark, ClearIterationsResetsFailures) {
     int iterations;
     bm.summaryIteration(name, min, mean, max, iterations, totalBytes, totalOps);
     EXPECT_EQ(iterations, 0);
+}
+
+TEST(lsmioBenchmark, StartTwiceThrows) {
+    lsmio::Benchmark bm;
+    bm.start();
+
+    expectInvalidArgument([&] { bm.start(); },
+                          "ERROR: lsmio::Benchmark::start: method ran but it is already started.");
+
+    // The rejected start must leave the running benchmark running.
+    EXPECT_NO_THROW((void)bm.sofar());
+    EXPECT_NO_THROW(bm.stop());
+    EXPECT_GE(bm.duration(), 0);
+}
+
+TEST(lsmioBenchmark, StopWithoutStartThrows) {
+    lsmio::Benchmark bm;
+
+    expectInvalidArgument([&] { bm.stop(); },
+                          "ERROR: lsmio::Benchmark::stop: method ran without starting.");
+    expectInvalidArgument([&] { bm.stop(false); },
+                          "ERROR: lsmio::Benchmark::stop: method ran without starting.");
+
+    // Nothing was started, so no stop time was recorded.
+    EXPECT_EQ(bm.duration(), 0);
+}
+
+TEST(lsmioBenchmark, StopIdempotentWithoutStartIsNoop) {
+    lsmio::Benchmark bm;
+
+    EXPECT_NO_THROW(bm.stop(true));
+    EXPECT_EQ(bm.duration(), 0);
+
+    // The idempotent stop did not start the benchmark, so sofar() still refuses.
+    // FIXME(BUG): D-K2-1 message text, see SofarRequiresRunning.
+    expectInvalidArgument([&] { (void)bm.sofar(); },
+                          "ERROR: lsmio::Benchmark::stop: method ran without starting.");
+}
+
+TEST(lsmioBenchmark, StopIdempotentAfterStopKeepsDuration) {
+    lsmio::Benchmark bm;
+    bm.start();
+    bm.stop();
+    const int64_t d1 = bm.duration();
+
+    EXPECT_NO_THROW(bm.stop(true));
+    EXPECT_EQ(bm.duration(), d1);
+
+    // The object can be restarted after the idempotent stop.
+    EXPECT_NO_THROW(bm.start());
+    bm.stop();
+}
+
+TEST(lsmioBenchmark, SofarRequiresRunning) {
+    lsmio::Benchmark bm;
+
+    // FIXME(BUG): sofar() and duration() throw messages that name "Benchmark::stop" (copied
+    // from stop()); they should name the method that failed. This test pins the current text.
+    expectInvalidArgument([&] { (void)bm.sofar(); },
+                          "ERROR: lsmio::Benchmark::stop: method ran without starting.");
+
+    bm.start();
+    bm.stop();
+    expectInvalidArgument([&] { (void)bm.sofar(); },
+                          "ERROR: lsmio::Benchmark::stop: method ran without starting.");
+}
+
+// sofar() counts microseconds of steady_clock, the clock sleep_for waits on, so a 2 ms sleep
+// advances it by at least 2000. A sofar() that returns a constant fails the lower bound.
+TEST(lsmioBenchmark, SofarWhileRunningIsMonotonic) {
+    lsmio::Benchmark bm;
+    bm.start();
+
+    const int64_t s1 = bm.sofar();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    const int64_t s2 = bm.sofar();
+    bm.stop();
+
+    EXPECT_GE(s1, 0);
+    EXPECT_GE(s2 - s1, 2000);
+    EXPECT_GE(bm.duration(), s2);
+}
+
+TEST(lsmioBenchmark, DurationWhileRunningThrows) {
+    lsmio::Benchmark bm;
+    bm.start();
+
+    // FIXME(BUG): sofar() and duration() throw messages that name "Benchmark::stop" (copied
+    // from stop()); they should name the method that failed. This test pins the current text.
+    expectInvalidArgument([&] { (void)bm.duration(); },
+                          "ERROR: lsmio::Benchmark::stop: method ran while running.");
+
+    // The rejected duration() call must leave the run intact.
+    EXPECT_NO_THROW(bm.stop());
+    EXPECT_GE(bm.duration(), 0);
+}
+
+TEST(lsmioBenchmark, NegativeOpsRejection) {
+    lsmio::Benchmark bm;
+    std::string name = "test";
+    bm.addIteration(name, 1000, 1024, -1);
+
+    double min = -1.0, mean = -1.0, max = -1.0;
+    double total_bytes = -1.0, total_ops = -1.0;
+    int iterations = -1;
+    bm.summaryIteration(name, min, mean, max, iterations, total_bytes, total_ops);
+
+    EXPECT_EQ(bm.formatSummary(name), "test, FAILED");
+    EXPECT_EQ(bm.failedIterations(name), 1);
+    EXPECT_EQ(iterations, 0);
+    EXPECT_DOUBLE_EQ(total_bytes, 0.0);
+    EXPECT_DOUBLE_EQ(total_ops, 0.0);
+}
+
+TEST(lsmioBenchmark, NaNBytesAndOpsAccepted) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    lsmio::Benchmark a;
+    lsmio::Benchmark b;
+    a.addIteration("test", 1000, nan, 1);
+    b.addIteration("test", 1000, 1024, nan);
+
+    // FIXME(BUG): addIteration rejects negative bytes/ops with "< 0.0", which is false for
+    // NaN, so NaN samples are stored and the summary prints "nan". This test pins the current
+    // behaviour.
+    EXPECT_EQ(a.formatSummary("test"), "test,nan,nan,nan,nan,1,1");
+    EXPECT_EQ(b.formatSummary("test"), "test,0.98,0.98,0.98,0.00,nan,1");
+
+    EXPECT_EQ(a.failedIterations("test"), 0);
+    EXPECT_EQ(b.failedIterations("test"), 0);
+
+    double min, mean, max;
+    double total_bytes, total_ops;
+    int iterations;
+    a.summaryIteration("test", min, mean, max, iterations, total_bytes, total_ops);
+    EXPECT_EQ(iterations, 1);
+    EXPECT_TRUE(std::isnan(total_bytes));
+
+    b.summaryIteration("test", min, mean, max, iterations, total_bytes, total_ops);
+    EXPECT_EQ(iterations, 1);
+    EXPECT_DOUBLE_EQ(total_bytes, 1024.0);
+    EXPECT_TRUE(std::isnan(total_ops));
+}
+
+TEST(lsmioBenchmark, FormatIterationsHeaderLosesCommas) {
+    lsmio::Benchmark bm;
+    bm.addIteration("iwrite", 10 * 1000, 20 * 1024 * 1024, 10);
+
+    const std::string out = bm.formatIterations("iwrite");
+    // FIXME(BUG): formatIterations removes every "," from the whole output, including
+    // BM_HEADER, before it turns ":" into ","; its header loses its column separators while
+    // formatSummary("") keeps them. This test pins the current text.
+    EXPECT_EQ(out, std::string("accessmax(MiB)/smin(MiB/s)mean(MiB/s)total(MiB)total(Ops)"
+                               "iteration\n") +
+                       std::string(68, '-') + "\n" + "iwrite,2000.00,2000.00,2000.00,20.00,10,1\n");
+
+    // formatSummary("") returns the header with its commas.
+    EXPECT_EQ(bm.formatSummary("").rfind("access,max(MiB)/s,min(MiB/s),", 0), 0u);
+    EXPECT_EQ(bm.failedIterations("iwrite"), 0);
 }
 
 int main(int argc, char **argv) {

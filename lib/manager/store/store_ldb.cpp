@@ -45,6 +45,10 @@ LSMIOStoreLDB::LSMIOStoreLDB(const std::string& dbPath, const bool overWrite)
     _options.create_if_missing = true;
     _batch = nullptr;
 
+    // FIXME: the filter policy and the block cache created below are never deleted, so each store
+    // that uses them leaks them (close() deletes only _db). LeakSanitizer reports a direct leak of
+    // 24 bytes from NewBloomFilterPolicy and of 3520 bytes from NewLRUCache. No test can observe
+    // it.
     if (gConfigLSMIO.useBloomFilter) {
         _options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     }
@@ -170,6 +174,9 @@ bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::str
               << " size: " << value.size() << " futureSize: " << futureSize
               << " futureBytes: " << futureBytes << std::endl;
 
+    // FIXME: compares the value's byte size with _maxBatchSize, which holds asyncBatchSize, a count
+    // of mutations; a deferred value of that many bytes or more bypasses the batch. See
+    // LSMIOLevelDBConfigTest.DeferredValueAtCountLimitBypassesBatch in test/test_leveldb.cpp.
     if (flush || value.size() >= _maxBatchSize) {
         if (_batch) stopBatch();
 
@@ -273,6 +280,9 @@ bool LSMIOStoreLDB::dbCleanup() {
     return s.ok();
 }
 
+// FIXME: readBarrier and writeBarrier discard the status of stopBatch() and always return true.
+// readBarrier logs "LSMIOStoreLDB::writeBarrier", and stopBatch logs "LSMIOStoreRDB::stopBatch()".
+// See LSMIOLevelDBConfigTest.BarriersWriteDeferredPutAndDelete in test/test_leveldb.cpp.
 bool LSMIOStoreLDB::readBarrier() {
     bool status;
 

@@ -125,6 +125,9 @@ add_lsmio_base_test(test_benchmark)
 # GTest: Version
 add_lsmio_base_test(test_version)
 
+# GTest: lsmio.cpp (logging setup, helper flags, enum strings and stream operators)
+add_lsmio_base_test(test_lsmio)
+
 # GTest: BMBase Regression Harness
 add_executable(test_bm_base test_bm_base.cpp "${CMAKE_SOURCE_DIR}/benchmark/bm_base.cpp")
 target_include_directories(test_bm_base PRIVATE ${LSMIO_INCLUDE_DIR} "${CMAKE_SOURCE_DIR}/benchmark")
@@ -151,6 +154,7 @@ add_lsmio_store_test(test_file_pool)
 add_lsmio_store_test(test_file_closer)
 add_lsmio_store_test(test_manager)
 add_lsmio_store_test(test_copy_once)
+add_lsmio_store_test(test_store)
 add_lsmio_posix_test(test_posix)
 
 # GTest: MPI: Base and Manager

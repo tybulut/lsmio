@@ -106,6 +106,8 @@ void LSMIOHelper::setFlag(const std::string key, const bool value) {
     }
 }
 
+// FIXME: fprintf, backtrace and exit are not async-signal-safe; use write(2) and _exit(2).
+// See test_lsmio.cpp LSMIODeathTest.HandlerSIGSEGVPrintsAndExitsFailure.
 void handlerSIGSEGV(int signal) {
     const int TRACE_SIZE = 24;
     void *array[TRACE_SIZE];
@@ -182,6 +184,9 @@ std::string to_string(const MemtableType v) {
 
 }  // namespace lsmio
 
+// FIXME: the by-value and const-reference operator<< overloads (here and in lsmio.hpp) make
+// "os << v" ambiguous for every enum. See test_lsmio.cpp
+// LSMIOStreamOperatorTest.ShiftExpressionIsAmbiguous.
 std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v) {
     os << lsmio::to_string(v);
     return os;

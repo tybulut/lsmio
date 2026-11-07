@@ -29,15 +29,24 @@
  */
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <iterator>
 #include <lsmio/manager/store/native/MemtableVectorNoSort.hpp>
 #include <lsmio/manager/store/native/SSTableManager.hpp>
 #include <lsmio/manager/store/native/StoreNative.hpp>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <utility>
+#include <vector>
 
 using namespace lsmio;
 
@@ -515,3 +524,707 @@ TEST_F(SSTableManagerTest, PreallocManualOffsetAndFooterIndex) {
         EXPECT_EQ(val, "value_" + std::to_string(i));
     }
 }
+
+namespace {
+
+// Builds the bytes of a crafted SSTable in SSTableManager's on-disk format. A record is
+// {u32 key_len, key, u32 val_len, value}; the optional dense index footer is
+// {u32 num_entries, {u32 key_len, key, u64 offset} per entry, u64 footer_offset,
+// u32 FOOTER_MAGIC}. Every integer is little-endian.
+class CraftedSSTable {
+  public:
+    // Appends a well-formed record and returns its offset.
+    uint64_t addRecord(const std::string& f_key, const std::string& f_value) {
+        const uint64_t offset = m_bytes.size();
+        addLe32(static_cast<uint32_t>(f_key.size()));
+        m_bytes.append(f_key);
+        addLe32(static_cast<uint32_t>(f_value.size()));
+        m_bytes.append(f_value);
+        return offset;
+    }
+
+    void addRaw(const std::string& f_bytes) {
+        m_bytes.append(f_bytes);
+    }
+
+    void addLe32(uint32_t f_val) {
+        for (int i = 0; i < 4; ++i) {
+            m_bytes.push_back(static_cast<char>((f_val >> (8 * i)) & 0xFF));
+        }
+    }
+
+    void addLe64(uint64_t f_val) {
+        for (int i = 0; i < 8; ++i) {
+            m_bytes.push_back(static_cast<char>((f_val >> (8 * i)) & 0xFF));
+        }
+    }
+
+    // Appends one index entry {u32 key_len, key, u64 offset}.
+    void addIndexEntry(const std::string& f_key, uint64_t f_offset) {
+        addLe32(static_cast<uint32_t>(f_key.size()));
+        m_bytes.append(f_key);
+        addLe64(f_offset);
+    }
+
+    // Appends the last 12 bytes of a footer: u64 footer_offset, u32 FOOTER_MAGIC.
+    void addTrailer(uint64_t f_footer_offset) {
+        addLe64(f_footer_offset);
+        addLe32(SSTableManager::FOOTER_MAGIC);
+    }
+
+    // Appends a well-formed footer that lists f_entries; the footer starts at the current size.
+    void addFooter(const std::vector<std::pair<std::string, uint64_t>>& f_entries) {
+        const uint64_t footer_offset = m_bytes.size();
+        addLe32(static_cast<uint32_t>(f_entries.size()));
+        for (const auto& entry : f_entries) {
+            addIndexEntry(entry.first, entry.second);
+        }
+        addTrailer(footer_offset);
+    }
+
+    // Size in bytes of the footer that addFooter(f_entries) appends.
+    static uint64_t footerSize(const std::vector<std::pair<std::string, uint64_t>>& f_entries) {
+        uint64_t size = 4 + 12;
+        for (const auto& entry : f_entries) {
+            size += 4 + entry.first.size() + 8;
+        }
+        return size;
+    }
+
+    uint64_t size() const {
+        return m_bytes.size();
+    }
+    const std::string& bytes() const {
+        return m_bytes;
+    }
+
+    void writeTo(const std::string& f_path) const {
+        std::ofstream out(f_path, std::ios::binary | std::ios::trunc);
+        out.write(m_bytes.data(), static_cast<std::streamsize>(m_bytes.size()));
+    }
+
+  private:
+    std::string m_bytes;
+};
+
+// File name FilePool gives the SSTable with id f_id ("L0-000001.sst").
+std::string tableFileName(uint64_t f_id) {
+    std::ostringstream oss;
+    oss << "L0-" << std::setw(6) << std::setfill('0') << f_id << ".sst";
+    return oss.str();
+}
+
+// Fixture for tests that place crafted .sst files in the DB directory before the manager is
+// built (recovery runs in the constructor). One directory per test, named after the test.
+class LSMIOSSTableCraftedTest : public ::testing::Test {
+  protected:
+    std::string m_db_path;
+    std::unique_ptr<SSTableManager> m_mgr;
+    LSMIOConfig m_backup_config;
+
+    void SetUp() override {
+        m_backup_config = gConfigLSMIO;
+        const ::testing::TestInfo* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        m_db_path =
+            std::string("test_sstable_crafted_") + info->test_suite_name() + "_" + info->name();
+        std::replace(m_db_path.begin(), m_db_path.end(), '/', '_');
+        std::filesystem::remove_all(m_db_path);
+        std::filesystem::create_directories(m_db_path);
+        gConfigLSMIO.enableMMAP = false;
+        gConfigLSMIO.enablePread = true;
+        gConfigLSMIO.footerIndex = true;
+        gConfigLSMIO.manualOffset = true;
+        gConfigLSMIO.preAllocate = false;
+    }
+
+    void TearDown() override {
+        m_mgr.reset();
+        gConfigLSMIO = m_backup_config;
+        std::filesystem::remove_all(m_db_path);
+    }
+
+    std::string tablePath(uint64_t f_id) const {
+        return m_db_path + "/" + tableFileName(f_id);
+    }
+
+    // Builds the manager on m_db_path without a file pool; recovery reads the crafted files.
+    void openManager() {
+        m_mgr = std::make_unique<SSTableManager>(m_db_path, 0, 0);
+    }
+};
+
+}  // namespace
+
+// 036: two records of one key in a footer-less table; the sequential scan keeps the newest.
+TEST_F(LSMIOSSTableCraftedTest, SequentialScanKeepsNewestDuplicate) {
+    CraftedSSTable table;
+    table.addRecord("dup", "old");
+    table.addRecord("other", "x");
+    table.addRecord("dup", "new");
+    table.writeTo(tablePath(1));
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("dup", value));
+    EXPECT_EQ(value, "new");
+    EXPECT_TRUE(m_mgr->get("other", value));
+    EXPECT_EQ(value, "x");
+
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(m_mgr->scan("", results, deleted));
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"dup", "new"}, {"other", "x"}}));
+    EXPECT_TRUE(deleted.empty());
+}
+
+// Control for the footer cases below: a valid footer is authoritative, so a record it does not
+// list stays invisible.
+TEST_F(LSMIOSSTableCraftedTest, ValidFooterIsUsedAsIndex) {
+    CraftedSSTable table;
+    table.addRecord("k1", "v1");
+    table.addRecord("k2", "v2");
+    table.addFooter({{"k1", 0}});
+    table.writeTo(tablePath(1));
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("k1", value));
+    EXPECT_EQ(value, "v1");
+    EXPECT_FALSE(m_mgr->get("k2", value));
+}
+
+namespace {
+
+struct FooterCase {
+    const char* name;
+    // Appends a malformed footer that lists only "k1" (at offset 0) to a table holding the
+    // records k1 and k2; f_footer_offset is where the footer starts.
+    void (*append_footer)(CraftedSSTable& f_table, uint64_t f_footer_offset);
+};
+
+class LSMIOSSTableFooterRejectTest : public LSMIOSSTableCraftedTest,
+                                     public ::testing::WithParamInterface<FooterCase> {};
+
+}  // namespace
+
+// 037: every malformed footer is refused, so recovery falls back to the sequential scan and finds
+// k2 too (with a valid footer k2 would be invisible, see ValidFooterIsUsedAsIndex).
+TEST_P(LSMIOSSTableFooterRejectTest, FallsBackToSequentialScan) {
+    CraftedSSTable table;
+    table.addRecord("k1", "v1");
+    table.addRecord("k2", "v2");
+    GetParam().append_footer(table, table.size());
+    table.writeTo(tablePath(1));
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("k1", value));
+    EXPECT_EQ(value, "v1");
+    EXPECT_TRUE(m_mgr->get("k2", value));
+    EXPECT_EQ(value, "v2");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Footers, LSMIOSSTableFooterRejectTest,
+    ::testing::Values(FooterCase{"offset_beyond_trailer",
+                                 [](CraftedSSTable& f_table, uint64_t) {
+                                     f_table.addTrailer(1ULL << 40);
+                                 }},
+                      FooterCase{"count_exceeds_entries",
+                                 [](CraftedSSTable& f_table, uint64_t f_footer_offset) {
+                                     f_table.addLe32(2);
+                                     f_table.addIndexEntry("k1", 0);
+                                     f_table.addTrailer(f_footer_offset);
+                                 }},
+                      FooterCase{"key_len_over_limit",
+                                 [](CraftedSSTable& f_table, uint64_t f_footer_offset) {
+                                     f_table.addLe32(1);
+                                     f_table.addLe32(64 * 1024 * 1024 + 1);
+                                     f_table.addRaw("k1");
+                                     f_table.addTrailer(f_footer_offset);
+                                 }},
+                      FooterCase{"key_past_index_end",
+                                 [](CraftedSSTable& f_table, uint64_t f_footer_offset) {
+                                     f_table.addLe32(1);
+                                     f_table.addLe32(100);
+                                     f_table.addRaw("k1");
+                                     f_table.addTrailer(f_footer_offset);
+                                 }},
+                      FooterCase{"offset_bytes_missing",
+                                 [](CraftedSSTable& f_table, uint64_t f_footer_offset) {
+                                     f_table.addLe32(1);
+                                     f_table.addLe32(2);
+                                     f_table.addRaw("k1");
+                                     f_table.addLe32(0);
+                                     f_table.addTrailer(f_footer_offset);
+                                 }},
+                      FooterCase{"count_below_entries",
+                                 [](CraftedSSTable& f_table, uint64_t f_footer_offset) {
+                                     f_table.addLe32(1);
+                                     f_table.addIndexEntry("k1", 0);
+                                     f_table.addIndexEntry("k2", 12);
+                                     f_table.addTrailer(f_footer_offset);
+                                 }}),
+    [](const ::testing::TestParamInfo<FooterCase>& f_info) {
+        return std::string(f_info.param.name);
+    });
+
+namespace {
+
+struct TailCase {
+    const char* name;
+    // Appends a malformed record after the valid record "good".
+    void (*append_tail)(CraftedSSTable& f_table);
+};
+
+class LSMIOSSTableTruncatedTailTest : public LSMIOSSTableCraftedTest,
+                                      public ::testing::WithParamInterface<TailCase> {};
+
+}  // namespace
+
+// 038: the sequential scan stops at a malformed record and keeps the records before it.
+TEST_P(LSMIOSSTableTruncatedTailTest, KeepsRecordsBeforeTheBadOne) {
+    CraftedSSTable table;
+    table.addRecord("good", "1");
+    GetParam().append_tail(table);
+    table.writeTo(tablePath(1));
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("good", value));
+    EXPECT_EQ(value, "1");
+
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(m_mgr->scan("", results, deleted));
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"good", "1"}}));
+}
+
+INSTANTIATE_TEST_SUITE_P(Tails, LSMIOSSTableTruncatedTailTest,
+                         ::testing::Values(TailCase{"header_truncated",
+                                                    [](CraftedSSTable& f_table) {
+                                                        f_table.addRaw(std::string("\x01\x00", 2));
+                                                    }},
+                                           TailCase{"key_len_over_limit",
+                                                    [](CraftedSSTable& f_table) {
+                                                        f_table.addLe32(64 * 1024 * 1024 + 1);
+                                                    }},
+                                           TailCase{"key_truncated",
+                                                    [](CraftedSSTable& f_table) {
+                                                        f_table.addLe32(10);
+                                                        f_table.addRaw("abc");
+                                                    }},
+                                           TailCase{"val_len_truncated",
+                                                    [](CraftedSSTable& f_table) {
+                                                        f_table.addLe32(3);
+                                                        f_table.addRaw("bad");
+                                                        f_table.addRaw(std::string("\x05\x00", 2));
+                                                    }},
+                                           TailCase{"val_len_over_limit",
+                                                    [](CraftedSSTable& f_table) {
+                                                        f_table.addLe32(3);
+                                                        f_table.addRaw("bad");
+                                                        f_table.addLe32(0x80000000u);
+                                                    }}),
+                         [](const ::testing::TestParamInfo<TailCase>& f_info) {
+                             return std::string(f_info.param.name);
+                         });
+
+// 038: a record with an empty key and a non-empty value is not the padding marker; it is indexed
+// and the scan continues past it.
+TEST_F(LSMIOSSTableCraftedTest, EmptyKeyRecordIsIndexed) {
+    CraftedSSTable table;
+    table.addRecord("", "hello");
+    table.addRecord("after", "2");
+    table.writeTo(tablePath(1));
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("", value));
+    EXPECT_EQ(value, "hello");
+    EXPECT_TRUE(m_mgr->get("after", value));
+    EXPECT_EQ(value, "2");
+}
+
+// FIXME(BUG): (038) recovery takes a record with an empty key and an empty value for the zero
+// padding of a preallocated file and stops. The store accepts put("", ""), and the empty key sorts
+// first, so a footer-less table loses every record after it on restart. This pins it.
+TEST_F(LSMIOSSTableCraftedTest, EmptyKeyAndValueEndsFooterlessRecovery) {
+    gConfigLSMIO.footerIndex = false;
+    openManager();
+    MemtableVectorNoSort memtable;
+    memtable.add("", "");
+    memtable.add("after", "2");
+    std::vector<char> buffer(1024);
+    ASSERT_TRUE(m_mgr->flushMemtable(memtable, buffer));
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("after", value));
+    EXPECT_EQ(value, "2");
+
+    m_mgr.reset();
+    openManager();
+    EXPECT_FALSE(m_mgr->get("after", value));
+}
+
+// 038: a DB directory that does not exist recovers nothing and is not created.
+TEST_F(LSMIOSSTableCraftedTest, MissingDirectoryRecoversNothing) {
+    std::filesystem::remove_all(m_db_path);
+    openManager();
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+    std::string value;
+    EXPECT_FALSE(m_mgr->get("any", value));
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_FALSE(m_mgr->scan("", results, deleted));
+    EXPECT_TRUE(results.empty());
+}
+
+// 038: only L0-<number>.sst files are recovered; the next table id follows the highest one.
+TEST_F(LSMIOSSTableCraftedTest, IgnoresForeignAndMalformedFileNames) {
+    const std::vector<std::string> ignored_names = {"notes.txt", "L0-000001.log", "L0-abc.sst"};
+    for (size_t i = 0; i < ignored_names.size(); ++i) {
+        CraftedSSTable ghost;
+        ghost.addRecord("ghost" + std::to_string(i), "x");
+        ghost.writeTo(m_db_path + "/" + ignored_names[i]);
+    }
+    CraftedSSTable real;
+    real.addRecord("real", "1");
+    real.writeTo(tablePath(2));
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("real", value));
+    EXPECT_EQ(value, "1");
+    for (size_t i = 0; i < ignored_names.size(); ++i) {
+        EXPECT_FALSE(m_mgr->get("ghost" + std::to_string(i), value)) << ignored_names[i];
+    }
+
+    MemtableVectorNoSort memtable;
+    memtable.add("fresh", "2");
+    std::vector<char> buffer(1024);
+    ASSERT_TRUE(m_mgr->flushMemtable(memtable, buffer));
+    EXPECT_TRUE(std::filesystem::exists(tablePath(3)));
+    EXPECT_TRUE(m_mgr->get("fresh", value));
+    EXPECT_EQ(value, "2");
+}
+
+namespace {
+
+std::string readWholeFile(const std::string& f_path) {
+    std::ifstream in(f_path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+}  // namespace
+
+// FIXME(BUG): (039/038) recovery silently skips an SSTable it cannot open (no log, no error), so
+// the keys in it read as missing. The id still counts, so later flushes do not reuse the name.
+TEST_F(LSMIOSSTableCraftedTest, UnreadableTableIsSkipped) {
+    if (::geteuid() == 0) {
+        GTEST_SKIP() << "root ignores file permissions";
+    }
+    gConfigLSMIO.enableMMAP = true;
+    gConfigLSMIO.enablePread = false;
+    CraftedSSTable table;
+    table.addRecord("k1", "v1");
+    table.addFooter({{"k1", 0}});
+    table.writeTo(tablePath(1));
+    ASSERT_EQ(::chmod(tablePath(1).c_str(), 0), 0);
+
+    openManager();
+    ASSERT_EQ(::chmod(tablePath(1).c_str(), 0644), 0);
+    std::string value;
+    EXPECT_FALSE(m_mgr->get("k1", value));
+
+    MemtableVectorNoSort memtable;
+    memtable.add("k2", "v2");
+    std::vector<char> buffer(1024);
+    ASSERT_TRUE(m_mgr->flushMemtable(memtable, buffer));
+    EXPECT_TRUE(std::filesystem::exists(tablePath(2)));
+    EXPECT_EQ(readWholeFile(tablePath(1)), table.bytes());
+}
+
+// 040: an empty memtable is a successful no-op.
+TEST_F(LSMIOSSTableCraftedTest, EmptyMemtableFlushWritesNoFile) {
+    openManager();
+    MemtableVectorNoSort memtable;
+    std::vector<char> buffer(16);
+    EXPECT_TRUE(m_mgr->flushMemtable(memtable, buffer));
+    EXPECT_TRUE(std::filesystem::is_empty(m_db_path));
+}
+
+// 040: without a file pool the table is created on demand; with the directory gone that fails and
+// the flush reports it.
+TEST_F(LSMIOSSTableCraftedTest, FlushFailsWhenDirectoryIsGone) {
+    openManager();
+    std::filesystem::remove_all(m_db_path);
+    MemtableVectorNoSort memtable;
+    memtable.add("k", "v");
+    std::vector<char> buffer(1024);
+    EXPECT_FALSE(m_mgr->flushMemtable(memtable, buffer));
+    std::string value;
+    EXPECT_FALSE(m_mgr->get("k", value));
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+}
+
+namespace {
+
+struct FlushLayoutCase {
+    const char* name;
+    bool manual_offset;
+    bool footer_index;
+    bool pre_allocate;
+    size_t buffer_size;
+};
+
+class LSMIOSSTableFlushLayoutTest : public LSMIOSSTableCraftedTest,
+                                    public ::testing::WithParamInterface<FlushLayoutCase> {};
+
+}  // namespace
+
+// 040: the flushed file holds exactly the records (and the footer when enabled), whether offsets
+// come from the running count or from tellp(), and the table reads back before and after restart.
+TEST_P(LSMIOSSTableFlushLayoutTest, WritesExactBytes) {
+    const FlushLayoutCase& c = GetParam();
+    gConfigLSMIO.manualOffset = c.manual_offset;
+    gConfigLSMIO.footerIndex = c.footer_index;
+    gConfigLSMIO.preAllocate = c.pre_allocate;
+    m_mgr = std::make_unique<SSTableManager>(m_db_path, 0, c.pre_allocate ? 4096 : 0);
+
+    MemtableVectorNoSort memtable;
+    memtable.add("bb", "22");
+    memtable.add("a", "1");
+    std::vector<char> buffer(c.buffer_size);
+    ASSERT_TRUE(m_mgr->flushMemtable(memtable, buffer));
+
+    CraftedSSTable expected;
+    const uint64_t offset_a = expected.addRecord("a", "1");
+    const uint64_t offset_bb = expected.addRecord("bb", "22");
+    if (c.footer_index) {
+        expected.addFooter({{"a", offset_a}, {"bb", offset_bb}});
+    }
+    m_mgr.reset();
+    EXPECT_EQ(readWholeFile(tablePath(1)), expected.bytes());
+
+    openManager();
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("a", value));
+    EXPECT_EQ(value, "1");
+    EXPECT_TRUE(m_mgr->get("bb", value));
+    EXPECT_EQ(value, "22");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Layouts, LSMIOSSTableFlushLayoutTest,
+    ::testing::Values(FlushLayoutCase{"tellp_offsets_footer_prealloc", false, true, true, 0},
+                      FlushLayoutCase{"manual_offsets_no_footer", true, false, false, 64}),
+    [](const ::testing::TestParamInfo<FlushLayoutCase>& f_info) {
+        return std::string(f_info.param.name);
+    });
+
+// 041: a newer table shadows an older one in a scan: a key already returned is not read again, and
+// a key deleted in the newer table is not resurrected from the older one.
+TEST_F(LSMIOSSTableCraftedTest, ScanSkipsKeysSeenInNewerTables) {
+    openManager();
+    std::vector<char> buffer(1024);
+    MemtableVectorNoSort older;
+    older.add("p/a", "old");
+    older.add("p/b", "b-old");
+    ASSERT_TRUE(m_mgr->flushMemtable(older, buffer));
+    MemtableVectorNoSort newer;
+    newer.add("p/a", "new");
+    newer.add("p/b", MEMTABLE_TOMBSTONE);
+    ASSERT_TRUE(m_mgr->flushMemtable(newer, buffer));
+
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(m_mgr->scan("p/", results, deleted));
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"p/a", "new"}}));
+    EXPECT_EQ(deleted, (std::set<std::string>{"p/b"}));
+
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("p/b", value));
+    EXPECT_EQ(value, MEMTABLE_TOMBSTONE);
+}
+
+// 041: an index entry whose record cannot be read is skipped by scan and missed by get; get then
+// falls through to the older table.
+TEST_F(LSMIOSSTableCraftedTest, UnreadableIndexEntryIsSkipped) {
+    CraftedSSTable older;
+    older.addRecord("p/y", "older");
+    older.addFooter({{"p/y", 0}});
+    older.writeTo(tablePath(1));
+    CraftedSSTable newer;
+    newer.addRecord("p/x", "1");
+    newer.addFooter({{"p/x", 0}, {"p/y", 1ULL << 40}});
+    newer.writeTo(tablePath(2));
+
+    openManager();
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(m_mgr->scan("p/", results, deleted));
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"p/x", "1"}, {"p/y", "older"}}));
+
+    std::string value;
+    EXPECT_TRUE(m_mgr->get("p/y", value));
+    EXPECT_EQ(value, "older");
+}
+
+namespace {
+
+enum class ReadMode {
+    Mmap,
+    Pread,
+    Stream
+};
+
+// Crafted tables whose index (footer or sequential scan) points get() at a record it must refuse.
+enum class BadLayout {
+    OffsetFar,            // footer entry "k1" at offset 2^64 - 16
+    OffsetInMagic,        // footer entry "k1" at the last 4 bytes (the magic)
+    OffsetInLastTwo,      // footer entry "k1" at the last 2 bytes
+    KeyLenMismatch,       // footer entry "kkk" at the record of "k1"
+    KeyBytesDiffer,       // footer entry "k2" at the record of "k1"
+    ValLenOverLimit,      // footer entry "big" at a record whose val_len is 0xFFFFFFFF
+    KeyPastEnd5,          // footer entry (5 bytes) at the trailer; 4 bytes remain after its key
+    KeyPastEnd9,          // footer entry (9 bytes) at the trailer; only 8 bytes remain for its key
+    ValueTruncated,       // no footer; record "k" declares 100 value bytes, the file holds 3
+    FileRemovedAfterOpen  // valid footer; the file is deleted after recovery
+};
+
+struct ReadRefusalCase {
+    const char* name;
+    ReadMode mode;
+    BadLayout layout;
+    const char* key;
+    size_t key_size;          // the key may hold NUL bytes
+    const char* value_after;  // value left in the output string; get() starts from "sentinel"
+};
+
+// Builds the table for f_layout.
+CraftedSSTable buildBadLayout(BadLayout f_layout) {
+    CraftedSSTable table;
+    switch (f_layout) {
+        case BadLayout::OffsetFar:
+            table.addRecord("k1", "v1");
+            table.addFooter({{"k1", ~0ULL - 15}});
+            break;
+        case BadLayout::OffsetInMagic:
+        case BadLayout::OffsetInLastTwo: {
+            table.addRecord("k1", "v1");
+            const uint64_t total = table.size() + CraftedSSTable::footerSize({{"k1", 0}});
+            const uint64_t back = (f_layout == BadLayout::OffsetInMagic) ? 4 : 2;
+            table.addFooter({{"k1", total - back}});
+            break;
+        }
+        case BadLayout::KeyLenMismatch:
+            table.addRecord("k1", "v1");
+            table.addFooter({{"kkk", 0}});
+            break;
+        case BadLayout::KeyBytesDiffer:
+            table.addRecord("k1", "v1");
+            table.addFooter({{"k2", 0}});
+            break;
+        case BadLayout::ValLenOverLimit:
+            table.addLe32(3);
+            table.addRaw("big");
+            table.addLe32(0xFFFFFFFFu);
+            table.addFooter({{"big", 0}});
+            break;
+        case BadLayout::KeyPastEnd5:
+        case BadLayout::KeyPastEnd9: {
+            // The data section is key_size filler bytes, so the trailer's u64 footer_offset
+            // starts with u32 key_size: the entry at the trailer reads as a record header whose
+            // key is the next key_size bytes (4 zero bytes, then the magic "IMSL").
+            const size_t key_size = (f_layout == BadLayout::KeyPastEnd5) ? 5 : 9;
+            table.addRaw(std::string(key_size, 'z'));
+            const std::string key = (f_layout == BadLayout::KeyPastEnd5)
+                                        ? std::string("\0\0\0\0I", 5)
+                                        : std::string(9, 'q');
+            const uint64_t total = table.size() + CraftedSSTable::footerSize({{key, 0}});
+            table.addFooter({{key, total - 12}});
+            break;
+        }
+        case BadLayout::ValueTruncated:
+            table.addLe32(1);
+            table.addRaw("k");
+            table.addLe32(100);
+            table.addRaw("abc");
+            break;
+        case BadLayout::FileRemovedAfterOpen:
+            table.addRecord("k1", "v1");
+            table.addFooter({{"k1", 0}});
+            break;
+    }
+    return table;
+}
+
+class LSMIOSSTableReadRefusalTest : public LSMIOSSTableCraftedTest,
+                                    public ::testing::WithParamInterface<ReadRefusalCase> {};
+
+}  // namespace
+
+// 042/043: each read path (mmap, pread, stream) refuses a record that does not fit the file or
+// does not match the key; get() then reports a miss.
+TEST_P(LSMIOSSTableReadRefusalTest, GetRefusesBadRecord) {
+    const ReadRefusalCase& c = GetParam();
+    gConfigLSMIO.enableMMAP = (c.mode == ReadMode::Mmap);
+    gConfigLSMIO.enablePread = (c.mode == ReadMode::Pread);
+    buildBadLayout(c.layout).writeTo(tablePath(1));
+
+    openManager();
+    if (c.layout == BadLayout::FileRemovedAfterOpen) {
+        ASSERT_TRUE(std::filesystem::remove(tablePath(1)));
+    }
+    std::string value = "sentinel";
+    EXPECT_FALSE(m_mgr->get(std::string(c.key, c.key_size), value));
+    EXPECT_EQ(value, c.value_after);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ReadPaths, LSMIOSSTableReadRefusalTest,
+    ::testing::Values(ReadRefusalCase{"mmap_offset_far", ReadMode::Mmap, BadLayout::OffsetFar, "k1",
+                                      2, "sentinel"},
+                      ReadRefusalCase{"mmap_offset_in_magic", ReadMode::Mmap,
+                                      BadLayout::OffsetInMagic, "k1", 2, "sentinel"},
+                      ReadRefusalCase{"mmap_key_len_mismatch", ReadMode::Mmap,
+                                      BadLayout::KeyLenMismatch, "kkk", 3, "sentinel"},
+                      ReadRefusalCase{"mmap_key_past_end", ReadMode::Mmap, BadLayout::KeyPastEnd5,
+                                      "\0\0\0\0I", 5, "sentinel"},
+                      ReadRefusalCase{"mmap_key_bytes_differ", ReadMode::Mmap,
+                                      BadLayout::KeyBytesDiffer, "k2", 2, "sentinel"},
+                      ReadRefusalCase{"mmap_val_len_over_limit", ReadMode::Mmap,
+                                      BadLayout::ValLenOverLimit, "big", 3, "sentinel"},
+                      ReadRefusalCase{"mmap_value_truncated", ReadMode::Mmap,
+                                      BadLayout::ValueTruncated, "k", 1, "sentinel"},
+                      ReadRefusalCase{"pread_offset_far", ReadMode::Pread, BadLayout::OffsetFar,
+                                      "k1", 2, "sentinel"},
+                      ReadRefusalCase{"pread_key_len_mismatch", ReadMode::Pread,
+                                      BadLayout::KeyLenMismatch, "kkk", 3, "sentinel"},
+                      ReadRefusalCase{"pread_key_bytes_differ", ReadMode::Pread,
+                                      BadLayout::KeyBytesDiffer, "k2", 2, "sentinel"},
+                      ReadRefusalCase{"pread_val_len_over_limit", ReadMode::Pread,
+                                      BadLayout::ValLenOverLimit, "big", 3, "sentinel"},
+                      ReadRefusalCase{"pread_value_truncated", ReadMode::Pread,
+                                      BadLayout::ValueTruncated, "k", 1, ""},
+                      ReadRefusalCase{"stream_offset_far", ReadMode::Stream, BadLayout::OffsetFar,
+                                      "k1", 2, "sentinel"},
+                      ReadRefusalCase{"stream_offset_in_last_two", ReadMode::Stream,
+                                      BadLayout::OffsetInLastTwo, "k1", 2, "sentinel"},
+                      ReadRefusalCase{"stream_offset_in_magic", ReadMode::Stream,
+                                      BadLayout::OffsetInMagic, "k1", 2, "sentinel"},
+                      ReadRefusalCase{"stream_key_short", ReadMode::Stream, BadLayout::KeyPastEnd9,
+                                      "qqqqqqqqq", 9, "sentinel"},
+                      ReadRefusalCase{"stream_key_bytes_differ", ReadMode::Stream,
+                                      BadLayout::KeyBytesDiffer, "k2", 2, "sentinel"},
+                      ReadRefusalCase{"stream_val_len_missing", ReadMode::Stream,
+                                      BadLayout::KeyPastEnd5, "\0\0\0\0I", 5, "sentinel"},
+                      ReadRefusalCase{"stream_val_len_over_limit", ReadMode::Stream,
+                                      BadLayout::ValLenOverLimit, "big", 3, "sentinel"},
+                      ReadRefusalCase{"stream_value_truncated", ReadMode::Stream,
+                                      BadLayout::ValueTruncated, "k", 1, ""},
+                      ReadRefusalCase{"stream_file_removed", ReadMode::Stream,
+                                      BadLayout::FileRemovedAfterOpen, "k1", 2, "sentinel"}),
+    [](const ::testing::TestParamInfo<ReadRefusalCase>& f_info) {
+        return std::string(f_info.param.name);
+    });

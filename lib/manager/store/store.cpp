@@ -111,6 +111,8 @@ bool LSMIOStore::_batchMutation(MutationType mType, const std::string& key, std:
     return _batchMutation(mType, key, static_cast<const std::string&>(value), flush);
 }
 
+// FIXME: the status of stopBatch() is discarded and true is returned; return it. See test_store.cpp
+// LSMIOStoreTest.WriteBarrierIgnoresStopBatchFailure.
 bool LSMIOStore::writeBarrier() {
     bool status;
 

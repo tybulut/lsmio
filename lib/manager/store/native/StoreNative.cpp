@@ -204,6 +204,10 @@ void LSMIOStoreNative::FlushWorkLoop() {
                 return;
             }
 
+            // FIXME: the memtable taken off the queue here is in neither m_immutable_memtables
+            // nor the SSTable index until FlushMemtableToL0 returns, so get and getPrefix miss
+            // its keys meanwhile. See test_native_extended.cpp
+            // LSMIOStoreNativeTest.StalledFlushExposesImmutableMemtablesAndBackPressure.
             if (!m_immutable_memtables.empty()) {
                 memtable_to_flush = std::move(m_immutable_memtables.front());
                 m_immutable_memtables.pop_front();
@@ -423,6 +427,10 @@ bool LSMIOStoreNative::getPrefix(const std::string f_prefix_key,
 
         m_active_memtable->scan(f_prefix_key, results, deleted_keys);
 
+        // FIXME: each scan overwrites the results, and the immutable memtables are scanned after
+        // the active one and newest to oldest, so the oldest memtable's value of a key wins (an
+        // older value also resurrects a newer tombstone). See test_native_extended.cpp
+        // LSMIOStoreNativeTest.StalledFlushExposesImmutableMemtablesAndBackPressure.
         for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend(); ++it) {
             (*it)->scan(f_prefix_key, results, deleted_keys);
         }

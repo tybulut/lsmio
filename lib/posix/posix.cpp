@@ -57,6 +57,8 @@ void LSMIOStream::open(const char* filename, std::ios::openmode mode) {
     auto it = _fileMap.find(filename);
     if (it == _fileMap.end()) {
         _fileMap[filename] = 0;
+        // FIXME: tests the whole mode for equality; use (mode & std::ios::trunc) so out|trunc
+        // resets too. See test_posix.cpp LSMIOPosixStreamTest.OpenOutTruncKeepsOffset.
     } else if (mode == std::ios::trunc) {
         _fileMap[filename] = 0;
     }
@@ -69,6 +71,8 @@ LSMIOStream& LSMIOStream::read(char* s, std::streamsize n) {
     }
 
     std::string value;
+    // FIXME: the result of get() is ignored; a missing key should fail as not found. See
+    // test_posix.cpp LSMIOPosixStreamTest.ReadOfUnwrittenOffset.
     _lm->get(_genKey(), &value);
 
     if (value.size() != n) {
@@ -195,6 +199,8 @@ bool LSMIOStream::writeBarrier() {
         throw std::invalid_argument("ERROR: LSMIOStream::write called without initializing");
     }
 
+    // FIXME: the manager's result is discarded and true is returned (and the throw above says
+    // "write"). See test_posix.cpp LSMIOPosixStreamTest.WriteBarrierIgnoresFailedManagerBarrier.
     _lm->writeBarrier();
     ;
 

@@ -85,6 +85,9 @@ void Benchmark::stop(bool idempotent) {
 
 int64_t Benchmark::sofar() const {
     if (!_isStarted) {
+        // FIXME: the message names Benchmark::stop, not this method. See test_benchmark.cpp
+        // lsmioBenchmark.SofarRequiresRunning / DurationWhileRunningThrows /
+        // StopIdempotentWithoutStartIsNoop.
         throw std::invalid_argument("ERROR: lsmio::Benchmark::stop: method ran without starting.");
     }
 
@@ -94,6 +97,8 @@ int64_t Benchmark::sofar() const {
 
 int64_t Benchmark::duration() const {
     if (_isStarted) {
+        // FIXME: the message names Benchmark::stop, not this method. See test_benchmark.cpp
+        // lsmioBenchmark.SofarRequiresRunning / DurationWhileRunningThrows.
         throw std::invalid_argument("ERROR: lsmio::Benchmark::stop: method ran while running.");
     }
 
@@ -108,6 +113,8 @@ void Benchmark::addIteration(const std::string& name, int64_t duration, double b
         _failedIterations[name]++;
         return;
     }
+    // FIXME: NaN bytes or ops pass this check (NaN < 0.0 is false). See test_benchmark.cpp
+    // lsmioBenchmark.NaNBytesAndOpsAccepted.
     if (bytes < 0.0 || ops < 0.0) {
         LOG(WARNING) << "Benchmark::addIteration: Rejected negative bytes (" << bytes
                      << ") or ops (" << ops << ") for metric '" << name << "'." << std::endl;
@@ -182,6 +189,8 @@ std::string Benchmark::formatIterations(const std::string& name) {
                   ":" + fmt::format("{:.0f}", ops) + ":" + "1\n";
     }
 
+    // FIXME: this also strips the commas of BM_HEADER. See test_benchmark.cpp
+    // lsmioBenchmark.FormatIterationsHeaderLosesCommas.
     output = std::regex_replace(output, std::regex(","), "");
     output = std::regex_replace(output, std::regex(":"), ",");
 

@@ -522,6 +522,10 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             return true;
         } else {
             m_pread_slow_path_count.fetch_add(1, std::memory_order_relaxed);
+            // FIXME: val_len (up to READ_MAX_VAL_LEN, about 2 GiB) is allocated here before it is
+            // checked against the file size, so a corrupt record can make get() allocate about
+            // 2 GiB before the short read is detected. No test pins this: a test would have to
+            // allocate that memory.
             f_out_value.resize(val_len);
             uint64_t val_in_buf = static_cast<uint64_t>(bytes_read) - (8ULL + key_len);
             std::memcpy(f_out_value.data(), tl_pread_buf.data() + 8 + key_len, val_in_buf);
@@ -569,6 +573,9 @@ bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
     if (!readLe32(sst_file, val_len)) return false;
     if (val_len > READ_MAX_VAL_LEN) return false;
 
+    // FIXME: val_len (up to READ_MAX_VAL_LEN, about 2 GiB) is allocated here before it is checked
+    // against the file size, so a corrupt record can make get() allocate about 2 GiB before the
+    // read fails. No test pins this: a test would have to allocate that memory.
     f_out_value.resize(val_len);
     sst_file.read(f_out_value.data(), val_len);
     if (sst_file.fail()) {
@@ -605,6 +612,9 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
             new_index.path = path;
 
             std::ifstream sst_file(path, std::ios::binary);
+            // FIXME: a table that cannot be opened is skipped without a log line or an error, so
+            // its keys read as missing. See test_sstable_manager.cpp
+            // LSMIOSSTableCraftedTest.UnreadableTableIsSkipped.
             if (sst_file) {
                 sst_file.seekg(0, std::ios::end);
                 uint64_t file_size = sst_file.tellg();
@@ -629,6 +639,10 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
                         if (!readLe32(sst_file, val_len)) break;
                         if (val_len > READ_MAX_VAL_LEN) break;
 
+                        // FIXME: a real record with an empty key and an empty value also matches
+                        // this test, so recovery of a footer-less table stops there and drops the
+                        // records after it. See test_sstable_manager.cpp
+                        // LSMIOSSTableCraftedTest.EmptyKeyAndValueEndsFooterlessRecovery.
                         // A zero-length key and value marks the zero padding
                         // of a preallocated file that could not be trimmed:
                         // end of real data.

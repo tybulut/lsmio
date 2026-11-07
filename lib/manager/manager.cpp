@@ -60,6 +60,9 @@ const char* lifecycleStateName(LifecycleState state) {
 }
 
 
+// FIXME: no escaping: a key holding '|' or a value holding '\n' is split wrongly by
+// vectorTupleDeserialize. See test_manager.cpp
+// LSMIOManagerHelperTest.VectorTupleSerializeDoesNotEscapeDelimiters.
 void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values,
                           std::string& value) {
     std::stringstream ss;
@@ -179,6 +182,9 @@ void LSMIOManager::_init() {
 
     // Startup: RDB first and MPI afterwards to ensure DB available before MPI messages are received
     if (_isOpenLocal()) {
+        // FIXME: a storageType outside the enum opens no store and is not refused; every later
+        // call dereferences the null _lcStore. See test_manager.cpp
+        // LSMIOManagerTest.UnknownStorageTypeOpensNoStore.
         switch (gConfigLSMIO.storageType) {
             case StorageType::NativeDB:
                 LOG(INFO) << "LSMIOManager::_init: setting up Native backend." << std::endl;
@@ -468,6 +474,8 @@ bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>*
         LOG(INFO) << "LSMIOManager::metaGetAll: LOCAL for rank: " << _aggRank << std::endl;
         retValue = _lcStore->metaGetAll(values, inFix);
 
+        // FIXME: adds the number of entries, not the bytes read (the remote branch adds
+        // value.length()). See test_manager.cpp LSMIOManagerTest.MetaGetAllAndReadBarrierLocal.
         _counterReadBytes += values->size();
         _counterReadOps++;
 

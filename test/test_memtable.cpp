@@ -214,6 +214,117 @@ TEST(MemtableTest, ConstRefAddCopies) {
     expectConstRefAddCopies<MemtableBTree>();
 }
 
+// A key that is absent but lies between stored keys, below the first key or above the last key is
+// a miss: get returns false and never writes the output
+TEST(MemtableTest, MemtableVectorSort_GetMissBetweenKeys) {
+    MemtableVectorSort m;
+    m.add("a", "va");
+    m.add("c", "vc");
+    std::string out = "sentinel";
+
+    EXPECT_FALSE(m.get("b", out));  // lower bound lands on "c"
+    EXPECT_EQ(out, "sentinel");
+    EXPECT_FALSE(m.get("", out));  // lower bound lands on "a"
+    EXPECT_EQ(out, "sentinel");
+    EXPECT_FALSE(m.get("d", out));  // lower bound is end()
+    EXPECT_EQ(out, "sentinel");
+    EXPECT_EQ(m.count(), 2u);
+
+    EXPECT_TRUE(m.get("c", out));  // the neighbour is intact
+    EXPECT_EQ(out, "vc");
+}
+
+// scan walks from the prefix's lower bound while the prefix matches; it stops at the first key
+// past the prefix and merges every entry through applyScanEntry
+TEST(MemtableTest, MemtableVectorSort_ScanEmpty) {
+    MemtableVectorSort m;
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+
+    m.scan("a", results, deleted);
+
+    EXPECT_TRUE(results.empty());
+    EXPECT_TRUE(deleted.empty());
+}
+
+TEST(MemtableTest, MemtableVectorSort_ScanStopsAtPrefixEnd) {
+    MemtableVectorSort m;
+    m.add("a1", "v1");
+    m.add("a2", "v2");
+    m.add("b1", "v3");
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+
+    m.scan("a", results, deleted);
+
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"a1", "v1"}, {"a2", "v2"}}));
+    EXPECT_TRUE(deleted.empty());  // stops at "b1"
+}
+
+TEST(MemtableTest, MemtableVectorSort_ScanRunsToEnd) {
+    MemtableVectorSort m;
+    m.add("a1", "v1");
+    m.add("a2", "v2");
+    m.add("b1", "v3");
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+
+    m.scan("b", results, deleted);
+
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"b1", "v3"}}));
+    EXPECT_TRUE(deleted.empty());  // the loop ends at end(), no break
+}
+
+TEST(MemtableTest, MemtableVectorSort_ScanAbsentPrefix) {
+    MemtableVectorSort m;
+    m.add("a1", "v1");
+    m.add("a2", "v2");
+    m.add("b1", "v3");
+
+    // "aa": lower bound "b1"; "z": lower bound end(); "a1x": lower bound "a2"
+    for (const char* prefix : {"aa", "z", "a1x"}) {
+        SCOPED_TRACE(prefix);
+        std::map<std::string, std::string> results;
+        std::set<std::string> deleted;
+        m.scan(prefix, results, deleted);
+        EXPECT_TRUE(results.empty());
+        EXPECT_TRUE(deleted.empty());
+    }
+}
+
+TEST(MemtableTest, MemtableVectorSort_ScanEmptyPrefixReturnsAll) {
+    MemtableVectorSort m;
+    m.add("a1", "v1");
+    m.add("a2", "v2");
+    m.add("b1", "v3");
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+
+    m.scan("", results, deleted);
+
+    EXPECT_EQ(results,
+              (std::map<std::string, std::string>{{"a1", "v1"}, {"a2", "v2"}, {"b1", "v3"}}));
+    EXPECT_TRUE(deleted.empty());
+}
+
+TEST(MemtableTest, MemtableVectorSort_ScanMergesTombstones) {
+    MemtableVectorSort m;
+    m.add("a1", "v1");
+    m.add("a2", "v2");
+    m.add("b1", "v3");
+    m.add("a3", MEMTABLE_TOMBSTONE);
+    // As a newer table's caller holds them from an older one: a3 live, a1 deleted
+    std::map<std::string, std::string> results{{"a3", "older"}};
+    std::set<std::string> deleted{"a1"};
+
+    m.scan("a", results, deleted);
+
+    // a3's older value is retracted by its tombstone; a1 is re-added and its deletion retracted
+    EXPECT_EQ(results, (std::map<std::string, std::string>{{"a1", "v1"}, {"a2", "v2"}}));
+    EXPECT_EQ(deleted, std::set<std::string>{"a3"});
+    EXPECT_EQ(m.count(), 4u);  // the scan does not change the memtable
+}
+
 // The B+ tree holds slots, the values live beside it: many inserts (node splits) and overwrites
 // keep every key on its own value, in key order, with exact size accounting
 TEST(MemtableTest, MemtableBTree_ManyKeysOrderAndOverwrite) {

@@ -32,11 +32,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <lsmio/manager/store/native/StoreNative.hpp>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 using namespace lsmio;
@@ -584,4 +587,211 @@ TEST_F(NativeStoreExtendedTest, FlushWritesValuesAroundTheStreamBuffer) {
         }
     }
     CleanDir(dbPath);
+}
+
+// Per-test fixture for the K10 coverage tests: one DB directory per test, named after the test,
+// and gConfigLSMIO restored afterwards. Small memtables keep the flush buffer small.
+class LSMIOStoreNativeTest : public ::testing::Test {
+  protected:
+    LSMIOConfig m_backup_config;
+    std::string m_db_path;
+
+    void SetUp() override {
+        m_backup_config = gConfigLSMIO;
+        m_db_path = std::string("test-native-cov-") +
+                    ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".db";
+        std::filesystem::remove_all(m_db_path);
+        gConfigLSMIO.writeBufferSize = 64 * 1024;
+        gConfigLSMIO.maxKeyLen = 64;
+    }
+
+    void TearDown() override {
+        gConfigLSMIO = m_backup_config;
+        std::filesystem::remove_all(m_db_path);
+    }
+
+    // Waits until the store's file pool has created its first pooled file in m_db_path
+    bool waitForPooledFile() {
+        for (int i = 0; i < 500; ++i) {
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::directory_iterator(m_db_path, ec)) {
+                if (entry.path().extension() == ".sst") return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
+    }
+};
+
+TEST_F(LSMIOStoreNativeTest, WriteBufferSizeZeroThrowsBeforeCreatingDirectory) {
+    gConfigLSMIO.writeBufferSize = 0;
+    EXPECT_EQ(gConfigLSMIO.getMaxValueLen(), 0u);
+    EXPECT_THROW({ LSMIOStoreNative store(m_db_path, true); }, std::invalid_argument);
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+}
+
+TEST_F(LSMIOStoreNativeTest, WriteBufferNumberZeroDefaultsToFour) {
+    gConfigLSMIO.writeBufferNumber = 0;
+    LSMIOStoreNative store(m_db_path, true);
+    EXPECT_EQ(store.getMaxImmutableMemtables(), 4u);
+    EXPECT_EQ(store.getMemtableMaxSize(), 64u * 1024u);
+    EXPECT_TRUE(store.put("k", std::string("v")));
+    std::string value;
+    EXPECT_TRUE(store.get("k", &value));
+    EXPECT_EQ(value, "v");
+}
+
+TEST_F(LSMIOStoreNativeTest, ReadOnlyOpenOfMissingPathRejectsWrites) {
+    gConfigLSMIO.autoTuneParameters = true;
+    ASSERT_FALSE(std::filesystem::exists(m_db_path));
+    LSMIOStoreNative store(m_db_path, false, true);
+    EXPECT_TRUE(store.isReadOnly());
+    const std::string value = "v";
+    EXPECT_FALSE(store.put("k", value));
+    EXPECT_FALSE(store.putBytes("k", std::string_view(value)));
+    std::string out = "unchanged";
+    EXPECT_FALSE(store.get("k", &out));
+    EXPECT_EQ(out, "unchanged");
+    std::vector<std::tuple<std::string, std::string>> values;
+    EXPECT_FALSE(store.getPrefix("", &values));
+    EXPECT_TRUE(values.empty());
+    EXPECT_TRUE(store.readBarrier());
+    store.close();
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+}
+
+TEST_F(LSMIOStoreNativeTest, OversizeKeysAndValuesAreRejectedWithoutMutation) {
+    LSMIOStoreNative store(m_db_path, true);
+    const std::string long_key(gConfigLSMIO.maxKeyLen + 1, 'k');
+    const std::string big_value(gConfigLSMIO.getMaxValueLen() + 1, 'v');
+    const std::string value = "v";
+    EXPECT_FALSE(store.put(long_key, value));
+    EXPECT_FALSE(store.put("k", big_value));
+    EXPECT_FALSE(store.putBytes(long_key, std::string_view(value)));
+    EXPECT_FALSE(store.putBytes("k", std::string_view(big_value)));
+
+    std::string out = "unchanged";
+    EXPECT_FALSE(store.get(long_key, &out));
+    EXPECT_EQ(out, "unchanged");
+    std::vector<std::tuple<std::string, std::string>> values;
+    EXPECT_FALSE(store.getPrefix(long_key, &values));
+    EXPECT_TRUE(values.empty());
+
+    // Nothing was stored, and the store still accepts a valid put
+    EXPECT_FALSE(store.get("k", &out));
+    EXPECT_FALSE(store.getPrefix("", &values));
+    EXPECT_TRUE(store.put("k", value));
+    EXPECT_TRUE(store.get("k", &out));
+    EXPECT_EQ(out, "v");
+}
+
+TEST_F(LSMIOStoreNativeTest, GetPrefixWithoutMatchReturnsFalse) {
+    LSMIOStoreNative store(m_db_path, true);
+    EXPECT_TRUE(store.put("a/1", std::string("x1")));
+    EXPECT_TRUE(store.put("a/2", std::string("x2")));
+    std::vector<std::tuple<std::string, std::string>> values;
+    EXPECT_FALSE(store.getPrefix("b/", &values));
+    EXPECT_TRUE(values.empty());
+    EXPECT_TRUE(store.writeBarrier());
+    EXPECT_FALSE(store.getPrefix("b/", &values));
+    EXPECT_TRUE(values.empty());
+    EXPECT_TRUE(store.getPrefix("a/", &values));
+    ASSERT_EQ(values.size(), 2u);
+    EXPECT_EQ(values[0], std::make_tuple(std::string("a/1"), std::string("x1")));
+    EXPECT_EQ(values[1], std::make_tuple(std::string("a/2"), std::string("x2")));
+}
+
+// filePoolSize = 0: the flush creates its SSTable synchronously, so removing the DB directory
+// makes the flush fail at once (no 2 s pool wait)
+TEST_F(LSMIOStoreNativeTest, FailedFlushFailsTheStore) {
+    gConfigLSMIO.filePoolSize = 0;
+    LSMIOStoreNative store(m_db_path, true);
+    EXPECT_TRUE(store.put("k1", std::string("v1")));
+    std::filesystem::remove_all(m_db_path);
+
+    EXPECT_FALSE(store.writeBarrier());
+    EXPECT_FALSE(store.readBarrier());
+
+    const std::string value = "v2";
+    EXPECT_FALSE(store.put("k2", value));
+    EXPECT_FALSE(store.putBytes("k3", std::string_view(value)));
+    EXPECT_FALSE(store.put("k4", std::string("v4")));
+    EXPECT_FALSE(store.del("k1"));
+    EXPECT_FALSE(store.writeBarrier());
+
+    // The memtable whose flush failed is gone, and no rejected put reached the store
+    std::string out;
+    EXPECT_FALSE(store.get("k1", &out));
+    EXPECT_FALSE(store.get("k2", &out));
+    EXPECT_FALSE(store.get("k4", &out));
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+}
+
+// Timing-dependent (excluded from the coverage margin): a flush that stalls for the file pool's
+// 2 s acquire timeout keeps one memtable in flight and the next one in the immutable queue, so
+// reads see the immutable queue and further puts meet the back-pressure wait. The window is
+// about 2 s; every step inside it is a memory operation. The test takes about 6 s.
+TEST_F(LSMIOStoreNativeTest, StalledFlushExposesImmutableMemtablesAndBackPressure) {
+    gConfigLSMIO.writeBufferSize = 4096;  // max value 4096 - 64 - 512 = 3520 bytes
+    gConfigLSMIO.writeBufferNumber = 1;
+    gConfigLSMIO.filePoolSize = 1;
+    gConfigLSMIO.preAllocate = false;
+    const std::string kilo(1000, 'x');
+    LSMIOStoreNative store(m_db_path, true);
+    ASSERT_TRUE(waitForPooledFile());
+
+    // Memtable A takes the one pooled file; the directory is gone, so the pool cannot refill
+    EXPECT_TRUE(store.put("a0", kilo));
+    std::filesystem::remove_all(m_db_path);
+    ASSERT_TRUE(store.writeBarrier());
+
+    // Memtable B (4 entries of 1002 bytes) rotates out on c0; its flush waits for the pool
+    for (int i = 0; i < 4; ++i) EXPECT_TRUE(store.put("b" + std::to_string(i), kilo));
+    EXPECT_TRUE(store.put("c0", kilo));
+    EXPECT_TRUE(store.put("c1", kilo));
+    EXPECT_TRUE(store.put("c2", kilo));
+    EXPECT_TRUE(store.put("p/k", std::string("old")));
+    // C (3012 bytes) rotates out on d0 (1102 bytes): C is queued while B is in flight
+    EXPECT_TRUE(store.put("d0", std::string(1100, 'd')));
+    EXPECT_TRUE(store.put("p/k", std::string("new")));
+
+    std::string out;
+    EXPECT_TRUE(store.get("c1", &out));  // from the immutable memtable C
+    EXPECT_EQ(out, kilo);
+    EXPECT_FALSE(store.get("zz", &out));
+    EXPECT_TRUE(store.get("p/k", &out));  // the active memtable wins
+    EXPECT_EQ(out, "new");
+    // FIXME(BUG): a memtable that the flush thread has taken off the immutable queue is in
+    // neither the queue nor the SSTable index until its flush ends, so get() misses its keys
+    // while it is flushed (b1 was acknowledged by put). This pins the current behaviour.
+    EXPECT_FALSE(store.get("b1", &out));
+
+    std::vector<std::tuple<std::string, std::string>> values;
+    EXPECT_TRUE(store.getPrefix("c", &values));
+    EXPECT_EQ(values.size(), 3u);
+    values.clear();
+    EXPECT_TRUE(store.getPrefix("p/", &values));
+    ASSERT_EQ(values.size(), 1u);
+    // FIXME(BUG): getPrefix scans the active memtable first and then the immutable ones newest
+    // to oldest, and each scan overwrites the result, so the oldest memtable's value wins:
+    // getPrefix returns "old" while get returns "new". This pins the current behaviour.
+    EXPECT_EQ(values[0], std::make_tuple(std::string("p/k"), std::string("old")));
+
+    // D is filled to 3108 bytes; the next two puts need a rotation while C still fills the
+    // queue, so both wait for back-pressure, one through each _batchMutation overload. B's flush
+    // fails, the flush thread takes C, and both waiters find the store failed.
+    EXPECT_TRUE(store.put("d1", kilo));
+    EXPECT_TRUE(store.put("d2", kilo));
+    std::atomic<bool> rvalue_put_result{true};
+    std::thread rvalue_writer([&store, &rvalue_put_result] {
+        rvalue_put_result = store.put("e1", std::string(1000, 'e'));
+    });
+    const std::string e_value(1000, 'e');
+    EXPECT_FALSE(store.put("e0", e_value));
+    rvalue_writer.join();
+    EXPECT_FALSE(rvalue_put_result.load());
+    EXPECT_FALSE(store.readBarrier());
+    EXPECT_FALSE(store.writeBarrier());
+    EXPECT_TRUE(store.get("d1", &out));  // still in the active memtable
+    EXPECT_FALSE(store.get("e0", &out));
 }
