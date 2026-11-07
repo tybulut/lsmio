@@ -43,7 +43,7 @@ from lsmiotool.lib.profile import (
     ProfileSchemaError,
 )
 from lsmiotool.lib import env
-from lsmiotool.lib.cli import LatexRequest
+from lsmiotool.lib.cli import CompareRequest, LatexRequest
 from lsmiotool.lib.main import (
     CompareMain,
     LatexMain,
@@ -956,7 +956,7 @@ class ProfileSchemaTest(unittest.TestCase):
     def testLegacyCommandImportsAndEntryDispatch(self) -> None:
         """Verify legacy command classes import correctly and accept expected parameters."""
         # Ensure all main entry classes can be instantiated
-        f_compare = CompareMain("test_folder", "read", "1", "1M")
+        f_compare = CompareMain(f_request=CompareRequest("lsmio", ("test_folder",)))
         self.assertIsInstance(f_compare, CompareMain)
 
         f_latex = LatexMain(LatexRequest("plots", "sources.yaml", f_tsv_dir="tsv"))

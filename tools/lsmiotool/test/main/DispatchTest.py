@@ -200,7 +200,7 @@ class DispatchTest(unittest.TestCase):
 
         # 1. compare command
         with patch.object(
-            sys, "argv", [f_exec_str, "compare", "nodes", "bench_folder", "read"]
+            sys, "argv", [f_exec_str, "compare", "lsmio", "bench_folder"]
         ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
@@ -212,7 +212,7 @@ class DispatchTest(unittest.TestCase):
         with patch.object(
             sys,
             "argv",
-            [f_exec_str, "compare", "variants", "archive_folder", "both"],
+            [f_exec_str, "compare", "variants", "archive_folder"],
         ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
@@ -228,10 +228,13 @@ class DispatchTest(unittest.TestCase):
                 f_exec_str,
                 "--ssd",
                 "compare",
-                "nodes",
+                "epocpp",
                 "bench_folder",
-                "write",
+                "--by",
+                "combinations",
+                "--stripes",
                 "16",
+                "--block",
                 "8M",
             ],
         ):
@@ -243,7 +246,7 @@ class DispatchTest(unittest.TestCase):
 
         # compare command with global -s
         with patch.object(
-            sys, "argv", [f_exec_str, "-s", "compare", "nodes", "bench_folder", "read"]
+            sys, "argv", [f_exec_str, "-s", "compare", "ior", "bench_folder"]
         ):
             with patch.object(CompareMain, "run", return_value=0) as mock_run:
                 with self.assertRaises(SystemExit) as ctx:
@@ -285,7 +288,9 @@ class DispatchTest(unittest.TestCase):
 
         # A failing latex run exits with its non-zero status
         with patch.object(
-            sys, "argv", [f_exec_str, "latex", "plots", "sources.yaml", "--tsv-dir", "t"]
+            sys,
+            "argv",
+            [f_exec_str, "latex", "plots", "sources.yaml", "--tsv-dir", "t"],
         ):
             with patch.object(LatexMain, "run", return_value=1):
                 with self.assertRaises(SystemExit) as ctx:
@@ -339,7 +344,7 @@ class DispatchTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 2)
-                self.assertIn("Missing required submode", mock_stderr.getvalue())
+                self.assertIn("Missing benchmark", mock_stderr.getvalue())
 
         # compare with bare folder fallback prohibited
         with patch.object(sys, "argv", [f_exec_str, "compare", "bench_folder"]):
@@ -347,7 +352,7 @@ class DispatchTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 2)
-                self.assertIn("Invalid submode", mock_stderr.getvalue())
+                self.assertIn("Invalid benchmark", mock_stderr.getvalue())
 
         # compare with prohibited scaling alias
         with patch.object(
@@ -357,7 +362,7 @@ class DispatchTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 2)
-                self.assertIn("Invalid submode", mock_stderr.getvalue())
+                self.assertIn("Invalid benchmark", mock_stderr.getvalue())
 
         # compare nodes with missing operation
         with patch.object(
@@ -368,7 +373,20 @@ class DispatchTest(unittest.TestCase):
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 2)
                 self.assertIn(
-                    "Missing required positional argument: <read|write>",
+                    "'compare nodes' was removed",
+                    mock_stderr.getvalue(),
+                )
+
+        # compare lsmio bench_folder --all
+        with patch.object(
+            sys, "argv", [f_exec_str, "compare", "lsmio", "bench_folder", "--all"]
+        ):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    runpy.run_path(f_exec_str, run_name="__main__")
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn(
+                    "'--all' was removed",
                     mock_stderr.getvalue(),
                 )
 
@@ -389,7 +407,10 @@ class DispatchTest(unittest.TestCase):
                     runpy.run_path(f_exec_str, run_name="__main__")
                 self.assertEqual(ctx.exception.code, 0)
                 self.assertIn("Usage:", mock_stdout.getvalue())
-                self.assertIn("compare <nodes|variants>", mock_stdout.getvalue())
+                self.assertIn(
+                    "compare <lsmio|ior|epocpp|variants>",
+                    mock_stdout.getvalue(),
+                )
 
         # latex with no arguments is a usage error
         with patch.object(sys, "argv", [f_exec_str, "latex"]):

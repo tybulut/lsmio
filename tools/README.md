@@ -33,8 +33,7 @@ graph TD
     PARSE --> REPORTS["Stage 1/2 CSV & JSON Reports"]
     PARSE --> ASCII["Console ASCII Summary Table"]
 
-    COMPARE --> PLOT_NODES["compare nodes (Scaling Charts)"]
-    COMPARE --> PLOT_VAR["compare variants (Sensitivity Charts)"]
+    COMPARE --> PLOT_MULTI["compare <lsmio|ior|epocpp|variants> (multi-panel charts)"]
 ```
 
 ### CLI Subcommands Summary
@@ -43,7 +42,7 @@ graph TD
 | :--- | :--- |
 | `run` | Orchestrates multi-node benchmark runs across HPC schedulers with preflight validation and crash recovery. |
 | `parse` | Parses immutable run root artifacts, formats ASCII console summaries, and produces Stage 1/2 CSV/JSON reports. |
-| `compare` | Generates comparative scaling and variant sensitivity plots using Matplotlib. |
+| `compare` | Generates multi-panel comparison charts using Matplotlib. |
 | `archive` | Bundles and archives benchmark run directories for long-term comparative analysis. |
 | `cancel` | Stops a running `run` (detached or not) and cancels its job: `lsmiotool cancel <run root \| run id>`. |
 | `test` | Executes the internal Python test suite across unit, functional, and integration fixtures. |
@@ -93,26 +92,34 @@ lsmiotool --ssd run <benchmark> <scale> [<variants>] [--setup <name>] [--archive
 Repeated campaigns land in the same default folders. A second `variants` run is archived next to the first as `outputs-<arm>:run-1`/`:base-1`, and `compare variants` charts every pair in the folder; a second `backends` run replaces each `outputs-<backend>/<nodes>` it reruns. Give each campaign its own folder with `--out-dir` (e.g. `--out-dir lsmio-archive/variants-0.4.0`), or move the previous one aside first.
 ```bash
 # Backend scaling: adios2, native, plugin and rocksdb on 1-48 nodes, one job per node count,
-# then 12 scaling charts (write and read x stripes 4/16 x 64K/1M/8M)
+# then a multi-panel scaling chart (compare-small-lsmio-by-nodes.png: 6 combinations x 2 metrics)
 ./tools/lsmiotool/lsmiotool run lsmio backends small
-./tools/lsmiotool/lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small --all --output-dir ~/png/backends/small
+./tools/lsmiotool/lsmiotool compare lsmio ~/scratch/benchmark/lsmio-archive/backends/small --output-dir ~/png/backends/small
 
 # IOR (POSIX, MPIIO collective, HDF5, HDF5 collective) on 1-48 nodes, archived to lsmio-archive/ior/small
 # as outputs-ior, outputs-ior-collective, outputs-ior-hdf5 and outputs-ior-hdf5-collective;
-# 'parse ior small' regenerates their ior-report.csv, and 'compare nodes' charts them next to
-# the LSMIO backends when given both folders (compare-small-backends+ior-*.png, beside the
-# backends-only charts above)
+# 'parse ior small' regenerates their ior-report.csv, and 'compare lsmio' charts them next to
+# the LSMIO backends when given both folders (compare-small-lsmio-backends+ior-by-nodes.png,
+# beside the backends-only charts above)
 ./tools/lsmiotool/lsmiotool run ior small
-./tools/lsmiotool/lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small ~/scratch/benchmark/lsmio-archive/ior/small --all --output-dir ~/png/backends/small
+./tools/lsmiotool/lsmiotool compare lsmio ~/scratch/benchmark/lsmio-archive/backends/small ~/scratch/benchmark/lsmio-archive/ior/small --output-dir ~/png/backends/small
 
-# Every variant against the baseline on 8 nodes, in one job, then 12 delta charts
+# EPOCpp backends (baseline, wall-time backends, bandwidth arms) on 2-48 nodes, archived to
+# lsmio-archive/epocpp/small; charts runtime, write and read metrics by combinations
+# (one PNG per node count: compare-small-epocpp-by-combinations-<nodes>.png)
+./tools/lsmiotool/lsmiotool run epocpp backends small
+./tools/lsmiotool/lsmiotool compare epocpp ~/scratch/benchmark/lsmio-archive/epocpp/small --by combinations --output-dir ~/png/epocpp/small
+
+# Every variant against the baseline on 8 nodes, in one job, then a multi-panel delta chart
+# (compare-variants-variants-by-nodes.png: rows per combination and node count, variants on x)
 ./tools/lsmiotool/lsmiotool run lsmio variants all
-./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants --all --output-dir ~/png/variants
+./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants --output-dir ~/png/variants
 
 # The working branch against the bm_native:main reference binary, for two variants;
 # archived to lsmio-archive/variants-versioned, apart from the variant matrix
+# (compare-variants-versioned-variants-by-nodes.png)
 ./tools/lsmiotool/lsmiotool run lsmio variants legacy,autotune --versioned
-./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants-versioned --all --output-dir ~/png/variants-versioned
+./tools/lsmiotool/lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants-versioned --output-dir ~/png/variants-versioned
 ```
 
 #### Arguments & Options:
@@ -523,89 +530,166 @@ Upon metric extraction, `lsmiotool parse` prints an aligned ASCII summary table 
 
 ## 4. Comparative Analysis & Visualization (`lsmiotool compare`)
 
-`lsmiotool compare` generates publication-quality performance visualization charts using Matplotlib.
+`lsmiotool compare` generates publication-quality multi-panel performance visualization charts using Matplotlib.
 
-### 4.1 Node Scaling Comparison (`lsmiotool compare nodes`)
+### 4.1 Grammar & Benchmarks
 
-Evaluates performance progression across node scaling configurations:
+`lsmiotool compare` replaces legacy comparison modes with a unified grammar:
 
 ```bash
-lsmiotool compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
-lsmiotool compare nodes <folder> [read|write] --all [--output-dir <dir>]
+lsmiotool compare <lsmio|ior|epocpp|variants> <folder> [<folder> ...] [options]
 ```
 
-#### Arguments & Options:
-- `<operation>`: `read` or `write` (bandwidth), or for an epocpp archive also `runtime` and `cost`. An epocpp archive (`<benchmark_root>/lsmio-archive/epocpp/<scale>`) charts the `Best` of its bandwidth arms for `read`/`write`, of its wall-time arms (the baseline included) for `runtime`, and each backend's I/O cost for `cost` (`epocpp-cost.csv`); its reports are built when missing, and its plots are named `compare-<scale>-epocpp-<op>-<stripes>-<bs>.png`, apart from LSMIO's backends charts.
-- `<folder>`: Archive directory holding one `outputs-<backend>` directory per backend (e.g., `<archive>/backends/<scale>`), each with its `lsm-report.csv`. More folders may follow (`compare nodes <folder> <folder> ... [read|write] ...`; each a path with a `/` or an existing directory), and all their `outputs-*` are charted together, e.g. the IOR setups `run ior` archived: `compare nodes <archive>/backends/small <archive>/ior/small --all`. IOR arms (`outputs-ior[-<setup>]`, with `ior-report.csv`, built when missing) are charted after the backends, labelled by arm (`ior`, `ior-collective`, `ior-hdf5`, `ior-hdf5-collective`). The first folder names the plots; an arm found in several folders is labelled `<arm> (<parent>/<folder>)`.
-- `<read|write>`: Operation phase to compare (`read` or `write`); optional with `--all`.
-- `[stripes]`: Stripe count: `4` or `16` (default: `4`).
-- `[blocksize]`: Block size: `'64K'`, `'1M'`, or `'8M'` (default: `'1M'`).
-- `--all`: One chart per (stripes, blocksize) permutation: 6 for the given operation, or 12 (write and read) without one. Not combinable with explicit `<stripes>`/`<blocksize>`.
-- `--output-dir <dir>`: Directory the PNG plots are written to, as given (default: current working directory). Like `compare variants`, no subdirectories are added.
+The benchmark word determines how every folder is parsed and charted:
+- `lsmio`: A backends scaling archive (`<archive>/backends/<scale>`), containing one `outputs-<backend>` directory per backend with `lsm-report.csv`. Metrics: `write`, `read`.
+- `ior`: An IOR scaling archive (`<archive>/ior/<scale>`), containing one `outputs-ior[-<setup>]` directory per setup with `ior-report.csv`. Metrics: `write`, `read`.
+- `epocpp`: An EPOCpp scaling archive (`<archive>/epocpp/<scale>`), containing `outputs-epocpp-<arm>` directories (`epocpp-report.csv`, `epocpp-cost.csv`). Metrics: `runtime` (minimum runtime of EPOCpp; the no-output baseline in grey, and each backend), `cost` (I/O cost: runtime minus baseline; backends only), `write`, `read`.
+- `variants`: A variants sensitivity archive (`<archive>/variants`, `<archive>/variants-versioned`), containing one `outputs-<variant>` directory per variant (`lsm-report.csv`). Metrics: `write`, `read`. The variants form the x-axis categories (each named under its bar); node counts and combinations become panels. Folders of `:run`/`:base` pairs chart relative percentage change against base; folders without pairs chart absolute MiB/s.
 
-#### Output Files:
-Plots are named after the scale (`<archive>/backends/<scale>` gives `<scale>`, a variants archive gives `variants`, anything else its directory name):
-$$\text{compare-}<\text{scale}>-<\text{op}>-<\text{stripes}>-<\text{bs}>.png$$
-With several folders, the scale of the first is followed by each folder's parent, joined by `+` (as much of each path as tells them apart, `/` written `_`), so a combined chart never replaces a single folder's: `compare nodes <archive>/backends/small <archive>/ior/small` writes `compare-small-backends+ior-<op>-<stripes>-<bs>.png`. A single folder holding IOR setups alone (`outputs-ior[-<setup>]` only, e.g. `<archive>/ior/small`) gives `compare-<scale>-ior-<op>-<stripes>-<bs>.png`, so its charts never replace the backends charts of that scale in the same `--output-dir`.
+`write` and `read` metrics represent maximum throughput in MiB/s. Missing reports are automatically generated on demand when source logs exist.
 
-*Example*:
-```bash
-lsmiotool compare nodes ~/scratch/benchmark/lsmio-archive/backends/small --all --output-dir ~/png/backends/small
-```
-Renders 12 clustered bar charts, e.g. `~/png/backends/small/compare-small-write-4-1M.png`.
-
-#### Canonical Legend Mapping & Precedence Sorting (`INV-BACKEND-5`):
-When comparing multi-backend archive directories:
-- **Canonical Legend Labels**: Raw folder names (`outputs-adios`, `outputs-native`, `outputs-plugin`, `outputs-rocksdb`, `outputs-leveldb`, and their `-sync` arms, e.g. `outputs-adios-sync`) are automatically mapped to clean canonical labels: `adios2`, `native`, `plugin`, `rocksdb`, `leveldb`, and `adios2-sync`, `native-sync`, ….
-- **Precedence Ordering**: Series bars are strictly ordered by canonical precedence `[adios2, adios2-sync, native, native-sync, plugin, plugin-sync, rocksdb, rocksdb-sync, leveldb, leveldb-sync]`, then IOR arms.
-- **Clustered Grouped Bars**: Displays one clustered bar per backend (up to $N=10$ backends) per node category on the X-axis (`# of Nodes`).
-- **Backends archives**: `compare nodes` is for backends (and IOR, EPOCpp) archives, where `outputs-<backend>-sync` is a `-sync` arm and is labelled `<backend>-sync`. In a baseline or variants archive a folder of that name is the `sync` (fsync) variant; compare those with `compare variants`.
-- **Default Workload**: When omitted, workload parameters strictly default to 4 stripes and 1M block size (`stripes=4, bs=1M`).
+#### Multi-Folder Admission & First-Folder Rule:
+- **LSMIO & IOR Interoperability**: `lsmio` and `ior` folders can be charted together. The first folder decides which benchmark word fits:
+  - If the first folder holds only IOR setups (`outputs-ior[-<setup>]`), use `compare ior`. Invoking `compare lsmio` with an IOR-only first folder is refused with an error pointing to `compare ior`.
+  - If the first folder holds LSMIO backends (it is not IOR-only), use `compare lsmio`. Invoking `compare ior` with a backends first folder is refused with an error pointing to `compare lsmio`.
+  - Subsequent folders may mix `lsmio` and `ior` archives under either benchmark word.
+- **EPOCpp Isolation**: `epocpp` folders chart only with other `epocpp` folders. Mixing an `epocpp` archive with `lsmio`, `ior`, or `variants` is a kind error (exit 1).
+- **Variants Kind Isolation**: `variants` folders chart only with `variants` folders of the *same kind* (`unpaired`, `paired`, or `versioned`). Mixing different kinds of variants folders (such as unpaired with paired) is a kind error (exit 1).
+- Incompatible folder combinations or folders with invalid contents are rejected upfront before generating reports or creating directories.
 
 ---
 
-### 4.2 Variant Sensitivity Comparison (`lsmiotool compare variants`)
+### 4.2 Options & Defaults
 
-Evaluates sensitivity across storage engine parameters and tuning variants on fixed 8-node baseline runs:
+By default, `lsmiotool compare` charts everything held across the specified folders: all metrics, node counts, stripe counts, and block sizes. Options only narrow the charted subset:
 
-```bash
-lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
-```
+- `--by nodes|combinations`: Layout mode (default: `nodes`).
+- `--style bars|lines`: Visual chart representation (default: `bars`).
+- `--metrics <list>`: Comma-separated list of metrics in panel order.
+  - Default for `lsmio`, `ior`, `variants`: `write,read`.
+  - Default for `epocpp`: `runtime,write,read` (`cost` is included only when explicitly listed).
+- `--nodes <list>`: Comma-separated list of node counts to include (e.g., `--nodes 16` or `--nodes 8,16`).
+- `--stripes <list>`: Comma-separated list of stripe counts to include: `4`, `16`, or `4,16`.
+- `--block <list>`: Comma-separated list of block sizes to include: `64K`, `1M`, `8M`, or e.g. `64K,8M`.
+- `--output-dir <dir>`: Directory where output PNG charts are written (default: current working directory). The directory is created only after pre-flight validations pass and charts are ready to write.
 
-#### Arguments & Options:
-- `<archive_folder>`: Archive folder containing `outputs-*` variant run subdirectories.
-- `[operation]`: Operation to compare: `read`, `write`, or `both` (default: `both`).
-- `[stripes]`: Stripe count: `4` or `16` (default: `4`).
-- `[blocksize]`: Block size: `'64K'`, `'1M'`, or `'8M'` (default: `'1M'`).
-- `--all`: Generate comparison charts across all 6 `(stripes, blocksize)` permutations, for each operation (12 with the default `both`). Not combinable with explicit `<stripes>`/`<blocksize>`.
-- `--output-dir <dir>`: Directory the PNG plots are written to, as given (default: current working directory).
+#### Strict Selection Validation:
+If an option explicitly specifies a value not held by *any* charted folder (e.g. `--nodes 61` or an unsupported metric), the command fails immediately with a selection error (exit 1) and lists the values actually held across the folders.
 
-*Example*:
-```bash
-lsmiotool compare variants ~/scratch/benchmark/lsmio-archive/variants --all --output-dir ~/png/variants
-```
-Renders 12 charts, e.g. `~/png/variants/compare-variants-delta-variants-write-4-1M.png` (the archive folder's name follows `delta`).
+Options may appear anywhere after the benchmark word, interleaved with folder arguments.
 
-#### Paired Delta Comparison Plots (`INV-PAIR-4`):
-When `<archive_folder>` contains paired variant runs (`outputs-*-<variant>:run` and `outputs-*-<variant>:base`), `lsmiotool compare variants` automatically activates paired delta mode:
-- **Output Filename**: Renders `compare-variants-delta-<archive-name>-<op>-<stripes>-<blocksize>.png`.
-- **1 Bar Per Variant**: Each variant displays exactly 1 bar representing its relative $+/-$ percentage delta against its paired base run:
-  $$\Delta_{\%} = \frac{\text{BW}_{\text{run}} - \text{BW}_{\text{base}}}{\text{BW}_{\text{base}}} \times 100\%$$
-- **Zero Baseline Reference Line**: Draws a prominent horizontal reference line at zero (`y = 0`) via `plt.axhline(0)`.
-- **Dynamic Bidirectional Color Encoding**:
-  - **Green (`#2ca02c`)**: Positive performance improvement ($\Delta > 0$).
-  - **Red (`#d62728`)**: Performance regression ($\Delta < 0$).
-- **Negative Delta Preservation**: Negative values are preserved directly without clamping, ensuring accurate visibility into performance regressions.
+---
 
-#### Versioned Variant Labeling (Variation B.1):
-When `<archive_folder>` contains paired versioned archives generated via `--versioned`, `VariantReverseResolver` automatically formats the X-axis category labels on comparison charts:
-- **With variant (Variation B.1)**: `outputs-native-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `<branch> (<hash>) [<variant>]` (e.g., `tybulut-bugfixes (437400d) [legacy]`).
-- **Without variant**: `outputs-native-version-<branch>-<hash>:run` $\rightarrow$ `<branch> (<hash>)` (e.g., `main (437400d)`).
-- **With collision suffix**: `outputs-native-version-<branch>-<hash>-<variant>:run-1` $\rightarrow$ `<branch> (<hash>) [<variant>]-1`.
-- **Non-native backend**: `outputs-rocksdb-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `rocksdb-<branch> (<hash>) [<variant>]`.
+### 4.3 Layouts
 
-#### Legacy Absolute Comparison Mode:
-If `<archive_folder>` contains no `:run` directory at all (only unpaired `outputs-*` directories), the command falls back to rendering standard multi-bar absolute throughput comparison charts (`compare-variants-<archive-name>-<op>-<stripes>-<blocksize>.png`).
+`lsmiotool compare` formats multi-panel charts in two primary layouts:
+
+- **`--by nodes` (Default)**:
+  - Generates a single PNG chart covering all charted node counts.
+  - Grid: A row per stripe/block combination (in canonical stripes-major order: `4/64K`, `4/1M`, `4/8M`, `16/64K`, `16/1M`, `16/8M`), and a column per metric.
+  - Horizontal x-axis: Node count.
+  - Series: Grouped bars or line series per arm.
+- **`--by combinations`**:
+  - Generates one PNG chart per charted node count (`compare-<scale>-<benchmark>...-by-combinations-<nodes>.png`).
+  - Grid: A row per metric.
+  - Horizontal x-axis: Stripe/block combinations in canonical order.
+  - Series: Grouped bars or line series per arm.
+- **Variants Layouts**:
+  - Variants form the horizontal x-axis categories, with each variant name clearly positioned beneath its bar.
+  - `--by nodes`: Generates one PNG with a row per (combination, node count) pair and a column per metric.
+  - `--by combinations`: Generates one PNG per node count, with a row per combination and a column per metric.
+  - Rows are preserved for all charted combinations and node counts; panels that contain no valid points are rendered with a prominent "no data" notation.
+
+---
+
+### 4.4 Styles & Colours
+
+- **Visual Styles**:
+  - `--style bars` (default): Clustered vertical bars per x-category.
+  - `--style lines`: Line series with distinct markers at each charted point.
+- **Series Colours & Palette**:
+  - Series receive colours from a standard high-contrast palette (`#2a78d6` blue, `#eb6834` orange, `#1baf7a` aqua, `#eda100` yellow, etc.).
+  - Palette colours are assigned by index across non-baseline series, remaining stable across panels and PNGs.
+  - Baseline series (`epocpp-baseline`) is drawn in a dedicated fixed grey (`#6f6e69`) and never consumes a palette colour. If multiple epocpp folders are charted together, each folder's baseline receives a distinct, distinguishable shade of grey.
+  - In variants mode, each charted folder forms a series with its own distinct palette colour across the shared variant categories on the x-axis.
+- **Paired Delta Charts**:
+  - In paired or versioned variants mode, bars display relative percentage delta against baseline:
+    $$\Delta_{\%} = \frac{\text{BW}_{\text{run}} - \text{BW}_{\text{base}}}{\text{BW}_{\text{base}}} \times 100\%$$
+  - A prominent horizontal zero line (`y = 0`) is drawn across delta panels.
+  - Each bar is annotated with its signed percentage label (`+X.X%` or `-X.X%`).
+  - Series bars are coloured by folder; regressions and improvements are distinguished by their placement relative to the zero reference line and their signed labels.
+
+---
+
+### 4.5 Broken Values & Warnings
+
+Data extraction and parsing enforce strict resilience rules:
+
+- **Broken Value Points**: Finite numbers are plotted normally. If a value cell is blank, non-numeric, `NA`, `NAN`, `N/A`, `NULL`, `NONE`, or non-finite (`inf`/`-inf`), it is classified as a broken point and stored as `NaN`. Broken points are rendered as gaps in bar and line charts; they never abort the command.
+- **Zero & Negative Values**: Finite non-positive values (such as zero throughput or negative I/O cost) are valid data points and charted as they are, accompanied by a zero reference line.
+- **Unreadable Rows**: Rows missing mandatory key cells (N, Stripes, BlockSize) or containing malformed key values (e.g., non-numeric N) are classified as unreadable rows and excluded.
+- **Unreadable Reports**: If a report file is missing or unreadable (due to I/O errors, decode failures, or malformed headers), a warning is emitted and only that arm is omitted from the chart.
+- **Failed Cost Report Generation**: If `epocpp-cost.csv` cannot be computed (e.g. because runtime data is broken), a warning is emitted and the folder loses its `cost` points. If `--metrics cost` was explicitly requested and no other folder provides cost data, a selection error (exit 1) is raised.
+- **Warning Reporting**: Warnings are printed to stderr once per report file or variant pair. Report warnings identify broken points (by metric, combination, and node count) and count unreadable rows. Paired delta warnings identify broken percentage change points.
+
+---
+
+### 4.6 Output Files
+
+Comparison charts are saved to the target output directory following standard naming templates:
+
+- **By Nodes**:
+  $$\text{compare-}<\text{scale}>-<\text{benchmark}>[-<\text{names}>]-\text{by-nodes.png}$$
+- **By Combinations**:
+  $$\text{compare-}<\text{scale}>-<\text{benchmark}>[-<\text{names}>]-\text{by-combinations-}<\text{nodes}>.png$$
+
+#### Scale and Name Resolution:
+- `<scale>` is derived from the first folder path (e.g., `small`, `bake`, `variants`, or the directory basename).
+- When multiple folders are charted together, `<names>` joins the distinguishing parent directory names using `+` (e.g. `compare-small-lsmio-backends+ior-by-nodes.png`). If the combined name exceeds 120 characters, it is cut to 111 characters followed by '-' and the first 8 hex digits of its SHA-1 hash (total 120 characters).
+- Files generated in the target directory overwrite existing charts from previous runs of the same configuration.
+
+---
+
+### 4.7 Series Rules & Ordering
+
+- **Canonical Legend Labels (`INV-BACKEND-5`)**:
+  Raw directory names `outputs-<backend>` map to clean canonical labels: `adios2`, `native`, `plugin`, `rocksdb`, `leveldb`, and their `-sync` arms `adios2-sync`, `native-sync`, etc.
+- **Canonical Ordering**:
+  Series are sorted in strict precedence: `[adios2, adios2-sync, native, native-sync, plugin, plugin-sync, rocksdb, rocksdb-sync, leveldb, leveldb-sync]`, followed by IOR setups (`ior`, `ior-collective`, `ior-hdf5`, `ior-hdf5-collective`), followed by EPOCpp arms (baseline first, then wall-time backends, then bandwidth arms).
+- **Multi-Folder Disambiguation**:
+  If an arm appears in multiple charted folders, its label is disambiguated by appending the folder's parent tail: `<label> (<parent>/<folder>)`.
+- **Backends Archives vs. Variants Archives**:
+  In backends archives, `outputs-<backend>-sync` represents a `-sync` arm (`flush=true` / synchronous write mode). In baseline or variants archives, a folder of that name represents the filesystem sync (`fsync`) variant; those are evaluated using `compare variants`.
+
+---
+
+### 4.8 Variant Sensitivity Comparison
+
+`lsmiotool compare variants` evaluates storage engine parameter tuning and git commit regressions:
+
+- **Unpaired Mode**:
+  When an archive contains standalone `outputs-*` directories without `:run` or `:base` roles, each run is treated as an arm and plotted with absolute throughput (MiB/s).
+- **Paired Mode**:
+  Archives containing `:run` and `:base` directories (e.g. `outputs-*-<variant>:run` and `outputs-*-<variant>:base`) automatically pair runs with their corresponding baselines and calculate relative percentage delta. Orphaned runs lacking a baseline emit an orphan warning and are omitted.
+- **Versioned Variant Labeling**:
+  For archives created with `--versioned`, directory names are resolved to descriptive x-axis category labels via `VariantReverseResolver`:
+  - With variant: `outputs-native-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `<branch> (<hash>) [<variant>]` (e.g., `tybulut-bugfixes (437400d) [legacy]`).
+  - Without variant: `outputs-native-version-<branch>-<hash>:run` $\rightarrow$ `<branch> (<hash>)` (e.g., `main (437400d)`).
+  - With collision suffix: `outputs-native-version-<branch>-<hash>-<variant>:run-1` $\rightarrow$ `<branch> (<hash>) [<variant>]-1`.
+  - Non-native backend: `outputs-rocksdb-version-<branch>-<hash>-<variant>:run` $\rightarrow$ `rocksdb-<branch> (<hash>) [<variant>]`.
+
+---
+
+### 4.9 Exit Status
+
+`lsmiotool compare` returns strict, deterministic integer exit codes:
+
+| Exit Code | Classification | Description |
+|:---|:---|:---|
+| `0` | Success | All comparison charts generated and saved successfully. |
+| `1` | Data / Output Error | Nothing to chart (no data), incompatible folder kinds, explicit option value not held by folders, failed output directory creation, or failed PNG save. |
+| `2` | CLI Parse Error | Invalid CLI syntax, missing benchmark word, unknown option, or malformed argument. |
+| `3` | Missing Folder | One or more specified folder paths do not exist or are not directories. |
 
 ---
 

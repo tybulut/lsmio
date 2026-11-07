@@ -40,8 +40,8 @@ from typing import Any, List, Optional, Set, Tuple
 from unittest.mock import patch
 
 from lsmiotool.lib import data, output
-from lsmiotool.lib.cli import parseParseArguments
-from lsmiotool.lib.main import CompareVariantsMain, ParseMain
+from lsmiotool.lib.cli import parseCompareArguments, parseParseArguments
+from lsmiotool.lib.main import CompareMain, ParseMain
 from lsmiotool.lib.runparse import (
     ArchivedArtifactLayout,
     RunRootResolver,
@@ -941,12 +941,23 @@ class ParseArchiveModeTest(unittest.TestCase):
         os.makedirs(f_zero_arm)
         open(os.path.join(f_zero_arm, data.LSM_REPORT_FILE), "w").close()
 
-        f_cm = CompareVariantsMain(
-            f_archive_folder=f_archive,
-            f_op="write",
-            f_stripes=4,
-            f_blocksize="1M",
-            f_output_dir=os.path.join(self.m_temp_dir, "plots"),
+        f_plots = os.path.join(self.m_temp_dir, "plots")
+        f_cm = CompareMain(
+            f_request=parseCompareArguments(
+                [
+                    "compare",
+                    "variants",
+                    f_archive,
+                    "--metrics",
+                    "write",
+                    "--stripes",
+                    "4",
+                    "--block",
+                    "1M",
+                    "--output-dir",
+                    f_plots,
+                ]
+            )
         )
         with (
             patch("lsmiotool.lib.log.Console.warning"),

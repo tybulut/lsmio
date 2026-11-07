@@ -41,12 +41,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import unittest
 from unittest.mock import MagicMock, patch
 
-from lsmiotool.lib import epocppreport, main, plot
+from lsmiotool.lib import epocppreport, main
 from lsmiotool.lib.benchmarks import EpocppAdapter
 from lsmiotool.lib.cli import (
     ArchiveCliParseError,
     CompareCliParseError,
-    CompareNodesRequest,
+    CompareRequest,
     ParseCliParseError,
     parseArchiveArguments,
     parseCompareArguments,
@@ -479,115 +479,123 @@ class EpocppReportTest(EpocppArchiveFixture):
         self.assertEqual(epocppreport.timeSeries(f_bw, "read", 4, "1M"), ([2], [300.0]))
         self.assertEqual(epocppreport.timeSeries(f_bw, "runtime", 4, "1M"), ([], []))
 
-    def testCompareNodesChartsEpocppArms(self) -> None:
+    def testCompareChartsEpocppArms(self) -> None:
         self._standardArchive()
         f_out = os.path.join(self.m_dir, "png")
-        for f_op, f_legends, f_label in (
-            ("runtime", ["epocpp-baseline", "epocpp-posix"], "Min Runtime in s"),
-            (
-                "cost",
+        f_req = CompareRequest(
+            "epocpp",
+            (self.m_scale,),
+            f_metrics=("runtime", "cost", "write"),
+            f_output_dir=f_out,
+        )
+        with patch("lsmiotool.lib.plot.ComparePanelPlot") as f_plot:
+            f_plot.return_value = MagicMock()
+            self.assertEqual(main.CompareMain(f_request=f_req).run(), 0)
+            f_fig = f_plot.call_args[0][0]
+            f_png_path = f_plot.return_value.plot.call_args[0][0]
+
+            self.assertEqual(
+                os.path.basename(f_png_path), "compare-small-epocpp-by-nodes.png"
+            )
+
+            p_runtime = f_fig.grid[0][0]
+            p_cost = f_fig.grid[0][1]
+            p_write = f_fig.grid[0][2]
+
+            self.assertEqual(
+                [f_fig.series[s_idx].label for s_idx, _ in p_runtime.values],
+                ["epocpp-baseline", "epocpp-posix"],
+            )
+            self.assertEqual(
+                [f_fig.series[s_idx].label for s_idx, _ in p_cost.values],
                 ["epocpp-posix"],
-                "I/O cost in s (Min Runtime - no-output baseline)",
-            ),
-            ("write", ["epocpp-posix-bw"], "Max BW in MiB/s"),
-        ):
-            with (
-                self.subTest(f_op=f_op),
-                patch("lsmiotool.lib.plot.MultiBarPlot") as f_plot,
-            ):
-                f_plot.return_value = MagicMock()
-                f_req = CompareNodesRequest(
-                    f_folder=self.m_scale,
-                    f_op=f_op,
-                    f_stripes=4,
-                    f_blocksize="1M",
-                    f_output_dir=f_out,
+            )
+            self.assertEqual(
+                [f_fig.series[s_idx].label for s_idx, _ in p_write.values],
+                ["epocpp-posix-bw"],
+            )
+
+            self.assertEqual(p_runtime.y_label, "Min runtime (s)")
+            self.assertEqual(
+                p_cost.y_label,
+                "I/O cost (s): Min runtime minus the baseline's",
+            )
+            self.assertEqual(p_write.y_label, "Max MiB/s")
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.m_scale,
+                    "outputs-epocpp-posix",
+                    epocppreport.ARM_REPORT_FILE,
                 )
-                self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
-                f_args, _ = f_plot.call_args
-                f_meta: plot.PlotMetaData = f_args[0]
-                self.assertEqual([f_p.legend for f_p in f_args[1:]], f_legends)
-                self.assertEqual(f_meta.y_label, f_label)
-                f_name = f_plot.return_value.plot.call_args[0][0]
-                self.assertEqual(
-                    os.path.basename(f_name), f"compare-small-epocpp-{f_op}-4-1M.png"
-                )
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(os.path.join(self.m_scale, epocppreport.COST_REPORT_FILE))
+        )
 
     def testCostChartWithoutReportsHasEveryBackend(self) -> None:
         # No reports yet: adios2 sorts before the baseline, but is charted all the same
         self._standardArchive()
         self._arm("epocpp-adios2", "POSIX", {(2, 4, "1M"): [_log(12.0)]})
-        # An LSMIO arm in the folder (real bmtool outputs) has no runtime or cost
+        f_req = CompareRequest(
+            "epocpp",
+            (self.m_scale,),
+            f_metrics=("cost",),
+            f_output_dir=os.path.join(self.m_dir, "png"),
+        )
+        with patch("lsmiotool.lib.plot.ComparePanelPlot") as f_plot:
+            f_plot.return_value = MagicMock()
+            self.assertEqual(main.CompareMain(f_request=f_req).run(), 0)
+            f_fig = f_plot.call_args[0][0]
+            cost_labels = [
+                f_fig.series[s_idx].label for s_idx, _ in f_fig.grid[0][0].values
+            ]
+            self.assertEqual(cost_labels, ["epocpp-posix", "epocpp-adios2"])
+
+        # An LSMIO arm in the folder (mixed folders are refused with kind error naming outputs-native)
         shutil.copytree(
             os.path.join(
-                os.path.dirname(__file__), "..", "parse", "example", "lsmio-outputs"
+                os.path.dirname(__file__),
+                "..",
+                "parse",
+                "example",
+                "lsmio-outputs",
             ),
             os.path.join(self.m_scale, "outputs-native"),
         )
-        with patch("lsmiotool.lib.plot.MultiBarPlot") as f_plot:
-            f_plot.return_value = MagicMock()
-            f_req = CompareNodesRequest(
-                f_folder=self.m_scale,
-                f_op="cost",
-                f_stripes=4,
-                f_blocksize="1M",
-                f_output_dir=os.path.join(self.m_dir, "png"),
-            )
-            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
-            self.assertEqual(
-                [f_p.legend for f_p in f_plot.call_args[0][1:]],
-                ["epocpp-posix", "epocpp-adios2"],
-            )
-        with patch("lsmiotool.lib.plot.MultiBarPlot") as f_plot:
-            f_plot.return_value = MagicMock()
-            f_req = CompareNodesRequest(
-                f_folder=self.m_scale,
-                f_op="runtime",
-                f_stripes=4,
-                f_blocksize="1M",
-                f_output_dir=os.path.join(self.m_dir, "png"),
-            )
-            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
-            self.assertNotIn("native", [f_p.legend for f_p in f_plot.call_args[0][1:]])
-        # ... though it is charted for bandwidth, with the epocpp bandwidth arm
-        with patch("lsmiotool.lib.plot.MultiBarPlot") as f_plot:
-            f_plot.return_value = MagicMock()
-            f_req = CompareNodesRequest(
-                f_folder=self.m_scale,
-                f_op="write",
-                f_stripes=4,
-                f_blocksize="1M",
-                f_output_dir=os.path.join(self.m_dir, "png"),
-            )
-            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
-            f_legends = [f_p.legend for f_p in f_plot.call_args[0][1:]]
-            self.assertIn("native", f_legends)
-            self.assertIn("epocpp-posix-bw", f_legends)
-            # Mixed with LSMIO's MB/s, the label stays LSMIO's
-            self.assertEqual(f_plot.call_args[0][0].y_label, "Max BW in MB")
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            ret = main.CompareMain(f_request=f_req).run()
+            self.assertEqual(ret, 1)
+            mock_err.assert_called_once()
+            self.assertIn("outputs-native", mock_err.call_args[0][0])
 
-    def testAnUnusableArmLosesOnlyItsOwnChart(self) -> None:
+    def testAnUnusableArmLosesOnlyItself(self) -> None:
         self._standardArchive()
         # Sorts before every other arm; its summary cannot be read
         f_bad = self._arm("epocpp-adios2-bw", "POSIX-BW", {(2, 4, "1M"): [_log(1.0)]})
         for f_root, _, f_files in os.walk(f_bad):
             for f_name in f_files:
                 if f_name.startswith("out-"):
-                    with open(os.path.join(f_root, f_name), "a") as f_f:
+                    with open(
+                        os.path.join(f_root, f_name), "a", encoding="utf-8"
+                    ) as f_f:
                         f_f.write("write,1.2.3,1,1,1,3,3\n")
-        with patch("lsmiotool.lib.plot.MultiBarPlot") as f_plot:
+        f_req = CompareRequest(
+            "epocpp",
+            (self.m_scale,),
+            f_metrics=("cost",),
+            f_output_dir=os.path.join(self.m_dir, "png"),
+        )
+        with patch("lsmiotool.lib.plot.ComparePanelPlot") as f_plot:
             f_plot.return_value = MagicMock()
-            f_req = CompareNodesRequest(
-                f_folder=self.m_scale,
-                f_op="cost",
-                f_stripes=4,
-                f_blocksize="1M",
-                f_output_dir=os.path.join(self.m_dir, "png"),
-            )
-            self.assertEqual(main.CompareNodesMain(f_request=f_req).run(), 0)
-            self.assertEqual(
-                [f_p.legend for f_p in f_plot.call_args[0][1:]], ["epocpp-posix"]
-            )
+            self.assertEqual(main.CompareMain(f_request=f_req).run(), 0)
+            f_fig = f_plot.call_args[0][0]
+            cost_labels = [
+                f_fig.series[s_idx].label for s_idx, _ in f_fig.grid[0][0].values
+            ]
+            self.assertEqual(cost_labels, ["epocpp-posix"])
 
     def testParseOfTheArchiveDirNeverAggregatesEpocppLogs(self) -> None:
         # 'parse <dir>' of an epocpp archive, or of one arm: never LSMIO's reports
@@ -675,12 +683,24 @@ class EpocppCommandLineTest(unittest.TestCase):
         self.assertEqual((f_req.target, f_req.scale), ("epocpp", "large"))
         with self.assertRaises(ArchiveCliParseError):
             parseArchiveArguments(["archive", "epocpp", "variants"])
-        for f_op in ("runtime", "cost"):
-            self.assertEqual(
-                parseCompareArguments(["nodes", "/a/b", f_op, "16", "8M"]).op, f_op
-            )
+        cmp_req = parseCompareArguments(
+            [
+                "compare",
+                "epocpp",
+                "/a/b",
+                "--metrics",
+                "runtime,cost",
+                "--stripes",
+                "16",
+                "--block",
+                "8M",
+            ]
+        )
+        self.assertEqual(cmp_req.metrics, ("runtime", "cost"))
         with self.assertRaises(CompareCliParseError):
-            parseCompareArguments(["nodes", "/a/b", "speed"])
+            parseCompareArguments(["compare", "nodes", "/a/b", "runtime"])
+        with self.assertRaises(CompareCliParseError):
+            parseCompareArguments(["compare", "epocpp", "/a/b", "--metrics", "speed"])
 
     def testArchiveEpocppNeedsAnArmRunRoot(self) -> None:
         f_req = parseArchiveArguments(["archive", "epocpp", "small"])
