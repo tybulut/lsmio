@@ -34,6 +34,7 @@
 #include <leveldb/cache.h>
 #include <leveldb/db.h>
 #include <leveldb/filter_policy.h>
+#include <leveldb/write_batch.h>
 
 #include <atomic>
 #include <memory>
@@ -56,14 +57,15 @@ class LSMIOStoreLDB : public LSMIOStore {
     leveldb::ReadOptions _rOptions;
     leveldb::Options _options;
     leveldb::DB* _db = nullptr;
-    leveldb::WriteBatch* _batch = nullptr;
+    // The store's one batch (AI-16); holds no entry when _batchSize == 0 (AI-2).
+    leveldb::WriteBatch _batch;
 
-    /// Requires _batchMutex held. Writes the pending batch, if any, and deletes it. Returns true
-    /// when nothing was pending or the write succeeded; on failure sets _writeFailed.
+    /// Requires _batchMutex held. Writes the pending batch, if any, then clears it on every exit
+    /// (success, failure or exception). Returns true when nothing was pending or the write
+    /// succeeded; on failure sets _writeFailed.
     bool _writePendingBatchLocked();
 
-    /// start / stop batching
-    /// @return bool success
+    /// Returns true exactly when nothing is pending, and has no other effect.
     bool startBatch() override;
     bool stopBatch() override;
 

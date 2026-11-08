@@ -565,6 +565,24 @@ TEST_F(LSMIOLevelDBConfigTest, ConcurrentDeferredWritersKeepEveryKey) {
     }
 }
 
+TEST_F(LSMIOLevelDBConfigTest, SuccessfulBatchWriteIsNotResent) {
+    lsmio::LSMIOStoreLDB lc(dbPath("batch-not-resent"));
+
+    EXPECT_TRUE(lc.put("k", std::string("old"), false));
+    EXPECT_TRUE(lc.writeBarrier());
+    EXPECT_TRUE(lc.put("k", std::string("new"), true));
+    EXPECT_TRUE(lc.put("k2", std::string("x"), false));
+    EXPECT_TRUE(lc.writeBarrier());
+
+    std::string val_k;
+    EXPECT_TRUE(lc.get("k", &val_k));
+    EXPECT_EQ(val_k, "new");
+
+    std::string val_k2;
+    EXPECT_TRUE(lc.get("k2", &val_k2));
+    EXPECT_EQ(val_k2, "x");
+}
+
 TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedBatchWriteFailsWriteBarrier) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     const std::string path = dbPath("fail-batch-write-wb");

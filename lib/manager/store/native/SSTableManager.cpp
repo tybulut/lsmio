@@ -30,7 +30,6 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -210,35 +209,29 @@ bool tryLoadFooterIndex(std::ifstream& f_file, uint64_t& f_file_size,
 
 namespace lsmio {
 
-SSTableManager::IndexNode::IndexNode(L0Index&& idx) : index(std::move(idx)) {}
+SSTableManager::IndexNode::IndexNode(L0Index&& idx, uint64_t f_file_len)
+    : index(std::move(idx)), m_file_len(f_file_len) {}
 
 SSTableManager::IndexNode::~IndexNode() {
     closeReader();
 }
 
 void SSTableManager::IndexNode::initReader(bool f_enable_mmap, bool f_enable_pread) {
-    if (f_enable_mmap || f_enable_pread) {
+    if ((f_enable_mmap || f_enable_pread) && m_file_len > 0) {
         int fd = ::open(index.path.c_str(), O_RDONLY);
         if (fd >= 0) {
-            struct stat st;
-            if (::fstat(fd, &st) == 0 && st.st_size > 0) {
-                const size_t file_size = static_cast<size_t>(st.st_size);
-
-                if (f_enable_mmap) {
-                    void* ptr = ::mmap(nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0);
-                    if (ptr != MAP_FAILED) {
-                        m_mmap_ptr = static_cast<char*>(ptr);
-                        m_mmap_len = file_size;
-                        ::posix_madvise(m_mmap_ptr, m_mmap_len, POSIX_MADV_WILLNEED);
-                    }
+            if (f_enable_mmap) {
+                void* ptr = ::mmap(nullptr, static_cast<size_t>(m_file_len), PROT_READ, MAP_SHARED,
+                                   fd, 0);
+                if (ptr != MAP_FAILED) {
+                    m_mmap_ptr = static_cast<char*>(ptr);
+                    m_mmap_len = static_cast<size_t>(m_file_len);
+                    ::posix_madvise(m_mmap_ptr, m_mmap_len, POSIX_MADV_WILLNEED);
                 }
+            }
 
-                if (f_enable_pread) {
-                    m_read_fd = fd;
-                    m_file_len = file_size;
-                } else {
-                    ::close(fd);
-                }
+            if (f_enable_pread) {
+                m_read_fd = fd;
             } else {
                 ::close(fd);
             }
@@ -397,7 +390,7 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
 
     dedupOffsets(new_index.offsets);
 
-    IndexNode* new_node = new IndexNode(std::move(new_index));
+    IndexNode* new_node = new IndexNode(std::move(new_index), current_offset);
     new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
     IndexNode* old_head = m_head.load(std::memory_order_relaxed);
     do {
@@ -516,9 +509,9 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             f_out_value.assign(tl_pread_buf.data() + 8 + key_len, val_len);
             return true;
         } else {
-            // Precondition: bytes_read >= 8 implies f_offset < m_file_len because the file is
-            // immutable once its node exists (AI-5).
-            if (total_record_len > f_node.m_file_len - f_offset) {
+            // Precondition: bytes_read >= 8 + f_key.size() implies f_offset lies below the real file
+            // size (< 2^63), and total_record_len is below 2^32, so the sum cannot wrap (AI-5, AI-15).
+            if (f_offset + total_record_len > f_node.m_file_len) {
                 return false;
             }
             m_pread_slow_path_count.fetch_add(1, std::memory_order_relaxed);
@@ -536,20 +529,18 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             return true;
         }
     } else {
-        return readValueAt(f_node.index.path, f_offset, f_key, f_out_value);
+        return readValueAt(f_node.index.path, f_node.m_file_len, f_offset, f_key, f_out_value);
     }
 }
 
-bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
-                                 const std::string& f_key, std::string& f_out_value) {
+bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_file_len,
+                                 uint64_t f_offset, const std::string& f_key,
+                                 std::string& f_out_value) {
     std::ifstream sst_file(f_path, std::ios::binary);
     if (!sst_file) {
         std::cerr << "ERROR: Failed to open SSTable for read: " << f_path << std::endl;
         return false;
     }
-
-    sst_file.seekg(0, std::ios::end);
-    const uint64_t file_len = static_cast<uint64_t>(sst_file.tellg());
 
     sst_file.seekg(f_offset);
     if (sst_file.fail()) return false;
@@ -571,7 +562,7 @@ bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
     uint32_t val_len;
     if (!readLe32(sst_file, val_len)) return false;
     if (val_len > READ_MAX_VAL_LEN) return false;
-    if (val_len > file_len - (f_offset + 8 + key_len)) return false;
+    if (f_offset + 8 + key_len + val_len > f_file_len) return false;
 
     f_out_value.resize(val_len);
     sst_file.read(f_out_value.data(), val_len);
@@ -620,6 +611,7 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
 
             sst_file.seekg(0, std::ios::end);
             uint64_t file_size = sst_file.tellg();
+            const uint64_t file_len = file_size;
 
             if (!tryLoadFooterIndex(sst_file, file_size, new_index.offsets)) {
                 sst_file.clear();
@@ -656,7 +648,7 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
 
             dedupOffsets(new_index.offsets);
 
-            auto new_node = std::make_unique<IndexNode>(std::move(new_index));
+            auto new_node = std::make_unique<IndexNode>(std::move(new_index), file_len);
             new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
             recovered_nodes.push_back(std::move(new_node));
         }

@@ -1542,3 +1542,262 @@ TEST_F(LSMIOSSTableAllocationDeathTest, PreadSlowPathRefusesHugeRecordUnderAddre
         ::testing::ExitedWithCode(0), "");
 #endif
 }
+
+namespace {
+
+void appendToFile(const std::string& f_path, const std::string& f_bytes) {
+    std::ofstream sst_file(f_path, std::ios::binary | std::ios::app);
+    sst_file.write(f_bytes.data(), static_cast<std::streamsize>(f_bytes.size()));
+}
+
+struct StreamRestartParam {
+    std::string name;
+    bool manual_offset;
+    bool footer_index;
+};
+
+class LSMIOSSTableStreamRestartTest
+    : public LSMIOSSTableCraftedTest,
+      public ::testing::WithParamInterface<StreamRestartParam> {};
+
+TEST_P(LSMIOSSTableStreamRestartTest, ReadsBackBeforeAndAfterRestart) {
+    const auto& param = GetParam();
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = false;
+    gConfigLSMIO.manualOffset = param.manual_offset;
+    gConfigLSMIO.footerIndex = param.footer_index;
+    gConfigLSMIO.preAllocate = false;
+
+    openManager();
+
+    MemtableVectorNoSort memtable;
+    memtable.add("a", "1");
+    memtable.add("bb", "22");
+    memtable.add("ccc", std::string(300, 'c'));
+
+    std::vector<char> buffer(1024);
+    ASSERT_TRUE(m_mgr->flushMemtable(memtable, buffer));
+
+    // Expected 1 (flush length)
+    std::string value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("a", value));
+    EXPECT_EQ(value, "1");
+
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("bb", value));
+    EXPECT_EQ(value, "22");
+
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("ccc", value));
+    EXPECT_EQ(value, std::string(300, 'c'));
+
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_TRUE(m_mgr->scan("", results, deleted));
+    std::map<std::string, std::string> expected_results = {
+        {"a", "1"}, {"bb", "22"}, {"ccc", std::string(300, 'c')}};
+    EXPECT_EQ(results, expected_results);
+    EXPECT_TRUE(deleted.empty());
+
+    // Action 2: restart
+    m_mgr.reset();
+    openManager();
+
+    // Expected 2 (recovery length)
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("a", value));
+    EXPECT_EQ(value, "1");
+
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("bb", value));
+    EXPECT_EQ(value, "22");
+
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("ccc", value));
+    EXPECT_EQ(value, std::string(300, 'c'));
+
+    results.clear();
+    deleted.clear();
+    EXPECT_TRUE(m_mgr->scan("", results, deleted));
+    EXPECT_EQ(results, expected_results);
+    EXPECT_TRUE(deleted.empty());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Layouts, LSMIOSSTableStreamRestartTest,
+    ::testing::Values(
+        StreamRestartParam{"footer_manual", true, true},
+        StreamRestartParam{"footerless_manual", true, false},
+        StreamRestartParam{"footerless_tellp", false, false}),
+    [](const ::testing::TestParamInfo<StreamRestartParam>& info) {
+        return info.param.name;
+    });
+
+enum class FooterRegionLayout {
+    EndsAtEof,
+    OnePastEof,
+    HugeInFooter
+};
+
+struct FooterRegionParam {
+    std::string name;
+    ReadMode mode;
+    FooterRegionLayout layout;
+};
+
+class LSMIOSSTableFooterRegionTest
+    : public LSMIOSSTableCraftedTest,
+      public ::testing::WithParamInterface<FooterRegionParam> {};
+
+TEST_P(LSMIOSSTableFooterRegionTest, ReadMatchesFileLength) {
+    const auto& param = GetParam();
+    gConfigLSMIO.enableMMAP = (param.mode == ReadMode::Mmap);
+    gConfigLSMIO.enablePread = (param.mode == ReadMode::Pread);
+
+    CraftedSSTable table;
+    std::string test_key;
+    if (param.layout == FooterRegionLayout::EndsAtEof) {
+        test_key = "k";
+        table.addLe32(1);
+        table.addRaw("k");
+        table.addLe32(31);
+        table.addRaw("ab");
+        table.addFooter({{"k", 0}});
+    } else if (param.layout == FooterRegionLayout::OnePastEof) {
+        test_key = "k";
+        table.addLe32(1);
+        table.addRaw("k");
+        table.addLe32(32);
+        table.addRaw("ab");
+        table.addFooter({{"k", 0}});
+    } else {
+        test_key = std::string("\x01", 1);
+        table.addRecord("x", "1");
+        table.addFooter({{std::string("\x01", 1), 10}});
+        ASSERT_EQ(table.bytes().substr(10, 9), std::string("\x01\x00\x00\x00\x01\x00\x00\x00\x01", 9));
+    }
+    table.writeTo(tablePath(1));
+
+    // Write empty newer table to cover m_file_len > 0 false side in initReader
+    CraftedSSTable().writeTo(tablePath(2));
+
+    openManager();
+
+    if (param.layout == FooterRegionLayout::EndsAtEof) {
+        std::string value = "sentinel";
+        EXPECT_TRUE(m_mgr->get(test_key, value));
+        EXPECT_EQ(value, table.bytes().substr(9));
+        std::map<std::string, std::string> results;
+        std::set<std::string> deleted;
+        EXPECT_TRUE(m_mgr->scan("", results, deleted));
+        std::map<std::string, std::string> expected_results = {{test_key, table.bytes().substr(9)}};
+        EXPECT_EQ(results, expected_results);
+        EXPECT_TRUE(deleted.empty());
+        EXPECT_EQ(m_mgr->getPreadSlowPathCount(), 0u);
+    } else {
+        std::string value = "sentinel";
+        EXPECT_FALSE(m_mgr->get(test_key, value));
+        EXPECT_EQ(value, "sentinel");
+        std::map<std::string, std::string> results;
+        std::set<std::string> deleted;
+        EXPECT_FALSE(m_mgr->scan("", results, deleted));
+        EXPECT_TRUE(results.empty());
+        EXPECT_TRUE(deleted.empty());
+        EXPECT_EQ(m_mgr->getPreadSlowPathCount(), 0u);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Layouts, LSMIOSSTableFooterRegionTest,
+    ::testing::Values(
+        FooterRegionParam{"ends_at_eof_mmap", ReadMode::Mmap, FooterRegionLayout::EndsAtEof},
+        FooterRegionParam{"ends_at_eof_pread", ReadMode::Pread, FooterRegionLayout::EndsAtEof},
+        FooterRegionParam{"ends_at_eof_stream", ReadMode::Stream, FooterRegionLayout::EndsAtEof},
+        FooterRegionParam{"one_past_eof_mmap", ReadMode::Mmap, FooterRegionLayout::OnePastEof},
+        FooterRegionParam{"one_past_eof_pread", ReadMode::Pread, FooterRegionLayout::OnePastEof},
+        FooterRegionParam{"one_past_eof_stream", ReadMode::Stream, FooterRegionLayout::OnePastEof},
+        FooterRegionParam{"huge_in_footer_mmap", ReadMode::Mmap, FooterRegionLayout::HugeInFooter},
+        FooterRegionParam{"huge_in_footer_pread", ReadMode::Pread, FooterRegionLayout::HugeInFooter},
+        FooterRegionParam{"huge_in_footer_stream", ReadMode::Stream, FooterRegionLayout::HugeInFooter}),
+    [](const ::testing::TestParamInfo<FooterRegionParam>& info) {
+        return info.param.name;
+    });
+
+}  // namespace
+
+// Out-of-contract: a table shrunk after open breaks AI-5's premise. Verifies the stream path
+// uses the stored length, allocating then clearing the value on a failed read; not a supported use.
+TEST_F(LSMIOSSTableCraftedTest, StreamShrunkAfterOpenClearsValue) {
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = false;
+
+    CraftedSSTable table;
+    table.addRecord("k", std::string(100, 'v'));
+    table.addFooter({{"k", 0}});
+    table.writeTo(tablePath(1));
+
+    openManager();
+    std::filesystem::resize_file(tablePath(1), 50);
+
+    std::string value = "sentinel";
+    EXPECT_FALSE(m_mgr->get("k", value));
+    EXPECT_EQ(value, "");
+
+    std::map<std::string, std::string> results;
+    std::set<std::string> deleted;
+    EXPECT_FALSE(m_mgr->scan("", results, deleted));
+    EXPECT_TRUE(results.empty());
+}
+
+// Out-of-contract: a table grown after open breaks AI-5's premise. Verifies AI-15's fail-closed
+// stream check refuses a record past the stored length; not a supported use.
+TEST_F(LSMIOSSTableCraftedTest, StreamGrownAfterOpenRefusesRecordPastStoredLength) {
+    gConfigLSMIO.enableMMAP = false;
+    gConfigLSMIO.enablePread = false;
+
+    CraftedSSTable table;
+    table.addRecord("x", "1");
+    table.addFooter({{"x", 0}, {"k", 52}});
+    table.writeTo(tablePath(1));
+
+    openManager();
+
+    CraftedSSTable append_table;
+    append_table.addRecord("k", "abc");
+    appendToFile(tablePath(1), append_table.bytes());
+
+    std::string value = "sentinel";
+    EXPECT_FALSE(m_mgr->get("k", value));
+    EXPECT_EQ(value, "sentinel");
+
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("x", value));
+    EXPECT_EQ(value, "1");
+}
+
+// Out-of-contract: a table grown after open breaks AI-5's premise. Verifies AI-15's pread
+// slow-path check refuses a record past the stored length before the slow-path counter; not a supported use.
+TEST_F(LSMIOSSTableCraftedTest, PreadGrownAfterOpenRefusesSlowPathPastStoredLength) {
+    CraftedSSTable table;
+    table.addRecord("x", "1");
+    table.addFooter({{"x", 0}, {"k", 53}});
+    table.writeTo(tablePath(1));
+
+    openManager();
+
+    CraftedSSTable append_table;
+    append_table.addRaw("z");
+    append_table.addRecord("k", std::string(204800, 'v'));
+    appendToFile(tablePath(1), append_table.bytes());
+
+    std::string value = "sentinel";
+    EXPECT_FALSE(m_mgr->get("k", value));
+    EXPECT_EQ(value, "sentinel");
+    EXPECT_EQ(m_mgr->getPreadSlowPathCount(), 0u);
+
+    value = "sentinel";
+    EXPECT_TRUE(m_mgr->get("x", value));
+    EXPECT_EQ(value, "1");
+    EXPECT_EQ(m_mgr->getPreadSlowPathCount(), 0u);
+}
+

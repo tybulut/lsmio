@@ -108,10 +108,11 @@ class SSTableManager {
         int m_read_fd{-1};
         char* m_mmap_ptr{nullptr};
         size_t m_mmap_len{0};
-        // file length from the fstat in initReader; valid whenever m_read_fd >= 0 (AI-5); m_mmap_len plays this role for mmap
-        size_t m_file_len{0};
+        // Length of the table file, fixed by the node's creator (AI-5). initReader maps this many
+        // bytes and skips empty tables; the pread slow path and the stream path check against it.
+        const uint64_t m_file_len;
 
-        explicit IndexNode(L0Index&& idx);
+        IndexNode(L0Index&& idx, uint64_t f_file_len);
         ~IndexNode();
 
         // Non-copyable, non-movable to guarantee resource ownership
@@ -132,9 +133,9 @@ class SSTableManager {
     bool readValueAt(const IndexNode& f_node, uint64_t f_offset, const std::string& f_key,
                      std::string& f_out_value);
 
-    // Backward-compatible stream fallback overload
-    bool readValueAt(const std::string& f_path, uint64_t f_offset, const std::string& f_key,
-                     std::string& f_out_value);
+    // Stream fallback: opens f_path per call; f_file_len is the node's m_file_len (AI-5, AI-15)
+    bool readValueAt(const std::string& f_path, uint64_t f_file_len, uint64_t f_offset,
+                     const std::string& f_key, std::string& f_out_value);
 
     // Internal recovery
     void recoverState(size_t f_file_pool_size, size_t f_pre_alloc_bytes);
