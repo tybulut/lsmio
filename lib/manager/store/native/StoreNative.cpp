@@ -174,21 +174,16 @@ void LSMIOStoreNative::close() {
         m_immutable_memtables.push_back(std::move(m_active_memtable));
     }
     while (!m_immutable_memtables.empty()) {
-        m_flushing_memtable = std::move(m_immutable_memtables.front());
+        auto memtable_to_flush = std::move(m_immutable_memtables.front());
         m_immutable_memtables.pop_front();
-        const IMemtable* ptr = m_flushing_memtable.get();
 
         lock.unlock();
         try {
-            FlushMemtableToL0(*ptr);
+            FlushMemtableToL0(*memtable_to_flush);
         } catch (...) {
             m_bg_error.store(true, std::memory_order_release);
         }
-        std::unique_ptr<IMemtable> flushed_memtable;
-        lock.lock();
-        flushed_memtable = std::move(m_flushing_memtable);
-        lock.unlock();
-        flushed_memtable.reset();
+        memtable_to_flush.reset();
         lock.lock();
     }
 
@@ -235,7 +230,6 @@ void LSMIOStoreNative::FlushWorkLoop() {
                 std::unique_lock<std::mutex> lock(m_state_mutex);
                 flushed_memtable = std::move(m_flushing_memtable);
             }
-            flushed_memtable.reset();
             m_barrier_cv.notify_all();
         }
     }

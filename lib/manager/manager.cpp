@@ -61,21 +61,24 @@ const char* lifecycleStateName(LifecycleState state) {
 
 namespace {
 
-void writeLe64(std::string& out, uint64_t val) {
+void writeField(std::string& out, const std::string& str) {
+    const uint64_t len = str.size();
     for (size_t i = 0; i < 8; ++i) {
-        out.push_back(static_cast<char>((val >> (i * 8)) & 0xFF));
+        out.push_back(static_cast<char>((len >> (i * 8)) & 0xFF));
     }
+    out.append(str);
 }
 
-bool readLe64(const std::string& payload, size_t& pos, uint64_t& out) {
-    if (payload.size() - pos < 8) {
-        return false;
-    }
-    out = 0;
+bool readField(const std::string& payload, size_t& pos, std::string& out) {
+    if (payload.size() - pos < 8) return false;
+    uint64_t len = 0;
     for (size_t i = 0; i < 8; ++i) {
-        out |= (static_cast<uint64_t>(static_cast<unsigned char>(payload[pos + i])) << (i * 8));
+        len |= (static_cast<uint64_t>(static_cast<unsigned char>(payload[pos + i])) << (i * 8));
     }
     pos += 8;
+    if (len > payload.size() - pos) return false;
+    out.assign(payload, pos, len);
+    pos += len;
     return true;
 }
 
@@ -91,50 +94,27 @@ uint64_t appendedValueBytes(const std::vector<std::tuple<std::string, std::strin
 }  // namespace
 
 void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values,
-                          std::string& payload) {
-    size_t totalBytes = 0;
+                          std::string& value) {
+    value.clear();
     for (const auto& tup : values) {
-        totalBytes += 8 + std::get<0>(tup).size() + 8 + std::get<1>(tup).size();
-    }
-    payload.clear();
-    payload.reserve(totalBytes);
-    for (const auto& tup : values) {
-        writeLe64(payload, std::get<0>(tup).size());
-        payload.append(std::get<0>(tup));
-        writeLe64(payload, std::get<1>(tup).size());
-        payload.append(std::get<1>(tup));
+        writeField(value, std::get<0>(tup));
+        writeField(value, std::get<1>(tup));
     }
 }
 
-bool vectorTupleDeserialize(const std::string& payload,
+bool vectorTupleDeserialize(const std::string& serialized_data,
                             std::vector<std::tuple<std::string, std::string>>& values) {
     size_t pos = 0;
     std::vector<std::tuple<std::string, std::string>> parsed;
-    while (pos < payload.size()) {
-        uint64_t keyLen = 0;
-        if (!readLe64(payload, pos, keyLen)) {
+    while (pos < serialized_data.size()) {
+        std::string first_str, second_str;
+        if (!readField(serialized_data, pos, first_str) ||
+            !readField(serialized_data, pos, second_str)) {
             return false;
         }
-        if (keyLen > payload.size() - pos) {
-            return false;
-        }
-        std::string key = payload.substr(pos, keyLen);
-        pos += keyLen;
-
-        uint64_t valLen = 0;
-        if (!readLe64(payload, pos, valLen)) {
-            return false;
-        }
-        if (valLen > payload.size() - pos) {
-            return false;
-        }
-        std::string val = payload.substr(pos, valLen);
-        pos += valLen;
-
-        parsed.emplace_back(std::move(key), std::move(val));
+        parsed.emplace_back(std::move(first_str), std::move(second_str));
     }
-    values.insert(values.end(),
-                  std::make_move_iterator(parsed.begin()),
+    values.insert(values.end(), std::make_move_iterator(parsed.begin()),
                   std::make_move_iterator(parsed.end()));
     return true;
 }

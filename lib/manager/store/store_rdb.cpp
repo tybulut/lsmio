@@ -29,7 +29,6 @@
  */
 
 #include <rocksdb/cache.h>
-#include <rocksdb/convenience.h>
 #include <rocksdb/merge_operator.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/table.h>
@@ -64,10 +63,7 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
         tableOptions.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
     }
 
-    // Compression on picks the first codec of this list that the linked RocksDB supports. The
-    // RocksDB default is Snappy only, so a build without Snappy would otherwise not compress.
-    // kNoCompression closes both lists, so the search always finds an element and a library with
-    // no codec at all opens uncompressed
+    // Pick first supported codec; kNoCompression closes both lists so find_first_of cannot fail.
     if (!gConfigLSMIO.compression) {
         _options.compression = rocksdb::kNoCompression;
     } else {
@@ -78,12 +74,6 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
         supported.push_back(rocksdb::kNoCompression);
         _options.compression = *std::find_first_of(std::begin(preference), std::end(preference),
                                                    supported.begin(), supported.end());
-    }
-    {
-        std::string codec_name;
-        rocksdb::GetStringFromCompressionType(&codec_name, _options.compression)
-            .PermitUncheckedError();
-        LOG(INFO) << "LSMIOStoreRDB::LSMIOStoreRDB: compression: " << codec_name << std::endl;
     }
 
     if (gConfigLSMIO.cacheSize > 0) {

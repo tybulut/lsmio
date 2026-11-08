@@ -37,15 +37,9 @@
 #include <lsmio/manager/store/store_ldb.hpp>
 
 namespace {
-class BatchClearGuard {
-  public:
-    explicit BatchClearGuard(leveldb::WriteBatch& target) noexcept : _target(target) {}
-    ~BatchClearGuard() { _target.Clear(); }
-    BatchClearGuard(const BatchClearGuard&) = delete;
-    BatchClearGuard& operator=(const BatchClearGuard&) = delete;
-
-  private:
-    leveldb::WriteBatch& _target;
+struct BatchClearGuard {
+    leveldb::WriteBatch& target;
+    ~BatchClearGuard() { target.Clear(); }
 };
 }  // namespace
 
@@ -177,11 +171,7 @@ bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::str
               << " size: " << value.size() << std::endl;
 
     if (flush || value.size() >= _maxBatchBytes) {
-        bool flushed;
-        {
-            std::lock_guard<std::mutex> lg(_batchMutex);
-            flushed = _writePendingBatchLocked();
-        }
+        const bool flushed = stopBatch();
 
         LOG(INFO) << "LSMIOStoreLDB::_batchMutation: mutation: " << getMutationType(mType)
                   << std::endl;
@@ -245,7 +235,7 @@ bool LSMIOStoreLDB::_writePendingBatchLocked() {
     _batchSize.store(0);
     _batchBytes.store(0);
 
-    BatchClearGuard clearGuard(_batch);
+    BatchClearGuard clearGuard{_batch};
     const leveldb::Status s = _db->Write(_wOptions, &_batch);
     if (!s.ok()) {
         _writeFailed = true;
@@ -280,14 +270,12 @@ bool LSMIOStoreLDB::dbCleanup() {
 
 bool LSMIOStoreLDB::readBarrier() {
     LOG(INFO) << "LSMIOStoreLDB::readBarrier: " << std::endl;
-    const bool flushed = stopBatch();
-    return flushed && !_writeFailed.load();
+    return stopBatch() && !_writeFailed.load();
 }
 
 bool LSMIOStoreLDB::writeBarrier() {
     LOG(INFO) << "LSMIOStoreLDB::writeBarrier: " << std::endl;
-    const bool flushed = stopBatch();
-    return flushed && !_writeFailed.load();
+    return stopBatch() && !_writeFailed.load();
 }
 
 }  // namespace lsmio

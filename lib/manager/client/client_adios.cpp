@@ -35,11 +35,6 @@
 
 namespace lsmio {
 
-namespace {
-// Upper bound for a size received from a peer, checked before allocating.
-constexpr int kMaxRecvSize = 1 << 30;
-}  // namespace
-
 LSMIOClientAdios::LSMIOClientAdios(adios2::helper::Comm *comm) : LSMIOClient() {
     _comm = comm;
     _rank = (_comm) ? _comm->Rank() : 0;
@@ -108,13 +103,8 @@ bool LSMIOClientAdios::recvCommand(int rank, std::string *command, std::string *
 
     int sizeReceived[3];
     _comm->Recv(sizeReceived, 3, rank, 0, hint);
-
-    for (int i = 0; i < 3; i++) {
-        if (sizeReceived[i] < 0 || sizeReceived[i] > kMaxRecvSize) {
-            LOG(ERROR) << "LSMIOClientAdios::recvCommand: invalid size " << sizeReceived[i]
-                       << " at index " << i << " from rank: " << rank << std::endl;
-            return false;
-        }
+    for (int sz : sizeReceived) {
+        if (sz < 0 || sz > (1 << 30)) return false;
     }
 
     std::vector<char> cmdBuffer(sizeReceived[0]);
