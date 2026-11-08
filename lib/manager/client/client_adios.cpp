@@ -31,8 +31,14 @@
 #include <iostream>
 #include <lsmio/manager/client/client_adios.hpp>
 #include <thread>  // NOLINT [build/c++11]
+#include <vector>
 
 namespace lsmio {
+
+namespace {
+// Upper bound for a size received from a peer, checked before allocating.
+constexpr int kMaxRecvSize = 1 << 30;
+}  // namespace
 
 LSMIOClientAdios::LSMIOClientAdios(adios2::helper::Comm *comm) : LSMIOClient() {
     _comm = comm;
@@ -103,17 +109,25 @@ bool LSMIOClientAdios::recvCommand(int rank, std::string *command, std::string *
     int sizeReceived[3];
     _comm->Recv(sizeReceived, 3, rank, 0, hint);
 
-    char cmdBuffer[sizeReceived[0]];
-    char keyBuffer[sizeReceived[1]];
-    char valBuffer[sizeReceived[2]];
+    for (int i = 0; i < 3; i++) {
+        if (sizeReceived[i] < 0 || sizeReceived[i] > kMaxRecvSize) {
+            LOG(ERROR) << "LSMIOClientAdios::recvCommand: invalid size " << sizeReceived[i]
+                       << " at index " << i << " from rank: " << rank << std::endl;
+            return false;
+        }
+    }
 
-    _comm->Recv(cmdBuffer, sizeReceived[0], rank, 0, hint);
-    _comm->Recv(cmdBuffer, sizeReceived[1], rank, 0, hint);
-    _comm->Recv(cmdBuffer, sizeReceived[2], rank, 0, hint);
+    std::vector<char> cmdBuffer(sizeReceived[0]);
+    std::vector<char> keyBuffer(sizeReceived[1]);
+    std::vector<char> valBuffer(sizeReceived[2]);
 
-    command->assign(cmdBuffer, sizeReceived[0]);
-    key->assign(keyBuffer, sizeReceived[1]);
-    value->assign(valBuffer, sizeReceived[2]);
+    _comm->Recv(cmdBuffer.data(), sizeReceived[0], rank, 0, hint);
+    _comm->Recv(keyBuffer.data(), sizeReceived[1], rank, 0, hint);
+    _comm->Recv(valBuffer.data(), sizeReceived[2], rank, 0, hint);
+
+    command->assign(cmdBuffer.data(), sizeReceived[0]);
+    key->assign(keyBuffer.data(), sizeReceived[1]);
+    value->assign(valBuffer.data(), sizeReceived[2]);
 
     LOG(INFO) << "LSMIOClientAdios::recvCommandMPI:"
               << " rank: " << rank << " command: " << *command << " key: " << *key

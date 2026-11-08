@@ -57,7 +57,7 @@ void LSMIOStream::open(const char* filename, std::ios::openmode mode) {
     auto it = _fileMap.find(filename);
     if (it == _fileMap.end()) {
         _fileMap[filename] = 0;
-    } else if (mode == std::ios::trunc) {
+    } else if ((mode & std::ios::trunc) == std::ios::trunc) {
         _fileMap[filename] = 0;
     }
     _filePath = filename;
@@ -69,7 +69,10 @@ LSMIOStream& LSMIOStream::read(char* s, std::streamsize n) {
     }
 
     std::string value;
-    _lm->get(_genKey(), &value);
+    if (!_lm->get(_genKey(), &value)) {
+        throw std::ios_base::failure("ERROR: LSMIOStream::read: no record at offset " +
+                                     std::to_string(_fileMap[_filePath]) + " of " + _filePath);
+    }
 
     if (value.size() != n) {
         throw std::invalid_argument("ERROR: LSMIOStream::read unexpected length of data");
@@ -192,13 +195,10 @@ bool LSMIOStream::cleanup() {
 
 bool LSMIOStream::writeBarrier() {
     if (_lsmioState != LifecycleState::Ready) {
-        throw std::invalid_argument("ERROR: LSMIOStream::write called without initializing");
+        throw std::invalid_argument("ERROR: LSMIOStream::writeBarrier called without initializing");
     }
 
-    _lm->writeBarrier();
-    ;
-
-    return true;
+    return _lm->writeBarrier();
 }
 
 }  // namespace lsmio

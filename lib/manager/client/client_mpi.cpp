@@ -32,6 +32,7 @@
 #include <iostream>
 #include <lsmio/manager/client/client_mpi.hpp>
 #include <thread>  // NOLINT [build/c++11]
+#include <vector>
 
 #define MPI_COMM_TO_STR(cLevel)                          \
     (cLevel == MPI_IDENT                                 \
@@ -67,8 +68,8 @@ int LSMIOClientMPI::_allreduceMax(int value) {
 }
 
 char **LSMIOClientMPI::_recvToBuffer(int *bufSizes, const std::vector<int> &eolRanks) {
-    MPI_Request reqs[_size - 1];
-    MPI_Status statuses[_size - 1];
+    std::vector<MPI_Request> reqs(_size - 1);
+    std::vector<MPI_Status> statuses(_size - 1);
     int recv_i, req_count;
 
     char **buffer = new char *[_size];
@@ -90,7 +91,7 @@ char **LSMIOClientMPI::_recvToBuffer(int *bufSizes, const std::vector<int> &eolR
     }
 
     LOG(INFO) << "LSMIOClientMPI::_recvToBuffer: Waiting for buffers for ALL." << std::endl;
-    MPI_Waitall(req_count, reqs, statuses);
+    MPI_Waitall(req_count, reqs.data(), statuses.data());
 
     return buffer;
 }

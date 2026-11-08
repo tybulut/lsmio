@@ -217,37 +217,32 @@ SSTableManager::IndexNode::~IndexNode() {
 }
 
 void SSTableManager::IndexNode::initReader(bool f_enable_mmap, bool f_enable_pread) {
-    if (f_enable_mmap) {
+    if (f_enable_mmap || f_enable_pread) {
         int fd = ::open(index.path.c_str(), O_RDONLY);
         if (fd >= 0) {
             struct stat st;
-            bool stat_ok = (::fstat(fd, &st) == 0);
-            if (stat_ok && st.st_size > 0) {
-                void* ptr =
-                    ::mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
-                if (ptr != MAP_FAILED) {
-                    m_mmap_ptr = static_cast<char*>(ptr);
-                    m_mmap_len = static_cast<size_t>(st.st_size);
-                    ::posix_madvise(m_mmap_ptr, m_mmap_len, POSIX_MADV_WILLNEED);
-                    if (!f_enable_pread) {
-                        ::close(fd);
-                        fd = -1;
-                    } else {
-                        m_read_fd = fd;
-                        fd = -1;
+            if (::fstat(fd, &st) == 0 && st.st_size > 0) {
+                const size_t file_size = static_cast<size_t>(st.st_size);
+
+                if (f_enable_mmap) {
+                    void* ptr = ::mmap(nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0);
+                    if (ptr != MAP_FAILED) {
+                        m_mmap_ptr = static_cast<char*>(ptr);
+                        m_mmap_len = file_size;
+                        ::posix_madvise(m_mmap_ptr, m_mmap_len, POSIX_MADV_WILLNEED);
                     }
                 }
-            }
-            if (fd >= 0) {
-                if (f_enable_pread && stat_ok && st.st_size > 0) {
+
+                if (f_enable_pread) {
                     m_read_fd = fd;
+                    m_file_len = file_size;
                 } else {
                     ::close(fd);
                 }
+            } else {
+                ::close(fd);
             }
         }
-    } else if (f_enable_pread) {
-        m_read_fd = ::open(index.path.c_str(), O_RDONLY);
     }
 }
 
@@ -521,6 +516,11 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             f_out_value.assign(tl_pread_buf.data() + 8 + key_len, val_len);
             return true;
         } else {
+            // Precondition: bytes_read >= 8 implies f_offset < m_file_len because the file is
+            // immutable once its node exists (AI-5).
+            if (total_record_len > f_node.m_file_len - f_offset) {
+                return false;
+            }
             m_pread_slow_path_count.fetch_add(1, std::memory_order_relaxed);
             f_out_value.resize(val_len);
             uint64_t val_in_buf = static_cast<uint64_t>(bytes_read) - (8ULL + key_len);
@@ -548,6 +548,9 @@ bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
         return false;
     }
 
+    sst_file.seekg(0, std::ios::end);
+    const uint64_t file_len = static_cast<uint64_t>(sst_file.tellg());
+
     sst_file.seekg(f_offset);
     if (sst_file.fail()) return false;
 
@@ -568,6 +571,7 @@ bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
     uint32_t val_len;
     if (!readLe32(sst_file, val_len)) return false;
     if (val_len > READ_MAX_VAL_LEN) return false;
+    if (val_len > file_len - (f_offset + 8 + key_len)) return false;
 
     f_out_value.resize(val_len);
     sst_file.read(f_out_value.data(), val_len);
@@ -600,57 +604,71 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
         std::cout << "[NATIVE] Recovering state. Indexing " << found_files.size() << " SSTables..."
                   << std::endl;
 
+        std::vector<std::unique_ptr<IndexNode>> recovered_nodes;
+        recovered_nodes.reserve(found_files.size());
+
         for (const auto& [id, path] : found_files) {
             L0Index new_index;
             new_index.path = path;
 
             std::ifstream sst_file(path, std::ios::binary);
-            if (sst_file) {
-                sst_file.seekg(0, std::ios::end);
-                uint64_t file_size = sst_file.tellg();
+            if (!sst_file) {
+                const int err = errno;
+                throw std::runtime_error("SSTableManager: cannot open SSTable " + path + ": " +
+                                         std::generic_category().message(err));
+            }
 
-                if (!tryLoadFooterIndex(sst_file, file_size, new_index.offsets)) {
-                    sst_file.clear();
-                    sst_file.seekg(0, std::ios::beg);
+            sst_file.seekg(0, std::ios::end);
+            uint64_t file_size = sst_file.tellg();
 
-                    while (static_cast<uint64_t>(sst_file.tellg()) < file_size &&
-                           sst_file.peek() != EOF) {
-                        uint64_t current_offset = sst_file.tellg();
+            if (!tryLoadFooterIndex(sst_file, file_size, new_index.offsets)) {
+                sst_file.clear();
+                sst_file.seekg(0, std::ios::beg);
 
-                        uint32_t key_len;
-                        if (!readLe32(sst_file, key_len)) break;
-                        if (key_len > READ_MAX_KEY_LEN) break;
+                while (static_cast<uint64_t>(sst_file.tellg()) < file_size &&
+                       sst_file.peek() != EOF) {
+                    uint64_t current_offset = sst_file.tellg();
 
-                        std::string key(key_len, '\0');
-                        sst_file.read(key.data(), key_len);
-                        if (sst_file.fail()) break;
+                    uint32_t key_len;
+                    if (!readLe32(sst_file, key_len)) break;
+                    if (key_len > READ_MAX_KEY_LEN) break;
 
-                        uint32_t val_len;
-                        if (!readLe32(sst_file, val_len)) break;
-                        if (val_len > READ_MAX_VAL_LEN) break;
+                    std::string key(key_len, '\0');
+                    sst_file.read(key.data(), key_len);
+                    if (sst_file.fail()) break;
 
-                        // A zero-length key and value marks the zero padding
-                        // of a preallocated file that could not be trimmed:
-                        // end of real data.
-                        if (key_len == 0 && val_len == 0) break;
+                    uint32_t val_len;
+                    if (!readLe32(sst_file, val_len)) break;
+                    if (val_len > READ_MAX_VAL_LEN) break;
 
-                        sst_file.seekg(val_len, std::ios::cur);  // Skip value
+                    if (val_len > file_size - (current_offset + 8 + key_len)) break;
 
-                        new_index.offsets.emplace_back(std::move(key), current_offset);
-                    }
+                    // An all-zero header (empty key, empty value) marks the zero padding of a
+                    // preallocated file that could not be trimmed: end of real data. The Native
+                    // store refuses empty keys, so no real record has this header.
+                    if (key_len == 0 && val_len == 0) break;
+
+                    sst_file.seekg(val_len, std::ios::cur);  // Skip value
+
+                    new_index.offsets.emplace_back(std::move(key), current_offset);
                 }
             }
 
             dedupOffsets(new_index.offsets);
 
-            // Prepend during recovery to maintain newest-to-oldest order
-            // Since we iterate found_files Oldest -> Newest, prepending each results in Newest at
-            // head. No mutex needed during initialization single-thread context.
-            IndexNode* new_node = new IndexNode(std::move(new_index));
+            auto new_node = std::make_unique<IndexNode>(std::move(new_index));
             new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
+            recovered_nodes.push_back(std::move(new_node));
+        }
+
+        // Prepend during recovery to maintain newest-to-oldest order.
+        // Since recovered_nodes is Oldest -> Newest, prepending each results in Newest at head.
+        // No mutex needed during initialization single-thread context.
+        for (auto& node : recovered_nodes) {
+            IndexNode* raw = node.release();
             IndexNode* old_head = m_head.load(std::memory_order_relaxed);
-            new_node->next = old_head;
-            m_head.store(new_node, std::memory_order_relaxed);
+            raw->next = old_head;
+            m_head.store(raw, std::memory_order_relaxed);
         }
         std::cout << "[NATIVE] Recovery complete." << std::endl;
     }

@@ -59,33 +59,84 @@ const char* lifecycleStateName(LifecycleState state) {
     return "Unknown";
 }
 
+namespace {
 
-void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values,
-                          std::string& value) {
-    std::stringstream ss;
-    for (const auto& tup : values) {
-        ss << std::get<0>(tup) << "|" << std::get<1>(tup) << "\n";
+void writeLe64(std::string& out, uint64_t val) {
+    for (size_t i = 0; i < 8; ++i) {
+        out.push_back(static_cast<char>((val >> (i * 8)) & 0xFF));
     }
-    value = ss.str();
 }
 
-void vectorTupleDeserialize(const std::string& serialized_data,
-                            std::vector<std::tuple<std::string, std::string>>& values) {
-    std::stringstream ss(serialized_data);
-    std::string line;
-
-    while (std::getline(ss, line, '\n')) {
-        if (line.empty()) {
-            continue;
-        }
-
-        size_t delimiter_pos = line.find('|');
-        if (delimiter_pos != std::string::npos) {
-            std::string first_str = line.substr(0, delimiter_pos);
-            std::string second_str = line.substr(delimiter_pos + 1);
-            values.emplace_back(first_str, second_str);
-        }
+bool readLe64(const std::string& payload, size_t& pos, uint64_t& out) {
+    if (payload.size() - pos < 8) {
+        return false;
     }
+    out = 0;
+    for (size_t i = 0; i < 8; ++i) {
+        out |= (static_cast<uint64_t>(static_cast<unsigned char>(payload[pos + i])) << (i * 8));
+    }
+    pos += 8;
+    return true;
+}
+
+uint64_t appendedValueBytes(const std::vector<std::tuple<std::string, std::string>>& f_values,
+                            size_t f_from) {
+    uint64_t bytes = 0;
+    for (size_t i = f_from; i < f_values.size(); ++i) {
+        bytes += std::get<1>(f_values[i]).size();
+    }
+    return bytes;
+}
+
+}  // namespace
+
+void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>>& values,
+                          std::string& payload) {
+    size_t totalBytes = 0;
+    for (const auto& tup : values) {
+        totalBytes += 8 + std::get<0>(tup).size() + 8 + std::get<1>(tup).size();
+    }
+    payload.clear();
+    payload.reserve(totalBytes);
+    for (const auto& tup : values) {
+        writeLe64(payload, std::get<0>(tup).size());
+        payload.append(std::get<0>(tup));
+        writeLe64(payload, std::get<1>(tup).size());
+        payload.append(std::get<1>(tup));
+    }
+}
+
+bool vectorTupleDeserialize(const std::string& payload,
+                            std::vector<std::tuple<std::string, std::string>>& values) {
+    size_t pos = 0;
+    std::vector<std::tuple<std::string, std::string>> parsed;
+    while (pos < payload.size()) {
+        uint64_t keyLen = 0;
+        if (!readLe64(payload, pos, keyLen)) {
+            return false;
+        }
+        if (keyLen > payload.size() - pos) {
+            return false;
+        }
+        std::string key = payload.substr(pos, keyLen);
+        pos += keyLen;
+
+        uint64_t valLen = 0;
+        if (!readLe64(payload, pos, valLen)) {
+            return false;
+        }
+        if (valLen > payload.size() - pos) {
+            return false;
+        }
+        std::string val = payload.substr(pos, valLen);
+        pos += valLen;
+
+        parsed.emplace_back(std::move(key), std::move(val));
+    }
+    values.insert(values.end(),
+                  std::make_move_iterator(parsed.begin()),
+                  std::make_move_iterator(parsed.end()));
+    return true;
 }
 
 LSMIOManager::LSMIOManager(const std::string& dbName, const std::string& dbDir,
@@ -111,6 +162,13 @@ LSMIOManager::LSMIOManager(const std::string& dbName, const std::string& dbDir,
 }
 
 void LSMIOManager::_init() {
+    if (gConfigLSMIO.storageType != StorageType::NativeDB &&
+        gConfigLSMIO.storageType != StorageType::RocksDB &&
+        gConfigLSMIO.storageType != StorageType::LevelDB) {
+        throw std::invalid_argument("ERROR: LSMIOManager::_init: unknown storageType: " +
+                                    std::to_string(static_cast<int>(gConfigLSMIO.storageType)));
+    }
+
     if (_adiosComm) {
         LOG(INFO) << "LSMIOManager::_init: Adios comm object is not null." << std::endl;
 
@@ -466,9 +524,10 @@ bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>*
     LOG(INFO) << "LSMIOManager::metaGetAll: for rank: " << _aggRank << std::endl;
     if (_isOpenLocal()) {
         LOG(INFO) << "LSMIOManager::metaGetAll: LOCAL for rank: " << _aggRank << std::endl;
+        const size_t before = values->size();
         retValue = _lcStore->metaGetAll(values, inFix);
 
-        _counterReadBytes += values->size();
+        _counterReadBytes += appendedValueBytes(*values, before);
         _counterReadOps++;
 
         return retValue;
@@ -486,10 +545,10 @@ bool LSMIOManager::metaGetAll(std::vector<std::tuple<std::string, std::string>>*
         LOG(INFO) << "LSMIOManager::metaGetAll: REMOTE response received len: " << value.length()
                   << std::endl;
 
-        _counterReadBytes += value.length();
+        const size_t before = values->size();
+        retValue &= lsmio::vectorTupleDeserialize(value, *values);
+        _counterReadBytes += appendedValueBytes(*values, before);
         _counterReadOps++;
-
-        lsmio::vectorTupleDeserialize(value, *values);
 
         if (cCommand != KV_CMD_RETURN::META_GET_ALL) {
             LOG(ERROR) << "LSMIOManager::metaGetAll: received incorrect command: " << cCommand

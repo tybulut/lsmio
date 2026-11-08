@@ -108,6 +108,8 @@ class SSTableManager {
         int m_read_fd{-1};
         char* m_mmap_ptr{nullptr};
         size_t m_mmap_len{0};
+        // file length from the fstat in initReader; valid whenever m_read_fd >= 0 (AI-5); m_mmap_len plays this role for mmap
+        size_t m_file_len{0};
 
         explicit IndexNode(L0Index&& idx);
         ~IndexNode();

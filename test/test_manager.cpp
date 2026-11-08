@@ -28,6 +28,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <adios2/helper/adiosCommDummy.h>
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -38,6 +39,7 @@
 #include <lsmio/manager/manager.hpp>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 const std::string TEST_DIR_MGR = "";
@@ -343,6 +345,361 @@ TEST(lsmioManager, ConcurrentInitialize) {
     EXPECT_EQ(opened, 1);
     EXPECT_TRUE(lsmio::LSMIOManager::cleanup());
     std::filesystem::remove_all(dbName);
+}
+
+// Defined in lib/manager/manager.cpp inside namespace lsmio and declared in no header
+namespace lsmio {
+void vectorTupleSerialize(const std::vector<std::tuple<std::string, std::string>> &values,
+                          std::string &payload);
+bool vectorTupleDeserialize(const std::string &payload,
+                            std::vector<std::tuple<std::string, std::string>> &values);
+}  // namespace lsmio
+
+namespace {
+
+std::string le64(uint64_t f_value) {
+    std::string bytes(8, '\0');
+    for (size_t i = 0; i < 8; ++i) {
+        bytes[i] = static_cast<char>((f_value >> (i * 8)) & 0xFF);
+    }
+    return bytes;
+}
+
+std::string entryBytes(const std::string &f_key, const std::string &f_value) {
+    return le64(f_key.size()) + f_key + le64(f_value.size()) + f_value;
+}
+
+using KeyValues = std::vector<std::tuple<std::string, std::string>>;
+
+struct StorageCase {
+    const char *name;
+    lsmio::StorageType storage_type;
+};
+
+class LSMIOManagerTest : public ::testing::Test {
+  protected:
+    lsmio::LSMIOConfig m_backup_config;
+    std::vector<std::string> m_paths;
+
+    std::string dbName(const std::string &f_name) {
+        std::string path = "test-mgr-cov-" + f_name + ".db";
+        std::filesystem::remove_all(path);
+        m_paths.push_back(path);
+        return path;
+    }
+
+    void SetUp() override {
+        m_backup_config = lsmio::gConfigLSMIO;
+    }
+
+    void TearDown() override {
+        lsmio::gConfigLSMIO = m_backup_config;
+        for (const auto &path : m_paths) std::filesystem::remove_all(path);
+    }
+};
+
+class LSMIOManagerBackendTest : public LSMIOManagerTest,
+                                public ::testing::WithParamInterface<StorageCase> {};
+
+}  // namespace
+
+TEST(LSMIOManagerHelperTest, LifecycleStateNameCoversEveryState) {
+    EXPECT_STREQ(lsmio::lifecycleStateName(lsmio::LifecycleState::None), "None");
+    EXPECT_STREQ(lsmio::lifecycleStateName(lsmio::LifecycleState::Initializing), "Initializing");
+    EXPECT_STREQ(lsmio::lifecycleStateName(lsmio::LifecycleState::Ready), "Ready");
+    EXPECT_STREQ(lsmio::lifecycleStateName(lsmio::LifecycleState::Cleaning), "Cleaning");
+    EXPECT_STREQ(lsmio::lifecycleStateName(static_cast<lsmio::LifecycleState>(42)), "Unknown");
+}
+
+TEST(LSMIOManagerHelperTest, VectorTupleSerializeRoundTrip) {
+    const KeyValues input = {{"k1", "v1"}, {"k2", ""}, {"", "v3"}};
+    std::string serialized = "stale";
+    lsmio::vectorTupleSerialize(input, serialized);
+    EXPECT_EQ(serialized, entryBytes("k1", "v1") + entryBytes("k2", "") + entryBytes("", "v3"));
+
+    KeyValues output;
+    EXPECT_TRUE(lsmio::vectorTupleDeserialize(serialized, output));
+    EXPECT_EQ(output, input);
+}
+
+TEST(LSMIOManagerHelperTest, VectorTupleSerializeEmpty) {
+    std::string serialized = "stale";
+    lsmio::vectorTupleSerialize(KeyValues{}, serialized);
+    EXPECT_EQ(serialized, "");
+
+    KeyValues output;
+    EXPECT_TRUE(lsmio::vectorTupleDeserialize("", output));
+    EXPECT_TRUE(output.empty());
+}
+
+TEST(LSMIOManagerHelperTest, VectorTupleDeserializeAppends) {
+    KeyValues output = {{"kept", "first"}};
+    std::string serialized;
+    lsmio::vectorTupleSerialize({{"a", "1"}, {"b", "2"}}, serialized);
+    EXPECT_TRUE(lsmio::vectorTupleDeserialize(serialized, output));
+    const KeyValues expected = {{"kept", "first"}, {"a", "1"}, {"b", "2"}};
+    EXPECT_EQ(output, expected);
+}
+
+TEST(LSMIOManagerHelperTest, VectorTupleRoundTripsDelimitersAndNul) {
+    const KeyValues input = {{"a|b", "v"}, {"k", "line1\nline2"}, {std::string("n\0l", 3), std::string(1, '\0')}};
+    std::string serialized;
+    lsmio::vectorTupleSerialize(input, serialized);
+    EXPECT_EQ(serialized, entryBytes("a|b", "v") + entryBytes("k", "line1\nline2") +
+                              entryBytes(std::string("n\0l", 3), std::string(1, '\0')));
+
+    KeyValues output;
+    EXPECT_TRUE(lsmio::vectorTupleDeserialize(serialized, output));
+    EXPECT_EQ(output, input);
+}
+
+TEST(LSMIOManagerHelperTest, VectorTupleDeserializeRejectsMalformedPayloads) {
+    struct TestCase {
+        std::string name;
+        std::string payload;
+    };
+    const std::vector<TestCase> cases = {
+        {"cut inside a key length", le64(1).substr(0, 5)},
+        {"cut inside a key", le64(5) + "ab"},
+        {"cut inside a value length", le64(1) + "a" + std::string(3, '\0')},
+        {"cut inside a value", le64(1) + "a" + le64(4) + "xy"},
+        {"trailing bytes", entryBytes("a", "1") + "\x01\x02\x03"},
+        {"key length near 2^64", le64(UINT64_MAX) + "abc"},
+        {"value length near 2^64", le64(1) + "a" + le64(UINT64_MAX - 3) + "abc"},
+        {"good entry then cut (all-or-nothing)", entryBytes("a", "1") + le64(9) + "x"},
+    };
+
+    for (const auto &tc : cases) {
+        SCOPED_TRACE(tc.name);
+        KeyValues output = {{"kept", "first"}};
+        EXPECT_FALSE(lsmio::vectorTupleDeserialize(tc.payload, output));
+        const KeyValues expected = {{"kept", "first"}};
+        EXPECT_EQ(output, expected);
+    }
+}
+
+TEST_F(LSMIOManagerTest, AdiosCommWithoutMpiThrows) {
+    const std::string db_name = dbName("adios-dummy");
+    adios2::helper::Comm comm = adios2::helper::CommDummy();
+    ASSERT_FALSE(comm.IsMPI());
+    EXPECT_THROW(lsmio::LSMIOManager(db_name, "", false, &comm), std::invalid_argument);
+    EXPECT_FALSE(std::filesystem::exists(db_name));
+}
+
+TEST_P(LSMIOManagerBackendTest, OpensAndRoundTrips) {
+    const StorageCase &c = GetParam();
+    lsmio::gConfigLSMIO.storageType = c.storage_type;
+    const std::string db_name = dbName(std::string("backend-") + c.name);
+    {
+        lsmio::LSMIOManager lm(db_name);
+        EXPECT_EQ(lm.getDbPath(), db_name);
+        EXPECT_TRUE(lm.put("bk", std::string("bv"), true));
+        EXPECT_TRUE(lm.metaPut("mk", "mv", true));
+        std::string value;
+        EXPECT_TRUE(lm.get("bk", &value));
+        EXPECT_EQ(value, "bv");
+        EXPECT_TRUE(lm.metaGet("mk", &value));
+        EXPECT_EQ(value, "mv");
+        EXPECT_TRUE(lm.close());
+    }
+    EXPECT_TRUE(std::filesystem::is_directory(db_name));
+    {
+        lsmio::LSMIOManager lm(db_name);
+        std::string value;
+        EXPECT_TRUE(lm.get("bk", &value));
+        EXPECT_EQ(value, "bv");
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Backends, LSMIOManagerBackendTest,
+                         ::testing::Values(StorageCase{"RocksDB", lsmio::StorageType::RocksDB},
+                                           StorageCase{"LevelDB", lsmio::StorageType::LevelDB}),
+                         [](const ::testing::TestParamInfo<StorageCase> &f_info) {
+                             return std::string(f_info.param.name);
+                         });
+
+TEST_F(LSMIOManagerTest, UnknownStorageTypeIsRefused) {
+    lsmio::gConfigLSMIO.storageType = static_cast<lsmio::StorageType>(42);
+    const std::string db_name = dbName("unknown-storage");
+    EXPECT_THROW(lsmio::LSMIOManager lm(db_name), std::invalid_argument);
+    EXPECT_FALSE(std::filesystem::exists(db_name));
+}
+
+TEST_F(LSMIOManagerTest, UnknownStorageTypeIsRefusedBeforeAdiosComm) {
+    lsmio::gConfigLSMIO.storageType = static_cast<lsmio::StorageType>(42);
+    const std::string db_name = dbName("unknown-storage-adios");
+    adios2::helper::Comm comm = adios2::helper::CommDummy();
+    try {
+        lsmio::LSMIOManager lm(db_name, "", false, &comm);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument &e) {
+        EXPECT_NE(std::string(e.what()).find("storageType"), std::string::npos);
+    }
+    EXPECT_FALSE(std::filesystem::exists(db_name));
+}
+
+TEST_F(LSMIOManagerTest, RvaluePutUsesAlwaysFlush) {
+    lsmio::gConfigLSMIO.alwaysFlush = true;
+    const std::string db_name = dbName("rvalue-default");
+    lsmio::LSMIOManager lm(db_name);
+    lm.resetCounters();
+    EXPECT_TRUE(lm.put("rk", std::string("rvalue")));
+    uint64_t wb = 0, rb = 0, wo = 0, ro = 0;
+    lm.getCounters(wb, rb, wo, ro);
+    EXPECT_EQ(wb, 6u);
+    EXPECT_EQ(wo, 1u);
+    std::string value;
+    EXPECT_TRUE(lm.get("rk", &value));
+    EXPECT_EQ(value, "rvalue");
+}
+
+TEST_F(LSMIOManagerTest, RejectedWritesReturnFalse) {
+    const std::string db_name = dbName("rejected");
+    lsmio::LSMIOManager lm(db_name);
+    lm.resetCounters();
+    const std::string long_key(lsmio::gConfigLSMIO.maxKeyLen + 1, 'k');
+    uint64_t wb = 0, rb = 0, wo = 0, ro = 0;
+
+    // A negative length is refused before anything is counted
+    EXPECT_FALSE(lm.put("neg", "abc", static_cast<std::streamsize>(-1)));
+    lm.getCounters(wb, rb, wo, ro);
+    EXPECT_EQ(wo, 0u);
+    EXPECT_EQ(wb, 0u);
+
+    // The store refuses an over-long key; the manager has already counted the write
+    EXPECT_FALSE(lm.put(long_key, std::string("v"), true));
+    lm.getCounters(wb, rb, wo, ro);
+    EXPECT_EQ(wo, 1u);
+    EXPECT_EQ(wb, 1u);
+
+    std::string value;
+    EXPECT_FALSE(lm.get("neg", &value));
+    EXPECT_TRUE(lm.put("ok", std::string("fine"), true));
+    EXPECT_TRUE(lm.get("ok", &value));
+    EXPECT_EQ(value, "fine");
+}
+
+TEST_F(LSMIOManagerTest, MetaGetAllAndReadBarrierLocal) {
+    const std::string db_name = dbName("meta-all");
+    lsmio::LSMIOManager lm(db_name);
+    EXPECT_TRUE(lm.metaPut("a1", "x", true));
+    EXPECT_TRUE(lm.metaPut("a2", "yy", true));
+    EXPECT_TRUE(lm.metaPut("b1", "z", true));
+    EXPECT_TRUE(lm.readBarrier());
+    lm.resetCounters();
+
+    KeyValues values;
+    EXPECT_TRUE(lm.metaGetAll(&values, "a"));
+    const KeyValues expected = {{"__lsmio_md::a1", "x"}, {"__lsmio_md::a2", "yy"}};
+    EXPECT_EQ(values, expected);
+    uint64_t wb = 0, rb = 0, wo = 0, ro = 0;
+    lm.getCounters(wb, rb, wo, ro);
+    EXPECT_EQ(ro, 1u);
+    // Read bytes count value bytes, as get and metaGet do
+    EXPECT_EQ(rb, 3u);
+
+    KeyValues all;
+    EXPECT_TRUE(lm.metaGetAll(&all));
+    EXPECT_EQ(all.size(), 3u);
+}
+
+TEST_F(LSMIOManagerTest, MetaGetAllCountsOnlyAppendedValueBytes) {
+    const std::string db_name = dbName("meta-prefilled");
+    lsmio::LSMIOManager lm(db_name);
+    EXPECT_TRUE(lm.metaPut("a1", "xyz", true));
+    EXPECT_TRUE(lm.metaPut("a2", "vw", true));
+    EXPECT_TRUE(lm.readBarrier());
+    lm.resetCounters();
+
+    KeyValues values = {{"pre", "12345"}};
+    EXPECT_TRUE(lm.metaGetAll(&values, "a"));
+    EXPECT_EQ(values.size(), 3u);
+    EXPECT_EQ(values[0], std::make_tuple(std::string("pre"), std::string("12345")));
+    uint64_t wb = 0, rb = 0, wo = 0, ro = 0;
+    lm.getCounters(wb, rb, wo, ro);
+    EXPECT_EQ(rb, 5u);
+    EXPECT_EQ(ro, 1u);
+}
+
+TEST_F(LSMIOManagerTest, CallbackForCollectiveIOServesEveryCommand) {
+    const std::string db_name = dbName("callback");
+    lsmio::LSMIOManager lm(db_name);
+    std::string value;
+
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::PUT, "ck", &value, "cv"));
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::WRITE_BARRIER, lsmio::KV_DUMMY, &value,
+                                           lsmio::KV_DUMMY));
+    // Not serving (no MPI group): the rank is not prefixed, so the key is the caller's key
+    EXPECT_TRUE(lm.get("ck", &value));
+    EXPECT_EQ(value, "cv");
+    value.clear();
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::GET, "ck", &value, ""));
+    EXPECT_EQ(value, "cv");
+
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::META_PUT, "1::m1", &value, "mv1"));
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::META_PUT, "plain", &value, "mv2"));
+    value.clear();
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::META_GET, "plain", &value, ""));
+    EXPECT_EQ(value, "mv2");
+
+    // META_GET_ALL looks for the "<rank>::" infix, so only the key written with it is returned
+    value = "stale";
+    EXPECT_TRUE(
+        lm.callbackForCollectiveIO(1, lsmio::KV_CMD::META_GET_ALL, lsmio::KV_DUMMY, &value, ""));
+    EXPECT_EQ(value, entryBytes("__lsmio_md::1::m1", "mv1"));
+
+    EXPECT_TRUE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::DEL, "ck", &value, ""));
+    EXPECT_TRUE(lm.writeBarrier());
+    EXPECT_FALSE(lm.get("ck", &value));
+
+    // A failed read is not a write failure; an unknown command is refused
+    EXPECT_FALSE(lm.callbackForCollectiveIO(1, lsmio::KV_CMD::GET, "missing", &value, ""));
+    EXPECT_FALSE(lm.callbackForCollectiveIO(1, "BOGUS", "ck", &value, ""));
+}
+
+TEST_F(LSMIOManagerTest, CallbackForCollectiveIOReportsFailedWrites) {
+    const std::string db_name = dbName("callback-fail");
+    lsmio::LSMIOManager lm(db_name);
+    std::string value;
+    const std::string long_key(lsmio::gConfigLSMIO.maxKeyLen + 1, 'k');
+
+    // The first failed write sets the collective failure flag and logs the failure. Later failed
+    // writes find the flag set and do not log again, and a failed read neither logs nor sets it.
+    // The flag itself is read only by a serve-local close(), which this single-process test cannot
+    // reach, so the test observes it through the one-time log line.
+    testing::internal::CaptureStderr();
+    EXPECT_FALSE(lm.callbackForCollectiveIO(0, lsmio::KV_CMD::GET, "absent", &value, ""));
+    EXPECT_FALSE(lm.callbackForCollectiveIO(0, lsmio::KV_CMD::PUT, long_key, &value, "v"));
+    EXPECT_FALSE(lm.callbackForCollectiveIO(0, lsmio::KV_CMD::META_PUT, long_key, &value, "v"));
+    const std::string err = testing::internal::GetCapturedStderr();
+
+    const std::string needle = " failed for rank ";
+    size_t count = 0;
+    for (size_t pos = err.find(needle); pos != std::string::npos;
+         pos = err.find(needle, pos + needle.size())) {
+        ++count;
+    }
+    EXPECT_EQ(count, 1u) << err;
+    // The first write logs (KV_CMD::PUT is "put", KV_CMD::META_PUT is "metaPut")
+    EXPECT_NE(err.find("LSMIOManager::callbackForCollectiveIO: " + lsmio::KV_CMD::PUT +
+                       " failed for rank 0"),
+              std::string::npos)
+        << err;
+    EXPECT_EQ(err.find("LSMIOManager::callbackForCollectiveIO: " + lsmio::KV_CMD::META_PUT +
+                       " failed for rank"),
+              std::string::npos)
+        << err;
+    EXPECT_EQ(err.find("LSMIOManager::callbackForCollectiveIO: " + lsmio::KV_CMD::GET +
+                       " failed for rank"),
+              std::string::npos)
+        << err;
+
+    EXPECT_FALSE(lm.get(long_key, &value));
+    // The local store is unaffected
+    EXPECT_TRUE(lm.callbackForCollectiveIO(0, lsmio::KV_CMD::PUT, "good", &value, "g"));
+    EXPECT_TRUE(lm.writeBarrier());
+    EXPECT_TRUE(lm.get("good", &value));
+    EXPECT_EQ(value, "g");
 }
 
 int main(int argc, char **argv) {

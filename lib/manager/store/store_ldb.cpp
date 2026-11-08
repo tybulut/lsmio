@@ -43,10 +43,10 @@ LSMIOStoreLDB::LSMIOStoreLDB(const std::string& dbPath, const bool overWrite)
     leveldb::Status status;
 
     _options.create_if_missing = true;
-    _batch = nullptr;
 
     if (gConfigLSMIO.useBloomFilter) {
-        _options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+        _filterPolicy.reset(leveldb::NewBloomFilterPolicy(10));
+        _options.filter_policy = _filterPolicy.get();
     }
 
     if (!gConfigLSMIO.compression) {
@@ -59,7 +59,8 @@ LSMIOStoreLDB::LSMIOStoreLDB(const std::string& dbPath, const bool overWrite)
     }
 
     if (gConfigLSMIO.cacheSize > 0) {
-        _options.block_cache = leveldb::NewLRUCache(gConfigLSMIO.cacheSize);
+        _blockCache.reset(leveldb::NewLRUCache(gConfigLSMIO.cacheSize));
+        _options.block_cache = _blockCache.get();
     }
 
     // Standard LevelDB does not support disabling mmap via Options.
@@ -159,22 +160,19 @@ bool LSMIOStoreLDB::putBytes(const std::string& key, std::string_view value, boo
 
 bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::string_view value,
                             bool flush) {
-    leveldb::Status s;
-    bool retValue;
-    std::string origValue, finalValue;
-
-    const unsigned int futureSize = _batchSize + 1;
-    const unsigned int futureBytes = _batchBytes + value.size();
-
     LOG(INFO) << "LSMIOStoreLDB::_batchMutation: key: " << key << " flush: " << flush
-              << " size: " << value.size() << " futureSize: " << futureSize
-              << " futureBytes: " << futureBytes << std::endl;
+              << " size: " << value.size() << std::endl;
 
-    if (flush || value.size() >= _maxBatchSize) {
-        if (_batch) stopBatch();
+    if (flush || value.size() >= _maxBatchBytes) {
+        bool flushed;
+        {
+            std::lock_guard<std::mutex> lg(_batchMutex);
+            flushed = _writePendingBatchLocked();
+        }
 
         LOG(INFO) << "LSMIOStoreLDB::_batchMutation: mutation: " << getMutationType(mType)
                   << std::endl;
+        leveldb::Status s;
         if (mType == MutationType::Put) {
             s = _db->Put(_wOptions, key, leveldb::Slice(value.data(), value.size()));
         } else if (mType == MutationType::Del) {
@@ -183,36 +181,39 @@ bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::str
             throw std::invalid_argument("ERROR: LSMIOStoreLDB:::_batchMutation: Unknown mutation.");
         }
 
-        retValue = s.ok();
+        return flushed && s.ok();
     } else {
+        std::lock_guard<std::mutex> lg(_batchMutex);
+
+        const unsigned int futureSize = _batchSize + 1;
+        const unsigned int futureBytes = _batchBytes + value.size();
+
+        LOG(INFO) << "LSMIOStoreLDB::_batchMutation: futureSize: " << futureSize
+                  << " futureBytes: " << futureBytes << std::endl;
+
+        bool flushed = true;
         if (_batch && (futureSize >= _maxBatchSize || futureBytes >= _maxBatchBytes)) {
-            stopBatch();
+            flushed = _writePendingBatchLocked();
         }
 
         LOG(INFO) << "LSMIOStoreLDB::_batchMutation: mutation: batch::" << getMutationType(mType)
                   << std::endl;
-        {
-            std::lock_guard<std::mutex> lg(_batchMutex);
+        if (!_batch) {
+            _batch = new leveldb::WriteBatch();
+        }
 
-            if (!_batch) {
-                _batch = new leveldb::WriteBatch();
-            }
-
-            if (mType == MutationType::Put) {
-                _batch->Put(key, leveldb::Slice(value.data(), value.size()));
-            } else if (mType == MutationType::Del) {
-                _batch->Delete(key);
-            }
+        if (mType == MutationType::Put) {
+            _batch->Put(key, leveldb::Slice(value.data(), value.size()));
+        } else if (mType == MutationType::Del) {
+            _batch->Delete(key);
         }
 
         LOG(INFO) << "LSMIOStoreLDB::_batchMutation: mutation: update counters: " << std::endl;
         _batchSize++;
         _batchBytes.fetch_add(value.size());
 
-        retValue = true;
+        return flushed;
     }
-
-    return retValue;
 }
 
 bool LSMIOStoreLDB::_batchMutation(MutationType mType, const std::string& key, std::string&& value,
@@ -233,28 +234,30 @@ bool LSMIOStoreLDB::startBatch() {
     return true;
 }
 
-bool LSMIOStoreLDB::stopBatch() {
-    leveldb::Status s;
-    leveldb::WriteBatch* oldBatch = _batch;
-
-    LOG(INFO) << "LSMIOStoreRDB::stopBatch(): " << std::endl;
-
-    {
-        std::lock_guard<std::mutex> lg(_batchMutex);
-
-        if (!_batch) {
-            return false;
-        }
-
-        _batch = nullptr;
-        _batchSize.store(0);
-        _batchBytes.store(0);
+bool LSMIOStoreLDB::_writePendingBatchLocked() {
+    if (!_batch) {
+        return true;
     }
 
-    s = _db->Write(_wOptions, oldBatch);
-    delete oldBatch;
+    std::unique_ptr<leveldb::WriteBatch> batch(_batch);
+    _batch = nullptr;
+    _batchSize.store(0);
+    _batchBytes.store(0);
 
+    const leveldb::Status s = _db->Write(_wOptions, batch.get());
+    if (!s.ok()) {
+        _writeFailed = true;
+        LOG(ERROR) << "LSMIOStoreLDB::_writePendingBatchLocked: Write failed: " << s.ToString()
+                   << std::endl;
+    }
     return s.ok();
+}
+
+bool LSMIOStoreLDB::stopBatch() {
+    LOG(INFO) << "LSMIOStoreLDB::stopBatch(): " << std::endl;
+
+    std::lock_guard<std::mutex> lg(_batchMutex);
+    return _writePendingBatchLocked();
 }
 
 bool LSMIOStoreLDB::dbCleanup() {
@@ -274,19 +277,15 @@ bool LSMIOStoreLDB::dbCleanup() {
 }
 
 bool LSMIOStoreLDB::readBarrier() {
-    bool status;
-
-    LOG(INFO) << "LSMIOStoreLDB::writeBarrier: " << std::endl;
-    status = stopBatch();
-    return true;
+    LOG(INFO) << "LSMIOStoreLDB::readBarrier: " << std::endl;
+    const bool flushed = stopBatch();
+    return flushed && !_writeFailed.load();
 }
 
 bool LSMIOStoreLDB::writeBarrier() {
-    bool status;
-
     LOG(INFO) << "LSMIOStoreLDB::writeBarrier: " << std::endl;
-    status = stopBatch();
-    return true;
+    const bool flushed = stopBatch();
+    return flushed && !_writeFailed.load();
 }
 
 }  // namespace lsmio
