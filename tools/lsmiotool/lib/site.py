@@ -101,7 +101,7 @@ class SiteResolutionError(Exception):
 
 
 # -------------------------------------------------------------------------
-# bmtool-compatible site helpers (tools/bmtool/include/vars.in.sh)
+# Site helpers (detection by LSMIO_ENV, hostname and groups)
 # -------------------------------------------------------------------------
 
 # Default ARCHER2 work root when ARCHER2_WORK_ROOT is unset (bmtool vars.in.sh)
@@ -1050,8 +1050,7 @@ class EnvironmentResolver:
           - "DEV" requires explicit f_test_mode=True.
           - Known production sites: "VIKING", "VIKING2", "ARCHER2", "ISAMBARD".
           - Unknown values raise SiteResolutionError.
-        - If LSMIO_ENV is not set, the first matching rule wins, in bmtool's fixed order
-          (tools/bmtool/include/vars.in.sh):
+        - If LSMIO_ENV is not set, the first matching rule wins, in this fixed order:
             1. Viking: hostname contains the word "viking" (grep -w)
             2. Viking2: hostname contains the word "viking2" (grep -w)
             3. Archer2: groups contain the word "archer2" (grep -w), or "archer2" in hostname

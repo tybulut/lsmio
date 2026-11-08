@@ -30,721 +30,257 @@
 
 import unittest
 
+from lsmiotool.lib import cli, main
 from lsmiotool.lib.cli import (
-    COMPARE_ARCHIVE_HELP_TEXT,
     COMPARE_HELP_TEXT,
     LSMIOTOOL_HELP,
-    CliParseError,
-    CompareArchiveCliParseError,
-    CompareArchiveCliParser,
-    CompareArchiveRequest,
     CompareCliParseError,
     CompareCliParser,
-    CompareNodesRequest,
-    CompareVariantsRequest,
-    parseCompareArchiveArguments,
+    CompareRequest,
     parseCompareArguments,
 )
 from lsmiotool.lib.variants import (
-    VariantResolutionResult,
     VariantReverseResolver,
 )
 
 
 class CompareCliParserTest(unittest.TestCase):
-    """Unit tests for CompareNodesRequest, CompareVariantsRequest, and CompareCliParser."""
+    """Unit tests for CompareRequest and CompareCliParser."""
 
-    def testNodesAllOption(self) -> None:
-        """compare nodes --all: every (stripes, blocksize), for one operation or both."""
-        f_req = parseCompareArguments(
-            ["nodes", "/path/to/bench", "--all", "--output-dir", "/tmp/png"]
-        )
-        self.assertTrue(f_req.all)
-        self.assertEqual(f_req.op, "both")
-        self.assertEqual(f_req.output_dir, "/tmp/png")
+    def testParseAcceptsEveryBenchmarkAndInterleavedOptions(self) -> None:
+        """Exercises T1 and G1: parses all 4 benchmarks with and without interleaved options."""
+        # lsmio minimal
+        req = parseCompareArguments(["lsmio", "/path1"])
+        self.assertEqual(req.benchmark, "lsmio")
+        self.assertEqual(req.folders, ("/path1",))
+        self.assertEqual(req.by, "nodes")
+        self.assertEqual(req.style, "bars")
+        self.assertIsNone(req.metrics)
+        self.assertIsNone(req.nodes)
+        self.assertIsNone(req.stripes)
+        self.assertIsNone(req.blocks)
+        self.assertIsNone(req.output_dir)
 
-        f_req = parseCompareArguments(["nodes", "/path/to/bench", "write", "--all"])
-        self.assertTrue(f_req.all)
-        self.assertEqual(f_req.op, "write")
-
-        f_req = parseCompareArguments(["nodes", "/path/to/bench", "read"])
-        self.assertFalse(f_req.all)
-        self.assertEqual(f_req.toDict()["all"], False)
-
-        # 'both' is only an operation for --all
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path/to/bench", f_op="both")
-
-    def testCompareNodesRequestValueObject(self) -> None:
-        """Validates CompareNodesRequest construction, properties, immutability, toDict, repr, eq, and hash."""
-        req = CompareNodesRequest(
-            f_folder="/path/to/bench",
-            f_op="read",
-            f_stripes=16,
-            f_blocksize="8M",
-            f_output_dir="/tmp/plots",
-        )
-
-        # Properties
-        self.assertEqual(req.submode, "nodes")
-        self.assertEqual(req.folder, "/path/to/bench")
-        self.assertEqual(req.op, "read")
-        self.assertEqual(req.stripes, 16)
-        self.assertEqual(req.blocksize, "8M")
-        self.assertEqual(req.output_dir, "/tmp/plots")
-        self.assertEqual(req.outputDir, "/tmp/plots")
-
-        # Defaults
-        req_def = CompareNodesRequest(
-            f_folder="/path/to/bench",
-            f_op="write",
-        )
-        self.assertEqual(req_def.submode, "nodes")
-        self.assertEqual(req_def.folder, "/path/to/bench")
-        self.assertEqual(req_def.op, "write")
-        self.assertEqual(req_def.stripes, 4)
-        self.assertEqual(req_def.blocksize, "1M")
-        self.assertIsNone(req_def.output_dir)
-        self.assertIsNone(req_def.outputDir)
-
-        # Normalization
-        req_norm = CompareNodesRequest(
-            f_folder="  /path/to/bench  ",
-            f_op="  READ  ",
-            f_stripes=4,
-            f_blocksize="  64k  ",
-            f_output_dir="  /tmp/out  ",
-        )
-        self.assertEqual(req_norm.folder, "/path/to/bench")
-        self.assertEqual(req_norm.op, "read")
-        self.assertEqual(req_norm.blocksize, "64K")
-        self.assertEqual(req_norm.output_dir, "/tmp/out")
-
-        # Immutability guards
-        with self.assertRaises(AttributeError):
-            req.m_op = "write"  # type: ignore
-        with self.assertRaises(AttributeError):
-            req.op = "write"  # type: ignore
-        with self.assertRaises(AttributeError):
-            req.m_stripes = 4  # type: ignore
-        with self.assertRaises(AttributeError):
-            del req.m_stripes  # type: ignore
-        with self.assertRaises(AttributeError):
-            del req.stripes  # type: ignore
-
-        # toDict serialization
-        expected_dict = {
-            "submode": "nodes",
-            "folder": "/path/to/bench",
-            "op": "read",
-            "stripes": 16,
-            "blocksize": "8M",
-            "output_dir": "/tmp/plots",
-            "all": False,
-        }
-        self.assertEqual(req.toDict(), expected_dict)
-
-        # __repr__
-        self.assertIn("CompareNodesRequest(", repr(req))
-        self.assertIn("folder='/path/to/bench'", repr(req))
-        self.assertIn("op='read'", repr(req))
-        self.assertIn("stripes=16", repr(req))
-        self.assertIn("blocksize='8M'", repr(req))
-        self.assertIn("output_dir='/tmp/plots'", repr(req))
-
-        # __eq__ and __hash__
-        req_same = CompareNodesRequest(
-            f_folder="/path/to/bench",
-            f_op="READ",
-            f_stripes=16,
-            f_blocksize="8m",
-            f_output_dir="/tmp/plots",
-        )
-        self.assertEqual(req, req_same)
-        self.assertEqual(hash(req), hash(req_same))
-        self.assertNotEqual(req, req_def)
-        self.assertFalse(req == "non_request_object")
-        self.assertFalse(req == 123)
-
-        req_set = {req, req_same, req_def}
-        self.assertEqual(len(req_set), 2)
-
-        # Constructor validation errors
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="", f_op="read")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="   ", f_op="read")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder=None, f_op="read")  # type: ignore
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="both")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="delete")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_stripes=0)
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_stripes=-1)
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_stripes=True)  # type: ignore
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_blocksize="2M")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_blocksize="")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_output_dir="")
-        with self.assertRaises(ValueError):
-            CompareNodesRequest(f_folder="/path", f_op="read", f_output_dir="   ")
-
-    def testCompareVariantsRequestValueObject(self) -> None:
-        """Validates CompareVariantsRequest construction, properties, immutability, toDict, repr, eq, and hash."""
-        req = CompareVariantsRequest(
-            f_archive_folder="/path/to/archive",
-            f_op="read",
-            f_stripes=16,
-            f_blocksize="8M",
-            f_all=True,
-            f_output_dir="/tmp/charts",
-        )
-
-        # Properties
-        self.assertEqual(req.submode, "variants")
-        self.assertEqual(req.archive_folder, "/path/to/archive")
-        self.assertEqual(req.archiveFolder, "/path/to/archive")
-        self.assertEqual(req.folder, "/path/to/archive")
-        self.assertEqual(req.op, "read")
-        self.assertEqual(req.stripes, 16)
-        self.assertEqual(req.blocksize, "8M")
-        self.assertTrue(req.all)
-        self.assertEqual(req.output_dir, "/tmp/charts")
-        self.assertEqual(req.outputDir, "/tmp/charts")
-
-        # Backward compatibility alias
-        self.assertIs(CompareArchiveRequest, CompareVariantsRequest)
-        req_alias = CompareArchiveRequest(f_archive_folder="/path/to/archive")
-        self.assertIsInstance(req_alias, CompareVariantsRequest)
-
-        # Defaults
-        req_default = CompareVariantsRequest(f_archive_folder="/path/to/archive")
-        self.assertEqual(req_default.submode, "variants")
-        self.assertEqual(req_default.archive_folder, "/path/to/archive")
-        self.assertEqual(req_default.folder, "/path/to/archive")
-        self.assertEqual(req_default.op, "both")
-        self.assertEqual(req_default.stripes, 4)
-        self.assertEqual(req_default.blocksize, "1M")
-        self.assertFalse(req_default.all)
-        self.assertIsNone(req_default.output_dir)
-
-        # Immutability guards
-        with self.assertRaises(AttributeError):
-            req.m_op = "write"  # type: ignore
-        with self.assertRaises(AttributeError):
-            req.op = "write"  # type: ignore
-        with self.assertRaises(AttributeError):
-            req.m_stripes = 4  # type: ignore
-        with self.assertRaises(AttributeError):
-            del req.m_stripes  # type: ignore
-        with self.assertRaises(AttributeError):
-            del req.stripes  # type: ignore
-
-        # toDict serialization
-        expected_dict = {
-            "submode": "variants",
-            "archive_folder": "/path/to/archive",
-            "folder": "/path/to/archive",
-            "op": "read",
-            "stripes": 16,
-            "blocksize": "8M",
-            "all": True,
-            "output_dir": "/tmp/charts",
-        }
-        self.assertEqual(req.toDict(), expected_dict)
-
-        # __repr__
-        self.assertIn("CompareVariantsRequest(", repr(req))
-        self.assertIn("archive_folder='/path/to/archive'", repr(req))
-        self.assertIn("op='read'", repr(req))
-        self.assertIn("stripes=16", repr(req))
-        self.assertIn("blocksize='8M'", repr(req))
-        self.assertIn("all=True", repr(req))
-        self.assertIn("output_dir='/tmp/charts'", repr(req))
-
-        # __eq__ and __hash__
-        req_same = CompareVariantsRequest(
-            f_archive_folder="/path/to/archive",
-            f_op="READ",
-            f_stripes=16,
-            f_blocksize="8m",
-            f_all=True,
-            f_output_dir="/tmp/charts",
-        )
-        self.assertEqual(req, req_same)
-        self.assertEqual(hash(req), hash(req_same))
-        self.assertNotEqual(req, req_default)
-        self.assertFalse(req == "non_request_object")
-        self.assertFalse(req == 123)
-
-        req_set = {req, req_same, req_default}
-        self.assertEqual(len(req_set), 2)
-
-        # Constructor validation errors
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="   ")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder=None)  # type: ignore
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_op="delete")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_op="")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_stripes=8)
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_stripes=True)  # type: ignore
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_blocksize="2M")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_blocksize="")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_all="yes")  # type: ignore
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_output_dir="")
-        with self.assertRaises(ValueError):
-            CompareVariantsRequest(f_archive_folder="/path", f_output_dir="   ")
-
-    def testParseCompareNodesValidArguments(self) -> None:
-        """Validates parsing for 'compare nodes' grammar."""
-        # Minimal positional: nodes <folder> <op>
-        req1 = parseCompareArguments(["nodes", "/path/to/bench", "read"])
-        self.assertIsInstance(req1, CompareNodesRequest)
-        self.assertEqual(req1.submode, "nodes")
-        self.assertEqual(req1.folder, "/path/to/bench")
-        self.assertEqual(req1.op, "read")
-        self.assertEqual(req1.stripes, 4)
-        self.assertEqual(req1.blocksize, "1M")
-        self.assertIsNone(req1.output_dir)
-
-        # Direct parser invocation
-        req1_direct = CompareCliParser.parse(["nodes", "/path/to/bench", "read"])
-        self.assertEqual(req1_direct, req1)
-
-        # Leading 'compare' token
-        req1_cmd = parseCompareArguments(["compare", "nodes", "/path/to/bench", "read"])
-        self.assertEqual(req1_cmd, req1)
-
-        # Explicit stripes and blocksize
-        req_stripes_bs = parseCompareArguments(
+        # ior with leading compare, multiple folders, interleaved --by, --style
+        req = parseCompareArguments(
             [
-                "nodes",
-                "/path/to/bench",
-                "write",
-                "16",
-                "8M",
+                "compare",
+                "ior",
+                "/path1",
+                "--by",
+                "combinations",
+                "/path2",
+                "--style",
+                "lines",
             ]
         )
-        self.assertEqual(req_stripes_bs.op, "write")
-        self.assertEqual(req_stripes_bs.stripes, 16)
-        self.assertEqual(req_stripes_bs.blocksize, "8M")
+        self.assertEqual(req.benchmark, "ior")
+        self.assertEqual(req.folders, ("/path1", "/path2"))
+        self.assertEqual(req.by, "combinations")
+        self.assertEqual(req.style, "lines")
 
-        # Case normalization for op and blocksize
-        req_case = parseCompareArguments(
+        # epocpp with --metrics, --nodes, --output-dir interleaved
+        req = parseCompareArguments(
             [
-                "nodes",
-                "/path/to/bench",
-                "WRITE",
-                "4",
-                "64k",
-            ]
-        )
-        self.assertEqual(req_case.op, "write")
-        self.assertEqual(req_case.blocksize, "64K")
-
-        # With --output-dir
-        req_out = parseCompareArguments(
-            [
-                "nodes",
-                "/path/to/bench",
-                "read",
+                "epocpp",
+                "--metrics",
+                "runtime,cost",
+                "/path1",
+                "--nodes",
+                "16,8",
                 "--output-dir",
-                "/tmp/plots",
+                "/out",
             ]
         )
-        self.assertEqual(req_out.output_dir, "/tmp/plots")
-        self.assertEqual(req_out.outputDir, "/tmp/plots")
+        self.assertEqual(req.benchmark, "epocpp")
+        self.assertEqual(req.folders, ("/path1",))
+        self.assertEqual(req.metrics, ("runtime", "cost"))
+        self.assertEqual(req.nodes, (8, 16))
+        self.assertEqual(req.output_dir, "/out")
 
-        # Full options permutation
-        req_full = parseCompareArguments(
-            [
-                "nodes",
-                "/path/to/bench",
-                "read",
-                "16",
-                "8M",
-                "--output-dir",
-                "/tmp/plots",
-            ]
-        )
-        self.assertEqual(req_full.folder, "/path/to/bench")
-        self.assertEqual(req_full.op, "read")
-        self.assertEqual(req_full.stripes, 16)
-        self.assertEqual(req_full.blocksize, "8M")
-        self.assertEqual(req_full.output_dir, "/tmp/plots")
-
-    def testParseCompareVariantsValidArguments(self) -> None:
-        """Validates parsing for 'compare variants' grammar."""
-        # Minimal positional: variants <archive_folder>
-        req1 = parseCompareArguments(["variants", "/path/to/archive"])
-        self.assertIsInstance(req1, CompareVariantsRequest)
-        self.assertEqual(req1.submode, "variants")
-        self.assertEqual(req1.archive_folder, "/path/to/archive")
-        self.assertEqual(req1.folder, "/path/to/archive")
-        self.assertEqual(req1.op, "both")
-        self.assertEqual(req1.stripes, 4)
-        self.assertEqual(req1.blocksize, "1M")
-        self.assertFalse(req1.all)
-        self.assertIsNone(req1.output_dir)
-
-        # Leading 'compare' token
-        req1_cmd = parseCompareArguments(["compare", "variants", "/path/to/archive"])
-        self.assertEqual(req1_cmd, req1)
-
-        # Positional operations: read, write, both
-        req_read = parseCompareArguments(["variants", "/path/to/archive", "read"])
-        self.assertEqual(req_read.op, "read")
-        req_write = parseCompareArguments(["variants", "/path/to/archive", "WRITE"])
-        self.assertEqual(req_write.op, "write")
-        req_both = parseCompareArguments(["variants", "/path/to/archive", "both"])
-        self.assertEqual(req_both.op, "both")
-
-        # Positional stripes and blocksize
-        req_s_bs = parseCompareArguments(
+        # variants with --stripes, --block interleaved between folders
+        req = parseCompareArguments(
             [
                 "variants",
-                "/path/to/archive",
-                "read",
-                "16",
-                "64K",
+                "/path1",
+                "--stripes",
+                "16,4",
+                "--block",
+                "8M,64K",
+                "/path2",
             ]
         )
-        self.assertEqual(req_s_bs.stripes, 16)
-        self.assertEqual(req_s_bs.blocksize, "64K")
+        self.assertEqual(req.benchmark, "variants")
+        self.assertEqual(req.folders, ("/path1", "/path2"))
+        self.assertEqual(req.stripes, (4, 16))
+        self.assertEqual(req.blocks, ("64K", "8M"))
 
-        # With --all and --output-dir
-        req_all_out = parseCompareArguments(
+    def testParseListsAndCaseNormalisation(self) -> None:
+        """Exercises G2, G5, G6, G7: comma-separated lists, case-folding, and canonical ordering."""
+        req = parseCompareArguments(
             [
-                "variants",
-                "/path/to/archive",
-                "read",
-                "--all",
-                "--output-dir",
-                "/tmp/plots",
+                "EPOCPP",
+                "/folder",
+                "--by",
+                "COMBINATIONS",
+                "--style",
+                "LINES",
+                "--metrics",
+                "RUNTIME,write,READ",
+                "--nodes",
+                "16,8",
+                "--stripes",
+                "16,4",
+                "--block",
+                "8m,64k",
             ]
         )
-        self.assertTrue(req_all_out.all)
-        self.assertEqual(req_all_out.op, "read")
-        self.assertEqual(req_all_out.output_dir, "/tmp/plots")
+        self.assertEqual(req.benchmark, "epocpp")
+        self.assertEqual(req.by, "combinations")
+        self.assertEqual(req.style, "lines")
+        self.assertEqual(req.metrics, ("runtime", "write", "read"))
+        self.assertEqual(req.nodes, (8, 16))
+        self.assertEqual(req.stripes, (4, 16))
+        self.assertEqual(req.blocks, ("64K", "8M"))
 
-        # --all charts every (stripes, blocksize): explicit ones are refused, as for nodes
-        for f_extra in (["16"], ["16", "8M"]):
-            with self.assertRaises(CompareCliParseError) as ctx:
-                parseCompareArguments(
-                    ["variants", "/path/to/archive", "read"] + f_extra + ["--all"]
-                )
-            self.assertIn("'--all' charts every <stripes>", str(ctx.exception))
+    def testParseOnlyALeadingCompareIsTheCommandWord(self) -> None:
+        """Section 4.1 rule: only leading compare is command word; compare after benchmark is a folder."""
+        req1 = parseCompareArguments(["compare", "lsmio", "compare"])
+        self.assertEqual(req1.benchmark, "lsmio")
+        self.assertEqual(req1.folders, ("compare",))
 
-        # Compatibility function parseCompareArchiveArguments
-        req_compat = parseCompareArchiveArguments(["/path/to/archive", "read", "--all"])
-        self.assertIsInstance(req_compat, CompareVariantsRequest)
-        self.assertEqual(req_compat.archive_folder, "/path/to/archive")
-        self.assertEqual(req_compat.op, "read")
-        self.assertTrue(req_compat.all)
+        req2 = parseCompareArguments(["lsmio", "/a"])
+        self.assertEqual(req2.benchmark, "lsmio")
+        self.assertEqual(req2.folders, ("/a",))
 
-    def testParseCompareErrorsZeroAliasAndFallback(self) -> None:
-        """Validates strict rejection of missing submode, aliases, bare folder fallback (INV-ARCH-1, INV-ARCH-2)."""
-        # Missing submode token
-        with self.assertRaises(CompareCliParseError) as ctx_empty:
-            parseCompareArguments([])
-        self.assertIn("Missing required submode", str(ctx_empty.exception))
+    def testParseRefusals(self) -> None:
+        """T2, G3-G8: table of parse refusals."""
+        cases = [
+            ([], "Missing benchmark"),
+            (["nodes", "/a", "read"], "'compare nodes' was removed"),
+            (["scaling", "/a"], "Invalid benchmark"),
+            (["lsmio"], "Missing <folder>"),
+            (["lsmio", "/a", "--all"], "'--all' was removed"),
+            (["lsmio", "/a", "--foo"], "Unknown option"),
+            (["lsmio", "/a", "--nodes=8"], "Prohibit '--nodes=value'"),
+            (["lsmio", "/a", "--foo=1"], "Unknown option"),
+            (["lsmio", "/a", "--nodes", "8", "--nodes", "16"], "Duplicate '--nodes'"),
+            (["lsmio", "/a", "--nodes"], "Missing value after '--nodes'"),
+            (["lsmio", "/a", "--output-dir", "-x"], "option-like token"),
+            (["lsmio", "/a", "--output-dir", " "], "cannot be empty"),
+            (["lsmio", "/a", "--nodes", "8,,16"], "empty item"),
+            (["lsmio", "/a", "--nodes", "8,8"], "repeated item"),
+            (["lsmio", "/a", "--nodes", "0"], "invalid node count"),
+            (["lsmio", "/a", "--nodes", "x"], "invalid node count"),
+            (["lsmio", "/a", "--nodes", "²"], "invalid node count"),
+            (["lsmio", "/a", "--nodes", "８"], "invalid node count"),
+            (["lsmio", "/a", "--stripes", "8"], "invalid stripe count"),
+            (["lsmio", "/a", "--stripes", "٤"], "invalid stripe count"),
+            (["lsmio", "/a", "--block", "2M"], "invalid block size"),
+            (["lsmio", "/a", "--by", "x"], "Invalid --by value"),
+            (["lsmio", "/a", "--style", "x"], "Invalid --style value"),
+            (["lsmio", "/a", "--metrics", "cost"], "invalid metric 'cost'"),
+            (["ior", "/a", "--metrics", "cost"], "invalid metric 'cost'"),
+            (["variants", "/a", "--metrics", "cost"], "invalid metric 'cost'"),
+            (["lsmio", "/a", "read"], "is not a folder"),
+            (["lsmio", "/a", "16"], "is not a folder"),
+            (["lsmio", "/a", "1m"], "is not a folder"),
+            (["lsmio", "/a", "runtime"], "is not a folder"),
+            (["compare-archive", "/a"], "'compare-archive' was removed"),
+            (["lsmio", ""], "Folder path cannot be empty"),
+        ]
+        for argv, substr in cases:
+            with (
+                self.subTest(argv=argv, substr=substr),
+                self.assertRaises(CompareCliParseError) as ctx,
+            ):
+                parseCompareArguments(argv)
+            self.assertIn(substr, str(ctx.exception))
 
-        with self.assertRaises(CompareCliParseError) as ctx_cmp_only:
-            parseCompareArguments(["compare"])
-        self.assertIn("Missing required submode", str(ctx_cmp_only.exception))
+    def testParseRefusesNonStringArgv(self) -> None:
+        """Non-iterable, string, bytes, or iterable containing non-strings raises CompareCliParseError."""
+        for bad_argv in (None, "string", b"bytes", ["lsmio", "/a", 123]):
+            with (
+                self.subTest(bad_argv=bad_argv),
+                self.assertRaises(CompareCliParseError),
+            ):
+                parseCompareArguments(bad_argv)  # type: ignore
 
-        # Bare folder fallback (legacy command syntax)
-        with self.assertRaises(CompareCliParseError) as ctx_bare1:
-            parseCompareArguments(["/path/to/bench", "read"])
-        self.assertIn("Invalid submode '/path/to/bench'", str(ctx_bare1.exception))
-        self.assertIn("Must be 'nodes' or 'variants'", str(ctx_bare1.exception))
+    def testCompareHelpTextContract(self) -> None:
+        """T3: Verifies COMPARE_HELP_TEXT and LSMIOTOOL_HELP contracts."""
+        norm_help = " ".join(COMPARE_HELP_TEXT.split())
+        self.assertIn(
+            "Usage: lsmiotool compare <lsmio|ior|epocpp|variants> <folder>",
+            norm_help,
+        )
+        self.assertIn("lsmio a backends archive", norm_help)
+        self.assertIn("ior an IOR archive", norm_help)
+        self.assertIn("epocpp an epocpp archive", norm_help)
+        self.assertIn("variants a variants archive", norm_help)
+        self.assertIn("--by nodes|combinations", norm_help)
+        self.assertIn("--style bars|lines", norm_help)
+        self.assertIn("--metrics <list>", norm_help)
+        self.assertIn("--nodes <list>", norm_help)
+        self.assertIn("--stripes <list>", norm_help)
+        self.assertIn("--block <list>", norm_help)
+        self.assertIn("--output-dir <dir>", norm_help)
+        self.assertIn("variants: x is the variants", norm_help)
+        self.assertIn("drawn as a gap and named in a warning", norm_help)
+        self.assertIn("compare-<scale>-<benchmark>[-<names>]-by-nodes.png", norm_help)
+        self.assertIn(
+            "compare-<scale>-<benchmark>[-<names>]-by-combinations-<nodes>.png",
+            norm_help,
+        )
+        self.assertIn("Exit status:", norm_help)
 
-        with self.assertRaises(CompareCliParseError) as ctx_bare2:
-            parseCompareArguments(["compare", "viking2/", "read"])
-        self.assertIn("Invalid submode 'viking2/'", str(ctx_bare2.exception))
-        self.assertIn("Must be 'nodes' or 'variants'", str(ctx_bare2.exception))
+        self.assertIn(
+            "compare <lsmio|ior|epocpp|variants> <folder> ... [options]",
+            LSMIOTOOL_HELP,
+        )
+        self.assertFalse(hasattr(cli, "COMPARE_ARCHIVE_HELP_TEXT"))
 
-        # Prohibited alias 'scaling'
-        with self.assertRaises(CompareCliParseError) as ctx_scaling:
-            parseCompareArguments(["scaling", "/path/to/bench", "read"])
-        self.assertIn("Invalid submode 'scaling'", str(ctx_scaling.exception))
-        self.assertIn("Must be 'nodes' or 'variants'", str(ctx_scaling.exception))
-
-        with self.assertRaises(CompareCliParseError) as ctx_scaling_cmd:
-            parseCompareArguments(["compare", "scaling", "/path/to/bench", "read"])
-        self.assertIn("Invalid submode 'scaling'", str(ctx_scaling_cmd.exception))
-
-        # Prohibited alias 'archive'
-        with self.assertRaises(CompareCliParseError) as ctx_archive:
-            parseCompareArguments(["archive", "/path/to/archive"])
-        self.assertIn("Invalid submode 'archive'", str(ctx_archive.exception))
-
-        with self.assertRaises(CompareCliParseError) as ctx_archive_cmd:
-            parseCompareArguments(["compare", "archive", "/path/to/archive"])
-        self.assertIn("Invalid submode 'archive'", str(ctx_archive_cmd.exception))
-
-        # Option flag placed before submode
-        with self.assertRaises(CompareCliParseError) as ctx_opt_sub:
-            parseCompareArguments(
-                ["--output-dir", "/tmp", "nodes", "/path/to/bench", "read"]
+    def testRemovedInterfacesAreGone(self) -> None:
+        """T18: Asserts that legacy compare interfaces and submodes are gone."""
+        removed_cli = (
+            "CompareNodesRequest",
+            "CompareVariantsRequest",
+            "CompareArchiveRequest",
+            "CompareArchiveCliParser",
+            "CompareArchiveCliParseError",
+            "parseCompareArchiveArguments",
+            "COMPARE_ARCHIVE_HELP_TEXT",
+            "_parseNodes",
+            "_parseVariants",
+        )
+        for name in removed_cli:
+            self.assertFalse(
+                hasattr(cli, name),
+                f"lsmiotool.lib.cli.{name} should have been removed",
             )
-        self.assertIn("Invalid submode '--output-dir'", str(ctx_opt_sub.exception))
 
-        with self.assertRaises(CompareCliParseError) as ctx_all_first:
-            parseCompareArguments(["--all"])
-        self.assertIn("Invalid submode '--all'", str(ctx_all_first.exception))
-
-    def testParseCompareNodesGrammarErrors(self) -> None:
-        """Validates error cases specific to 'compare nodes' grammar."""
-        # Missing folder
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes"])
-        self.assertIn(
-            "Missing required positional argument: <folder>", str(ctx.exception)
+        removed_parser_consts = (
+            "WORKLOAD_PERMUTATIONS",
+            "VALID_SUBMODES",
+            "VALID_OPERATIONS",
+            "VALID_OPERATIONS_EXPANDED",
         )
-
-        # Option placed before folder
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "--output-dir", "/tmp", "/path", "read"])
-        self.assertIn(
-            "Unexpected option '--output-dir' placed before positional argument <folder>",
-            str(ctx.exception),
-        )
-
-        # Missing operation
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench"])
-        self.assertIn(
-            "Missing required positional argument: <read|write>", str(ctx.exception)
-        )
-
-        # Invalid operation (both is rejected in nodes mode)
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "both"])
-        self.assertIn(
-            "Invalid operation: 'both'. Must be 'read', 'write', 'runtime' or 'cost'",
-            str(ctx.exception),
-        )
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "delete"])
-        self.assertIn(
-            "Invalid operation: 'delete'. Must be 'read', 'write', 'runtime' or 'cost'",
-            str(ctx.exception),
-        )
-
-        # Invalid stripes
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "8"])
-        self.assertIn("Invalid stripes: '8'", str(ctx.exception))
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "abc"])
-        self.assertIn("Invalid stripes: 'abc'", str(ctx.exception))
-
-        # Invalid blocksize
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "4", "2M"])
-        self.assertIn("Invalid blocksize: '2M'", str(ctx.exception))
-
-        # --all charts every (stripes, blocksize): explicit ones are refused
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "4", "--all"])
-        self.assertIn(
-            "'--all' charts every <stripes> and <blocksize>", str(ctx.exception)
-        )
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "--all", "--all"])
-        self.assertIn("Duplicate '--all'", str(ctx.exception))
-
-        # Prohibited --all=val and --output-dir=val syntax
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--all=true"])
-        self.assertIn("Prohibit '--all=value' syntax", str(ctx.exception))
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                ["nodes", "/path/to/bench", "read", "--output-dir=/tmp/plots"]
+        for name in removed_parser_consts:
+            self.assertFalse(
+                hasattr(CompareCliParser, name),
+                f"CompareCliParser.{name} should have been removed",
             )
-        self.assertIn("Prohibit '--output-dir=value' syntax", str(ctx.exception))
 
-        # Missing or option-like value after --output-dir
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--output-dir"])
-        self.assertIn("Missing value after '--output-dir' option.", str(ctx.exception))
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                ["nodes", "/path/to/bench", "read", "--output-dir", "--other"]
-            )
-        self.assertIn(
-            "Missing valid value after '--output-dir' option, got option-like token: '--other'",
-            str(ctx.exception),
+        removed_main = (
+            "CompareNodesMain",
+            "CompareVariantsMain",
+            "CompareArchiveMain",
+            "PairedVariantRun",
         )
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                ["nodes", "/path/to/bench", "read", "--output-dir", ""]
+        for name in removed_main:
+            self.assertFalse(
+                hasattr(main, name),
+                f"lsmiotool.lib.main.{name} should have been removed",
             )
-        self.assertIn("Output directory path cannot be empty.", str(ctx.exception))
-
-        # Duplicate options
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                [
-                    "nodes",
-                    "/path/to/bench",
-                    "read",
-                    "--output-dir",
-                    "/a",
-                    "--output-dir",
-                    "/b",
-                ]
-            )
-        self.assertIn("Duplicate '--output-dir' option specified.", str(ctx.exception))
-
-        # Unknown options
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["nodes", "/path/to/bench", "read", "--unknown"])
-        self.assertIn("Unknown option: '--unknown'", str(ctx.exception))
-
-        # Unexpected extra positional arguments
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                [
-                    "nodes",
-                    "/path/to/bench",
-                    "read",
-                    "4",
-                    "1M",
-                    "extra",
-                ]
-            )
-        self.assertIn(
-            "Unexpected extra positional argument: 'extra'", str(ctx.exception)
-        )
-
-        # Unexpected token before compare
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                [
-                    "unexpected",
-                    "compare",
-                    "nodes",
-                    "/path/to/bench",
-                    "read",
-                ]
-            )
-        self.assertIn(
-            "Unexpected token before 'compare': 'unexpected'", str(ctx.exception)
-        )
-
-        # Invalid argv types
-        with self.assertRaises(CompareCliParseError):
-            parseCompareArguments(None)  # type: ignore
-        with self.assertRaises(CompareCliParseError):
-            parseCompareArguments("string")  # type: ignore
-        with self.assertRaises(CompareCliParseError):
-            parseCompareArguments(123)  # type: ignore
-        with self.assertRaises(CompareCliParseError):
-            parseCompareArguments(["nodes", "/path", 123])  # type: ignore
-
-    def testParseCompareVariantsGrammarErrors(self) -> None:
-        """Validates error cases specific to 'compare variants' grammar."""
-        # Missing archive folder
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants"])
-        self.assertIn(
-            "Missing required positional argument: <archive_folder>", str(ctx.exception)
-        )
-
-        # Option placed before archive folder
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "--all", "/path/to/archive"])
-        self.assertIn(
-            "Unexpected option '--all' placed before positional argument <archive_folder>",
-            str(ctx.exception),
-        )
-
-        # Invalid operation
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "delete"])
-        self.assertIn("Invalid operation: 'delete'", str(ctx.exception))
-
-        # Invalid stripes
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "read", "8"])
-        self.assertIn("Invalid stripes: '8'", str(ctx.exception))
-
-        # Invalid blocksize
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "read", "4", "2M"])
-        self.assertIn("Invalid blocksize: '2M'", str(ctx.exception))
-
-        # Prohibited --all=val syntax
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "--all=true"])
-        self.assertIn("Prohibit '--all=value' syntax", str(ctx.exception))
-
-        # Missing or option-like value after --output-dir
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "--output-dir"])
-        self.assertIn("Missing value after '--output-dir' option.", str(ctx.exception))
-
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                ["variants", "/path/to/archive", "--output-dir", "--all"]
-            )
-        self.assertIn(
-            "Missing valid value after '--output-dir' option, got option-like token: '--all'",
-            str(ctx.exception),
-        )
-
-        # Duplicate options
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "--all", "--all"])
-        self.assertIn("Duplicate '--all' option specified.", str(ctx.exception))
-
-        # Unknown option
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(["variants", "/path/to/archive", "--foo"])
-        self.assertIn("Unknown option: '--foo'", str(ctx.exception))
-
-        # Unexpected extra positional arguments
-        with self.assertRaises(CompareCliParseError) as ctx:
-            parseCompareArguments(
-                [
-                    "variants",
-                    "/path/to/archive",
-                    "read",
-                    "4",
-                    "1M",
-                    "extra",
-                ]
-            )
-        self.assertIn(
-            "Unexpected extra positional argument: 'extra'", str(ctx.exception)
-        )
 
     def testVariantReverseResolutionTruthTable(self) -> None:
         """Exhaustively validates all 10 canonical rows of the Reverse-Resolution Truth Table."""
@@ -838,20 +374,199 @@ class CompareCliParserTest(unittest.TestCase):
         self.assertIsNone(VariantReverseResolver.resolve("outputs_native"))
         self.assertIsNone(VariantReverseResolver.resolve("archive"))
 
-    def testCompareHelpTextSynchronization(self) -> None:
-        """Asserts that COMPARE_HELP_TEXT and LSMIOTOOL_HELP are defined and synchronized."""
-        self.assertIn(
-            "lsmiotool compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]",
-            COMPARE_HELP_TEXT,
+    def testCompareParserConstants(self) -> None:
+        """Asserts the exact tuples and dicts of the new constants in CompareCliParser."""
+        self.assertEqual(
+            CompareCliParser.VALID_BENCHMARKS,
+            ("lsmio", "ior", "epocpp", "variants"),
         )
-        self.assertIn("nodes <folder> <read|write>", COMPARE_HELP_TEXT)
-        self.assertIn("variants <archive_folder>", COMPARE_HELP_TEXT)
-        self.assertIn(
-            "compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]",
-            LSMIOTOOL_HELP,
+        self.assertEqual(
+            CompareCliParser.BENCHMARK_METRICS,
+            {
+                "lsmio": ("write", "read"),
+                "ior": ("write", "read"),
+                "variants": ("write", "read"),
+                "epocpp": ("runtime", "cost", "write", "read"),
+            },
         )
-        self.assertEqual(COMPARE_ARCHIVE_HELP_TEXT, COMPARE_HELP_TEXT)
-        self.assertIs(CompareArchiveCliParseError, CompareCliParseError)
+        self.assertEqual(
+            CompareCliParser.DEFAULT_METRICS,
+            {
+                "lsmio": ("write", "read"),
+                "ior": ("write", "read"),
+                "variants": ("write", "read"),
+                "epocpp": ("runtime", "write", "read"),
+            },
+        )
+        self.assertEqual(
+            CompareCliParser.COMBINATIONS,
+            (
+                (4, "64K"),
+                (4, "1M"),
+                (4, "8M"),
+                (16, "64K"),
+                (16, "1M"),
+                (16, "8M"),
+            ),
+        )
+        self.assertEqual(CompareCliParser.VALID_BY, ("nodes", "combinations"))
+        self.assertEqual(CompareCliParser.VALID_STYLES, ("bars", "lines"))
+        self.assertEqual(CompareCliParser.VALID_STRIPES, (4, 16))
+        self.assertEqual(CompareCliParser.VALID_BLOCKSIZES, ("64K", "1M", "8M"))
+
+    def testCompareRequestDefaultsAndToDict(self) -> None:
+        """CompareRequest('lsmio', ['/a']) defaults and toDict structure."""
+        req = CompareRequest("lsmio", ["/a"])
+        self.assertEqual(req.benchmark, "lsmio")
+        self.assertEqual(req.folders, ("/a",))
+        self.assertEqual(req.by, "nodes")
+        self.assertEqual(req.style, "bars")
+        self.assertIsNone(req.metrics)
+        self.assertIsNone(req.nodes)
+        self.assertIsNone(req.stripes)
+        self.assertIsNone(req.blocks)
+        self.assertIsNone(req.output_dir)
+
+        expected_dict = {
+            "benchmark": "lsmio",
+            "folders": ["/a"],
+            "by": "nodes",
+            "style": "bars",
+            "metrics": None,
+            "nodes": None,
+            "stripes": None,
+            "blocks": None,
+            "output_dir": None,
+        }
+        self.assertEqual(req.toDict(), expected_dict)
+        self.assertTrue(repr(req).startswith("CompareRequest("))
+
+    def testCompareRequestNormalisesAndStoresSetsCanonically(self) -> None:
+        """Case normalisation and canonical ordering of sets in CompareRequest."""
+        req = CompareRequest(
+            f_benchmark=" EPOCPP ",
+            f_folders=[" /b ", "/a", "/b"],
+            f_by="Combinations",
+            f_style="LINES",
+            f_metrics=("Read", "write"),
+            f_nodes=(16, 8),
+            f_stripes=(16, 4),
+            f_blocks=("8m", "64k"),
+            f_output_dir=" out ",
+        )
+        self.assertEqual(req.benchmark, "epocpp")
+        self.assertEqual(req.folders, ("/b", "/a", "/b"))
+        self.assertEqual(req.by, "combinations")
+        self.assertEqual(req.style, "lines")
+        self.assertEqual(req.metrics, ("read", "write"))
+        self.assertEqual(req.nodes, (8, 16))
+        self.assertEqual(req.stripes, (4, 16))
+        self.assertEqual(req.blocks, ("64K", "8M"))
+        self.assertEqual(req.output_dir, "out")
+
+    def testCompareRequestEqualityAndHash(self) -> None:
+        """Equality and hashing across permutations, metrics, folders, and types."""
+        req1 = CompareRequest(
+            "lsmio",
+            ["/a"],
+            f_nodes=(8, 16),
+            f_stripes=(4, 16),
+            f_blocks=("64K", "8M"),
+        )
+        req2 = CompareRequest(
+            "lsmio",
+            ["/a"],
+            f_nodes=(16, 8),
+            f_stripes=(16, 4),
+            f_blocks=("8M", "64K"),
+        )
+        self.assertEqual(req1, req2)
+        self.assertEqual(hash(req1), hash(req2))
+
+        req3 = CompareRequest("lsmio", ["/a"], f_metrics=("write", "read"))
+        self.assertNotEqual(req1, req3)
+
+        req4 = CompareRequest("lsmio", ["/a", "/b"])
+        req5 = CompareRequest("lsmio", ["/b", "/a"])
+        self.assertNotEqual(req4, req5)
+
+        self.assertNotEqual(req1, "lsmio")
+        self.assertNotEqual(req1, 42)
+        self.assertNotEqual(req1, None)
+
+    def testCompareRequestIsImmutable(self) -> None:
+        """Setting or deleting attributes on CompareRequest raises AttributeError."""
+        req = CompareRequest("lsmio", ["/a"])
+        with self.assertRaises(AttributeError):
+            req.benchmark = "ior"
+        with self.assertRaises(AttributeError):
+            req.m_benchmark = "ior"
+        with self.assertRaises(AttributeError):
+            del req.benchmark
+        with self.assertRaises(AttributeError):
+            del req.m_benchmark
+        with self.assertRaises(AttributeError):
+            req.unknown_attribute = "test"
+
+        unfrozen = object.__new__(CompareRequest)
+        unfrozen.m_benchmark = "ior"
+        self.assertEqual(unfrozen.m_benchmark, "ior")
+        del unfrozen.m_benchmark
+
+    def testCompareRequestRejectsInvalidValues(self) -> None:
+        """Asserts that invalid inputs raise ValueError with appropriate subTests."""
+        # benchmark "nodes", "", None
+        for val in ("nodes", "", None):
+            with self.subTest(case="benchmark", val=val), self.assertRaises(ValueError):
+                CompareRequest(val, ["/a"])
+
+        # folders "abc", (), ("",), (" ",), (1,)
+        for val in ("abc", (), ("",), (" ",), (1,)):
+            with self.subTest(case="folders", val=val), self.assertRaises(ValueError):
+                CompareRequest("lsmio", val)
+
+        # by "x"
+        with self.subTest(case="by", val="x"), self.assertRaises(ValueError):
+            CompareRequest("lsmio", ["/a"], f_by="x")
+
+        # style "x"
+        with self.subTest(case="style", val="x"), self.assertRaises(ValueError):
+            CompareRequest("lsmio", ["/a"], f_style="x")
+
+        # metrics (), ("cost",) for lsmio, ior and variants, ("write", "WRITE"), ("speed",)
+        for bm in ("lsmio", "ior", "variants"):
+            with (
+                self.subTest(case="metrics_cost", benchmark=bm),
+                self.assertRaises(ValueError),
+            ):
+                CompareRequest(bm, ["/a"], f_metrics=("cost",))
+
+        for val in ((), ("write", "WRITE"), ("speed",)):
+            with self.subTest(case="metrics", val=val), self.assertRaises(ValueError):
+                CompareRequest("lsmio", ["/a"], f_metrics=val)
+
+        # nodes (), (0,), (-1,), (True,), ("8",), (8, 8)
+        for val in ((), (0,), (-1,), (True,), ("8",), (8, 8)):
+            with self.subTest(case="nodes", val=val), self.assertRaises(ValueError):
+                CompareRequest("lsmio", ["/a"], f_nodes=val)
+
+        # stripes (8,), (4, 4), ()
+        for val in ((8,), (4, 4), ()):
+            with self.subTest(case="stripes", val=val), self.assertRaises(ValueError):
+                CompareRequest("lsmio", ["/a"], f_stripes=val)
+
+        # blocks ("2M",), ("1M", "1m"), ()
+        for val in (("2M",), ("1M", "1m"), ()):
+            with self.subTest(case="blocks", val=val), self.assertRaises(ValueError):
+                CompareRequest("lsmio", ["/a"], f_blocks=val)
+
+        # output_dir "", " ", 5
+        for val in ("", " ", 5):
+            with (
+                self.subTest(case="output_dir", val=val),
+                self.assertRaises(ValueError),
+            ):
+                CompareRequest("lsmio", ["/a"], f_output_dir=val)
 
 
 if __name__ == "__main__":

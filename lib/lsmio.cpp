@@ -28,16 +28,25 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <cstdlib>
 #include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
 
 #include <iostream>
-/*
-#include <stdlib.h>
-*/
 
 #include <lsmio/lsmio.hpp>
+
+namespace {
+
+// Loads and binds the unwinder before any handler can run (man 3 backtrace, NOTES),
+// so handlerSIGSEGV's own backtrace call does not allocate dynamically.
+[[maybe_unused]] const bool gUnwinderPrimed = []() {
+    void *dummy[1];
+    return backtrace(dummy, 1) > 0;
+}();
+
+}  // namespace
 
 namespace lsmio {
 
@@ -107,17 +116,16 @@ void LSMIOHelper::setFlag(const std::string key, const bool value) {
 }
 
 void handlerSIGSEGV(int signal) {
+    static const char msg[] = "LSMIO caught signal: SIGSEGV.\n";
+    [[maybe_unused]] const ssize_t written = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+
     const int TRACE_SIZE = 24;
     void *array[TRACE_SIZE];
-    size_t size;
+    const int size = backtrace(array, TRACE_SIZE);
 
-    size = backtrace(array, TRACE_SIZE);
-
-    fprintf(stderr, "LSMIO caught signal: SIGSEGV.\n");
     backtrace_symbols_fd(array, size, STDERR_FILENO);
 
-    // SIGSEGV handler must exit
-    exit(EXIT_FAILURE);
+    _exit(EXIT_FAILURE);
 }
 
 std::string to_string(const MPIAggType v) {
@@ -180,34 +188,19 @@ std::string to_string(const MemtableType v) {
     return sVal;
 }
 
+std::ostream &operator<<(std::ostream &os, MPIAggType v) {
+    os << to_string(v);
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, StorageType v) {
+    os << to_string(v);
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, MemtableType v) {
+    os << to_string(v);
+    return os;
+}
+
 }  // namespace lsmio
-
-std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v) {
-    os << lsmio::to_string(v);
-    return os;
-}
-
-std::ostream &operator<<(std::ostream &os, lsmio::StorageType v) {
-    os << lsmio::to_string(v);
-    return os;
-}
-
-std::ostream &operator<<(std::ostream &os, lsmio::MemtableType v) {
-    os << lsmio::to_string(v);
-    return os;
-}
-
-std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType &v) {
-    os << lsmio::to_string(v);
-    return os;
-}
-
-std::ostream &operator<<(std::ostream &os, const lsmio::StorageType &v) {
-    os << lsmio::to_string(v);
-    return os;
-}
-
-std::ostream &operator<<(std::ostream &os, const lsmio::MemtableType &v) {
-    os << lsmio::to_string(v);
-    return os;
-}

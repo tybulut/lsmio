@@ -1884,12 +1884,13 @@ class LmpAdapter(BenchmarkAdapter):
 
         f_norm_executable = f_executable.strip()
 
-        if f_setup is not None:
-            f_norm_setup = f_setup.strip().upper()
-            if f_norm_setup not in self.ALLOWED_SETUPS:
-                raise BenchmarkProbeError(
-                    f"Unsupported LMP setup requested: {f_setup!r}. Allowed: {self.ALLOWED_SETUPS}"
-                )
+        f_norm_setup = (
+            self.DEFAULT_SETUP if f_setup is None else f_setup.strip().upper()
+        )
+        if f_norm_setup not in self.ALLOWED_SETUPS:
+            raise BenchmarkProbeError(
+                f"Unsupported LMP setup requested: {f_setup!r}. Allowed: {self.ALLOWED_SETUPS}"
+            )
 
         if f_runner is None:
             return CapabilityState.CONFIGURED

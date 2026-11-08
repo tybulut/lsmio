@@ -82,7 +82,7 @@ _REL_PROJECT_PREFIX: Final[List[str]] = ["src", "usr"]
 # OS Environment
 USER: Final[str] = os.environ["USER"]
 HOME: Final[str] = os.environ["HOME"]
-LD_LIBRARY_PATH: Final[str] = os.environ["HOME"]
+LD_LIBRARY_PATH: Final[str] = os.environ.get("LD_LIBRARY_PATH", "")
 
 # Error message for unknown environments
 UNKNOWN_HPC_ENVIRONMENT: Final[str] = "Unknown HPC Environment"
@@ -93,6 +93,9 @@ UNKNOWN_HPC_ENVIRONMENT: Final[str] = "Unknown HPC Environment"
 
 # Detect environment
 lsmio_env: Optional[str] = os.environ.get("LSMIO_ENV", None)
+if lsmio_env is not None:
+    # As EnvironmentResolver.detect (site.py): strip the value, blank means unset.
+    lsmio_env = lsmio_env.strip() or None
 if lsmio_env is not None:
     lsmio_env = lsmio_env.upper()
     if lsmio_env == "ISAMBARD":

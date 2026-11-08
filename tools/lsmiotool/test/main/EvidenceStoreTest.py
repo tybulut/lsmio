@@ -28,13 +28,21 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import copy
 import json
+import math
 import os
 import shutil
 import tempfile
 import unittest
+from types import MappingProxyType
 
-from lsmiotool.lib.artifacts import ArtifactLayout, ArtifactStore, ContainmentError
+from lsmiotool.lib.artifacts import (
+    ArtifactError,
+    ArtifactLayout,
+    ArtifactStore,
+    ContainmentError,
+)
 from lsmiotool.lib.evidence import (
     EvidenceCollisionError,
     EvidenceCorruptionError,
@@ -404,6 +412,99 @@ class EvidenceStoreTest(unittest.TestCase):
         f_deserialized_handle = JobHandle.fromDict(f_read_sub_rec.payload["handle"])
         self.assertEqual(f_deserialized_handle, f_handle)
         self.assertEqual(f_deserialized_handle.job_id, f_job_id)
+
+    def testIntegerPointNamedFromMatchedPlanPoint(self) -> None:
+        """An int point is an index or a task count; the directory is the matched point's NN-tasks-T."""
+        f_points = self.m_plan.scale_points
+        self.assertEqual([f_p.tasks for f_p in f_points[:4]], [1, 2, 4, 8])
+        # (int, expected plan index): 0 and 3 are indexes (no point has 0 or 3 tasks), 4 is a task count.
+        for f_int, f_idx in ((0, 0), (3, 3), (4, 2)):
+            with self.subTest(f_int=f_int):
+                f_sp = f_points[f_idx]
+                f_name = f"{f_idx:02d}-tasks-{f_sp.tasks}"
+                self.m_artifact_store.preparePoint(f_sp, f_ordinal=f_idx)
+                f_rec = self.m_evidence_store.recordSubmissionRequested(
+                    f_int, "client"
+                )
+                f_path = os.path.join(
+                    self.m_layout.pointsDir,
+                    f_name,
+                    "scheduler",
+                    "submission_requested.json",
+                )
+                self.assertTrue(os.path.isfile(f_path))
+                self.assertEqual(f_rec.point_id, f_name)
+                self.assertEqual(
+                    self.m_evidence_store.readSubmissionRecords(f_int)[
+                        "submission_requested"
+                    ].point_id,
+                    f_name,
+                )
+
+    def testIntegerPointFirstMatchInPlanOrder(self) -> None:
+        """An int that is one point's index and another's task count resolves to the first in plan order."""
+        f_points = self.m_plan.scale_points
+        # 2 is the index of tasks=4 (idx 2) and the task count of idx 1; idx 1 comes first.
+        self.assertEqual(f_points[1].tasks, 2)
+        self.assertEqual(f_points[2].tasks, 4)
+        self.m_artifact_store.preparePoint(f_points[1], f_ordinal=1)
+        self.m_artifact_store.preparePoint(f_points[2], f_ordinal=2)
+        f_rec = self.m_evidence_store.recordSubmissionRequested(2, "client")
+        self.assertEqual(f_rec.point_id, "01-tasks-2")
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.m_layout.pointsDir,
+                    "02-tasks-4",
+                    "scheduler",
+                    "submission_requested.json",
+                )
+            )
+        )
+
+    def testIntegerPointRejections(self) -> None:
+        """Outside-plan ints, bool points and contradictory ordinals raise EvidencePlanError; no plan raises ArtifactError."""
+        f_run = self.m_run_id
+        f_out = f"Point '99999' is not part of plan for run '{f_run}'"
+        with self.assertRaises(EvidencePlanError) as f_cm:
+            self.m_evidence_store.recordSubmissionRequested(99999, "client")
+        self.assertEqual(str(f_cm.exception), f_out)
+        with self.assertRaises(EvidencePlanError) as f_cm:
+            self.m_evidence_store.readSubmissionRecords(99999)
+        self.assertEqual(str(f_cm.exception), f_out)
+        with self.assertRaises(EvidencePlanError) as f_cm:
+            self.m_evidence_store.readWorkerEvents(99999)
+        self.assertEqual(str(f_cm.exception), f_out)
+        # bool is an int subclass but never a point.
+        for f_b in (True, False):
+            with self.subTest(f_b=f_b):
+                with self.assertRaises(EvidencePlanError) as f_cm:
+                    self.m_evidence_store.recordSubmissionRequested(f_b, "client")
+                self.assertEqual(
+                    str(f_cm.exception),
+                    f"Point '{f_b}' is not part of plan for run '{f_run}'",
+                )
+        # Task count 4 matches plan index 2; an explicit ordinal must agree.
+        with self.assertRaises(EvidencePlanError) as f_cm:
+            self.m_evidence_store.recordSubmissionRequested(
+                4, "client", f_ordinal=3
+            )
+        self.assertEqual(
+            str(f_cm.exception),
+            f"Ordinal 3 contradicts point '4' matched at plan index 2 for run '{f_run}'",
+        )
+        self.m_artifact_store.preparePoint(self.m_plan.scale_points[2], f_ordinal=2)
+        f_rec = self.m_evidence_store.recordSubmissionRequested(
+            4, "client", f_ordinal=2
+        )
+        self.assertEqual(f_rec.point_id, "02-tasks-4")
+        # Without a plan the layout rejects the int.
+        f_planless = EvidenceStore(self.m_layout)
+        with self.assertRaises(ArtifactError) as f_cm:
+            f_planless.recordSubmissionRequested(1, "client")
+        self.assertIn("Integer point needs a plan", str(f_cm.exception))
+        with self.assertRaises(ArtifactError):
+            f_planless.readSubmissionRecords(1)
 
     def testOutOfPlanRejected(self) -> None:
         """Rejects evidence for combinations, ranks, or points not in the plan."""
@@ -1081,3 +1182,408 @@ class EvidenceStoreTest(unittest.TestCase):
         self.assertFalse(
             ResultPayloadValidator.isFailurePayload({}, EvidenceKind.CONTROLLER_RESULT)
         )
+
+
+class ResultPayloadValidatorTest(unittest.TestCase):
+    """Pure validator calls: exact messages, copies returned, inputs untouched."""
+
+    def setUp(self) -> None:
+        self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-payload-test-")
+        self.m_log = os.path.join(self.m_temp_dir, "rank_0.log")
+        self.m_res = os.path.join(self.m_temp_dir, "rank_0.db")
+        for f_path in (self.m_log, self.m_res):
+            with open(f_path, "w", encoding="utf-8") as f_file:
+                f_file.write("x\n")
+        self.m_dir = os.path.join(self.m_temp_dir, "adir")
+        os.mkdir(self.m_dir)
+        self.m_missing = os.path.join(self.m_temp_dir, "missing.db")
+        self.m_rank_ok = {
+            "status": "success",
+            "exit_code": 0,
+            "exit_status": 0,
+            "global_rank": 0,
+            "rank": 0,
+            "combination": "c16_b8M",
+            "argv": ["lsmioworker", "rank"],
+            "log_path": self.m_log,
+            "result_path": self.m_res,
+            "timed_out": False,
+        }
+        self.m_ctrl_ok = {
+            "status": "success",
+            "exit_code": 0,
+            "stage": "execution",
+            "combination": "c16_b8M",
+        }
+        self.m_ctrl_fail = {"status": "failed", "exit_code": 1, "stage": "execution"}
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.m_temp_dir, ignore_errors=True)
+
+    def _assertNoNewFiles(self) -> None:
+        self.assertEqual(
+            sorted(os.listdir(self.m_temp_dir)), ["adir", "rank_0.db", "rank_0.log"]
+        )
+
+    def _assertRejects(self, f_call, f_payload, f_message, f_prefix=False):
+        f_before = copy.deepcopy(f_payload)
+        with self.assertRaises(EvidenceSchemaError) as f_cm:
+            f_call(f_payload)
+        if f_prefix:
+            self.assertTrue(
+                str(f_cm.exception).startswith(f_message), str(f_cm.exception)
+            )
+        else:
+            self.assertEqual(str(f_cm.exception), f_message)
+        self.assertEqual(f_payload, f_before)
+        return f_cm.exception
+
+    def _assertAccepts(self, f_call, f_payload):
+        f_before = copy.deepcopy(f_payload)
+        f_clean = f_call(f_payload)
+        self.assertEqual(f_clean, f_payload)
+        self.assertIsNot(f_clean, f_payload)
+        self.assertEqual(f_payload, f_before)
+        return f_clean
+
+    def testSharedStatusMustBeNonBlankString(self) -> None:
+        """A missing, blank or non-string status is rejected with the value."""
+        for f_v in (None, 5, "", "   ", ["success"]):
+            with self.subTest(f_v=f_v):
+                self._assertRejects(
+                    ResultPayloadValidator.validateSharedPayload,
+                    {"status": f_v, "exit_code": 0},
+                    "Result payload 'status' must be a non-empty string, got: "
+                    + repr(f_v),
+                )
+        self._assertNoNewFiles()
+
+    def testSharedStatusMustBeCanonical(self) -> None:
+        """A non-canonical status is rejected with the raw padded value."""
+        for f_v in ("ok", "SUCCESSFUL", "pass", " done "):
+            with self.subTest(f_v=f_v):
+                self._assertRejects(
+                    ResultPayloadValidator.validateSharedPayload,
+                    {"status": f_v, "exit_code": 0},
+                    f"Invalid result payload status: {f_v!r} (must be one of "
+                    "['complete', 'completed', 'failed', 'failure', 'succeeded', "
+                    "'success'])",
+                )
+        self._assertNoNewFiles()
+
+    def testSharedTimedOutMustBeBool(self) -> None:
+        """timed_out must be a real bool; False is accepted."""
+        for f_v in ("false", 0, None, 1):
+            with self.subTest(f_v=f_v):
+                self._assertRejects(
+                    ResultPayloadValidator.validateSharedPayload,
+                    {"status": "success", "exit_code": 0, "timed_out": f_v},
+                    f"timed_out must be a boolean, got: {f_v!r}",
+                )
+        f_clean = self._assertAccepts(
+            ResultPayloadValidator.validateSharedPayload,
+            {"status": "success", "exit_code": 0, "timed_out": False},
+        )
+        self.assertIs(f_clean["timed_out"], False)
+        self._assertNoNewFiles()
+
+    def testSharedExitStatusMustBeInteger(self) -> None:
+        """exit_status rejects bools and non-integers."""
+        for f_v in (True, False, "0", 0.0, None):
+            with self.subTest(f_v=f_v):
+                self._assertRejects(
+                    ResultPayloadValidator.validateSharedPayload,
+                    {"status": "failed", "exit_code": 1, "exit_status": f_v},
+                    f"exit_status must be an integer, got: {f_v!r}",
+                )
+        self._assertNoNewFiles()
+
+    def testSharedSignalNumberAcceptedOnFailure(self) -> None:
+        """signal_number is kept when an int, rejected otherwise; mappings become dicts."""
+        f_a = {"status": "failed", "exit_code": 143, "signal_number": 15}
+        self._assertAccepts(ResultPayloadValidator.validateSharedPayload, f_a)
+        f_proxy = MappingProxyType(
+            {
+                "status": " Failure ",
+                "exit_code": -9,
+                "signal_number": 9,
+                "elapsed_seconds": 0,
+            }
+        )
+        f_clean = ResultPayloadValidator.validateSharedPayload(f_proxy)
+        self.assertIs(type(f_clean), dict)
+        self.assertEqual(f_clean, dict(f_proxy))
+        self.assertEqual(f_clean["status"], " Failure ")
+        self._assertRejects(
+            ResultPayloadValidator.validateSharedPayload,
+            {"status": "failed", "exit_code": 1, "signal_number": "15"},
+            "signal_number must be an integer, got: '15'",
+        )
+        self._assertNoNewFiles()
+
+    def testSharedElapsedSecondsRejectsNonFinite(self) -> None:
+        """elapsed_seconds NaN and infinity are rejected, as are negative numbers."""
+        # 10**400 is an int too large for float: isfinite would raise OverflowError.
+        for f_bad in (float("nan"), float("inf"), float("-inf"), 10**400):
+            with self.subTest(f_bad=repr(f_bad)):
+                self._assertRejects(
+                    ResultPayloadValidator.validateSharedPayload,
+                    {"status": "success", "exit_code": 0, "elapsed_seconds": f_bad},
+                    f"elapsed_seconds must be a non-negative float/int, got: {f_bad!r}",
+                )
+        f_json = json.loads(
+            '{"status": "success", "exit_code": 0, "elapsed_seconds": NaN}'
+        )
+        self._assertRejects(
+            ResultPayloadValidator.validateSharedPayload,
+            f_json,
+            "elapsed_seconds must be a non-negative float/int, got: nan",
+        )
+        self._assertRejects(
+            ResultPayloadValidator.validateSharedPayload,
+            {"status": "success", "exit_code": 0, "elapsed_seconds": -5.0},
+            "elapsed_seconds must be a non-negative float/int, got: -5.0",
+        )
+        self._assertNoNewFiles()
+
+    def testRankIdentityFieldTypes(self) -> None:
+        """global_rank, rank and combination are type checked on a failure payload."""
+        f_rows = (
+            ("global_rank", (-1, True, "0", 1.0, None), "a non-negative integer"),
+            ("rank", (-1, True, "0", 1.5), "a non-negative integer"),
+            ("combination", ("", "   ", 5, None), "a non-empty string"),
+        )
+        for f_field, f_values, f_what in f_rows:
+            for f_v in f_values:
+                with self.subTest(f_field=f_field, f_v=f_v):
+                    self._assertRejects(
+                        ResultPayloadValidator.validateRankPayload,
+                        {"status": "failed", "exit_code": 1, f_field: f_v},
+                        f"{f_field} must be {f_what}, got: {f_v!r}",
+                    )
+        self._assertNoNewFiles()
+
+    def testRankStrictSuccessRequiresRankAndCombination(self) -> None:
+        """Strict success needs a rank and a combination; non-strict does not."""
+        f_validate = ResultPayloadValidator.validateRankPayload
+        f_no_rank = {
+            f_k: f_v
+            for f_k, f_v in self.m_rank_ok.items()
+            if f_k not in ("global_rank", "rank")
+        }
+        self._assertRejects(
+            f_validate,
+            f_no_rank,
+            "Rank success payload requires 'global_rank' or 'rank'",
+        )
+        f_clean = self._assertAccepts(
+            lambda f_p: f_validate(f_p, f_strict=False), f_no_rank
+        )
+        self.assertNotIn("rank", f_clean)
+        self.assertNotIn("global_rank", f_clean)
+        f_no_comb = {
+            f_k: f_v for f_k, f_v in self.m_rank_ok.items() if f_k != "combination"
+        }
+        self._assertRejects(
+            f_validate, f_no_comb, "Rank success payload requires 'combination'"
+        )
+        self._assertNoNewFiles()
+
+    def testRankStrictSuccessArgvShape(self) -> None:
+        """argv must be a non-empty list of strings (strict success)."""
+        for f_v in ([], (), ["a", 1], "lsmioworker", None):
+            with self.subTest(f_v=f_v):
+                self._assertRejects(
+                    ResultPayloadValidator.validateRankPayload,
+                    {**self.m_rank_ok, "argv": f_v},
+                    f"Rank success argv must be a non-empty list of strings, got: {f_v!r}",
+                )
+        f_clean = ResultPayloadValidator.validateRankPayload(
+            {**self.m_rank_ok, "argv": ("a", "b")}
+        )
+        self.assertEqual(f_clean["argv"], ("a", "b"))
+        self._assertNoNewFiles()
+
+    def testRankFileChecksWithoutLayout(self) -> None:
+        """File checks run on plain paths when no layout is given."""
+        f_clean = ResultPayloadValidator.validateRankPayload(
+            self.m_rank_ok,
+            f_expected_rank=0,
+            f_expected_combination=" c16_b8M ",
+            f_validate_files=True,
+        )
+        self.assertEqual(f_clean, self.m_rank_ok)
+
+        def f_call(f_p):
+            return ResultPayloadValidator.validateRankPayload(
+                f_p, f_validate_files=True
+            )
+
+        self._assertRejects(
+            f_call,
+            {**self.m_rank_ok, "result_path": self.m_dir},
+            f"Rank success result_path '{self.m_dir}' is not a regular file",
+        )
+        self._assertRejects(
+            f_call,
+            {**self.m_rank_ok, "log_path": self.m_dir},
+            f"Rank success log_path '{self.m_dir}' is not a regular file",
+        )
+        f_exc = self._assertRejects(
+            f_call,
+            {**self.m_rank_ok, "result_path": self.m_missing},
+            f"Rank success result_path '{self.m_missing}' does not exist: ",
+            f_prefix=True,
+        )
+        self.assertIsInstance(f_exc.__cause__, FileNotFoundError)
+        self.assertFalse(os.path.exists(self.m_missing))
+        self.assertTrue(os.path.isdir(self.m_dir))
+        self._assertNoNewFiles()
+
+    def testRankFailureRejectsExtraFields(self) -> None:
+        """A failure payload may only carry the allowed fields."""
+        self._assertRejects(
+            ResultPayloadValidator.validateRankPayload,
+            {
+                "status": "failed",
+                "exit_code": 2,
+                "zeta": 1,
+                "alpha": 2,
+                "error": "boom",
+            },
+            "Rank failure payload contains forbidden extra fields: ['alpha', 'zeta']",
+        )
+        self._assertAccepts(
+            ResultPayloadValidator.validateRankPayload,
+            {
+                "status": "failed",
+                "exit_code": 2,
+                "error": "boom",
+                "signal_number": 9,
+                "spawn_error": "x",
+                "stage": "exec",
+            },
+        )
+        self._assertNoNewFiles()
+
+    def testRankRedundantGuardsFireEarlier(self) -> None:
+        """The shared checks fire before the rank-specific duplicates."""
+        self._assertRejects(
+            ResultPayloadValidator.validateRankPayload,
+            {**self.m_rank_ok, "exit_status": 3},
+            "Success payload cannot have non-zero exit_status: 3",
+        )
+        self._assertRejects(
+            ResultPayloadValidator.validateRankPayload,
+            {**self.m_rank_ok, "timed_out": None},
+            "timed_out must be a boolean, got: None",
+        )
+        self._assertNoNewFiles()
+
+    def testControllerCombinationMismatchAndExtraFields(self) -> None:
+        """Controller payloads check the combination and forbid rank fields."""
+        f_validate = ResultPayloadValidator.validateControllerPayload
+        self._assertRejects(
+            lambda f_p: f_validate(f_p, f_expected_combination="c4_b64K"),
+            self.m_ctrl_ok,
+            "Controller combination mismatch: expected 'c4_b64K', got 'c16_b8M'",
+        )
+        # Observation: the controller combination is compared through str().
+        f_clean = f_validate(
+            {**self.m_ctrl_ok, "combination": 5}, f_expected_combination=" 5 "
+        )
+        self.assertEqual(f_clean["combination"], 5)
+        self._assertRejects(
+            f_validate,
+            {**self.m_ctrl_ok, "rank": 0, "argv": ["x"]},
+            "Controller success payload contains forbidden extra fields: ['argv', 'rank']",
+        )
+        self._assertRejects(
+            f_validate,
+            {**self.m_ctrl_fail, "rank": 0, "argv": []},
+            "Controller failure payload contains forbidden extra fields: ['argv', 'rank']",
+        )
+        self._assertNoNewFiles()
+
+    def testControllerStageRequiredWhenStrict(self) -> None:
+        """A strict controller payload needs a non-empty stage."""
+        f_validate = ResultPayloadValidator.validateControllerPayload
+        f_absent = object()
+        for f_v in (f_absent, "", "  ", 3):
+            for f_base, f_word in (
+                (self.m_ctrl_ok, "success"),
+                (self.m_ctrl_fail, "failure"),
+            ):
+                with self.subTest(f_v=f_v, f_word=f_word):
+                    f_payload = {f_k: f_x for f_k, f_x in f_base.items() if f_k != "stage"}
+                    if f_v is not f_absent:
+                        f_payload["stage"] = f_v
+                    self._assertRejects(
+                        f_validate,
+                        f_payload,
+                        f"Controller {f_word} payload requires non-empty 'stage'",
+                    )
+                    self._assertAccepts(
+                        lambda f_p: f_validate(f_p, f_strict=False), f_payload
+                    )
+        self._assertNoNewFiles()
+
+    def testControllerOutputFileChecks(self) -> None:
+        """output_path is checked as a file only when file validation is on."""
+
+        def f_call(f_p):
+            return ResultPayloadValidator.validateControllerPayload(
+                f_p, f_validate_files=True
+            )
+
+        for f_v in ("", "   ", 7):
+            with self.subTest(f_v=f_v):
+                self._assertRejects(
+                    f_call,
+                    {**self.m_ctrl_ok, "output_path": f_v},
+                    "output_path must be a non-empty string",
+                )
+        f_exc = self._assertRejects(
+            f_call,
+            {**self.m_ctrl_ok, "output_path": self.m_missing},
+            f"Controller output artifact '{self.m_missing}' does not exist: ",
+            f_prefix=True,
+        )
+        self.assertIsInstance(f_exc.__cause__, FileNotFoundError)
+        self._assertRejects(
+            f_call,
+            {**self.m_ctrl_ok, "output_path": self.m_dir},
+            f"Controller output artifact '{self.m_dir}' is not a regular file",
+        )
+        self._assertAccepts(f_call, {**self.m_ctrl_ok, "output_path": self.m_log})
+        self._assertAccepts(
+            ResultPayloadValidator.validateControllerPayload,
+            {**self.m_ctrl_ok, "output_path": ""},
+        )
+        self.assertFalse(os.path.exists(self.m_missing))
+        self._assertNoNewFiles()
+
+    def testPayloadPredicatesOnNonMappings(self) -> None:
+        """The predicates return False for non-mappings and route by kind."""
+        for f_v in (None, [], "success", 5):
+            with self.subTest(f_v=f_v):
+                self.assertIs(ResultPayloadValidator.isSuccessPayload(f_v), False)
+                self.assertIs(ResultPayloadValidator.isFailurePayload(f_v), False)
+        self.assertIs(
+            ResultPayloadValidator.isSuccessPayload(MappingProxyType(self.m_ctrl_ok)),
+            True,
+        )
+        self.assertIs(
+            ResultPayloadValidator.isFailurePayload(MappingProxyType(self.m_ctrl_fail)),
+            True,
+        )
+        self.assertIs(
+            ResultPayloadValidator.isSuccessPayload(self.m_rank_ok, "rank_result"), True
+        )
+        self.assertIs(
+            ResultPayloadValidator.isSuccessPayload(
+                {**self.m_rank_ok, "argv": []}, "rank_result", f_strict=True
+            ),
+            False,
+        )
+        self._assertNoNewFiles()

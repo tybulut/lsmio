@@ -183,7 +183,7 @@ class ProcessRunnerTest(unittest.TestCase):
             self.assertIsNotNone(f_ctx2.exception.result)
 
     def testLogIsWrittenWhileProcessRuns(self) -> None:
-        """M13: output reaches the log as it is produced (like 'CMD 2>&1 | tee LOG'), so a
+        """Output reaches the log as it is produced (like 'CMD 2>&1 | tee LOG'), so a
         step killed at its time limit still leaves what it printed; both streams are kept."""
         import threading
 
@@ -435,6 +435,264 @@ class ProcessRunnerTest(unittest.TestCase):
         self.assertTrue(issubclass(ProcessLoggingError, ProcessExecutionError))
         self.assertTrue(issubclass(ProcessTimeoutError, ProcessExecutionError))
         self.assertTrue(issubclass(WorkerError, Exception))
+
+    def testProcessRunnerArgvNotIterable(self) -> None:
+        """Validates that non-iterable argv raises ProcessSpawnError."""
+        for f_bad in [12345, object()]:
+            with self.subTest(bad=f_bad):
+                with self.assertRaises(ProcessSpawnError) as f_cm:
+                    self.m_runner.run(f_bad)  # type: ignore
+                self.assertIn(
+                    "Process argv must be an iterable sequence of arguments",
+                    str(f_cm.exception),
+                )
+
+    def testProcessRunnerUnexpectedPopenException(self) -> None:
+        """Validates unexpected (non-OSError) exception in subprocess.Popen raises ProcessSpawnError with cause."""
+        with patch("subprocess.Popen", side_effect=RuntimeError("Subprocess memory error")):
+            with self.assertRaises(ProcessSpawnError) as f_cm:
+                self.m_runner.run(["/bin/echo", "test"])
+            self.assertIn(
+                "Unexpected error spawning process '/bin/echo': Subprocess memory error",
+                str(f_cm.exception),
+            )
+            self.assertIsInstance(f_cm.exception.__cause__, RuntimeError)
+
+    def testProcessRunnerTimeoutKillRaisesOSError(self) -> None:
+        """Validates that OSError raised by kill() during communicate timeout is swallowed."""
+        f_mock_proc = MagicMock()
+        f_mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="sleep", timeout=0.1),
+            (b"post-timeout", b""),
+        ]
+        f_mock_proc.kill.side_effect = ProcessLookupError("No such process")
+        f_mock_proc.returncode = -9
+        with patch("subprocess.Popen", return_value=f_mock_proc):
+            f_res = self.m_runner.run(["sleep", "10"], f_timeout=0.1)
+            self.assertTrue(f_res.timed_out)
+            self.assertEqual(f_res.stdout, "post-timeout")
+            self.assertEqual(f_res.returncode, -9)
+            self.assertTrue(f_mock_proc.kill.called)
+
+    def testProcessRunnerCommunicateUnexpectedException(self) -> None:
+        """Validates unexpected exception in communicate kills process and raises ProcessExecutionError with cause."""
+        f_mock_proc = MagicMock()
+        f_mock_proc.communicate.side_effect = RuntimeError("Pipe error")
+        f_mock_proc.kill.side_effect = ProcessLookupError("gone")
+        f_mock_proc.wait.return_value = 1
+        with patch("subprocess.Popen", return_value=f_mock_proc):
+            with self.assertRaises(ProcessExecutionError) as f_cm:
+                self.m_runner.run(["/bin/test_cmd"])
+            self.assertIn(
+                "Communication error during process execution '/bin/test_cmd': Pipe error",
+                str(f_cm.exception),
+            )
+            self.assertIsInstance(f_cm.exception.__cause__, RuntimeError)
+            self.assertTrue(f_mock_proc.kill.called)
+            self.assertTrue(f_mock_proc.wait.called)
+
+    def testProcessRunnerLogFileCloseRaisesOSError(self) -> None:
+        """Validates that OSError on log file close in finally block is swallowed without masking result."""
+        f_log_path = os.path.join(self.m_temp_dir.name, "test_close_err.log")
+        f_real_open = open
+
+        class _MockFileWrapper:
+            def __init__(self, f):
+                self._f = f
+
+            def write(self, b):
+                return self._f.write(b)
+
+            def flush(self):
+                return self._f.flush()
+
+            def fileno(self):
+                return self._f.fileno()
+
+            def close(self):
+                self._f.close()
+                raise OSError("NFS flush error")
+
+        def _custom_open(path, mode="r", *args, **kwargs):
+            f = f_real_open(path, mode, *args, **kwargs)
+            if "test_close_err.log" in str(path):
+                return _MockFileWrapper(f)
+            return f
+
+        with patch("builtins.open", side_effect=_custom_open):
+            f_res = self.m_runner.run(
+                [sys.executable, "-c", "print('hello')"],
+                f_log_path=f_log_path,
+            )
+            self.assertEqual(f_res.returncode, 0)
+            self.assertEqual(f_res.stdout, "hello\n")
+
+    def testProcessRunnerMirrorStdoutEmptyStreams(self) -> None:
+        """Validates branches 518->521 (empty stdout) and 521->528 (empty stderr) during console mirroring."""
+        with self.subTest(stream="stderr_only"):
+            with patch("sys.stdout", new_callable=io.StringIO) as f_mock_stdout, \
+                 patch("sys.stderr", new_callable=io.StringIO) as f_mock_stderr:
+                f_res = self.m_runner.run(
+                    [sys.executable, "-c", "import sys; sys.stderr.write('err\\n')"],
+                    f_mirror_stdout=True,
+                )
+                self.assertEqual(f_res.stdout, "")
+                self.assertEqual(f_res.stderr, "err\n")
+                self.assertEqual(f_mock_stdout.getvalue(), "")
+                self.assertEqual(f_mock_stderr.getvalue(), "err\n")
+
+        with self.subTest(stream="stdout_only"):
+            with patch("sys.stdout", new_callable=io.StringIO) as f_mock_stdout, \
+                 patch("sys.stderr", new_callable=io.StringIO) as f_mock_stderr:
+                f_res = self.m_runner.run(
+                    [sys.executable, "-c", "import sys; sys.stdout.write('out\\n')"],
+                    f_mirror_stdout=True,
+                )
+                self.assertEqual(f_res.stdout, "out\n")
+                self.assertEqual(f_res.stderr, "")
+                self.assertEqual(f_mock_stdout.getvalue(), "out\n")
+                self.assertEqual(f_mock_stderr.getvalue(), "")
+
+    def testProcessRunnerMirrorStdoutWriteException(self) -> None:
+        """Validates that sys.stdout.write exception during mirroring is swallowed without masking outcome."""
+        with patch("sys.stdout.write", side_effect=IOError("Broken pipe")):
+            f_res = self.m_runner.run(
+                [sys.executable, "-c", "print('out')"],
+                f_mirror_stdout=True,
+            )
+            self.assertEqual(f_res.returncode, 0)
+            self.assertEqual(f_res.stdout, "out\n")
+
+    def testProcessRunnerStreamToLogWriteErrorAndDrain(self) -> None:
+        """Validates _streamToLog multi-chunk write error, error collection, drain continuation, and fsync skip."""
+
+        class _MockPipe:
+            def __init__(self, chunks):
+                self._chunks = list(chunks)
+
+            def read1(self, size: int) -> bytes:
+                if self._chunks:
+                    return self._chunks.pop(0)
+                return b""
+
+            def close(self) -> None:
+                pass
+
+        class _MockLogFile:
+            def __init__(self):
+                self.writes = 0
+
+            def fileno(self) -> int:
+                return 1
+
+            def write(self, chunk: bytes) -> int:
+                self.writes += 1
+                if self.writes == 1:
+                    raise OSError("Disk write failure")
+                return len(chunk)
+
+            def flush(self) -> None:
+                pass
+
+        f_mock_proc = MagicMock()
+        f_mock_proc.stdout = _MockPipe([b"chunk1", b"chunk2"])
+        f_mock_proc.stderr = _MockPipe([])
+        f_mock_proc.wait.return_value = 0
+
+        f_mock_log = _MockLogFile()
+        f_out, f_err, f_timed_out, f_err_res = ProcessRunner._streamToLog(
+            f_mock_proc, f_mock_log, None
+        )
+        self.assertEqual(f_out, b"chunk1chunk2")
+        self.assertEqual(f_err, b"")
+        self.assertFalse(f_timed_out)
+        self.assertIsInstance(f_err_res, OSError)
+        self.assertIn("Disk write failure", str(f_err_res))
+
+    def testProcessRunnerStreamToLogTimeoutKillRaisesOSError(self) -> None:
+        """Validates that _streamToLog swallows OSError raised by f_proc.kill() on timeout."""
+
+        class _MockPipe:
+            def read1(self, size: int) -> bytes:
+                return b""
+
+            def close(self) -> None:
+                pass
+
+        class _MockLogFile:
+            def fileno(self) -> int:
+                return 1
+
+            def flush(self) -> None:
+                pass
+
+        f_mock_proc = MagicMock()
+        f_mock_proc.stdout = _MockPipe()
+        f_mock_proc.stderr = _MockPipe()
+        f_mock_proc.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="sleep", timeout=0.1),
+            0,
+        ]
+        f_mock_proc.kill.side_effect = ProcessLookupError("gone")
+
+        f_mock_log = _MockLogFile()
+        with patch("os.fsync"):
+            f_out, f_err, f_timed_out, f_err_res = ProcessRunner._streamToLog(
+                f_mock_proc, f_mock_log, 0.1
+            )
+            self.assertEqual(f_out, b"")
+            self.assertEqual(f_err, b"")
+            self.assertTrue(f_timed_out)
+            self.assertIsNone(f_err_res)
+            self.assertTrue(f_mock_proc.kill.called)
+
+
+class ProcessResultContractTest(unittest.TestCase):
+    """Contract tests for ProcessResult unfrozen mutations, scalar properties, and equality."""
+
+    def testProcessResultUnfrozenSetattr(self) -> None:
+        """Validates that unfrozen ProcessResult allows setting attributes via super().__setattr__."""
+        f_res = ProcessResult.__new__(ProcessResult)
+        f_res.m_returncode = 42
+        self.assertEqual(f_res.m_returncode, 42)
+
+        f_res2 = ProcessResult(0)
+        object.__setattr__(f_res2, "_frozen", False)
+        f_res2.m_returncode = 99
+        self.assertEqual(f_res2.m_returncode, 99)
+
+    def testProcessResultUnfrozenDelattr(self) -> None:
+        """Validates that unfrozen ProcessResult allows deleting attributes via super().__delattr__."""
+        f_res = ProcessResult.__new__(ProcessResult)
+        f_res.m_returncode = 42
+        self.assertTrue(hasattr(f_res, "m_returncode"))
+        del f_res.m_returncode
+        self.assertFalse(hasattr(f_res, "m_returncode"))
+
+        f_res2 = ProcessResult(0)
+        object.__setattr__(f_res2, "_frozen", False)
+        self.assertTrue(hasattr(f_res2, "m_returncode"))
+        del f_res2.m_returncode
+        self.assertFalse(hasattr(f_res2, "m_returncode"))
+
+    def testProcessResultAliasProperties(self) -> None:
+        """Validates alias properties: elapsedSeconds, spawn_error, spawnError."""
+        f_res = ProcessResult(
+            f_returncode=127,
+            f_elapsed_seconds=2.718,
+            f_spawn_error="binary not found",
+        )
+        self.assertEqual(f_res.elapsedSeconds, 2.718)
+        self.assertEqual(f_res.spawn_error, "binary not found")
+        self.assertEqual(f_res.spawnError, "binary not found")
+
+    def testProcessResultEqualityNonProcessResult(self) -> None:
+        """Validates equality comparisons between ProcessResult and non-ProcessResult objects return False."""
+        f_res = ProcessResult(f_returncode=0)
+        for f_other in [None, 0, "ProcessResult", {}, object()]:
+            with self.subTest(other=f_other):
+                self.assertFalse(f_res == f_other)
+                self.assertTrue(f_res != f_other)
 
 
 if __name__ == "__main__":

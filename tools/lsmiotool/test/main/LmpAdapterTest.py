@@ -70,7 +70,7 @@ class LmpAdapterTest(unittest.TestCase):
         - FS: -lsmio-fallback
         """
         f_setups = ["LSMIO", "LSMIO-MMAP", "FS"]
-        # Literal upstream tuning values from tools/bmtool/jobs/lmp-benchmark.sh:34-64
+        # Literal upstream tuning values (the LMP benchmark's per-node buffer sizes)
         f_upstream_tuning: Dict[int, Tuple[int, int]] = {
             1: (4, 32),
             2: (5, 32),
@@ -685,6 +685,407 @@ class LmpAdapterTest(unittest.TestCase):
             self.assertTrue(
                 os.path.isfile(os.path.join(f_staged_work, "ffield.reax.hns"))
             )
+
+    def testValidateAssetsArgumentValidation(self) -> None:
+        """Verify validateAssets argument validation (cases 033-A1, 033-A2)."""
+        # 033-A1: non-string / empty asset_root raises BenchmarkConfigurationError
+        for f_bad in (123, None, "", "   ", "\t"):
+            with self.subTest(asset_root=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.validateAssets(f_bad)  # type: ignore[arg-type]
+                self.assertIn("Asset root must be a non-empty string", str(f_cm.exception))
+
+        # 033-A2: NUL byte in asset_root
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.validateAssets("/tmp/assets\0dir")
+        self.assertIn("Asset root contains NUL byte:", str(f_cm.exception))
+
+    def testStageAssetsSourceAndDirectoryValidation(self) -> None:
+        """Verify stageAssets source and directory validation (cases 033-B1 to 033-B4)."""
+        # 033-B1: layout object with camelCase assetRoot
+        with tempfile.TemporaryDirectory() as f_temp_base:
+            f_asset_dir = os.path.join(f_temp_base, "assets")
+            os.makedirs(f_asset_dir, exist_ok=True)
+            for f_name in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
+                with open(os.path.join(f_asset_dir, f_name), "wb") as f_f:
+                    f_f.write(b"content")
+
+            class LayoutWithCamelCase:
+                assetRoot = f_asset_dir
+
+            f_staged_work = os.path.join(f_temp_base, "work")
+            f_hashes = self.m_adapter.stageAssets(LayoutWithCamelCase(), f_staged_work)
+            self.assertEqual(len(f_hashes), 3)
+            self.assertTrue(os.path.isfile(os.path.join(f_staged_work, "in.reaxc.hns")))
+
+        # 033-B2: invalid asset_source type raises BenchmarkConfigurationError
+        for f_bad in (123, None, [], {"root": "/tmp"}):
+            with self.subTest(asset_source=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.stageAssets(f_bad, "/tmp/work")  # type: ignore[arg-type]
+                self.assertIn(
+                    "Asset source must be a string path or RuntimeLayout object",
+                    str(f_cm.exception),
+                )
+
+        # 033-B3: working_dir non-string / empty
+        for f_bad in (123, None, "", "   "):
+            with self.subTest(work_dir=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.stageAssets("/tmp/assets", f_bad)  # type: ignore[arg-type]
+                self.assertIn("Working directory must be a non-empty string", str(f_cm.exception))
+
+        # 033-B4: working_dir contains NUL byte
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.stageAssets("/tmp/assets", "/tmp/work\0dir")
+        self.assertIn("Working directory contains NUL byte:", str(f_cm.exception))
+
+    def testStageAssetsFileSystemFailures(self) -> None:
+        """Verify stageAssets handles filesystem errors when creating directories or staging files (cases 033-C1, 033-C2)."""
+        with tempfile.TemporaryDirectory() as f_temp_base:
+            f_asset_dir = os.path.join(f_temp_base, "assets")
+            os.makedirs(f_asset_dir, exist_ok=True)
+            for f_name in ("in.reaxc.hns", "data.hns-equil", "ffield.reax.hns"):
+                with open(os.path.join(f_asset_dir, f_name), "wb") as f_f:
+                    f_f.write(b"content")
+
+            # 033-C1: os.makedirs failure
+            with patch("os.makedirs", side_effect=OSError("Makedirs permission denied")):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm_mkdir:
+                    self.m_adapter.stageAssets(f_asset_dir, "/tmp/fail_work")
+                self.assertIn("Failed to create LMP working directory", str(f_cm_mkdir.exception))
+                self.assertIsInstance(f_cm_mkdir.exception.__cause__, OSError)
+
+            # 033-C2: file write failure
+            f_real_open = open
+
+            def _failing_open(f_path: Any, f_mode: str = "r", *f_args: Any, **f_kwargs: Any) -> Any:
+                if "wb" in f_mode and "fail_stage" in str(f_path):
+                    raise OSError("Disk write error")
+                return f_real_open(f_path, f_mode, *f_args, **f_kwargs)
+
+            with patch("builtins.open", side_effect=_failing_open):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm_write:
+                    self.m_adapter.stageAssets(f_asset_dir, os.path.join(f_temp_base, "fail_stage"))
+                self.assertIn("Failed to stage LMP asset", str(f_cm_write.exception))
+                self.assertIsInstance(f_cm_write.exception.__cause__, OSError)
+
+    def testBuildCommandArgumentValidation(self) -> None:
+        """Verify buildCommand argument validation for executable, setup, replication, buffer, working_dir (cases 033-D1 to 033-D7)."""
+        # 033-D1: executable invalid / empty
+        for f_bad in (123, None, "", "   "):
+            with self.subTest(executable=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        f_bad,  # type: ignore[arg-type]
+                        f_setup="LSMIO",
+                        f_replication=4,
+                        f_buffer_size_mb=32,
+                    )
+                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+
+        # 033-D2: setup invalid / empty
+        for f_bad in (123, None, "", "   "):
+            with self.subTest(setup=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup=f_bad,  # type: ignore[arg-type]
+                        f_replication=4,
+                        f_buffer_size_mb=32,
+                    )
+                self.assertIn("Setup must be a non-empty string", str(f_cm.exception))
+
+        # 033-D3: unknown setup
+        for f_bad in ("UNKNOWN", "INVALID", "MPIIO"):
+            with self.subTest(setup=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup=f_bad,
+                        f_replication=4,
+                        f_buffer_size_mb=32,
+                    )
+                self.assertIn("Unknown LMP setup:", str(f_cm.exception))
+
+        # 033-D4: replication non-positive or non-int
+        for f_bad in (0, -1, -10, True, False, "4", 4.5):
+            with self.subTest(replication=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup="LSMIO",
+                        f_replication=f_bad,  # type: ignore[arg-type]
+                        f_buffer_size_mb=32,
+                    )
+                self.assertIn("LMP replication must be a positive integer", str(f_cm.exception))
+
+        # 033-D5: buffer_size_mb required for LSMIO and LSMIO-MMAP
+        for f_setup in ("LSMIO", "LSMIO-MMAP"):
+            with self.subTest(setup=f_setup):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup=f_setup,
+                        f_replication=4,
+                        f_buffer_size_mb=None,
+                    )
+                self.assertIn("LMP buffer_size_mb is required for setup", str(f_cm.exception))
+
+        # 033-D6: buffer_size_mb non-positive or non-int
+        for f_bad in (0, -1, -32, True, False, "32", 32.0):
+            with self.subTest(buffer_size_mb=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup="LSMIO",
+                        f_replication=4,
+                        f_buffer_size_mb=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("LMP buffer_size_mb must be a positive integer", str(f_cm.exception))
+
+        # 033-D7: working_dir invalid / empty
+        for f_bad in (123, None, "", "   "):
+            with self.subTest(working_dir=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup="LSMIO",
+                        f_replication=4,
+                        f_buffer_size_mb=32,
+                        f_working_dir=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Working directory must be a non-empty string", str(f_cm.exception))
+
+    def testBuildCommandPathValidation(self) -> None:
+        """Verify stdout_path and stderr_path validation in buildCommand (cases 033-E1 to 033-E4)."""
+        # 033-E1: stdout_path non-string / empty
+        for f_bad in (123, "", "   ", "\t"):
+            with self.subTest(stdout_path=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup="LSMIO",
+                        f_replication=4,
+                        f_buffer_size_mb=32,
+                        f_stdout_path=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Stdout path must be a non-empty string", str(f_cm.exception))
+
+        # 033-E2: stdout_path contains NUL byte
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.buildCommand(
+                self.m_executable,
+                f_setup="LSMIO",
+                f_replication=4,
+                f_buffer_size_mb=32,
+                f_stdout_path="/tmp/stdout\0.log",
+            )
+        self.assertIn("Stdout path contains NUL byte:", str(f_cm.exception))
+
+        # 033-E3: stderr_path non-string / empty
+        for f_bad in (123, "", "   ", "\n"):
+            with self.subTest(stderr_path=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup="LSMIO",
+                        f_replication=4,
+                        f_buffer_size_mb=32,
+                        f_stderr_path=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Stderr path must be a non-empty string", str(f_cm.exception))
+
+        # 033-E4: stderr_path contains NUL byte
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.buildCommand(
+                self.m_executable,
+                f_setup="LSMIO",
+                f_replication=4,
+                f_buffer_size_mb=32,
+                f_stderr_path="/tmp/stderr\0.log",
+            )
+        self.assertIn("Stderr path contains NUL byte:", str(f_cm.exception))
+
+    def testBuildCommandCustomSetupFallthrough(self) -> None:
+        """Verify buildCommand custom setup fall-through without backend flags (case 033-F1)."""
+        f_custom_adapter = LmpAdapter()
+        f_custom_adapter.ALLOWED_SETUPS = ("LSMIO", "LSMIO-MMAP", "FS", "CUSTOM")  # type: ignore[assignment]
+        f_cmd = f_custom_adapter.buildCommand(
+            self.m_executable,
+            f_setup="CUSTOM",
+            f_replication=4,
+            f_working_dir=self.m_work_dir,
+        )
+        f_expected_argv = (
+            self.m_executable,
+            "-in",
+            "in.reaxc.hns",
+            "-v",
+            "x",
+            "4",
+            "-v",
+            "y",
+            "4",
+            "-v",
+            "z",
+            "4",
+        )
+        self.assertEqual(f_cmd.argv, f_expected_argv)
+
+    def testBuildCommandConvenienceAliases(self) -> None:
+        """Verify convenience aliases buildBenchmarkCommand, createCommand, and build_command (case 033-G1)."""
+        f_kwargs = {
+            "f_executable": self.m_executable,
+            "f_setup": "LSMIO",
+            "f_replication": 4,
+            "f_buffer_size_mb": 32,
+            "f_working_dir": self.m_work_dir,
+        }
+        f_golden = self.m_adapter.buildCommand(**f_kwargs)
+        self.assertEqual(self.m_adapter.buildBenchmarkCommand(**f_kwargs), f_golden)
+        self.assertEqual(self.m_adapter.createCommand(**f_kwargs), f_golden)
+        self.assertEqual(self.m_adapter.build_command(**f_kwargs), f_golden)
+
+    def testProbeCapabilityValidation(self) -> None:
+        """Verify probeCapability executable validation (cases 033-H1, 033-H2)."""
+        # 033-H1: non-string / empty executable
+        for f_bad in (123, None, "", "   "):
+            with self.subTest(executable=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.probeCapability(f_executable=f_bad)  # type: ignore[arg-type]
+                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+
+        # 033-H2: NUL byte in executable
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.probeCapability(f_executable="/bin/lmp\0")
+        self.assertIn("Executable contains NUL byte:", str(f_cm.exception))
+
+    def testProbeCapabilityUnexpectedException(self) -> None:
+        """Verify unexpected runner exceptions are wrapped in BenchmarkProbeError (case 033-I1)."""
+        def _failingRunner(_argv: Sequence[str]) -> Any:
+            raise RuntimeError("Unexpected LMP probe crash")
+
+        with self.assertRaises(BenchmarkProbeError) as f_cm:
+            self.m_adapter.probeCapability(
+                self.m_executable,
+                f_runner=_failingRunner,
+                f_setup="LSMIO",
+            )
+        self.assertIn(
+            "LMP probe runner raised unexpected error for",
+            str(f_cm.exception),
+        )
+        self.assertIsInstance(f_cm.exception.__cause__, RuntimeError)
+
+    def testProbeCapabilityRunnerResultTypes(self) -> None:
+        """Verify probeCapability handling across runner result types (cases 033-J1 to 033-J6)."""
+        # 033-J1: result with exit_code attribute (no returncode)
+        class ExitCodeResult:
+            exit_code = 0
+            stdout = "LAMMPS buf"
+            stderr = ""
+
+        f_res_exit = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: ExitCodeResult(),
+            f_setup="LSMIO",
+        )
+        self.assertEqual(f_res_exit, CapabilityState.VERIFIED)
+
+        # 033-J2: 3-tuple result (exit_code, stdout, stderr)
+        f_res_tuple3 = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: (0, "LAMMPS buf", "stderr output"),
+            f_setup="LSMIO",
+        )
+        self.assertEqual(f_res_tuple3, CapabilityState.VERIFIED)
+
+        # 033-J3: 2-tuple result (exit_code, stdout)
+        f_res_tuple2 = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: (0, "LAMMPS buf"),
+            f_setup="LSMIO",
+        )
+        self.assertEqual(f_res_tuple2, CapabilityState.VERIFIED)
+
+        # 033-J4: int result (non-zero and zero)
+        with self.assertRaises(BenchmarkProbeError) as f_cm_fail:
+            self.m_adapter.probeCapability(
+                self.m_executable,
+                f_runner=lambda a: 1,
+                f_setup="LSMIO",
+            )
+        self.assertIn("probe failed with exit code 1", str(f_cm_fail.exception))
+
+        with self.assertRaises(BenchmarkProbeError) as f_cm_empty:
+            self.m_adapter.probeCapability(
+                self.m_executable,
+                f_runner=lambda a: 0,
+                f_setup="LSMIO",
+            )
+        self.assertIn("produced empty probe output", str(f_cm_empty.exception))
+
+        # 033-J5: str result
+        f_res_str = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: "LAMMPS -lsmio-buf-size-mb",
+            f_setup="LSMIO",
+        )
+        self.assertEqual(f_res_str, CapabilityState.VERIFIED)
+
+        # 033-J6: custom object with __str__ returning banner text
+        class CustomStrResult:
+            def __str__(self) -> str:
+                return "LAMMPS -lsmio-buf-size-mb"
+
+        f_res_custom = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: CustomStrResult(),
+            f_setup="LSMIO",
+        )
+        self.assertEqual(f_res_custom, CapabilityState.VERIFIED)
+
+    def testProbeCapabilityFallbackSetupAndUnrecognizedOutput(self) -> None:
+        """Verify fallback setup probing and unrecognized help output (cases 033-K1, 033-K2)."""
+        f_custom_adapter = LmpAdapter()
+        f_custom_adapter.ALLOWED_SETUPS = ("LSMIO", "LSMIO-MMAP", "FS", "BASE")  # type: ignore[assignment]
+
+        # 033-K1: fallback setup with recognized lammps banner
+        f_res = f_custom_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: (0, "LAMMPS 2023 version", ""),
+            f_setup="BASE",
+        )
+        self.assertEqual(f_res, CapabilityState.VERIFIED)
+
+        # 033-K2: fallback setup with unrecognized output
+        with self.assertRaises(BenchmarkProbeError) as f_cm:
+            f_custom_adapter.probeCapability(
+                self.m_executable,
+                f_runner=lambda a: (0, "unrecognized banner text with neither keyword", ""),
+                f_setup="BASE",
+            )
+        self.assertIn("produced unrecognized help output:", str(f_cm.exception))
+
+    def testProbeCapabilityNoneSetupDefaultsToLsmio(self) -> None:
+        """Verify that when f_setup is None, probeCapability defaults to LSMIO and returns VERIFIED."""
+        # Setup None defaults to LSMIO; when output exposes required 'buf' flag, capability is verified
+        f_res = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: (0, "LAMMPS (2 Aug 2023) -lsmio-buf-size-mb", ""),
+            f_setup=None,
+        )
+        self.assertEqual(f_res, CapabilityState.VERIFIED)
+
+        # Confirm it defaulted to LSMIO by checking that missing 'buf' raises BenchmarkProbeError for setup 'LSMIO'
+        with self.assertRaises(BenchmarkProbeError) as f_cm:
+            self.m_adapter.probeCapability(
+                self.m_executable,
+                f_runner=lambda a: (0, "LAMMPS (2 Aug 2023) without required flag", ""),
+                f_setup=None,
+            )
+        self.assertIn("required buffer flag ('buf') for setup 'LSMIO'", str(f_cm.exception))
 
 
 if __name__ == "__main__":

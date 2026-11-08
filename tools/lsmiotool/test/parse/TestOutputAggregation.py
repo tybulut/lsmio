@@ -43,12 +43,6 @@ class MockTwoNodeLsmioAggOutput(output.LsmioAggOutput):
     _node_counts: List[str] = ["1", "2"]
 
 
-class MockTwoNodeLmpAggOutput(output.LmpAggOutput):
-    """Subclass configured for 1 and 2 node testing."""
-
-    _node_counts: List[str] = ["1", "2"]
-
-
 class TestOutputAggregation(TestCase):
     """Unit tests for output aggregation, math stability, and reporting."""
 
@@ -96,30 +90,6 @@ class TestOutputAggregation(TestCase):
         lsm_agg = MockTwoNodeLsmioAggOutput(base)
         with self.assertRaises(output.MissingDataError):
             lsm_agg.getMap()
-
-    def testLmpOutputDirAndAggOutput(self) -> None:
-        """Test LMP directory traversal and aggregation."""
-        self.m_mock_gen.generateMockDirectoryTree(
-            self.m_temp_dir.name,
-            f_bench_type="lmp",
-            f_nodes=["1", "2"],
-            f_stripes=["4", "16"],
-            f_sizes=["64K", "1M", "8M"],
-        )
-
-        lmp_dir = output.LmpOutputDir(self.m_temp_dir.name)
-        d_map = lmp_dir.getMap()
-        self.assertIn("1", d_map)
-        self.assertIn("2", d_map)
-
-        lmp_agg = MockTwoNodeLmpAggOutput(self.m_temp_dir.name)
-        agg_map = lmp_agg.getMap()
-        self.assertIn("1", agg_map)
-        self.assertIn("2", agg_map)
-
-        # 2 files for node 2, each 123.45 -> sum = 246.90
-        sum_tp = agg_map["2"]["4"]["64K"]["write"]["max(MiB)/s"]
-        self.assertAlmostEqual(sum_tp, 246.90, places=4)
 
     def testGenerateReportsStage1AndStage2(self) -> None:
         """Test generation of Stage 1 intermediate and Stage 2 master report CSVs."""

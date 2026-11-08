@@ -28,9 +28,11 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import enum
 import os
 import sys
 import tempfile
+import types
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 import unittest
 from unittest.mock import MagicMock, patch
@@ -981,6 +983,381 @@ class LauncherTest(unittest.TestCase):
             )
             self.assertIs(f_mock_runner.m_invoked_kwargs[-1]["f_env"], f_own_env)
             self.assertEqual(f_own_env, {"PATH": "/usr/bin"})
+
+
+class FauxList:
+    """A container that evaluates to True in boolean contexts but yields zero elements when iterated."""
+
+    def __bool__(self) -> bool:
+        return True
+
+    def __iter__(self) -> Any:
+        return iter([])
+
+
+class LauncherContractTest(unittest.TestCase):
+    """Contract verification test suite for Launcher eliminating all coverage gaps in IDs 005 and 006."""
+
+    def testExtractPointAlternativeAttributesAndTuples(self) -> None:
+        """Validates point extraction from alternative attribute names, 1/2-tuples, ints, and unsupported types."""
+        # 1. task_count, tasks_per_node, node_count (lines 1309-1311, arc [1308, 1309])
+        f_pt_obj = types.SimpleNamespace(task_count=16, tasks_per_node=2, node_count=8)
+        self.assertEqual(Launcher._extractPoint(f_pt_obj), (16, 2, 8))
+
+        # 2. 2-tuple (tasks, ppn) with derived nodes (line 1320, 1346, arcs [1319, 1320], [1345, 1346])
+        self.assertEqual(Launcher._extractPoint((16, 2)), (16, 2, 8))
+
+        # 3. 1-tuple (tasks,) with default ppn=1 and derived nodes (lines 1322, 1323, arc [1321, 1322])
+        self.assertEqual(Launcher._extractPoint((8,)), (8, 1, 8))
+        self.assertEqual(Launcher._extractPoint([4]), (4, 1, 4))
+
+        # 4. int tasks with default ppn=1 and derived nodes (lines 1328-1330, arcs [1316, 1328], [1328, 1329])
+        self.assertEqual(Launcher._extractPoint(8), (8, 1, 8))
+
+        # 5. Unsupported type raises LauncherError (line 1332, arc [1328, 1332])
+        for f_bad_pt in (1.5, {1, 2}, set()):
+            with self.subTest(bad_pt=f_bad_pt):
+                with self.assertRaises(LauncherError) as f_ctx:
+                    Launcher._extractPoint(f_bad_pt)
+                self.assertIn("Unsupported scale point type", str(f_ctx.exception))
+
+    def testExtractPointValidationErrors(self) -> None:
+        """Validates error guards for non-positive ppn and nodes in _extractPoint."""
+        # Invalid ppn (line 1341, arc [1340, 1341])
+        # Note: must use tuple or object because dict.get("ppn") or 1 replaces falsy 0 with 1
+        for f_bad_ppn in (0, -1, True, "2"):
+            with self.subTest(bad_ppn=f_bad_ppn):
+                with self.assertRaises(LauncherError) as f_ctx:
+                    Launcher._extractPoint((8, f_bad_ppn, 1))
+                self.assertIn("Scale point ppn must be a positive integer", str(f_ctx.exception))
+
+        # Invalid nodes (line 1349, arc [1348, 1349])
+        # Note: must use tuple or object because dict.get("nodes") or ... replaces falsy 0 with None
+        for f_bad_nodes in (0, -1, True, "4"):
+            with self.subTest(bad_nodes=f_bad_nodes):
+                with self.assertRaises(LauncherError) as f_ctx:
+                    Launcher._extractPoint((8, 1, f_bad_nodes))
+                self.assertIn("Scale point nodes must be a positive integer", str(f_ctx.exception))
+
+    def testResolveSrunMpiEdgeCases(self) -> None:
+        """Validates profile srun_mpi resolution fallback paths and error translation."""
+        # 1. Unresolvable site profile raises LauncherError (lines 1391, 1392)
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._resolveSrunMpi("UNKNOWN_SITE_XYZ_999")
+        self.assertIn("Failed to resolve site profile", str(f_ctx.exception))
+
+        # 2. Object without .launcher having string .srun_mpi (lines 1398, 1399, arc [1396, 1398])
+        f_prof_srun_mpi = types.SimpleNamespace(srun_mpi="pmix")
+        self.assertEqual(Launcher._resolveSrunMpi(f_prof_srun_mpi), "pmix")
+
+        # 3. Object without .launcher having None or non-string .srun_mpi
+        f_prof_none = types.SimpleNamespace(srun_mpi=None)
+        self.assertIsNone(Launcher._resolveSrunMpi(f_prof_none))
+        f_prof_empty = types.SimpleNamespace()
+        self.assertIsNone(Launcher._resolveSrunMpi(f_prof_empty))
+
+    def testResolveSchedulerAndPartitionKindsAndPolicies(self) -> None:
+        """Validates SchedulerKind direct pass-through and LauncherPolicy kind matrix."""
+        # 1. Direct SchedulerKind pass-through (line 1430, arc [1429, 1430])
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(SchedulerKind.SLURM),
+            (SchedulerKind.SLURM, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(SchedulerKind.PBS),
+            (SchedulerKind.PBS, None),
+        )
+
+        # 2. LauncherPolicy variants (lines 1436-1441, arcs [1434, 1436], [1436, 1437], [1436, 1438], [1438, 1439], [1438, 1441])
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LauncherPolicy("pbs")),
+            (SchedulerKind.PBS, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LauncherPolicy("aprun")),
+            (SchedulerKind.PBS, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LauncherPolicy("direct")),
+            (SchedulerKind.FAKE, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LauncherPolicy("fake")),
+            (SchedulerKind.FAKE, None),
+        )
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._resolveSchedulerAndPartition(LauncherPolicy("custom_kind"))
+        self.assertIn("Unknown launcher policy kind", str(f_ctx.exception))
+
+    def testResolveSchedulerAndPartitionEnumsAndStrings(self) -> None:
+        """Validates LaunchMode enums and direct string scheduler names."""
+        # 1. LaunchMode enum values (lines 1445-1451, arcs [1444, 1445], [1446, 1447], [1446, 1448], [1448, 1449], [1448, 1450], [1450, 1451], [1450, 1453])
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LaunchMode.SLURM),
+            (SchedulerKind.SLURM, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LaunchMode.PBS),
+            (SchedulerKind.PBS, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LaunchMode.DIRECT),
+            (SchedulerKind.FAKE, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(LaunchMode.FAKE),
+            (SchedulerKind.FAKE, None),
+        )
+
+        # Enum with unhandled value falls through arc [1450, 1453]
+        class OtherEnum(enum.Enum):
+            OTHER = "other"
+
+        with self.assertRaises(LauncherError):
+            Launcher._resolveSchedulerAndPartition(OtherEnum.OTHER)
+
+        # 2. Direct string names "pbs", "aprun" (line 1461, arc [1460, 1461])
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition("pbs"),
+            (SchedulerKind.PBS, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition("aprun"),
+            (SchedulerKind.PBS, None),
+        )
+
+    def testResolveSchedulerAndPartitionAttributes(self) -> None:
+        """Validates attribute-based scheduler extraction and fallback error handling."""
+        # Lines 1482-1489, arcs [1480, 1482], [1482, 1483], [1482, 1505], [1484, 1485], [1484, 1486], [1486, 1487], [1486, 1488], [1488, 1489], [1488, 1505]
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="srun")),
+            (SchedulerKind.SLURM, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="aprun")),
+            (SchedulerKind.PBS, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="direct")),
+            (SchedulerKind.FAKE, None),
+        )
+        with self.assertRaises(LauncherError):
+            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="invalid"))
+        with self.assertRaises(LauncherError):
+            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler=12345))
+
+    def testResolveSchedulerAndPartitionDictContainers(self) -> None:
+        """Validates dictionary profile scheduler extraction and error paths."""
+        # Lines 1498-1503, arcs [1494, 1502], [1496, 1498], [1498, 1499], [1498, 1500], [1500, 1501], [1500, 1505], [1502, 1503], [1502, 1505]
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition({"scheduler": "pbs"}),
+            (SchedulerKind.PBS, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition({"launcher": "direct"}),
+            (SchedulerKind.FAKE, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition({"scheduler": SchedulerKind.PBS}),
+            (SchedulerKind.PBS, None),
+        )
+        with self.assertRaises(LauncherError):
+            Launcher._resolveSchedulerAndPartition({"scheduler": "unknown_scheduler"})
+        with self.assertRaises(LauncherError):
+            Launcher._resolveSchedulerAndPartition({"scheduler": 9999})
+
+    def testResolveSchedulerAndPartitionSlurmPartitions(self) -> None:
+        """Validates Slurm partition extraction across resources dict, top-level attributes, and name fallbacks."""
+        # 1. Line 1533, arcs [1529, 1543], [1532, 1533], [1534, 1543]: resources dict with shape dict
+        f_prof_res_dict = types.SimpleNamespace(
+            scheduler="slurm", resources={"small": {"partition": "dict_part"}}
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(f_prof_res_dict),
+            (SchedulerKind.SLURM, "dict_part"),
+        )
+
+        # Empty resources dict falls through [1529, 1543]
+        f_prof_res_empty = types.SimpleNamespace(scheduler="slurm", resources={})
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(f_prof_res_empty),
+            (SchedulerKind.SLURM, None),
+        )
+
+        # 2. Line 1541, arcs [1536, 1543], [1540, 1541]: dict profile with resources dict
+        f_dict_prof_res = {
+            "scheduler": "slurm",
+            "resources": {"small": {"partition": "slurm_part"}},
+        }
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(f_dict_prof_res),
+            (SchedulerKind.SLURM, "slurm_part"),
+        )
+
+        # Dict profile with non-dict/None resources triggers arc [1536, 1543]
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition({"scheduler": "slurm", "resources": None}),
+            (SchedulerKind.SLURM, None),
+        )
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition({"scheduler": "slurm", "resources": {}}),
+            (SchedulerKind.SLURM, None),
+        )
+
+        # 3. Line 1548, arc [1543, 1548]: object with .partition
+        f_prof_part_attr = types.SimpleNamespace(scheduler="slurm", partition="custom_part")
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(f_prof_part_attr),
+            (SchedulerKind.SLURM, "custom_part"),
+        )
+
+        # 4. Line 1554, arc [1549, 1554]: dict profile with top-level partition
+        f_dict_top_part = {"scheduler": "slurm", "partition": "dict_top_part"}
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(f_dict_top_part),
+            (SchedulerKind.SLURM, "dict_top_part"),
+        )
+
+        # 5. Line 1559, arc [1558, 1559]: profile name fallback to "ARCHER2"
+        f_archer2_fallback = types.SimpleNamespace(scheduler="slurm", name="ARCHER2")
+        self.assertEqual(
+            Launcher._resolveSchedulerAndPartition(f_archer2_fallback),
+            (SchedulerKind.SLURM, "standard"),
+        )
+
+    def testExtractCommandArgvVariantsAndEdgeCases(self) -> None:
+        """Validates command extraction from arguments attribute, single strings, and empty container checks."""
+        # 1. Line 1583, arc [1582, 1583]: .arguments attribute
+        f_cmd_args = types.SimpleNamespace(arguments=["ior", "-w", "-r"])
+        self.assertEqual(Launcher._extractCommandArgv(f_cmd_args), ["ior", "-w", "-r"])
+
+        # 2. Line 1589, arc [1587, 1589]: single command string
+        self.assertEqual(Launcher._extractCommandArgv("ior -w -r"), ["ior -w -r"])
+
+        # 3. Line 1591, arc [1586, 1591]: unsupported command container type
+        for f_bad_cmd in (12345, {"cmd": "ior"}):
+            with self.subTest(bad_cmd=f_bad_cmd):
+                with self.assertRaises(LauncherError) as f_ctx:
+                    Launcher._extractCommandArgv(f_bad_cmd)
+                self.assertIn("Unsupported command container type", str(f_ctx.exception))
+
+        # 4. Line 1610, arc [1609, 1610]: truthy container yielding zero items
+        f_truthy_empty = types.SimpleNamespace(argv=FauxList())
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._extractCommandArgv(f_truthy_empty)
+        self.assertIn("Command argv cannot be empty", str(f_ctx.exception))
+
+    def testValidationGuards(self) -> None:
+        """Validates argument guards for manifest path, point ID, and combination descriptor."""
+        # 1. Manifest path NUL byte (line 1635, arc [1634, 1635])
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._validateManifestPath("/tmp/m\0.json")
+        self.assertIn("Manifest path contains NUL byte", str(f_ctx.exception))
+
+        # 2. Point ID empty and NUL byte (lines 1645, 1647, arcs [1644, 1645], [1646, 1647])
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._validatePointId("   ")
+        self.assertIn("Point ID cannot be empty", str(f_ctx.exception))
+
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._validatePointId("p0\0bad")
+        self.assertIn("Point ID contains NUL byte", str(f_ctx.exception))
+
+        # 3. Combination descriptor empty and NUL byte (lines 1679, 1681, arcs [1678, 1679], [1680, 1681])
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._validateCombinationDesc("   ")
+        self.assertIn("Combination descriptor cannot be empty", str(f_ctx.exception))
+
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher._validateCombinationDesc("c16_b8M\0bad")
+        self.assertIn("Combination descriptor contains NUL byte", str(f_ctx.exception))
+
+    def testBuildArgvUnsupportedScheduler(self) -> None:
+        """Validates unsupported scheduler fallthrough in buildSharedArgv and buildRankWorkerArgv."""
+        with patch.object(Launcher, "_resolveSchedulerAndPartition", return_value=("CUSTOM", None)):
+            # Line 1740, arc [1736, 1740]
+            with self.assertRaises(LauncherError) as f_ctx:
+                Launcher.buildSharedArgv(None, (8, 1, 8), ["ior"])
+            self.assertIn("Unsupported scheduler kind: CUSTOM", str(f_ctx.exception))
+
+            # Line 1817, arc [1813, 1817]
+            with self.assertRaises(LauncherError) as f_ctx:
+                Launcher.buildRankWorkerArgv(
+                    None, (8, 1, 8), "/bin/worker", "/tmp/m.json", "p0", "c16_b8M"
+                )
+            self.assertIn("Unsupported scheduler kind: CUSTOM", str(f_ctx.exception))
+
+    def testLaunchExecutionRunnerFallbackAndExceptions(self) -> None:
+        """Validates runner kwargs fallback, default instantiation, caller env, and unexpected exceptions."""
+        f_mock_runner = MockProcessRunner(f_returncode=0)
+
+        # 1. launchShared runner kwargs fallback (line 1879, arc [1878, 1879])
+        f_res1 = Launcher.launchShared(
+            "fake", (8, 1, 8), ["ior"], runner=f_mock_runner
+        )
+        self.assertEqual(f_res1.returncode, 0)
+        self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
+
+        # 2. launchShared default ProcessRunner instantiation (line 1881, arc [1880, 1881])
+        with patch.object(ProcessRunner, "run", return_value=ProcessResult(0)) as f_mock_run:
+            f_res2 = Launcher.launchShared("fake", (8, 1, 8), ["ior"])
+            self.assertEqual(f_res2.returncode, 0)
+            f_mock_run.assert_called_once()
+
+        # 3. launchShared with caller env (arc [1894, 1900])
+        f_mock_runner_env = MockProcessRunner(f_returncode=0)
+        f_res3 = Launcher.launchShared(
+            "fake", (8, 1, 8), ["ior"], f_runner=f_mock_runner_env, f_env={"MY_CUSTOM_VAR": "val"}
+        )
+        self.assertEqual(f_res3.returncode, 0)
+        self.assertEqual(
+            f_mock_runner_env.m_invoked_kwargs[0]["f_env"], {"MY_CUSTOM_VAR": "val"}
+        )
+
+        # 4. launchShared unexpected exception translation (lines 1921, 1922)
+        f_crash_runner = MockProcessRunner(
+            f_exception_to_raise=RuntimeError("Subprocess fatal error")
+        )
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher.launchShared("fake", (8, 1, 8), ["ior"], f_runner=f_crash_runner)
+        self.assertIn("Unexpected error executing shared launch", str(f_ctx.exception))
+        self.assertIsInstance(f_ctx.exception.__cause__, RuntimeError)
+
+        # 5. launchRankWorkers runner kwargs fallback (line 1969, arc [1968, 1969])
+        f_mock_rank_runner = MockProcessRunner(f_returncode=0)
+        f_res4 = Launcher.launchRankWorkers(
+            "fake",
+            (8, 1, 8),
+            "/bin/worker",
+            "/tmp/m.json",
+            "p0",
+            "c16_b8M",
+            runner=f_mock_rank_runner,
+        )
+        self.assertEqual(f_res4.returncode, 0)
+        self.assertEqual(len(f_mock_rank_runner.m_invoked_argv), 1)
+
+        # 6. launchRankWorkers default ProcessRunner instantiation (line 1971, arc [1970, 1971])
+        with patch.object(ProcessRunner, "run", return_value=ProcessResult(0)) as f_mock_run_rank:
+            f_res5 = Launcher.launchRankWorkers(
+                "fake", (8, 1, 8), "/bin/worker", "/tmp/m.json", "p0", "c16_b8M"
+            )
+            self.assertEqual(f_res5.returncode, 0)
+            f_mock_run_rank.assert_called_once()
+
+        # 7. launchRankWorkers unexpected exception translation (lines 2012, 2013)
+        with self.assertRaises(LauncherError) as f_ctx:
+            Launcher.launchRankWorkers(
+                "fake",
+                (8, 1, 8),
+                "/bin/worker",
+                "/tmp/m.json",
+                "p0",
+                "c16_b8M",
+                f_runner=f_crash_runner,
+            )
+        self.assertIn("Unexpected error executing rank worker launch", str(f_ctx.exception))
+        self.assertIsInstance(f_ctx.exception.__cause__, RuntimeError)
 
 
 if __name__ == "__main__":

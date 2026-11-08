@@ -28,14 +28,14 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-import os
-import tempfile
+import math
 import unittest
 from unittest.mock import patch
 
-from lsmiotool.lib.main import (
-    CompareVariantsMain,
+from lsmiotool.lib.compare import (
     PairedVariantRun,
+    pairDirectories,
+    percentChange,
 )
 from lsmiotool.lib.variants import (
     VariantResolutionResult,
@@ -43,7 +43,7 @@ from lsmiotool.lib.variants import (
 
 
 class PairedVariantRunTest(unittest.TestCase):
-    """Unit tests for PairedVariantRun model, directory pairing, and delta computation."""
+    """Unit tests for PairedVariantRun model, directory pairing, and percentChange."""
 
     def testModelInstantiationAndSerialization(self) -> None:
         """Asserts PairedVariantRun fields, toDict(), fromDict(), and round-trip equality."""
@@ -72,8 +72,12 @@ class PairedVariantRunTest(unittest.TestCase):
         self.assertEqual(pair.variant, "footer")
         self.assertEqual(pair.collision, 1)
         self.assertEqual(pair.display_label, "footer-1")
-        self.assertEqual(pair.run_dir, "/tmp/archive/outputs-native-footer:run-1")
-        self.assertEqual(pair.base_dir, "/tmp/archive/outputs-native-footer:base-1")
+        self.assertEqual(
+            pair.run_dir, "/tmp/archive/outputs-native-footer:run-1"
+        )
+        self.assertEqual(
+            pair.base_dir, "/tmp/archive/outputs-native-footer:base-1"
+        )
 
         # toDict serialization
         d = pair.toDict()
@@ -81,17 +85,19 @@ class PairedVariantRunTest(unittest.TestCase):
         self.assertEqual(d["variant"], "footer")
         self.assertEqual(d["collision"], 1)
         self.assertEqual(d["display_label"], "footer-1")
-        self.assertEqual(d["run_dir"], "/tmp/archive/outputs-native-footer:run-1")
-        self.assertEqual(d["base_dir"], "/tmp/archive/outputs-native-footer:base-1")
+        self.assertEqual(
+            d["run_dir"], "/tmp/archive/outputs-native-footer:run-1"
+        )
+        self.assertEqual(
+            d["base_dir"], "/tmp/archive/outputs-native-footer:base-1"
+        )
 
         # fromDict deserialization
         restored = PairedVariantRun.fromDict(d)
         self.assertEqual(pair, restored)
 
     def testPairDirectoriesTwinMatching(self) -> None:
-        """Asserts _pairDirectories matches :run with twin :base sharing the same collision index."""
-        cm = CompareVariantsMain(f_archive_folder="/tmp/fake")
-
+        """Asserts pairDirectories matches :run with twin :base sharing the same collision index."""
         res_run = VariantResolutionResult(
             raw_directory="outputs-native-footer:run-1",
             backend="native",
@@ -114,18 +120,20 @@ class PairedVariantRunTest(unittest.TestCase):
             (res_base, "/path/to/outputs-native-footer:base-1"),
         ]
 
-        paired = cm._pairDirectories(valid_runs)
+        paired = pairDirectories(valid_runs)
         self.assertEqual(len(paired), 1)
         self.assertEqual(paired[0].backend, "native")
         self.assertEqual(paired[0].variant, "footer")
         self.assertEqual(paired[0].collision, 1)
-        self.assertEqual(paired[0].run_dir, "/path/to/outputs-native-footer:run-1")
-        self.assertEqual(paired[0].base_dir, "/path/to/outputs-native-footer:base-1")
+        self.assertEqual(
+            paired[0].run_dir, "/path/to/outputs-native-footer:run-1"
+        )
+        self.assertEqual(
+            paired[0].base_dir, "/path/to/outputs-native-footer:base-1"
+        )
 
     def testPairDirectoriesFallbackToStandaloneBase(self) -> None:
-        """Asserts _pairDirectories matches :run with standalone baseline if twin :base is absent."""
-        cm = CompareVariantsMain(f_archive_folder="/tmp/fake")
-
+        """Asserts pairDirectories matches :run with standalone baseline if twin :base is absent."""
         res_run = VariantResolutionResult(
             raw_directory="outputs-native-footer:run",
             backend="native",
@@ -148,15 +156,15 @@ class PairedVariantRunTest(unittest.TestCase):
             (res_standalone_base, "/path/to/outputs-native"),
         ]
 
-        paired = cm._pairDirectories(valid_runs)
+        paired = pairDirectories(valid_runs)
         self.assertEqual(len(paired), 1)
-        self.assertEqual(paired[0].run_dir, "/path/to/outputs-native-footer:run")
+        self.assertEqual(
+            paired[0].run_dir, "/path/to/outputs-native-footer:run"
+        )
         self.assertEqual(paired[0].base_dir, "/path/to/outputs-native")
 
     def testPairDirectoriesOrphanedRunOmitted(self) -> None:
         """Asserts orphaned :run with no matching baseline is omitted with warning."""
-        cm = CompareVariantsMain(f_archive_folder="/tmp/fake")
-
         res_run = VariantResolutionResult(
             raw_directory="outputs-native-footer:run",
             backend="native",
@@ -169,54 +177,20 @@ class PairedVariantRunTest(unittest.TestCase):
         valid_runs = [(res_run, "/path/to/outputs-native-footer:run")]
 
         with patch("lsmiotool.lib.log.Console.warning") as mock_warn:
-            paired = cm._pairDirectories(valid_runs)
+            paired = pairDirectories(valid_runs)
             self.assertEqual(len(paired), 0)
             mock_warn.assert_called_once()
-            self.assertIn("Orphaned variant run omitted", mock_warn.call_args[0][0])
-
-    def testComputeDeltaRelativeAndAbsolute(self) -> None:
-        """Asserts _computeDelta calculates relative % and absolute throughput preserving negatives (INV-PAIR-4)."""
-        cm = CompareVariantsMain(f_archive_folder="/tmp/fake")
-
-        # Positive improvement: 120 vs 100 -> +20.0%
-        self.assertAlmostEqual(cm._computeDelta(120.0, 100.0, "percent"), 20.0)
-
-        # Negative regression: 80 vs 100 -> -20.0% (preserved, NOT clamped)
-        self.assertAlmostEqual(cm._computeDelta(80.0, 100.0, "percent"), -20.0)
-
-        # Zero base guard: returns 0.0
-        self.assertEqual(cm._computeDelta(80.0, 0.0, "percent"), 0.0)
-        self.assertEqual(cm._computeDelta(80.0, -5.0, "percent"), 0.0)
-
-        # Absolute delta
-        self.assertAlmostEqual(cm._computeDelta(125.0, 100.0, "abs"), 25.0)
-        self.assertAlmostEqual(cm._computeDelta(75.0, 100.0, "abs"), -25.0)
-
-    def testGenerateDeltaChartExecution(self) -> None:
-        """Asserts _generateDeltaChart produces delta chart file with proper naming."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            archive_dir = os.path.join(temp_dir, "archive")
-            out_dir = os.path.join(temp_dir, "charts")
-            os.makedirs(archive_dir)
-
-            cm = CompareVariantsMain(f_archive_folder=archive_dir, f_output_dir=out_dir)
-            delta_data = [("footer", 15.0), ("btree", -8.5)]
-
-            chart_path = cm._generateDeltaChart(
-                op="read",
-                stripes=4,
-                blocksize="1M",
-                delta_data=delta_data,
-                metric="percent",
-                out_dir=out_dir,
-            )
-
-            self.assertTrue(os.path.isfile(chart_path))
             self.assertIn(
-                "compare-variants-delta-archive-read-4-1M.png",
-                os.path.basename(chart_path),
+                "Orphaned variant run omitted", mock_warn.call_args[0][0]
             )
-            self.assertGreater(os.path.getsize(chart_path), 0)
+
+    def testPercentChange(self) -> None:
+        """Asserts percentChange relative delta, non-positive bases, and NaN handling."""
+        self.assertAlmostEqual(percentChange(120.0, 100.0), 20.0)
+        self.assertAlmostEqual(percentChange(80.0, 100.0), -20.0)
+        self.assertTrue(math.isnan(percentChange(80.0, 0.0)))
+        self.assertTrue(math.isnan(percentChange(80.0, -5.0)))
+        self.assertTrue(math.isnan(percentChange(float("nan"), 100.0)))
 
 
 if __name__ == "__main__":

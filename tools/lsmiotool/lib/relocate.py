@@ -28,7 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""ARCHER2 relocation of the lsmiotool worker tree off /home (bmtool `bmtool:112-142`).
+"""ARCHER2 relocation of the lsmiotool worker tree off /home.
 
 ARCHER2 compute nodes cannot read /home. When the worker that the job script will exec lives
 under /home (or any BM_HOME_PREFIXES entry), the files it needs are mirrored with

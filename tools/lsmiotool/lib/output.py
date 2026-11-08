@@ -225,60 +225,6 @@ class LsmioOutputDir(IorOutputDir):
     pass
 
 
-class LmpOutputDir(IorOutputDir):
-    """Directory traversal specialized for LMP output files."""
-
-    def getMap(self) -> Dict[str, Dict[str, Dict[str, Dict[str, FileMetadata]]]]:
-        """Get LMP output file mapping.
-
-        Returns:
-            Dictionary mapping of LMP output files organized by node count, stripe count,
-            and stripe size.
-        """
-        meta_dict: Dict[str, Dict[str, Dict[str, Dict[str, FileMetadata]]]] = {}
-
-        for field_size in self.m_dir_recursive:
-            value_size = self.m_dir_recursive[field_size]
-            if not isinstance(value_size, dict):
-                continue
-
-            if field_size not in meta_dict:
-                meta_dict[field_size] = {}
-
-            for date_dir in value_size:
-                value_date = value_size[date_dir]
-                if not isinstance(value_date, dict):
-                    continue
-
-                for key in value_date:
-                    val = value_date[key]
-                    if isinstance(val, dict):
-                        continue
-
-                    pattern = r"out-[a-zA-Z\d-]*-(\d+)-(\d+[KMGTB])-.*"
-                    match = re.match(pattern, key)
-                    if not match:
-                        continue
-
-                    stripe_count = str(match.group(1))
-                    stripe_size = str(match.group(2))
-
-                    if stripe_count not in meta_dict[field_size]:
-                        meta_dict[field_size][stripe_count] = {}
-                    if stripe_size not in meta_dict[field_size][stripe_count]:
-                        meta_dict[field_size][stripe_count][stripe_size] = {}
-
-                    key_dir_list = [field_size, date_dir, key]
-                    meta_dict[field_size][stripe_count][stripe_size][key] = {
-                        "size": val,
-                        "path": os.path.join(self.m_root_dir, *key_dir_list),
-                    }
-
-        return meta_dict
-
-    get_map = getMap
-
-
 class IorAggOutput(DebuggableObject):
     """Aggregate IOR output data processor."""
 
@@ -428,7 +374,7 @@ class IorAggOutput(DebuggableObject):
             elif isinstance(f_agg_data, str):
                 f.write(f_agg_data)
 
-    def generateReports(self, f_out_dir: Optional[str] = None) -> None:
+    def generateReports(self, f_out_dir: Optional[str] = None) -> Optional[str]:
         """Generate ior-report.csv exactly like tools/bmtool/parse/ior-parse.sh.
 
         Every non-empty file <outputs>/*/*/* contributes its last two write/read lines
@@ -438,12 +384,16 @@ class IorAggOutput(DebuggableObject):
         Args:
             f_out_dir: Destination directory for the report (defaults to m_out_dir).
                 IOR outputs are always read from m_out_dir.
+
+        Returns:
+            The report path, or None when there were no summary rows.
         """
         report_file = data.generateBmtoolIorReport(
             self.m_out_dir, f_report_dir=f_out_dir or self.m_out_dir
         )
         if report_file:
             Console.debug(f"Generated IOR master report: {report_file}")
+        return report_file
 
 
 class LsmioAggOutput(IorAggOutput):
@@ -812,130 +762,6 @@ def ensureLsmioReports(
         return False
 
 
-class LmpAggOutput(IorAggOutput):
-    """Aggregate LMP output data processor."""
-
-    def __init__(self, f_output_dir: str) -> None:
-        """Initialize LMP output data processor.
-
-        The per-node map behind getMap() is built on first use, so report generation
-        on a partial run never raises MissingDataError.
-
-        Args:
-            f_output_dir: Directory containing LMP output files
-        """
-        super(IorAggOutput, self).__init__()
-        self.m_out_dir = f_output_dir
-        self.m_agg_data = None  # type: ignore[assignment]
-
-    def _buildAggData(self) -> AggData:
-        """Aggregate every node/stripe combination present (strict file counts)."""
-        lmp_dir = LmpOutputDir(self.m_out_dir)
-        dir_map = lmp_dir.getMap()
-        agg_data: AggData = {}
-
-        for n_count in self._node_counts:
-            agg_data[n_count] = {}
-            for s_count in self._stripe_counts:
-                agg_data[n_count][s_count] = {}
-                for s_size in self._stripe_sizes:
-                    agg_data[n_count][s_count][s_size] = []
-                    if (
-                        n_count not in dir_map
-                        or s_count not in dir_map[n_count]
-                        or s_size not in dir_map[n_count][s_count]
-                    ):
-                        continue
-                    agg_data[n_count][s_count][s_size] = self._processAggFiles(
-                        dir_map[n_count][s_count][s_size], n_count
-                    )
-        return agg_data
-
-    @property
-    def agg_data(self) -> AggData:
-        return self._lazyAggData()
-
-    def getMap(self) -> AggData:
-        """Get the aggregated data map.
-
-        Raises:
-            MissingDataError: If a node directory holds fewer files than nodes.
-        """
-        return self._lazyAggData()
-
-    get_map = getMap
-
-    def _processAggFiles(
-        self, f_files: Dict[str, FileMetadata], f_count: str
-    ) -> AccessData:
-        """Process aggregated LMP output files.
-
-        Args:
-            f_files: Dictionary of output files to process
-            f_count: Expected number of files
-
-        Returns:
-            Aggregated performance data
-        """
-        sim_data: List[Dict[str, Any]] = []
-
-        for file in sorted(f_files.keys()):
-            file_meta = f_files[file]
-            sr_data = data.LmpSingleRunData(file_meta["path"])
-            sim_data.append(sr_data.getMap())
-
-        if len(sim_data) != int(f_count):
-            self._log_error({0: "number of simulation data does not match node count"})
-            raise MissingDataError(
-                f"Number of simulation data files ({len(sim_data)}) does not match expected node count ({f_count})"
-            )
-
-        tp_list: List[float] = [
-            data.parseFloat(s["write"].get("throughput", 0.0)) for s in sim_data
-        ]
-        sum_tp = math.fsum(tp_list)
-
-        agg_map: AccessData = {
-            "read": {
-                "max(MiB)/s": 0.0,
-                "min(MiB/s)": 0.0,
-                "mean(MiB/s)": 0.0,
-                "total(MiB)": 0.0,
-                "total(Ops)": 0.0,
-                "iteration": 0,
-            },
-            "write": {
-                "max(MiB)/s": sum_tp,
-                "min(MiB/s)": sum_tp,
-                "mean(MiB/s)": sum_tp,
-                "total(MiB)": sum_tp,
-                "total(Ops)": 0.0,
-                "iteration": 0,
-            },
-        }
-        return agg_map
-
-    _process_agg_files = _processAggFiles
-
-    def generateReports(self, f_out_dir: Optional[str] = None) -> None:
-        """Generate lmp-report.csv exactly like tools/bmtool/parse/lmp-parse.sh.
-
-        One row per node count (1..48), stripe count and block size that has output:
-        'n,rf,bs,' followed by the last '^.write,' line of
-        <outputs>/n/*/out-*-rf-bs-*.txt up to its first colon. Missing combinations are
-        skipped and a report without rows is not written.
-
-        Args:
-            f_out_dir: Destination directory for the report (defaults to m_out_dir).
-                LMP outputs are always read from m_out_dir.
-        """
-        report_file = data.generateBmtoolLmpReport(
-            self.m_out_dir, f_report_dir=f_out_dir or self.m_out_dir
-        )
-        if report_file:
-            Console.debug(f"Generated LMP master report: {report_file}")
-
-
 class IorFullOutput(IorAggOutput):
     """Full IOR output data processor."""
 
@@ -979,47 +805,6 @@ class IorFullOutput(IorAggOutput):
 
 class LsmioFullOutput(LsmioAggOutput):
     """Full LSMIO output data processor."""
-
-    def getMap(self) -> AggData:
-        """Get the complete aggregated data map.
-
-        Returns:
-            Complete mapping of aggregated performance data
-        """
-        return self._lazyAggData()
-
-    get_map = getMap
-
-    def timeSeries(
-        self, f_read: bool, f_stripe_count: int, f_stripe_size: str
-    ) -> Tuple[List[str], List[float]]:
-        """Get time series data for a specific stripe configuration.
-
-        Args:
-            f_read: Whether to get read or write data
-            f_stripe_count: Stripe count
-            f_stripe_size: Stripe size
-
-        Returns:
-            Time series data for the specified stripe configuration
-        """
-        sum_data = self.getMap()
-        access = "read" if f_read else "write"
-        x_series = self._node_counts
-        y_series: List[float] = []
-        for n_count in x_series:
-            y_series.append(
-                sum_data[n_count][str(f_stripe_count)][f_stripe_size][access][
-                    "max(MiB)/s"
-                ]
-            )
-        return (x_series, y_series)
-
-    time_series = timeSeries
-
-
-class LmpFullOutput(LmpAggOutput):
-    """Full LMP output data processor."""
 
     def getMap(self) -> AggData:
         """Get the complete aggregated data map.

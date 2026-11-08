@@ -43,6 +43,7 @@ import sys
 import tempfile
 from typing import Dict, List, Mapping, Optional, Tuple
 import unittest
+import unittest.mock
 
 from lsmiotool.lib.artifacts import (
     STANDARD_COMBINATION_TUPLES,
@@ -339,6 +340,39 @@ class EpocppWorkerTest(_EpocppWorkerHarness):
             self.assertEqual(
                 f_f.read(), EpocppAdapter().renderDeck(f_template, "ADIOS2-BW", "large")
             )
+
+    def testAControllerInstanceReadsTheDeckFromItsAssetSource(self) -> None:
+        """run() on an instance takes the constructor's f_asset_source, as the
+        installed lsmiotool-worker passes it (share/lsmio/lmp-reaxff): the deck comes
+        from the epocpp template beside it, not from the source tree's share/."""
+        f_share = os.path.join(self.m_temp_dir, "installed", "share", "lsmio")
+        f_assets = os.path.join(f_share, "lmp-reaxff")
+        os.makedirs(f_assets)
+        os.makedirs(os.path.join(f_share, EpocppAdapter.TEMPLATE_DIR))
+        with open(EpocppAdapter.templatePath(_SHARE_ROOT)) as f_f:
+            f_template = "# the installed template\n" + f_f.read()
+        with open(EpocppAdapter.templatePath(f_share), "w") as f_f:
+            f_f.write(f_template)
+        f_plan, f_layout = self._manifest("POSIX", 1)
+        f_environ = {
+            "HOME": self.m_home,
+            "PATH": f"{self.m_bin}:{os.environ.get('PATH', '')}",
+            "LSMIO_RANK": "0",
+            "SLURMD_NODENAME": "node042",
+            "MOCK_LOG": self.m_log,
+        }
+        with unittest.mock.patch.dict(os.environ, f_environ):
+            f_rc = AllocationController(f_asset_source=f_assets).run(
+                f_manifest_path=f_layout.manifestPath, f_point_id="00-tasks-1"
+            )
+        self.assertEqual(f_rc, 0)
+        f_sp = f_plan.scale_points[0]
+        for f_rf, f_bs in STANDARD_COMBINATION_TUPLES:
+            f_work = f_layout.pointCombinationWorkDir(f_sp, f"c{f_rf}_b{f_bs}", 0)
+            with open(os.path.join(f_work, "input.deck")) as f_f:
+                self.assertEqual(
+                    f_f.read(), EpocppAdapter().renderDeck(f_template, "POSIX", "small")
+                )
 
     def testAFailedPurgeFailsTheCombination(self) -> None:
         f_plan, f_layout = self._manifest("POSIX", 2)

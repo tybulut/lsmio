@@ -30,7 +30,9 @@
 
 import copy
 import os
+from typing import Any, Dict, List, Optional, Tuple
 import unittest
+from unittest.mock import patch
 
 from lsmiotool.lib.profile import ProfileDocument, ProfileLoader, ProfileRecord
 from lsmiotool.lib.site import (
@@ -603,7 +605,7 @@ class SiteResolverTest(unittest.TestCase):
             EnvironmentResolver.detect(f_env={"LSMIO_ENV": "UNKNOWN_SITE"})
 
     def testDetectionIsFirstMatchInBmtoolOrder(self) -> None:
-        """Hosts matching several rules resolve first-match: viking, viking2, archer2, isambard (H12)."""
+        """Hosts matching several rules resolve first-match: viking, viking2, archer2, isambard."""
         # ARCHER2 compute/login nodes: nid* in group archer2 is ARCHER2, not ISAMBARD/ambiguous
         self.assertEqual(
             EnvironmentResolver.detect(
@@ -806,3 +808,484 @@ class SiteResolverTest(unittest.TestCase):
                 f_home="/home/alice/../escape",
                 f_document=self.m_profile_doc,
             )
+
+    def _vikingProfile(self) -> SiteProfile:
+        return EnvironmentResolver.resolveProfile(
+            "VIKING",
+            f_user=self.m_test_user,
+            f_home=self.m_test_home,
+            f_document=self.m_profile_doc,
+        )
+
+    def _slurmPolicy(self) -> ResourcePolicy:
+        return ResourcePolicy(
+            f_scheduler=SchedulerKind.SLURM,
+            f_walltime_policy="short",
+            f_partition="nodes",
+            f_qos="std",
+            f_memory="4G",
+            f_mail_mode=SlurmMailMode.END_FAIL,
+        )
+
+    def testArcher2WorkRootFallsBackToLoginName(self) -> None:
+        """Assert the ARCHER2 work root falls back to the login name and reports an unknown one."""
+        for f_env in [{"USER": ""}, {"USER": "  "}, {}]:
+            with self.subTest(f_env=f_env):
+                with patch("getpass.getuser", return_value="bob") as f_getuser:
+                    self.assertEqual(
+                        resolveArcher2WorkRoot(f_env), "/work/e281/e281/bob"
+                    )
+                f_getuser.assert_called_once_with()
+        for f_env, f_error in [
+            ({"USER": ""}, OSError("no login")),
+            ({}, KeyError("uid")),
+        ]:
+            with self.subTest(f_error=f_error):
+                with patch("getpass.getuser", side_effect=f_error):
+                    with self.assertRaises(SiteResolutionError) as f_cm:
+                        resolveArcher2WorkRoot(f_env)
+                self.assertEqual(
+                    str(f_cm.exception),
+                    "Cannot resolve ARCHER2 work root: USER is unset and the login name is unknown",
+                )
+                self.assertIs(f_cm.exception.__cause__, f_error)
+        with patch("getpass.getuser", return_value=""):
+            with self.assertRaises(SiteResolutionError) as f_cm:
+                resolveArcher2WorkRoot({})
+        self.assertEqual(
+            str(f_cm.exception), "Invalid user name for ARCHER2 work root: ''"
+        )
+        f_env_alice = {"USER": "alice"}
+        with patch("getpass.getuser") as f_getuser:
+            self.assertEqual(
+                resolveArcher2WorkRoot(f_env_alice), "/work/e281/e281/alice"
+            )
+        f_getuser.assert_not_called()
+        self.assertEqual(f_env_alice, {"USER": "alice"})
+
+    def testPolicyConstructorsRejectInvalidArguments(self) -> None:
+        """Assert policy constructors reject invalid arguments with their exact messages."""
+        f_rows: List[Tuple[Any, type, str]] = []
+        for f_val in ["", None, 5]:
+            f_rows.append(
+                (
+                    lambda f_v=f_val: LauncherPolicy(f_v),
+                    SiteResolutionError,
+                    f"Launcher kind must be a non-empty string, got: {f_val!r}",
+                )
+            )
+        for f_val in ["", None]:
+            f_rows.append(
+                (
+                    lambda f_v=f_val: RankIdentityPolicy(f_v, "N"),
+                    SiteResolutionError,
+                    f"global_rank must be a non-empty string, got: {f_val!r}",
+                )
+            )
+            f_rows.append(
+                (
+                    lambda f_v=f_val: RankIdentityPolicy("G", f_v),
+                    SiteResolutionError,
+                    f"node_name must be a non-empty string, got: {f_val!r}",
+                )
+            )
+        for f_val in [5, b"x"]:
+            f_rows.append(
+                (
+                    lambda f_v=f_val: RankIdentityPolicy("G", "N", f_v),
+                    SiteResolutionError,
+                    f"local_rank must be str or None, got: {f_val!r}",
+                )
+            )
+        for f_val in [0, -1, "5", 1.5]:
+            f_rows.append(
+                (
+                    lambda f_v=f_val: CancellationPolicy(f_v, 5),
+                    SiteResolutionError,
+                    f"poll_interval_seconds must be a positive integer, got: {f_val!r}",
+                )
+            )
+        for f_val in [0, -2, "1", 2.0]:
+            f_rows.append(
+                (
+                    lambda f_v=f_val: CancellationPolicy(5, f_v),
+                    SiteResolutionError,
+                    f"grace_seconds must be a positive integer, got: {f_val!r}",
+                )
+            )
+        f_rows.append(
+            (
+                lambda: ResourcePolicy(
+                    f_scheduler=SchedulerKind.SLURM, f_mail_mode=5  # type: ignore[arg-type]
+                ),
+                TypeError,
+                "mail_mode must be SlurmMailMode, PbsMailMode, or None, got: int",
+            )
+        )
+        f_rows.append(
+            (
+                lambda: ResourcePolicy(f_mail_mode=SchedulerKind.SLURM),  # type: ignore[arg-type]
+                TypeError,
+                "mail_mode must be SlurmMailMode, PbsMailMode, or None, got: SchedulerKind",
+            )
+        )
+        f_rows.append(
+            (
+                lambda: ResourcePolicy(f_scheduler="slurm"),  # type: ignore[arg-type]
+                TypeError,
+                "scheduler must be a SchedulerKind enum, got: str",
+            )
+        )
+        for f_index, (f_call, f_type, f_message) in enumerate(f_rows):
+            with self.subTest(f_index=f_index, f_message=f_message):
+                with self.assertRaises(f_type) as f_cm:
+                    f_call()
+                self.assertIs(type(f_cm.exception), f_type)
+                self.assertEqual(str(f_cm.exception), f_message)
+        # Observation O5: a bool is an int, so CancellationPolicy(True, True) is accepted.
+        self.assertEqual(
+            repr(CancellationPolicy(True, True)),  # type: ignore[arg-type]
+            "CancellationPolicy(poll_interval_seconds=True, grace_seconds=True)",
+        )
+
+    def testFrozenValueObjectsRejectSetAndDelete(self) -> None:
+        """Assert frozen value objects reject attribute assignment and deletion and stay unchanged."""
+        f_vk = self._vikingProfile()
+        f_rows = [
+            (LauncherPolicy("srun", "pmi2"), "m_kind"),
+            (
+                RankIdentityPolicy("SLURM_PROCID", "SLURMD_NODENAME", "SLURM_LOCALID"),
+                "m_global_rank",
+            ),
+            (CancellationPolicy(5, 30), "m_grace_seconds"),
+            (self._slurmPolicy(), "m_queue"),
+            (ExecutableRegistry(f_vk.executables.toDict()), "m_executables"),
+        ]
+        for f_obj, f_slot in f_rows:
+            f_name = type(f_obj).__name__
+            with self.subTest(f_name=f_name):
+                f_before = f_obj.toDict()
+                with self.assertRaises(AttributeError) as f_cm:
+                    setattr(f_obj, f_slot, "x")
+                self.assertEqual(str(f_cm.exception), f"Cannot modify immutable {f_name}")
+                with self.assertRaises(AttributeError) as f_cm:
+                    delattr(f_obj, f_slot)
+                self.assertEqual(
+                    str(f_cm.exception),
+                    f"Cannot delete attribute from immutable {f_name}",
+                )
+                self.assertEqual(f_obj.toDict(), f_before)
+
+    def testUnfrozenValueObjectsSetAndDelete(self) -> None:
+        """Assert objects that are not frozen yet allow slot assignment and deletion."""
+        for f_cls, f_slot, f_value in [
+            (LauncherPolicy, "m_kind", "k"),
+            (RankIdentityPolicy, "m_node_name", "n"),
+            (CancellationPolicy, "m_grace_seconds", 3),
+            (ResourcePolicy, "m_queue", "q"),
+            (ExecutableRegistry, "m_executables", {"a": "/a"}),
+        ]:
+            with self.subTest(f_cls=f_cls.__name__):
+                f_raw = f_cls.__new__(f_cls)
+                setattr(f_raw, f_slot, f_value)
+                self.assertTrue(hasattr(f_raw, f_slot))
+                self.assertEqual(getattr(f_raw, f_slot), f_value)
+                delattr(f_raw, f_slot)
+                self.assertFalse(hasattr(f_raw, f_slot))
+                with self.assertRaises(AttributeError):
+                    getattr(f_raw, f_slot)
+
+    def testLauncherPolicyDictAndRepr(self) -> None:
+        """Assert LauncherPolicy dictionary and repr include the srun MPI mode only when set."""
+        f_srun = LauncherPolicy("srun", "pmi2")
+        f_mpirun = LauncherPolicy("mpirun")
+        self.assertEqual(f_srun.toDict(), {"kind": "srun", "srun_mpi": "pmi2"})
+        self.assertEqual(f_mpirun.toDict(), {"kind": "mpirun"})
+        self.assertEqual(repr(f_srun), "LauncherPolicy(kind='srun', srun_mpi='pmi2')")
+        self.assertEqual(repr(f_mpirun), "LauncherPolicy(kind='mpirun')")
+
+    def testValueObjectReprAndEquality(self) -> None:
+        """Assert value object equality and exact repr strings."""
+        f_vk = self._vikingProfile()
+        f_other_exec = {
+            f_key: "/opt/x/bin/" + f_key
+            for f_key in sorted(ExecutableRegistry.REQUIRED_EXECUTABLES)
+        }
+        f_rows: List[Tuple[Any, Any, Any, Any]] = [
+            (
+                LauncherPolicy("srun", "pmi2"),
+                LauncherPolicy("srun", "pmi2"),
+                LauncherPolicy("mpirun"),
+                "srun",
+            ),
+            (
+                RankIdentityPolicy("SLURM_PROCID", "SLURMD_NODENAME", "SLURM_LOCALID"),
+                RankIdentityPolicy("SLURM_PROCID", "SLURMD_NODENAME", "SLURM_LOCALID"),
+                RankIdentityPolicy("SLURM_PROCID", "SLURMD_NODENAME"),
+                "x",
+            ),
+            (
+                CancellationPolicy(5, 30),
+                CancellationPolicy(5, 30),
+                CancellationPolicy(5, 31),
+                5,
+            ),
+            (
+                self._slurmPolicy(),
+                self._slurmPolicy(),
+                ResourcePolicy(
+                    f_scheduler=SchedulerKind.SLURM,
+                    f_walltime_policy="short",
+                    f_partition="nodes",
+                    f_qos="std",
+                    f_memory="8G",
+                    f_mail_mode=SlurmMailMode.END_FAIL,
+                ),
+                "x",
+            ),
+            (
+                ExecutableRegistry(f_vk.executables.toDict()),
+                ExecutableRegistry(f_vk.executables.toDict()),
+                ExecutableRegistry(f_other_exec),
+                f_vk.executables.toDict(),
+            ),
+        ]
+        for f_obj, f_twin, f_diff, f_foreign in f_rows:
+            with self.subTest(f_name=type(f_obj).__name__):
+                self.assertTrue(f_obj == f_twin)
+                self.assertFalse(f_obj == f_diff)
+                self.assertFalse(f_obj == f_foreign)
+        self.assertEqual(
+            repr(
+                RankIdentityPolicy("SLURM_PROCID", "SLURMD_NODENAME", "SLURM_LOCALID")
+            ),
+            "RankIdentityPolicy(global_rank='SLURM_PROCID', node_name='SLURMD_NODENAME', local_rank='SLURM_LOCALID')",
+        )
+        self.assertEqual(
+            repr(RankIdentityPolicy("PMI_RANK", "HOST")),
+            "RankIdentityPolicy(global_rank='PMI_RANK', node_name='HOST', local_rank=None)",
+        )
+        self.assertEqual(
+            repr(CancellationPolicy(5, 30)),
+            "CancellationPolicy(poll_interval_seconds=5, grace_seconds=30)",
+        )
+        self.assertEqual(
+            repr(self._slurmPolicy()),
+            "ResourcePolicy(scheduler=<SchedulerKind.SLURM: 'slurm'>, walltime_policy='short', "
+            "queue=None, partition='nodes', qos='std', memory='4G', "
+            "mail_mode=<SlurmMailMode.END_FAIL: 'END,FAIL'>, pmem=None, pvmem=None)",
+        )
+        self.assertEqual(
+            repr(ExecutableRegistry(f_other_exec)), f"ExecutableRegistry({f_other_exec!r})"
+        )
+
+    def testResourcePolicySchedulerScope(self) -> None:
+        """Assert the scheduler scope of resource policies and the Fake scheduler mail rule."""
+        f_rows: List[Tuple[ResourcePolicy, Optional[SchedulerKind], bool]] = [
+            (ResourcePolicy(f_queue="q"), None, False),
+            (ResourcePolicy(f_mail_mode=PbsMailMode.ABE), None, False),
+            (ResourcePolicy(f_scheduler=SchedulerKind.FAKE), SchedulerKind.FAKE, False),
+            (
+                ResourcePolicy(
+                    f_scheduler=SchedulerKind.PBS,
+                    f_mail_mode=PbsMailMode.ABE,
+                    f_queue="workq",
+                ),
+                SchedulerKind.PBS,
+                False,
+            ),
+            (self._slurmPolicy(), SchedulerKind.SLURM, True),
+        ]
+        for f_index, (f_policy, f_kind, f_requires) in enumerate(f_rows):
+            with self.subTest(f_index=f_index):
+                self.assertIs(f_policy.scheduler, f_kind)
+                self.assertIs(f_policy.requires_credentials, f_requires)
+                self.assertIs(f_policy.requires_account, f_requires)
+                self.assertIs(f_policy.requires_email, f_requires)
+        self.assertIs(f_rows[1][0].mail_mode, PbsMailMode.ABE)
+        with self.assertRaises(SiteResolutionError) as f_cm:
+            ResourcePolicy(
+                f_scheduler=SchedulerKind.FAKE, f_mail_mode=SlurmMailMode.END_FAIL
+            )
+        self.assertEqual(
+            str(f_cm.exception),
+            "Fake scheduler cannot accept mail_mode: SlurmMailMode.END_FAIL",
+        )
+
+    def testValidateCredentialsScope(self) -> None:
+        """Assert credential validation applies to Slurm only and rejects blank accounts and emails."""
+        f_pbs = ResourcePolicy(f_scheduler=SchedulerKind.PBS, f_queue="workq")
+        for f_policy in [f_pbs, ResourcePolicy()]:
+            with self.subTest(f_scheduler=f_policy.scheduler):
+                self.assertIsNone(f_policy.validateCredentials())
+                self.assertIsNone(f_policy.validateCredentials(None, None))
+        f_slurm = self._slurmPolicy()
+        for f_account in [None, "", "  "]:
+            with self.subTest(f_account=f_account):
+                with self.assertRaises(SiteResolutionError) as f_cm:
+                    f_slurm.validateCredentials(f_account, "e@x")
+                self.assertEqual(
+                    str(f_cm.exception),
+                    "Slurm scheduler policy requires a non-empty account (SB_ACCOUNT)",
+                )
+        for f_email in [None, "", "   "]:
+            with self.subTest(f_email=f_email):
+                with self.assertRaises(SiteResolutionError) as f_cm:
+                    f_slurm.validateCredentials("acc", f_email)
+                self.assertEqual(
+                    str(f_cm.exception),
+                    "Slurm scheduler policy requires a non-empty email (SB_EMAIL)",
+                )
+        self.assertIsNone(f_slurm.validateCredentials("acc", "e@x"))
+        # Observation O6: a non-string account is accepted through str().
+        self.assertIsNone(f_slurm.validateCredentials(123, "e@x"))  # type: ignore[arg-type]
+
+    def testExecutableRegistryRejectsMissingAndRelative(self) -> None:
+        """Assert the executable registry rejects missing, relative and empty executable paths."""
+        f_ex = dict(self._vikingProfile().executables.toDict())
+        f_copy = dict(f_ex)
+        f_without = {f_k: f_v for f_k, f_v in f_ex.items() if f_k not in ("ior", "lmp")}
+        f_rows: List[Tuple[Dict[str, Any], str]] = [
+            (f_without, "Missing required executables in registry: ['ior', 'lmp']"),
+            (
+                {},
+                "Missing required executables in registry: ['bm_adios', 'bm_leveldb', "
+                "'bm_manager', 'bm_native', 'bm_rocksdb', 'ior', 'lmp']",
+            ),
+            (
+                {**f_ex, "ior": "bin/ior"},
+                "Executable 'ior' path must be an absolute path, got: 'bin/ior'",
+            ),
+            (
+                {**f_ex, "lmp": None},
+                "Executable 'lmp' path must be an absolute path, got: None",
+            ),
+            (
+                {**f_ex, "lmp": ""},
+                "Executable 'lmp' path must be an absolute path, got: ''",
+            ),
+        ]
+        for f_index, (f_dict, f_message) in enumerate(f_rows):
+            with self.subTest(f_index=f_index):
+                with self.assertRaises(SiteResolutionError) as f_cm:
+                    ExecutableRegistry(f_dict)
+                self.assertEqual(str(f_cm.exception), f_message)
+        self.assertEqual(f_ex, f_copy)
+
+    def testSiteProfileConstructorRejectsInvalidArguments(self) -> None:
+        """Assert SiteProfile validates every constructor argument with its exact message."""
+        f_vk = self._vikingProfile()
+        f_roots = dict(f_vk.benchmark_roots)
+        f_res = dict(f_vk.resources)
+        f_small = f_res["small"]
+        f_ex = f_vk.executables.toDict()
+        f_kw: Dict[str, Any] = dict(
+            f_name=f_vk.name,
+            f_scheduler=f_vk.scheduler,
+            f_launcher=f_vk.launcher,
+            f_certification=f_vk.certification,
+            f_test_only=f_vk.test_only,
+            f_benchmark_roots=f_vk.benchmark_roots,
+            f_install_prefix=f_vk.install_prefix,
+            f_executables=f_vk.executables,
+            f_modules=f_vk.modules,
+            f_resources=f_vk.resources,
+            f_rank_identity=f_vk.rank_identity,
+            f_cancellation=f_vk.cancellation,
+            f_lustre_pools=f_vk.lustre_pools,
+        )
+        f_valid = SiteProfile(**f_kw)
+        self.assertEqual(f_valid.toDict(), f_vk.toDict())
+        self.assertEqual(f_valid.name, "VIKING")
+
+        f_hdd = StorageClass.HDD
+        f_ssd = StorageClass.SSD
+        f_rows: List[Tuple[str, Any, str]] = [
+            ("f_name", "", "Site name must be a non-empty string, got: ''"),
+            ("f_name", None, "Site name must be a non-empty string, got: None"),
+            ("f_scheduler", "slurm", "Scheduler must be a SchedulerKind enum, got: 'slurm'"),
+            ("f_launcher", "srun", "Launcher must be a LauncherPolicy, got: 'srun'"),
+            (
+                "f_certification",
+                "configured",
+                "Certification must be a CertificationState enum, got: 'configured'",
+            ),
+            ("f_test_only", 0, "test_only must be a boolean, got: 0"),
+            ("f_test_only", "false", "test_only must be a boolean, got: 'false'"),
+            (
+                "f_install_prefix",
+                "opt/lsmio",
+                "install_prefix must be an absolute path, got: 'opt/lsmio'",
+            ),
+            ("f_install_prefix", None, "install_prefix must be an absolute path, got: None"),
+            ("f_install_prefix", "", "install_prefix must be an absolute path, got: ''"),
+            (
+                "f_executables",
+                f_ex,
+                f"executables must be an ExecutableRegistry, got: {f_ex!r}",
+            ),
+            (
+                "f_rank_identity",
+                None,
+                "rank_identity must be a RankIdentityPolicy, got: None",
+            ),
+            (
+                "f_cancellation",
+                (5, 30),
+                "cancellation must be a CancellationPolicy, got: (5, 30)",
+            ),
+            (
+                "f_benchmark_roots",
+                {**f_roots, "hdd": "scratch/hdd"},
+                f"Benchmark root for {f_hdd} must be an absolute path, got: 'scratch/hdd'",
+            ),
+            (
+                "f_benchmark_roots",
+                {StorageClass.SSD: f_roots["ssd"], StorageClass.HDD: None},
+                f"Benchmark root for {f_hdd} must be an absolute path, got: None",
+            ),
+            (
+                "f_benchmark_roots",
+                {"hdd": f_roots["hdd"]},
+                f"Missing benchmark root for storage class: {f_ssd}",
+            ),
+            (
+                "f_lustre_pools",
+                {"ssd": None},
+                f"Missing lustre pool for storage class: {f_hdd}",
+            ),
+            (
+                "f_resources",
+                {"small": f_small},
+                "resources must contain exactly 'small' and 'large' shapes, got: {'small'}",
+            ),
+            (
+                "f_resources",
+                {**f_res, "huge": f_small},
+                "resources must contain exactly 'small' and 'large' shapes, got: ",
+            ),
+            (
+                "f_resources",
+                {"small": f_small, "large": {"queue": "q"}},
+                "Resource policy for 'large' must be ResourcePolicy, got: {'queue': 'q'}",
+            ),
+        ]
+        for f_key, f_val, f_message in f_rows:
+            with self.subTest(f_key=f_key, f_val=f_val):
+                f_args = dict(f_kw)
+                f_args[f_key] = f_val
+                with self.assertRaises(SiteResolutionError) as f_cm:
+                    SiteProfile(**f_args)
+                if f_message.endswith("got: "):
+                    # Set order is not stable, so only the prefix is pinned.
+                    self.assertTrue(str(f_cm.exception).startswith(f_message))
+                else:
+                    self.assertEqual(str(f_cm.exception), f_message)
+        # Observation O7: an unknown storage class key escapes as ValueError.
+        f_args = dict(f_kw)
+        f_args["f_benchmark_roots"] = {**f_roots, "nvme": "/x"}
+        with self.assertRaises(ValueError) as f_cm:
+            SiteProfile(**f_args)
+        self.assertNotIsInstance(f_cm.exception, SiteResolutionError)
+        self.assertEqual(str(f_cm.exception), "'nvme' is not a valid StorageClass")
+        self.assertEqual(f_vk.toDict(), SiteProfile(**f_kw).toDict())

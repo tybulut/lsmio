@@ -214,6 +214,17 @@ class InstalledSmoke(unittest.TestCase):
         self.assertEqual(f_proc_w_unknown.returncode, 1)
         self.assertIn("Unknown worker mode", f_proc_w_unknown.stderr)
 
+    def testParseLegacyIsAnUnknownCommand(self) -> None:
+        """The staged public launcher no longer has the parseLegacy command."""
+        f_public_bin = os.path.join(self.m_stage_dir, "bin", "lsmiotool")
+        f_proc = subprocess.run(
+            [f_public_bin, "parseLegacy", "ior", "small"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(f_proc.returncode, 1)
+        self.assertIn("Unknown command", f_proc.stderr)
+
     def testProfilesAssetsHashes(self) -> None:
         """Verify profile parsing, asset validation, and asset hashing from staged layout."""
         from lsmiotool.lib.benchmarks import LmpAdapter

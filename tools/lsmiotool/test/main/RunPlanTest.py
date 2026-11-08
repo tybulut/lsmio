@@ -29,11 +29,13 @@
 #
 
 import copy
+import io
 import json
 import os
 import unittest
 from unittest.mock import patch
 
+from lsmiotool.lib.arms import DEFAULT_LSMIO_BACKENDS
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import (
     Combination,
@@ -44,6 +46,7 @@ from lsmiotool.lib.run import (
     RankIdentity,
     RunPlan,
     RunPlanner,
+    RunReporter,
     RunRequest,
     ScalePoint,
     ScheduledPointResources,
@@ -761,7 +764,7 @@ class RunPlanTest(unittest.TestCase):
             self.assertEqual(sp.walltime, "15:00:00")
 
     def testPbsFixedWalltimeIgnoresTimeOverride(self) -> None:
-        """M1: a PBS site's fixed walltime wins over --time, as in bmtool, so the job script
+        """A PBS site's fixed walltime wins over --time, as in bmtool, so the job script
         still renders instead of failing on another walltime. It is per run: a job running
         several arms gets it once per arm, up to 48 hours."""
         from lsmiotool.lib.scheduler import PbsScriptRenderer
@@ -899,7 +902,7 @@ class RunPlanTest(unittest.TestCase):
         f_plan_day_dhm = RunPlanner.createPlan(f_req_day_dhm, self.m_archer2_profile)
         self.assertEqual(f_plan_day_dhm.scheduled_points[0].qos, "long")
 
-        # 7/8. Requested walltimes are clamped to 48h like bmtool's --time (M11), so
+        # 7/8. Requested walltimes are clamped to 48h like --time, so
         # 96h, 4 days and anything beyond become 48:00:00 on the long QoS
         for f_long in ("96:00:00", "4-00:00:00", "97:00:00", "4-01:00:00"):
             f_plan_long = RunPlanner.createPlan(
@@ -1103,3 +1106,850 @@ class RunPlanTest(unittest.TestCase):
         )
         f_plan_sub1h = RunPlanner.createPlan(f_req_sub1h, self.m_viking_profile)
         self.assertEqual(f_plan_sub1h.scheduled_points[0].walltime, "01:00:00")
+
+
+# =============================================================================
+# Chunk C08 Contract Tests: RunReporter, LaunchSpec, RankIdentity, RunRequest
+# =============================================================================
+
+
+class RunReporterContractTest(unittest.TestCase):
+    """Exhaustive contract tests for RunReporter emission, streams, and callback handling."""
+
+    def testEmitCallbackExceptionAndStreamWithoutFlush(self) -> None:
+        """Validates callback exception suppression and streams without flush support."""
+        def f_failing_callback(f_msg: str) -> None:
+            raise RuntimeError("Callback failure")
+
+        class DummyNoFlushStream:
+            def __init__(self) -> None:
+                self.m_written = []
+
+            def write(self, f_s: str) -> None:
+                self.m_written.append(f_s)
+
+        f_stream = DummyNoFlushStream()
+        f_reporter = RunReporter(f_stream=f_stream, f_callback=f_failing_callback)
+        # Lines 126, 127: callback exception caught; Arc [131, -119]: stream has no flush
+        f_reporter.emit("line 1")
+        self.assertEqual(f_reporter.lines, ["line 1"])
+        self.assertEqual(f_reporter.output, "line 1\n")
+        self.assertEqual(f_stream.m_written, ["line 1\n"])
+
+    def testReportCompletionStateVariations(self) -> None:
+        """Validates reportCompletion string branches and non-string/non-enum fallback."""
+        # 1. String state (lines 172, 173; arcs [170, 172], [172, 173])
+        f_rep_str = RunReporter(f_stream=io.StringIO())
+        f_rep_str.reportCompletion("completed", 0)
+        self.assertIn("Final State: COMPLETED", f_rep_str.output)
+        self.assertIn("Exit Code: 0", f_rep_str.output)
+
+        # 2. Non-string, non-enum fallback (line 175; arc [172, 175])
+        f_rep_other = RunReporter(f_stream=io.StringIO())
+        f_rep_other.reportCompletion(404, 1)
+        self.assertIn("Final State: 404", f_rep_other.output)
+        self.assertIn("Exit Code: 1", f_rep_other.output)
+
+    def testCallableInterfaceSingleStringArg(self) -> None:
+        """Validates __call__ with a single positional string argument."""
+        f_rep = RunReporter(f_stream=io.StringIO())
+        # Lines 182, 183; arc [182, 183]
+        f_rep("Progress update message")
+        self.assertEqual(f_rep.lines, ["Progress update message"])
+
+    def testCallableInterfaceRunIdentityKwargs(self) -> None:
+        """Validates __call__ run identity keyword arguments dispatch."""
+        # Lines 184-187; arcs [182, 184], [184, 185]
+        f_rep = RunReporter(f_stream=io.StringIO())
+        f_rep(f_run_id="run-c08-001", f_run_root="/tmp/test_root")
+        self.assertIn("Run ID: run-c08-001", f_rep.output)
+        self.assertIn("Run Root: /tmp/test_root", f_rep.output)
+
+        # Alternative kwargs without f_ prefix
+        f_rep2 = RunReporter(f_stream=io.StringIO())
+        f_rep2(run_id="run-c08-002", run_root="/tmp/test_root2")
+        self.assertIn("Run ID: run-c08-002", f_rep2.output)
+
+    def testCallableInterfacePointSubmissionKwargs(self) -> None:
+        """Validates __call__ scale point submission keyword arguments dispatch."""
+        # Lines 188-192; arcs [184, 188], [188, 189]
+        f_rep = RunReporter(f_stream=io.StringIO())
+        f_rep(f_point_id="p1", f_token="tok-abc", f_job_id="job-12345")
+        self.assertIn("Point p1 Correlation Token: tok-abc", f_rep.output)
+        self.assertIn("Point p1 Job ID: job-12345", f_rep.output)
+
+        # Alternative kwargs without f_ prefix
+        f_rep2 = RunReporter(f_stream=io.StringIO())
+        f_rep2(point_id="p2", token="tok-xyz", job_id="job-67890")
+        self.assertIn("Point p2 Correlation Token: tok-xyz", f_rep2.output)
+
+    def testCallableInterfaceCompletionKwargsAndFallthrough(self) -> None:
+        """Validates __call__ completion kwargs and unmatched arguments fallthrough."""
+        # Lines 193-196; arcs [188, 193], [193, 194]
+        f_rep = RunReporter(f_stream=io.StringIO())
+        f_rep(f_final_state="failed", f_exit_code=2)
+        self.assertIn("Final State: FAILED", f_rep.output)
+        self.assertIn("Exit Code: 2", f_rep.output)
+
+        # Fallthrough on unmatched call: arc [193, -181]
+        f_rep2 = RunReporter(f_stream=io.StringIO())
+        f_rep2(unrecognized_arg=True)
+        self.assertEqual(f_rep2.lines, [])
+
+
+class LaunchSpecContractTest(unittest.TestCase):
+    """Exhaustive contract tests for LaunchSpec validation, immutability, and serialization."""
+
+    def testLaunchSpecModeValidation(self) -> None:
+        """Validates string mode normalization and error guards for mode and executable."""
+        # 1. Valid string mode (lines 239, 240; arc [238, 239])
+        f_spec = LaunchSpec("direct", "lsmiotool-worker")
+        self.assertEqual(f_spec.mode, LaunchMode.DIRECT)
+
+        # 2. Invalid string mode (lines 241, 242)
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            LaunchSpec("invalid_mode", "worker")
+        self.assertIn("Invalid LaunchMode string: 'invalid_mode'", str(f_ctx.exception))
+
+        # 3. Invalid non-string non-LaunchMode type (line 246; arc [243, 246])
+        for f_bad_mode in (123, None, [LaunchMode.DIRECT]):
+            with self.subTest(bad_mode=f_bad_mode):
+                with self.assertRaises(PlanValidationError) as f_ctx2:
+                    LaunchSpec(f_bad_mode, "worker")
+                self.assertIn("LaunchMode must be LaunchMode or str", str(f_ctx2.exception))
+
+        # 4. Empty or invalid executable_or_worker (line 251; arc [250, 251])
+        for f_bad_exec in ("", None, 12345):
+            with self.subTest(bad_exec=f_bad_exec):
+                with self.assertRaises(PlanValidationError) as f_ctx3:
+                    LaunchSpec("direct", f_bad_exec)
+                self.assertIn("executable_or_worker must be a non-empty string", str(f_ctx3.exception))
+
+    def testLaunchSpecImmutabilityAndSlotMutation(self) -> None:
+        """Validates frozen immutability and unfrozen slot mutation/deletion via __new__."""
+        f_spec = LaunchSpec("direct", "worker")
+
+        # Frozen modification and deletion (lines 269, 270; arc [269, 270])
+        with self.assertRaises(AttributeError):
+            f_spec.m_mode = LaunchMode.SLURM
+        with self.assertRaises(AttributeError):
+            del f_spec.m_mode
+
+        # Unfrozen mutation via __new__ (line 266; arc [264, 266])
+        # Note: Must use an existing __slots__ attribute (e.g. m_mode) because arbitrary attributes are disallowed
+        f_unfrozen = LaunchSpec.__new__(LaunchSpec)
+        f_unfrozen.m_mode = LaunchMode.DIRECT
+        self.assertEqual(f_unfrozen.m_mode, LaunchMode.DIRECT)
+
+        # Unfrozen deletion via __new__ (line 273; arc [269, 273])
+        del f_unfrozen.m_mode
+        self.assertFalse(hasattr(f_unfrozen, "m_mode"))
+
+    def testLaunchSpecSerializationAndEquality(self) -> None:
+        """Validates toDict, __repr__, and __eq__ comparisons."""
+        f_spec = LaunchSpec("direct", "worker", ["--flag", "val"], ["res.csv"])
+
+        # toDict serialization (line 292)
+        f_dict = f_spec.toDict()
+        self.assertEqual(
+            f_dict,
+            {
+                "mode": "direct",
+                "executable_or_worker": "worker",
+                "arguments": ["--flag", "val"],
+                "expected_results": ["res.csv"],
+            },
+        )
+
+        # __repr__ string formatting (line 300)
+        self.assertIn("LaunchSpec(mode=<LaunchMode.DIRECT: 'direct'>", repr(f_spec))
+
+        # __eq__ identical LaunchSpec (lines 308, 309; arc [308, 309])
+        f_spec_same = LaunchSpec(LaunchMode.DIRECT, "worker", ["--flag", "val"], ["res.csv"])
+        self.assertEqual(f_spec, f_spec_same)
+
+        # __eq__ different LaunchSpec
+        f_spec_diff = LaunchSpec("direct", "other_worker")
+        self.assertNotEqual(f_spec, f_spec_diff)
+
+        # __eq__ non-LaunchSpec object (line 315; arc [308, 315])
+        self.assertFalse(f_spec == "not_a_launch_spec")
+        self.assertFalse(f_spec == 42)
+
+
+class RankIdentityContractTest(unittest.TestCase):
+    """Exhaustive contract tests for RankIdentity validation, immutability, and properties."""
+
+    def testRankIdentityValidation(self) -> None:
+        """Validates input guards for node_rank and local_rank."""
+        # 1. Invalid node_rank (line 336; arc [333, 336])
+        for f_bad_node in ("", None, 1.5):
+            with self.subTest(bad_node=f_bad_node):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RankIdentity(0, f_bad_node)
+                self.assertIn("node_rank must be a non-empty string or integer", str(f_ctx.exception))
+
+        # 2. Invalid local_rank (line 341; arc [340, 341])
+        for f_bad_local in (-1, 1.5, "0"):
+            with self.subTest(bad_local=f_bad_local):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RankIdentity(0, "node0", f_bad_local)
+                self.assertIn("local_rank must be a non-negative integer or None", str(f_ctx.exception))
+
+    def testRankIdentityImmutabilityAndSlotMutation(self) -> None:
+        """Validates frozen immutability and unfrozen slot mutation/deletion via __new__."""
+        f_id = RankIdentity(0, "node0", 0)
+
+        # Frozen modification and deletion (lines 356, 357; arc [356, 357])
+        with self.assertRaises(AttributeError):
+            f_id.m_global_rank = 1
+        with self.assertRaises(AttributeError):
+            del f_id.m_global_rank
+
+        # Unfrozen mutation via __new__ (line 353; arc [351, 353])
+        # Note: Must use an existing __slots__ attribute (e.g. m_global_rank)
+        f_unfrozen = RankIdentity.__new__(RankIdentity)
+        f_unfrozen.m_global_rank = 0
+        self.assertEqual(f_unfrozen.m_global_rank, 0)
+
+        # Unfrozen deletion via __new__ (line 360; arc [356, 360])
+        del f_unfrozen.m_global_rank
+        self.assertFalse(hasattr(f_unfrozen, "m_global_rank"))
+
+    def testRankIdentityPropertiesSerializationAndEquality(self) -> None:
+        """Validates property accessors, node alias, toDict, __repr__, and __eq__."""
+        f_id = RankIdentity(0, "node42", 1)
+
+        # Property accessors and node alias (line 372)
+        self.assertEqual(f_id.global_rank, 0)
+        self.assertEqual(f_id.node_rank, "node42")
+        self.assertEqual(f_id.node, "node42")
+        self.assertEqual(f_id.local_rank, 1)
+
+        # toDict serialization
+        self.assertEqual(
+            f_id.toDict(),
+            {"global_rank": 0, "node_rank": "node42", "local_rank": 1},
+        )
+
+        # __repr__ formatting (line 386)
+        self.assertEqual(
+            repr(f_id),
+            "RankIdentity(global_rank=0, node_rank='node42', local_rank=1)",
+        )
+
+        # __eq__ matching and non-matching objects (line 399; arc [393, 399])
+        f_id_same = RankIdentity(0, "node42", 1)
+        self.assertEqual(f_id, f_id_same)
+        self.assertNotEqual(f_id, RankIdentity(1, "node42", 1))
+        self.assertFalse(f_id == "not_a_rank_identity")
+        self.assertFalse(f_id == 0)
+
+
+class RunRequestContractTest(unittest.TestCase):
+    """Exhaustive contract tests for RunRequest validation guards, immutability, and serialization."""
+
+    def testRunRequestValidationTargetScaleMode(self) -> None:
+        """Validates non-empty string guards for target, scale, and mode."""
+        # 1. Target invalid (line 452; arc [451, 452])
+        for f_bad_target in ("", "   ", None, 123):
+            with self.subTest(bad_target=f_bad_target):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest(f_bad_target, "small")
+                self.assertIn("target must be a non-empty string", str(f_ctx.exception))
+
+        # 2. Scale invalid (line 456; arc [455, 456])
+        for f_bad_scale in ("", "   ", None, 123):
+            with self.subTest(bad_scale=f_bad_scale):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest("lsmio", f_bad_scale)
+                self.assertIn("scale must be a non-empty string", str(f_ctx.exception))
+
+        # 3. Mode invalid (line 460; arc [459, 460])
+        for f_bad_mode in ("", "   ", 123):
+            with self.subTest(bad_mode=f_bad_mode):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest("lsmio", "small", f_mode=f_bad_mode)
+                self.assertIn("mode must be a non-empty string", str(f_ctx.exception))
+
+    def testRunRequestValidationBackendsAndDefault(self) -> None:
+        """Validates backends sequence type guard and empty sequence fallback in backends mode."""
+        # 1. Non-sequence backends (line 479; arc [478, 479])
+        for f_bad_backends in ("native", 123, {"native": 1}):
+            with self.subTest(bad_backends=f_bad_backends):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest("lsmio", "small", f_backends=f_bad_backends)
+                self.assertIn("backends must be a sequence of strings", str(f_ctx.exception))
+
+        # 2. Empty backends sequence with mode="backends" defaults to target defaults (line 486; arc [485, 486])
+        f_req = RunRequest("lsmio", "small", f_mode="backends", f_backends=[])
+        self.assertEqual(f_req.backends, DEFAULT_LSMIO_BACKENDS)
+
+    def testRunRequestValidationFlagsAndSetup(self) -> None:
+        """Validates ssd, setup, variants, archive, resume, out_dir, wallhour, and fast."""
+        # 1. ssd boolean guard (line 493; arc [492, 493])
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunRequest("lsmio", "small", f_ssd="true")
+        self.assertIn("ssd must be a boolean", str(f_ctx.exception))
+
+        # 2. setup non-empty string guard (line 497; arc [494, 497])
+        for f_bad_setup in ("", "   ", 123):
+            with self.subTest(bad_setup=f_bad_setup):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest("lsmio", "small", f_setup=f_bad_setup)
+                self.assertIn("setup must be a non-empty string or None", str(f_ctx.exception))
+
+        # 3. variants sequence guard (line 502; arc [501, 502])
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunRequest("lsmio", "small", f_variants="var1")
+        self.assertIn("variants must be a sequence of variant strings or None", str(f_ctx.exception))
+
+        # 4. empty variants sequence fallback (line 512; arc [511, 512])
+        f_req_empty_var = RunRequest("lsmio", "small", f_variants=[])
+        self.assertEqual(f_req_empty_var.variants, (None,))
+        self.assertIsNone(f_req_empty_var.variant)
+
+        # 5. archive boolean guard (line 523; arc [522, 523])
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunRequest("lsmio", "small", f_archive="yes")
+        self.assertIn("archive must be a boolean or None", str(f_ctx.exception))
+
+        # 6. resume boolean guard (line 527; arc [526, 527])
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunRequest("lsmio", "small", f_resume="true")
+        self.assertIn("resume must be a boolean", str(f_ctx.exception))
+
+        # 7. out_dir string or Path guard (line 530; arc [529, 530])
+        for f_bad_out in ("", "   ", 12345):
+            with self.subTest(bad_out=f_bad_out):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest("lsmio", "small", f_out_dir=f_bad_out)
+                self.assertIn("out_dir must be a non-empty string or Path", str(f_ctx.exception))
+
+        # 8. wallhour positive integer guard (line 539; arc [538, 539])
+        for f_bad_wh in (0, -3, "5", 1.5):
+            with self.subTest(bad_wh=f_bad_wh):
+                with self.assertRaises(PlanValidationError) as f_ctx:
+                    RunRequest("lsmio", "small", f_wallhour=f_bad_wh)
+                self.assertIn("wallhour must be a positive integer", str(f_ctx.exception))
+
+        # 9. fast boolean guard (line 548; arc [547, 548])
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunRequest("lsmio", "small", f_fast=1)
+        self.assertIn("fast must be a boolean", str(f_ctx.exception))
+
+    def testRunRequestImmutabilityAndSlotMutation(self) -> None:
+        """Validates frozen immutability and unfrozen slot mutation/deletion via __new__."""
+        f_req = RunRequest("lsmio", "small")
+
+        # Frozen modification and deletion (lines 598, 599; arc [598, 599])
+        with self.assertRaises(AttributeError):
+            f_req.m_target = "ior"
+        with self.assertRaises(AttributeError):
+            del f_req.m_target
+
+        # Unfrozen mutation via __new__ (line 595; arc [593, 595])
+        # Note: Must use an existing __slots__ attribute (e.g. m_target)
+        f_unfrozen = RunRequest.__new__(RunRequest)
+        f_unfrozen.m_target = "lsmio"
+        self.assertEqual(f_unfrozen.m_target, "lsmio")
+
+        # Unfrozen deletion via __new__ (line 602; arc [598, 602])
+        del f_unfrozen.m_target
+        self.assertFalse(hasattr(f_unfrozen, "m_target"))
+
+    def testRunRequestEffectiveArchive(self) -> None:
+        """Validates effective_archive resolution when explicit archive is None with non-standard and standard variants."""
+        # 1. Non-standard variant triggers any() true branch (line 654)
+        f_req = RunRequest("lsmio", "small", f_variant="experimental_engine")
+        self.assertIsNone(f_req.archive)
+        self.assertTrue(f_req.effective_archive)
+
+        # 2. Standard variants trigger any() false branch falling through to line 655 (line 655; arc [651, 655])
+        f_req_std = RunRequest("lsmio", "small", f_variants=["default"])
+        self.assertFalse(f_req_std.effective_archive)
+        f_req_multi_std = RunRequest("lsmio", "small", f_variants=["default", "base"])
+        self.assertTrue(f_req_multi_std.effective_archive)
+
+    def testRunRequestToDictReprAndEquality(self) -> None:
+        """Validates toDict serialization options, __repr__, and __eq__ non-RunRequest comparison."""
+        f_req = RunRequest(
+            f_target="lsmio",
+            f_scale="small",
+            f_variants=("var1", "var2"),
+            f_archive=True,
+            f_resume=True,
+            f_out_dir="/tmp/custom_out",
+            f_versioned=True,
+            f_fast=True,
+        )
+
+        # toDict serialization (lines 723, 725, 727, 729, 735; arcs [720, 723], [724, 725], [726, 727], [728, 729], [734, 735])
+        f_dict = f_req.toDict()
+        self.assertEqual(f_dict["variants"], ["var1", "var2"])
+        self.assertTrue(f_dict["archive"])
+        self.assertTrue(f_dict["resume"])
+        self.assertEqual(f_dict["out_dir"], "/tmp/custom_out")
+        self.assertTrue(f_dict["versioned"])
+        self.assertTrue(f_dict["fast"])
+
+        # __repr__ formatting (line 745)
+        f_repr = repr(f_req)
+        self.assertIn("RunRequest(target='lsmio'", f_repr)
+        self.assertIn("variants=('var1', 'var2')", f_repr)
+
+        # __eq__ comparisons (line 785; arc [766, 785])
+        f_req_same = RunRequest(
+            f_target="lsmio",
+            f_scale="small",
+            f_variants=("var1", "var2"),
+            f_archive=True,
+            f_resume=True,
+            f_out_dir="/tmp/custom_out",
+            f_versioned=True,
+            f_fast=True,
+        )
+        self.assertEqual(f_req, f_req_same)
+        self.assertFalse(f_req == "not_a_run_request")
+        self.assertFalse(f_req == 42)
+
+
+class CombinationContractTest(unittest.TestCase):
+    """Exhaustive contract tests for Combination validation, immutability, properties, and equality."""
+
+    def testCombinationArgumentValidation(self) -> None:
+        """Validates processes, block_size, stripe_count, block_bytes, key_count, segment_count validation guards."""
+        # 1. processes positive integer validation (line 811; arc [810, 811])
+        with self.assertRaises(PlanValidationError):
+            Combination(0, "4M", 1, 4194304, 1000, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination(-1, "4M", 1, 4194304, 1000, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination("1", "4M", 1, 4194304, 1000, 1)  # type: ignore
+
+        # 2. block_size non-empty string validation (line 815; arc [814, 815])
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "", 1, 4194304, 1000, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "   ", 1, 4194304, 1000, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination(1, 4096, 1, 4194304, 1000, 1)  # type: ignore
+
+        # 3. stripe_count positive integer validation (line 819; arc [818, 819])
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 0, 4194304, 1000, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", -2, 4194304, 1000, 1)
+
+        # 4. block_bytes positive integer validation (line 823; arc [822, 823])
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 1, 0, 1000, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 1, -1024, 1000, 1)
+
+        # 5. key_count positive integer validation (line 827; arc [826, 827])
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 1, 4194304, 0, 1)
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 1, 4194304, -5, 1)
+
+        # 6. segment_count positive integer validation (line 831; arc [830, 831])
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 1, 4194304, 1000, 0)
+        with self.assertRaises(PlanValidationError):
+            Combination(1, "4M", 1, 4194304, 1000, -1)
+
+    def testCombinationImmutabilityAndUnfrozenMutation(self) -> None:
+        """Validates frozen immutability on modify/delete and unfrozen mutation/deletion via __new__."""
+        f_comb = Combination(1, "4M", 1, 4194304, 1000, 1)
+
+        # Frozen modify raises AttributeError (line 845)
+        with self.assertRaises(AttributeError) as f_ctx:
+            f_comb.m_processes = 2
+        self.assertIn("Cannot modify immutable Combination", str(f_ctx.exception))
+
+        # Frozen delete raises AttributeError (lines 849, 850; arc [849, 850])
+        with self.assertRaises(AttributeError) as f_ctx_del:
+            del f_comb.m_processes
+        self.assertIn("Cannot delete attribute from immutable Combination", str(f_ctx_del.exception))
+
+        # Unfrozen mutation via __new__ (line 846; arc [844, 846])
+        f_unfrozen = Combination.__new__(Combination)
+        f_unfrozen.m_processes = 8
+        self.assertEqual(f_unfrozen.m_processes, 8)
+
+        # Unfrozen deletion via __new__ (line 853; arc [849, 853])
+        del f_unfrozen.m_processes
+        self.assertFalse(hasattr(f_unfrozen, "m_processes"))
+
+    def testCombinationEqualityAndSerialization(self) -> None:
+        """Validates toDict, __repr__, and __eq__ non-Combination comparison branch."""
+        f_comb = Combination(1, "4M", 2, 4194304, 1000, 1)
+        self.assertEqual(f_comb.name, "c2_b4M")
+        self.assertEqual(f_comb.processes, 1)
+        self.assertEqual(f_comb.block_size, "4M")
+        self.assertEqual(f_comb.stripe_count, 2)
+        self.assertEqual(f_comb.block_bytes, 4194304)
+        self.assertEqual(f_comb.key_count, 1000)
+        self.assertEqual(f_comb.segment_count, 1)
+
+        f_dict = f_comb.toDict()
+        self.assertEqual(
+            f_dict,
+            {
+                "processes": 1,
+                "block_size": "4M",
+                "stripe_count": 2,
+                "block_bytes": 4194304,
+                "key_count": 1000,
+                "segment_count": 1,
+            },
+        )
+        self.assertIn("Combination(processes=1, block_size='4M'", repr(f_comb))
+
+        # __eq__ branch to False against non-Combination (line 913; arc [904, 913])
+        self.assertFalse(f_comb == "not_a_combination")
+        self.assertFalse(f_comb == 42)
+        self.assertFalse(f_comb is None)
+        self.assertFalse(f_comb == {"processes": 1})
+        self.assertEqual(f_comb, Combination(1, "4M", 2, 4194304, 1000, 1))
+
+
+class ScalePointContractTest(unittest.TestCase):
+    """Exhaustive contract tests for ScalePoint immutability, property aliases, and equality."""
+
+    def testScalePointImmutabilityAndUnfrozenMutation(self) -> None:
+        """Validates frozen immutability and unfrozen mutation/deletion via __new__."""
+        f_sp = ScalePoint(4, 4, 1)
+
+        # Frozen modify raises AttributeError (line 944)
+        with self.assertRaises(AttributeError) as f_ctx:
+            f_sp.m_tasks = 8
+        self.assertIn("Cannot modify immutable ScalePoint", str(f_ctx.exception))
+
+        # Frozen delete raises AttributeError (lines 948, 949; arc [948, 949])
+        with self.assertRaises(AttributeError) as f_ctx_del:
+            del f_sp.m_tasks
+        self.assertIn("Cannot delete attribute from immutable ScalePoint", str(f_ctx_del.exception))
+
+        # Unfrozen mutation via __new__ (line 945; arc [943, 945])
+        f_unfrozen = ScalePoint.__new__(ScalePoint)
+        f_unfrozen.m_tasks = 16
+        self.assertEqual(f_unfrozen.m_tasks, 16)
+
+        # Unfrozen deletion via __new__ (line 952; arc [948, 952])
+        del f_unfrozen.m_tasks
+        self.assertFalse(hasattr(f_unfrozen, "m_tasks"))
+
+    def testScalePointPropertyAliases(self) -> None:
+        """Validates task_count, tasks_per_node, and node_count property aliases."""
+        f_sp = ScalePoint(f_tasks=16, f_ppn=4, f_nodes=4)
+        # Property aliases (lines 968, 972, 976)
+        self.assertEqual(f_sp.task_count, 16)
+        self.assertEqual(f_sp.tasks_per_node, 4)
+        self.assertEqual(f_sp.node_count, 4)
+
+    def testScalePointEqualityAgainstNonScalePoint(self) -> None:
+        """Validates __eq__ returns False for non-ScalePoint comparisons."""
+        f_sp = ScalePoint(1, 1, 1)
+        self.assertFalse(f_sp == "not_a_scale_point")
+        self.assertFalse(f_sp == 100)
+        self.assertFalse(f_sp is None)
+        self.assertFalse(f_sp == (1, 1, 1))
+        self.assertEqual(f_sp, ScalePoint(1, 1, 1))
+
+
+class ScheduledPointResourcesContractTest(unittest.TestCase):
+    """Exhaustive contract tests for ScheduledPointResources validation, immutability, repr, and equality."""
+
+    def testScheduledPointResourcesArgumentValidation(self) -> None:
+        """Validates walltime, select_chunks, ncpus, and mpiprocs validation guards."""
+        # 1. walltime non-empty string validation (line 1033; arc [1032, 1033])
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("")
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("   ")
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources(120)  # type: ignore
+
+        # 2. select_chunks positive integer validation (line 1039; arc [1036, 1039])
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_select_chunks=0)
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_select_chunks=-1)
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_select_chunks="2")  # type: ignore
+
+        # 3. ncpus positive integer validation (line 1043; arc [1042, 1043])
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_ncpus=0)
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_ncpus=-16)
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_ncpus="16")  # type: ignore
+
+        # 4. mpiprocs positive integer validation (line 1049; arc [1046, 1049])
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_mpiprocs=0)
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_mpiprocs=-4)
+        with self.assertRaises(PlanValidationError):
+            ScheduledPointResources("01:00:00", f_mpiprocs="4")  # type: ignore
+
+    def testScheduledPointResourcesImmutabilityAndUnfrozenMutation(self) -> None:
+        """Validates frozen immutability and unfrozen mutation/deletion via __new__."""
+        f_res = ScheduledPointResources("01:00:00", f_select_chunks=2, f_ncpus=16, f_mpiprocs=4)
+
+        # Frozen modify raises AttributeError (line 1068)
+        with self.assertRaises(AttributeError) as f_ctx:
+            f_res.m_walltime = "02:00:00"
+        self.assertIn("Cannot modify immutable ScheduledPointResources", str(f_ctx.exception))
+
+        # Frozen delete raises AttributeError (lines 1072, 1073; arc [1072, 1073])
+        with self.assertRaises(AttributeError) as f_ctx_del:
+            del f_res.m_walltime
+        self.assertIn("Cannot delete attribute from immutable ScheduledPointResources", str(f_ctx_del.exception))
+
+        # Unfrozen mutation via __new__ (line 1069; arc [1067, 1069])
+        f_unfrozen = ScheduledPointResources.__new__(ScheduledPointResources)
+        f_unfrozen.m_walltime = "00:30:00"
+        self.assertEqual(f_unfrozen.m_walltime, "00:30:00")
+
+        # Unfrozen deletion via __new__ (line 1076; arc [1072, 1076])
+        del f_unfrozen.m_walltime
+        self.assertFalse(hasattr(f_unfrozen, "m_walltime"))
+
+    def testScheduledPointResourcesReprAndEquality(self) -> None:
+        """Validates __repr__ formatting and __eq__ non-ScheduledPointResources comparison branch."""
+        f_res = ScheduledPointResources("01:00:00", f_select_chunks=2, f_ncpus=16, f_mpiprocs=4)
+
+        # __repr__ formatting (line 1138)
+        f_repr = repr(f_res)
+        self.assertIn("ScheduledPointResources(walltime='01:00:00'", f_repr)
+        self.assertIn("select_chunks=2", f_repr)
+        self.assertIn("ncpus=16", f_repr)
+        self.assertIn("mpiprocs=4", f_repr)
+
+        # __eq__ branch to False against non-ScheduledPointResources (line 1162; arc [1148, 1162])
+        self.assertFalse(f_res == "not_resources")
+        self.assertFalse(f_res == 42)
+        self.assertFalse(f_res is None)
+        self.assertFalse(f_res == {"walltime": "01:00:00"})
+
+        f_res_same = ScheduledPointResources("01:00:00", f_select_chunks=2, f_ncpus=16, f_mpiprocs=4)
+        self.assertEqual(f_res, f_res_same)
+
+
+class RunPlanContractTest(unittest.TestCase):
+    """Exhaustive contract tests for RunPlan validation guards, LMP tuning, immutability, repr, and equality."""
+
+    def setUp(self) -> None:
+        f_env_path = os.path.normpath(
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
+        )
+        f_doc = ProfileLoader.load(f_env_path)
+        f_reg = EnvironmentResolver.resolveRegistry(
+            f_doc, f_user="alice", f_home="/home/alice"
+        )
+        self.m_profile = f_reg.getProfile("viking")
+        self.m_req = RunRequest("lsmio", "small")
+        self.m_sp = ScalePoint(1, 1, 1)
+        self.m_comb = Combination(1, "4M", 1, 4194304, 1000, 1)
+        self.m_sched = ScheduledPointResources("01:00:00")
+        self.m_token = "tok_test_01"
+        self.m_ts = "2026-11-07T12:00:00Z"
+
+    def testRunPlanBasicArgumentValidation(self) -> None:
+        """Validates run_id, request, profile, scale_points, combinations, scheduled_points, tokens, timestamp guards."""
+        # 1. run_id non-empty string validation (line 1194; arc [1193, 1194])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts)
+        with self.assertRaises(PlanValidationError):
+            RunPlan("   ", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts)
+        with self.assertRaises(PlanValidationError):
+            RunPlan(123, self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts)  # type: ignore
+
+        # 2. request RunRequest type validation (line 1198; arc [1197, 1198])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", "not_a_request", self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts)  # type: ignore
+
+        # 3. profile SiteProfile type validation (line 1202; arc [1201, 1202])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, "not_a_profile", [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts)  # type: ignore
+
+        # 4. scale_points non-empty sequence validation (line 1206; arc [1205, 1206])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts)
+
+        # 5. combinations non-empty sequence validation (line 1208; arc [1207, 1208])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [], [self.m_sched], [self.m_token], self.m_ts)
+
+        # 6. scheduled_points count equal scale_points count (line 1210; arc [1209, 1210])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [], [self.m_token], self.m_ts)
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched, self.m_sched], [self.m_token], self.m_ts)
+
+        # 7. tokens count equal scale_points count (line 1214; arc [1213, 1214])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [], self.m_ts)
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token, "tok_02"], self.m_ts)
+
+        # 8. manifest_timestamp non-empty string validation (line 1221; arc [1217, 1221])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], "")
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], "   ")
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r1", self.m_req, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], 12345)  # type: ignore
+
+    def testRunPlanLmpDefaultTuningWhenNone(self) -> None:
+        """Validates auto-populating lmp_task_tuning when f_lmp_task_tuning is None for LMP target."""
+        f_req_lmp = RunRequest("lmp", "small")
+        f_plan_lmp = RunPlan(
+            "r_lmp",
+            f_req_lmp,
+            self.m_profile,
+            [self.m_sp],
+            [self.m_comb],
+            [self.m_sched],
+            [self.m_token],
+            self.m_ts,
+            f_lmp_task_tuning=None,
+        )
+        # Line 1229; Arc [1228, 1229]
+        self.assertEqual(
+            f_plan_lmp.lmp_task_tuning,
+            {"1": {"replication": 4, "buffer_size_mb": 32}},
+        )
+
+    def testRunPlanLmpTuningValidationErrors(self) -> None:
+        """Validates all LMP tuning validation failure modes."""
+        f_req_lmp = RunRequest("lmp", "small")
+
+        # 1. f_lmp_task_tuning not a mapping (line 1235; arc [1234, 1235])
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning=[1, 2])  # type: ignore
+        self.assertIn("lmp_task_tuning must be a mapping", str(f_ctx.exception))
+
+        # 2. Key format invalid (leading zeroes, non-digits, <= 0) (line 1247; arc [1241, 1247])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"01": {"replication": 4, "buffer_size_mb": 32}})
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"abc": {"replication": 4, "buffer_size_mb": 32}})
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"-1": {"replication": 4, "buffer_size_mb": 32}})
+
+        # 3. Task int not in RunPlanner.LMP_TASK_TUNING (line 1253; arc [1252, 1253])
+        # Scale point tasks=999 matches key, but 999 is undefined in LMP_TASK_TUNING
+        f_sp_999 = ScalePoint(999, 1, 999)
+        with self.assertRaises(PlanValidationError) as f_ctx_undef:
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [f_sp_999], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"999": {"replication": 4, "buffer_size_mb": 32}})
+        self.assertIn("LMP tuning is undefined for task count 999", str(f_ctx_undef.exception))
+
+        # 4. Tuning value not a mapping (line 1257; arc [1256, 1257])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": "not_a_mapping"})  # type: ignore
+
+        # 5. Dict keys not exactly {"replication", "buffer_size_mb"} (line 1261; arc [1260, 1261])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": {"replication": 4}})
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": {"replication": 4, "buffer_size_mb": 32, "extra": 1}})
+
+        # 6. Field value not a positive integer or is a bool (line 1271; arc [1266, 1271])
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": {"replication": 0, "buffer_size_mb": 32}})
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": {"replication": True, "buffer_size_mb": 32}})
+        with self.assertRaises(PlanValidationError):
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": {"replication": 4, "buffer_size_mb": -1}})
+
+        # 7. Values do not match approved authority (line 1279; arc [1275, 1279])
+        with self.assertRaises(PlanValidationError) as f_ctx_auth:
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"1": {"replication": 999, "buffer_size_mb": 32}})
+        self.assertIn("values do not match approved LMP tuning authority", str(f_ctx_auth.exception))
+
+        # 8. Tuning tasks do not match scale points tasks (line 1287; arc [1286, 1287])
+        # Scale point has tasks=1, but tuning provided for tasks=2
+        with self.assertRaises(PlanValidationError) as f_ctx_mismatch:
+            RunPlan("r_lmp", f_req_lmp, self.m_profile, [self.m_sp], [self.m_comb], [self.m_sched], [self.m_token], self.m_ts, f_lmp_task_tuning={"2": {"replication": 5, "buffer_size_mb": 32}})
+        self.assertIn("do not match scale points tasks", str(f_ctx_mismatch.exception))
+
+    def testRunPlanNonLmpTuningMustBeEmpty(self) -> None:
+        """Validates that non-LMP target rejects non-empty lmp_task_tuning."""
+        f_req_ior = RunRequest("ior", "small")
+        # Line 1292; Arc [1291, 1292]
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunPlan(
+                "r_ior",
+                f_req_ior,
+                self.m_profile,
+                [self.m_sp],
+                [self.m_comb],
+                [self.m_sched],
+                [self.m_token],
+                self.m_ts,
+                f_lmp_task_tuning={"1": {"replication": 4, "buffer_size_mb": 32}},
+            )
+        self.assertIn("lmp_task_tuning must be empty for non-LMP target", str(f_ctx.exception))
+
+    def testRunPlanImmutabilityReprAndEquality(self) -> None:
+        """Validates frozen immutability, unfrozen mutation/deletion, repr, and equality against non-RunPlan."""
+        f_plan = RunPlan(
+            "r1",
+            self.m_req,
+            self.m_profile,
+            [self.m_sp],
+            [self.m_comb],
+            [self.m_sched],
+            [self.m_token],
+            self.m_ts,
+        )
+
+        # Frozen modify raises AttributeError (line 1310)
+        with self.assertRaises(AttributeError) as f_ctx:
+            f_plan.m_run_id = "r2"
+        self.assertIn("Cannot modify immutable RunPlan", str(f_ctx.exception))
+
+        # Frozen delete raises AttributeError (lines 1314, 1315; arc [1314, 1315])
+        with self.assertRaises(AttributeError) as f_ctx_del:
+            del f_plan.m_run_id
+        self.assertIn("Cannot delete attribute from immutable RunPlan", str(f_ctx_del.exception))
+
+        # Unfrozen mutation via __new__ (line 1311; arc [1309, 1311])
+        f_unfrozen = RunPlan.__new__(RunPlan)
+        f_unfrozen.m_run_id = "unfrozen_r1"
+        self.assertEqual(f_unfrozen.m_run_id, "unfrozen_r1")
+
+        # Unfrozen deletion via __new__ (line 1318; arc [1314, 1318])
+        del f_unfrozen.m_run_id
+        self.assertFalse(hasattr(f_unfrozen, "m_run_id"))
+
+        # __repr__ formatting (line 1371)
+        f_repr = repr(f_plan)
+        self.assertIn("RunPlan(run_id='r1'", f_repr)
+        self.assertIn("request=RunRequest(target='lsmio'", f_repr)
+
+        # __eq__ branch to False against non-RunPlan (line 1396; arc [1384, 1396])
+        self.assertFalse(f_plan == "not_a_plan")
+        self.assertFalse(f_plan == 42)
+        self.assertFalse(f_plan is None)
+        self.assertFalse(f_plan == {"run_id": "r1"})
+
+        f_plan_same = RunPlan(
+            "r1",
+            self.m_req,
+            self.m_profile,
+            [self.m_sp],
+            [self.m_comb],
+            [self.m_sched],
+            [self.m_token],
+            self.m_ts,
+        )
+        self.assertEqual(f_plan, f_plan_same)
+

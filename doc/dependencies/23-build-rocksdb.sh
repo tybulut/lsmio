@@ -14,7 +14,19 @@ rm -rf rocksdb-build
 mkdir rocksdb-build
 cd rocksdb-build
 
+# Compression codecs: RocksDB builds none of them unless asked, and then the store has nothing to
+# compress with. On macOS the codec libraries come from Homebrew (brew install snappy lz4 zstd),
+# which CMake finds through the Homebrew prefix. Codecs built from source reside in $HOME/src/usr.
+PREFIX_PATH="$HOME/src/usr"
+if [ "$(uname -s)" = "Darwin" ]; then
+  PREFIX_PATH="$(brew --prefix);$PREFIX_PATH"
+fi
+
 cmake \
+  -DCMAKE_PREFIX_PATH="$PREFIX_PATH" \
+  -DWITH_SNAPPY=ON \
+  -DWITH_LZ4=ON \
+  -DWITH_ZSTD=ON \
   -DCMAKE_BUILD_TYPE=Release \
   -DROCKSDB_BUILD_SHARED=On \
   -DWITH_TOOLS=On \

@@ -28,11 +28,11 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import glob
 import importlib
 import json
 import math
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -42,24 +42,17 @@ from typing import (
     Any,
     Callable,
     Dict,
-    FrozenSet,
     List,
     Mapping,
-    NamedTuple,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Union,
     TYPE_CHECKING,
 )
 
 if TYPE_CHECKING:
-    from lsmiotool.lib.cli import (
-        CompareArchiveRequest,
-        CompareNodesRequest,
-        CompareVariantsRequest,
-    )
+    from lsmiotool.lib.cli import CompareRequest
 
 from lsmiotool.lib import debuggable, log
 
@@ -116,199 +109,6 @@ def siteBenchmarkRoots(f_storages: Sequence[str] = ("hdd", "ssd")) -> List[str]:
         if f_root and f_root not in f_roots:
             f_roots.append(f_root)
     return f_roots
-
-
-class ParseLegacyMain(BaseMain):
-    """parseLegacy: bmtool's 'parse' command on a bmtool-layout outputs directory.
-
-    Command:
-        parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>] [--ssd]
-        parseLegacy lsmio backends <local|bake|small|large> [<path>] [--ssd]
-
-    Like tools/bmtool/parse/*-parse.sh, the outputs directory defaults to
-    $BM_PATH/<benchmark>/outputs (jobs/<benchmark>-vars.in.sh), where $BM_PATH is the
-    site profile's benchmark root (its ssd root with --ssd), and the reports are
-    written into it. 'lsmio backends <scale>' regenerates every outputs-* arm of the
-    archive destination <BM_PATH>/lsmio-archive/backends/<scale> (bmtool's archive
-    mode). <path> overrides the outputs directory (archive destination for backends).
-    """
-
-    VALID_MODES: FrozenSet[str] = frozenset(
-        {"local", "bake", "small", "large", "variants", "baseline"}
-    )
-    BACKENDS_SCALES: FrozenSet[str] = frozenset({"local", "bake", "small", "large"})
-
-    m_command: str
-    m_mode: str
-    m_is_ssd: bool
-    m_backends: bool
-    m_path: Optional[str]
-    m_benchmark_root: Optional[str]
-
-    def __init__(self, *f_args: Any, **f_kwargs: Any) -> None:
-        """Initialize ParseLegacyMain.
-
-        Args:
-            *f_args: <ior|lsmio|lmp> <scale> [<path>], or lsmio backends <scale> [<path>]
-            **f_kwargs: ssd=True/False; f_benchmark_root overrides the site profile's
-                benchmark root.
-        """
-        super().__init__()
-        f_usage = (
-            "ParseLegacy: Needs <ior|lsmio|lmp> <local|bake|small|large|variants> "
-            "[<path>] or lsmio backends <local|bake|small|large> [<path>]"
-        )
-        if len(f_args) < 2:
-            log.Console.error(f_usage)
-            sys.exit(1)
-        f_tokens = [str(f_a) for f_a in f_args]
-        self.m_command = f_tokens[0]
-        self.m_is_ssd = bool(f_kwargs.get("ssd", False))
-        self.m_benchmark_root = f_kwargs.get("f_benchmark_root")
-        self.m_backends = False
-
-        allowed_commands = ["ior", "lsmio", "lmp"]
-        if self.m_command not in allowed_commands:
-            log.Console.error(
-                "Command to execute has to be in: " + str(allowed_commands)
-            )
-            sys.exit(1)
-
-        f_rest = f_tokens[1:]
-        if self.m_command == "lsmio" and f_rest[0] == "backends":
-            self.m_backends = True
-            f_rest = f_rest[1:]
-            if not f_rest or f_rest[0] not in self.BACKENDS_SCALES:
-                log.Console.error(
-                    "Backends scale has to be in: " + str(sorted(self.BACKENDS_SCALES))
-                )
-                sys.exit(1)
-        allowed_modes = ["local", "bake", "small", "large", "variants", "baseline"]
-        if f_rest[0] not in self.VALID_MODES:
-            log.Console.error("Command mode has to be in: " + str(allowed_modes))
-            sys.exit(1)
-        self.m_mode = f_rest[0]
-        if len(f_rest) > 2:
-            log.Console.error(f_usage)
-            sys.exit(1)
-        self.m_path = (
-            os.path.abspath(os.path.expanduser(f_rest[1])) if len(f_rest) > 1 else None
-        )
-
-    def _benchmarkRoot(self) -> Optional[str]:
-        """$BM_PATH: the explicit root, else the site profile's (ssd with --ssd)."""
-        if self.m_benchmark_root:
-            return os.path.abspath(os.path.expanduser(self.m_benchmark_root))
-        f_roots = siteBenchmarkRoots(("ssd",) if self.m_is_ssd else ("hdd",))
-        return f_roots[0] if f_roots else None
-
-    def _getTargetDir(self, f_bench_type: str, f_mode: str, f_is_ssd: bool) -> str:
-        """Outputs directory bmtool parses: <path>, else $BM_PATH/<benchmark>/outputs.
-
-        Raises:
-            ValueError: When no path was given and the benchmark root is unknown.
-        """
-        if self.m_path:
-            return self.m_path
-        f_root = self._benchmarkRoot()
-        if not f_root:
-            raise ValueError(
-                "cannot resolve the benchmark root from the site profile; "
-                "pass the outputs directory as <path>"
-            )
-        return os.path.join(f_root, f_bench_type, "outputs")
-
-    def _checkTargetDir(self, f_bench_type: str, f_mode: str, f_is_ssd: bool) -> str:
-        f_dir = self._getTargetDir(f_bench_type, f_mode, f_is_ssd)
-        if not os.path.isdir(f_dir):
-            raise ValueError(f"outputs directory not found: {f_dir}")
-        return f_dir
-
-    def parseIor(self, f_mode: str, f_is_ssd: bool) -> None:
-        """Parse IOR outputs into ior-report.csv (bmtool parse/ior-parse.sh)."""
-        from lsmiotool.lib import output
-
-        target_dir = self._checkTargetDir("ior", f_mode, f_is_ssd)
-        log.Console.debug(f"Parsing IOR logs from: {target_dir}")
-        agg = output.IorAggOutput(target_dir)
-        agg.generateReports(target_dir)
-
-    def parseLsmio(self, f_mode: str, f_is_ssd: bool) -> None:
-        """Parse LSMIO outputs into agg files and lsm-report.csv (lsmio-parse.sh)."""
-        from lsmiotool.lib import output
-
-        target_dir = self._checkTargetDir("lsmio", f_mode, f_is_ssd)
-        log.Console.debug(f"Parsing LSMIO logs from: {target_dir}")
-        agg = output.LsmioAggOutput(target_dir, f_scale=f_mode)
-        agg.generateReports(target_dir)
-
-    def parseLmp(self, f_mode: str, f_is_ssd: bool) -> None:
-        """Parse LMP outputs into lmp-report.csv (bmtool parse/lmp-parse.sh)."""
-        from lsmiotool.lib import output
-
-        target_dir = self._checkTargetDir("lmp", f_mode, f_is_ssd)
-        log.Console.debug(f"Parsing LMP logs from: {target_dir}")
-        agg = output.LmpAggOutput(target_dir)
-        agg.generateReports(target_dir)
-
-    def parseLsmioBackends(self, f_scale: str) -> int:
-        """lsmio-parse.sh archive mode, through 'parse lsmio backends <scale>'."""
-        from lsmiotool.lib.cli import ParseRequest
-
-        f_root = self._benchmarkRoot()
-        if not self.m_path and not f_root:
-            sys.stderr.write(
-                "Error: cannot resolve the benchmark root from the site profile; "
-                "pass the archive destination as <path>\n"
-            )
-            return 3
-        f_request = ParseRequest(
-            f_target="lsmio",
-            f_mode="backends",
-            f_scale=f_scale,
-            f_output_dir=self.m_path,
-        )
-        return ParseMain(f_request=f_request, f_benchmark_root=f_root).run()
-
-    def run(self) -> int:
-        """Execute parsing dispatch.
-
-        Returns:
-            0 when the report was written, 1 when the outputs directory is missing or
-            holds no results; backends mode returns 'parse lsmio backends' codes.
-        """
-        if self.m_backends:
-            return self.parseLsmioBackends(self.m_mode)
-
-        f_report_names = {
-            "ior": "ior-report.csv",
-            "lsmio": "lsm-report.csv",
-            "lmp": "lmp-report.csv",
-        }
-        try:
-            if self.m_command == "ior":
-                self.parseIor(self.m_mode, self.m_is_ssd)
-            elif self.m_command == "lsmio":
-                self.parseLsmio(self.m_mode, self.m_is_ssd)
-            elif self.m_command == "lmp":
-                self.parseLmp(self.m_mode, self.m_is_ssd)
-            f_report = os.path.join(
-                self._getTargetDir(self.m_command, self.m_mode, self.m_is_ssd),
-                f_report_names[self.m_command],
-            )
-        except ValueError as f_err:
-            sys.stderr.write(f"Error: {f_err}\n")
-            return 1
-
-        from lsmiotool.lib.data import isUsableReport
-
-        if not isUsableReport(f_report):
-            sys.stderr.write(
-                f"Warning: no {self.m_command} results; {f_report} not written\n"
-            )
-            return 1
-        sys.stdout.write(f"{f_report}\n")
-        return 0
 
 
 class ParseMain(BaseMain):
@@ -713,21 +513,22 @@ class ParseMain(BaseMain):
 
     @staticmethod
     def _regenerateIorDirs(f_dirs: Sequence[str]) -> int:
-        """Regenerate ior-report.csv (bmtool ior-parse.sh) in each IOR archive dir.
+        """Regenerate ior-report.csv in each IOR outputs dir, through IorAggOutput.
 
         Returns:
             0 when at least one ior-report.csv was produced, 5 otherwise.
         """
         from lsmiotool.lib.data import IOR_REPORT_FILE
-        from lsmiotool.lib.export import generateIorReports
+        from lsmiotool.lib.output import IorAggOutput
 
         f_written = 0
         for f_dir in f_dirs:
-            sys.stdout.write(
-                f"=== Generating report for {os.path.basename(f_dir)[len('outputs-') :]} ===\n"
-            )
+            f_base = os.path.basename(os.path.normpath(f_dir))
+            f_label = f_base[len("outputs-") :] if f_base.startswith("outputs-") else f_base
+            sys.stdout.write(f"=== Generating report for {f_label} ===\n")
             try:
-                if not generateIorReports(f_dir):
+                # None (no summary rows) is the failure; an old report may exist
+                if IorAggOutput(f_dir).generateReports() is None:
                     sys.stderr.write(f"Warning: no IOR results found in {f_dir}\n")
                     continue
             except Exception as f_err:
@@ -746,11 +547,46 @@ class ParseMain(BaseMain):
         f_name = os.path.basename(f_dir.rstrip(os.sep))
         return f_name.startswith("outputs-") and isIorArmId(f_name[len("outputs-") :])
 
+    @staticmethod
+    def _hasIorBanner(f_dir: str) -> bool:
+        """True when a rank log <dir>/<nodes>/<date>/out-* starts with the IOR banner.
+
+        Only the first line of each regular, non-empty log is read, in sorted path
+        order, until the first banner. Some IOR logs have no banner (they start with
+        an HDF5 or MPI error), so one banner anywhere is enough.
+        """
+        f_paths = sorted(
+            glob.iglob(os.path.join(glob.escape(f_dir), "*", "*", "out-*"))
+        )
+        for f_path in f_paths:
+            if not os.path.relpath(f_path, f_dir).split(os.sep)[0].isdigit():
+                continue
+            try:
+                if not os.path.isfile(f_path) or os.path.getsize(f_path) == 0:
+                    continue
+                with open(f_path, errors="replace") as f_file:
+                    f_first = f_file.readline()
+            except OSError:
+                continue
+            if f_first.startswith("IOR-") and (
+                "MPI Coordinated Test of Parallel I/O" in f_first
+            ):
+                return True
+        return False
+
+    def _isIorOutputsDir(self, f_dir: str) -> bool:
+        """An IOR outputs dir: outputs-ior[-<setup>] by name, else by the IOR banner in
+        its rank logs. An EPOCpp arm (by name) is never IOR."""
+        if self._isEpocppArmDir(f_dir):
+            return False
+        return self._isIorArmDir(f_dir) or self._hasIorBanner(f_dir)
+
     def _parseBmtoolLayout(self, f_dir: str) -> int:
         """Regenerate reports for a bmtool-layout outputs dir or an archive of them; an
-        IOR arm (outputs-ior[-<setup>]) gets its ior-report.csv and an epocpp arm
-        (outputs-epocpp-*) its epocpp-report.csv, never LSMIO reports."""
-        from lsmiotool.lib.output import isBmtoolOutputDir
+        IOR dir (outputs-ior[-<setup>] or any dir whose rank logs carry the IOR banner)
+        gets its ior-report.csv and an epocpp arm (outputs-epocpp-*) its
+        epocpp-report.csv, never LSMIO reports."""
+        from lsmiotool.lib.output import IorAggOutput, isBmtoolOutputDir
 
         f_scale = self.m_request.scale
         f_epocpp_dirs = (
@@ -778,26 +614,24 @@ class ParseMain(BaseMain):
                 return 2
             return self._regenerateEpocppDirs([f_dir])
         if self.m_request.format != "csv" and (
-            self._isIorArmDir(f_dir)
+            self._isIorOutputsDir(f_dir)
             or any(
-                self._isIorArmDir(os.path.join(f_dir, f_entry))
+                f_entry.startswith("outputs-")
                 and os.path.isdir(os.path.join(f_dir, f_entry))
+                and self._isIorOutputsDir(os.path.join(f_dir, f_entry))
                 for f_entry in os.listdir(f_dir)
             )
         ):
             # As 'parse ior <scale>' rejects it: IOR outputs give ior-report.csv only
             sys.stderr.write(
-                f"Error: {f_dir} holds IOR outputs, reported as ior-report.csv only "
-                "(bmtool ior-parse.sh); --format json is not supported\n"
+                f"Error: {f_dir} holds IOR outputs, reported as ior-report.csv only; "
+                "--format json is not supported\n"
             )
             return 2
-        if self._isIorArmDir(f_dir):
+        if self._isIorOutputsDir(f_dir):
             if self.m_request.output_dir:
-                from lsmiotool.lib.data import generateBmtoolIorReport
-
-                f_report = generateBmtoolIorReport(
-                    f_dir,
-                    f_report_dir=os.path.abspath(self.m_request.output_dir),
+                f_report = IorAggOutput(f_dir).generateReports(
+                    os.path.abspath(self.m_request.output_dir)
                 )
                 if f_report is None:
                     sys.stderr.write(f"Warning: no IOR results found in {f_dir}\n")
@@ -829,7 +663,7 @@ class ParseMain(BaseMain):
             if f_entry.startswith("outputs-")
             and os.path.isdir(os.path.join(f_dir, f_entry))
         ]
-        f_ior = [f_c for f_c in f_children if self._isIorArmDir(f_c)]
+        f_ior = [f_c for f_c in f_children if self._isIorOutputsDir(f_c)]
         f_lsmio = [
             f_c for f_c in f_children if f_c not in f_ior and f_c not in f_epocpp_dirs
         ]
@@ -1028,1230 +862,63 @@ class ParseMain(BaseMain):
             return 1
 
 
-class CompareNodesMain(BaseMain):
-    """Submode orchestrator for 'compare nodes' (multi-node scaling curve comparison)."""
 
-    # Longest folder part of a combined chart's file name (NAME_MAX is 255)
-    MAX_COMBINED_NAME = 120
-
-    m_request: "CompareNodesRequest"
-    m_folder: str
-    m_extra_dirs: Tuple[str, ...]
-    m_op: str
-    m_stripes: int
-    m_bs: str
-    m_output_dir: Optional[str]
-    m_all: bool
-    # outputs-* whose report could not be built, tried once per run, not once per chart
-    m_no_report: Set[str]
-
-    def __init__(
-        self,
-        *f_args: Any,
-        f_request: Optional[Any] = None,
-        f_folder: Optional[str] = None,
-        f_op: Optional[str] = None,
-        f_stripes: int = 4,
-        f_blocksize: str = "1M",
-        f_output_dir: Optional[str] = None,
-        f_all: bool = False,
-        **f_kwargs: Any,
-    ) -> None:
-        """Initialize CompareNodesMain.
-
-        Command: compare nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
-
-        Args:
-            *f_args: Variable length argument list (folder, op, [stripes], [blocksize], [output_dir]).
-            f_request: Optional pre-constructed CompareNodesRequest.
-            f_folder: Optional target benchmark folder.
-            f_op: Optional operation ('read' or 'write').
-            f_stripes: Optional stripe count (default: 4).
-            f_blocksize: Optional block size ('64K', '1M', '8M', default: '1M').
-            f_output_dir: Optional output directory for generated plots.
-            f_all: Chart every (stripes, blocksize) permutation, for f_op or both operations.
-            **f_kwargs: Arbitrary keyword arguments.
-        """
-        super().__init__()
-        from lsmiotool.lib.cli import CompareNodesRequest
-
-        if f_request is not None:
-            req = f_request
-        elif len(f_args) == 1 and isinstance(f_args[0], CompareNodesRequest):
-            req = f_args[0]
-        else:
-            folder = f_folder
-            op = f_op
-            stripes = f_stripes
-            bs = f_blocksize
-            out_dir = (
-                f_output_dir
-                or f_kwargs.get("f_output_dir")
-                or f_kwargs.get("output_dir")
-            )
-
-            if f_args:
-                if len(f_args) < 2:
-                    log.Console.error(
-                        "Compare nodes: Needs at least two arguments: <folder> <read|write> [<stripes>] [<blocksize>]"
-                    )
-                    sys.exit(1)
-                folder = str(f_args[0])
-                op = str(f_args[1])
-                if (
-                    len(f_args) >= 3
-                    and f_args[2] is not None
-                    and str(f_args[2]).strip() != ""
-                ):
-                    try:
-                        stripes = int(f_args[2])
-                    except ValueError:
-                        log.Console.error(f"Invalid stripes value: {f_args[2]}")
-                        sys.exit(1)
-                if (
-                    len(f_args) >= 4
-                    and f_args[3] is not None
-                    and str(f_args[3]).strip() != ""
-                ):
-                    bs = str(f_args[3])
-                if (
-                    len(f_args) >= 5
-                    and f_args[4] is not None
-                    and str(f_args[4]).strip() != ""
-                ):
-                    out_dir = str(f_args[4])
-
-            if folder is None or (op is None and not f_all):
-                log.Console.error(
-                    "Compare nodes: Missing required folder or operation."
-                )
-                sys.exit(1)
-
-            try:
-                req = CompareNodesRequest(
-                    f_folder=folder,
-                    f_op=op,
-                    f_stripes=stripes,
-                    f_blocksize=bs,
-                    f_output_dir=out_dir,
-                    f_all=f_all,
-                )
-            except ValueError as err:
-                log.Console.error(f"Compare nodes validation error: {err}")
-                sys.exit(1)
-
-        self.m_request = req
-        self.m_folder = req.folder
-        # Further folders whose outputs-* are charted with the first (e.g. lsmio-archive/ior)
-        self.m_extra_dirs = tuple(self.resolveDirectory(f_f) for f_f in req.folders[1:])
-        self.m_op = req.op
-        self.m_stripes = req.stripes
-        self.m_bs = req.blocksize
-        self.m_output_dir = req.output_dir
-        self.m_all = req.all
-        self.m_no_report = set()
-
-    @property
-    def request(self) -> "CompareNodesRequest":
-        return self.m_request
-
-    @property
-    def folder(self) -> str:
-        return self.m_folder
-
-    @property
-    def op(self) -> str:
-        return self.m_op
-
-    @property
-    def stripes(self) -> int:
-        return self.m_stripes
-
-    @property
-    def blocksize(self) -> str:
-        return self.m_bs
-
-    @property
-    def bs(self) -> str:
-        return self.m_bs
-
-    @property
-    def output_dir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    @property
-    def outputDir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    def resolveDirectory(self, f_path: str) -> str:
-        """Resolve path handling user home (~), relative, and absolute paths."""
-        expanded = os.path.expanduser(f_path)
-        return os.path.abspath(expanded)
-
-    def run(self) -> int:
-        """Scan benchmark subdirectories, extract data series, and generate comparison
-        plots: one, or with --all one per (operation, stripes, blocksize)."""
-        from lsmiotool.lib.cli import CompareCliParser
-
-        target_dir = self.resolveDirectory(self.m_folder)
-        self.m_no_report = set()
-        # A folder given twice is charted once
-        self.m_extra_dirs = tuple(
-            f_d
-            for f_i, f_d in enumerate(self.m_extra_dirs)
-            if f_d != target_dir and f_d not in self.m_extra_dirs[:f_i]
-        )
-        for f_dir in (target_dir,) + self.m_extra_dirs:
-            if not os.path.isdir(f_dir):
-                log.Console.error(f"Directory not found: {f_dir}")
-                sys.exit(1)
-
-        if not self.m_all:
-            self._plotOne(target_dir, self.m_op, self.m_stripes, self.m_bs)
-            return 0
-        f_ops = ["write", "read"] if self.m_op == "both" else [self.m_op]
-        for f_op in f_ops:
-            for f_stripes, f_bs in CompareCliParser.WORKLOAD_PERMUTATIONS:
-                self._plotOne(target_dir, f_op, f_stripes, f_bs)
-        return 0
-
-    @staticmethod
-    def _uniqueTails(f_paths: Sequence[str], f_min_depth: int) -> List[str]:
-        """The last path parts of each of f_paths (at least f_min_depth), as many as tell
-        them apart: ['/a/backends/small', '/b/backends/small'] -> ['a/backends/small', ...]."""
-        f_parts = [os.path.normpath(f_p).strip(os.sep).split(os.sep) for f_p in f_paths]
-        f_depth = f_min_depth
-        while f_depth < max(len(f_p) for f_p in f_parts) and len(
-            {tuple(f_p[-f_depth:]) for f_p in f_parts}
-        ) < len(f_parts):
-            f_depth += 1
-        return ["/".join(f_p[-f_depth:]) for f_p in f_parts]
-
-    @staticmethod
-    def _isIorOnly(f_dir: str) -> bool:
-        """f_dir's outputs-* directories are all IOR arms ('run ior' archives), and it has one."""
-        from lsmiotool.lib.arms import isIorArmId
-
-        f_arms = [
-            f_e[len("outputs-") :]
-            for f_e in os.listdir(f_dir)
-            if f_e.startswith("outputs-") and os.path.isdir(os.path.join(f_dir, f_e))
-        ]
-        return bool(f_arms) and all(isIorArmId(f_a) for f_a in f_arms)
-
-    @staticmethod
-    def _ensureEpocppReports(f_dir: str) -> None:
-        """Build the epocpp reports f_dir lacks: every arm's first, then the cost
-        report, which needs the baseline's and each backend's."""
-        from lsmiotool.lib import epocppreport
-        from lsmiotool.lib.arms import isEpocppArmId
-
-        f_arms = [
-            os.path.join(f_dir, f_e)
-            for f_e in sorted(os.listdir(f_dir))
-            if f_e.startswith("outputs-")
-            and isEpocppArmId(f_e[len("outputs-") :])
-            and os.path.isdir(os.path.join(f_dir, f_e))
-        ]
-        f_missing = [
-            f_a
-            for f_a in f_arms
-            if not os.path.isfile(os.path.join(f_a, epocppreport.ARM_REPORT_FILE))
-        ]
-        f_cost = os.path.join(f_dir, epocppreport.COST_REPORT_FILE)
-        if not f_missing and (not f_arms or os.path.isfile(f_cost)):
-            return
-        # One unusable arm loses only its own report
-        for f_arm in f_missing:
-            try:
-                epocppreport.writeArmReport(f_arm)
-            except Exception as f_err:
-                log.Console.warning(f"Failed to generate report for {f_arm}: {f_err}")
-        try:
-            epocppreport.writeCostReport(f_dir)
-        except Exception as f_err:
-            log.Console.warning(
-                f"Failed to generate the cost report of {f_dir}: {f_err}"
-            )
-
-    @staticmethod
-    def _isEpocppOnly(f_dir: str) -> bool:
-        """f_dir's outputs-* directories are all epocpp arms ('run epocpp backends'
-        archives), and it has one."""
-        from lsmiotool.lib.arms import isEpocppArmId
-
-        f_arms = [
-            f_e[len("outputs-") :]
-            for f_e in os.listdir(f_dir)
-            if f_e.startswith("outputs-") and os.path.isdir(os.path.join(f_dir, f_e))
-        ]
-        return bool(f_arms) and all(isEpocppArmId(f_a) for f_a in f_arms)
-
-    def _plotOne(self, target_dir: str, f_op: str, f_stripes: int, f_bs: str) -> None:
-        """Generate the comparison plot of one (operation, stripes, blocksize)."""
-        from lsmiotool.lib import data, output, plot
-
-        canonical_backend_labels: Dict[str, str] = {
-            "outputs-adios": "adios2",
-            "outputs-adios2": "adios2",
-            "adios": "adios2",
-            "adios2": "adios2",
-            "outputs-native": "native",
-            "native": "native",
-            "outputs-plugin": "plugin",
-            "plugin": "plugin",
-            # The -sync arms ('run lsmio backends', --lsmio-always-flush)
-            "outputs-adios-sync": "adios2-sync",
-            "adios-sync": "adios2-sync",
-            "adios2-sync": "adios2-sync",
-            "outputs-native-sync": "native-sync",
-            "native-sync": "native-sync",
-            "outputs-plugin-sync": "plugin-sync",
-            "plugin-sync": "plugin-sync",
-            "outputs-rocksdb-sync": "rocksdb-sync",
-            "rocksdb-sync": "rocksdb-sync",
-            "outputs-leveldb-sync": "leveldb-sync",
-            "leveldb-sync": "leveldb-sync",
-            "outputs-rocksdb": "rocksdb",
-            "rocksdb": "rocksdb",
-            "outputs-leveldb": "leveldb",
-            "leveldb": "leveldb",
-        }
-        canonical_order: Dict[str, int] = {
-            # Each backend, then its -sync arm
-            "adios2": 0,
-            "adios2-sync": 1,
-            "native": 2,
-            "native-sync": 3,
-            "plugin": 4,
-            "plugin-sync": 5,
-            "rocksdb": 6,
-            "rocksdb-sync": 7,
-            "leveldb": 8,
-            "leveldb-sync": 9,
-            # EPOCpp arms ('run epocpp backends'), by kind then backend
-            "epocpp-baseline": 20,
-            "epocpp-posix": 21,
-            "epocpp-adios2": 22,
-            "epocpp-plugin": 23,
-            "epocpp-native": 24,
-            "epocpp-posix-bw": 25,
-            "epocpp-adios2-bw": 26,
-            "epocpp-plugin-bw": 27,
-            "epocpp-native-bw": 28,
-            # IOR arms archived by 'run ior' (outputs-ior[-<setup>]), charted after the backends
-            "ior": 10,
-            "ior-collective": 11,
-            "ior-hdf5": 12,
-            "ior-hdf5-collective": 13,
-            "ior-fsync": 14,
-            "ior-reverse": 15,
-        }
-
-        from lsmiotool.lib import epocppreport
-        from lsmiotool.lib.arms import isEpocppArmId, isIorArmId
-        from lsmiotool.lib.export import generateIorReports
-
-        plot_data_list: List[plot.PlotData] = []
-        # Folder of each series, to tell same-named arms of several folders apart
-        f_sources: List[str] = []
-        is_read = f_op == "read"
-        for f_dir in [target_dir] + list(self.m_extra_dirs):
-            self._ensureEpocppReports(f_dir)
-
-        for f_dir, entry in (
-            (f_d, f_e)
-            for f_d in [target_dir] + list(self.m_extra_dirs)
-            for f_e in sorted(os.listdir(f_d))
-        ):
-            child_path = os.path.join(f_dir, entry)
-            f_ior_arm = entry[len("outputs-") :] if entry.startswith("outputs-") else ""
-            if not os.path.isdir(child_path) or child_path in self.m_no_report:
-                continue
-            if isEpocppArmId(f_ior_arm):
-                # An epocpp arm: its epocpp-report.csv (and the scale's epocpp-cost.csv,
-                # both built when missing above); only arms with the metric are charted
-                f_report = os.path.join(child_path, epocppreport.ARM_REPORT_FILE)
-                if not os.path.isfile(f_report):
-                    self.m_no_report.add(child_path)
-                    continue
-                try:
-                    x_series, y_series = epocppreport.timeSeries(
-                        child_path, f_op, f_stripes, f_bs
-                    )
-                except (OSError, ValueError) as f_err:
-                    log.Console.warning(f"Unusable report in {child_path}: {f_err}")
-                    self.m_no_report.add(child_path)
-                    continue
-                if x_series and y_series:
-                    plot_data_list.append(plot.PlotData(f_ior_arm, x_series, y_series))
-                    f_sources.append(f_dir)
-                continue
-            if f_op in ("runtime", "cost"):
-                # Only epocpp arms have these metrics
-                continue
-            if isIorArmId(f_ior_arm):
-                # An IOR arm: ior-report.csv (ior-parse.sh), generated when missing
-                f_ior_report = os.path.join(child_path, data.IOR_REPORT_FILE)
-                if not data.isUsableReport(f_ior_report):
-                    try:
-                        generateIorReports(child_path)
-                    except Exception as f_err:
-                        log.Console.warning(
-                            f"Failed to generate report for {child_path}: {f_err}"
-                        )
-                if not data.isUsableReport(f_ior_report):
-                    self.m_no_report.add(child_path)
-                else:
-                    x_series, y_series = data.IorSummaryData(f_ior_report).timeSeries(
-                        is_read, f_stripes, f_bs
-                    )
-                    if x_series and y_series:
-                        plot_data_list.append(
-                            plot.PlotData(f_ior_arm, x_series, y_series)
-                        )
-                        f_sources.append(f_dir)
-            else:
-                report_file = os.path.join(child_path, "lsm-report.csv")
-                if not output.ensureLsmioReports(child_path):
-                    self.m_no_report.add(child_path)
-                else:
-                    summary_data = data.LsmioSummaryData(report_file)
-                    x_series, y_series = summary_data.timeSeries(
-                        is_read, f_stripes, f_bs
-                    )
-                    if x_series and y_series:
-                        legend_label = canonical_backend_labels.get(entry)
-                        if legend_label is None:
-                            entry_lower = entry.lower()
-                            # A -sync arm (e.g. outputs-plugin-sync-1, collision-suffixed) is
-                            # labelled as its backend, then -sync
-                            f_sync = (
-                                re.search(r"-sync(-\d+)?$", entry_lower) is not None
-                            )
-                            if f_sync:
-                                entry_lower = re.sub(r"-sync(-\d+)?$", "", entry_lower)
-                            # "plugin" first: plugin runs are ADIOS2 too (e.g. "adios2-plugin")
-                            if "plugin" in entry_lower:
-                                legend_label = "plugin"
-                            elif "adios" in entry_lower:
-                                legend_label = "adios2"
-                            elif entry_lower in ("outputs-native", "native"):
-                                legend_label = "native"
-                            elif "rocksdb" in entry_lower:
-                                legend_label = "rocksdb"
-                            elif "leveldb" in entry_lower:
-                                legend_label = "leveldb"
-                            else:
-                                legend_label = entry
-                            if f_sync and legend_label != entry:
-                                legend_label += "-sync"
-                        plot_data_list.append(
-                            plot.PlotData(legend_label, x_series, y_series)
-                        )
-                        f_sources.append(f_dir)
-
-        if not plot_data_list:
-            log.Console.warning(
-                "No benchmark data found in subdirectories of "
-                f"{', '.join([target_dir] + list(self.m_extra_dirs))} "
-                f"for {f_op}, stripes={f_stripes}, bs={f_bs}"
-            )
-            return
-
-        # Sort plot series by canonical precedence: [adios2, adios2-sync, native, native-sync,
-        # plugin, plugin-sync, rocksdb, rocksdb-sync, leveldb, leveldb-sync], then the IOR arms
-        # (INV-BACKEND-5);
-        # the same arm from several folders stays in folder order
-        f_series = sorted(
-            zip(plot_data_list, f_sources),
-            key=lambda f_t: (canonical_order.get(f_t[0].legend, 999), f_t[0].legend),
-        )
-        plot_data_list = [f_pd for f_pd, _ in f_series]
-
-        # The same arm in several folders: name each after its folder, by as many trailing
-        # path parts (at least <parent>/<name>) as tell those folders apart
-        f_folders: Dict[str, List[str]] = {}
-        for f_pd, f_src in f_series:
-            f_srcs = f_folders.setdefault(f_pd.legend, [])
-            if f_src not in f_srcs:
-                f_srcs.append(f_src)
-        f_labels: Dict[Tuple[str, str], str] = {}
-        for f_legend, f_srcs in f_folders.items():
-            if len(f_srcs) < 2:
-                continue
-            for f_src, f_tail in zip(f_srcs, self._uniqueTails(f_srcs, 2)):
-                f_labels[(f_legend, f_src)] = f"{f_legend} ({f_tail})"
-        for f_pd, f_src in f_series:
-            f_pd.legend = f_labels.get((f_pd.legend, f_src), f_pd.legend)
-
-        base_name = os.path.basename(target_dir.rstrip(os.sep))
-
-        # Plots go straight into --output-dir (default: cwd), as 'compare variants' does;
-        # the scale names them: backends/<scale> -> <scale>, a variants archive -> variants
-        norm_target = os.path.normpath(target_dir)
-        path_parts = norm_target.split(os.sep)
-
-        out_dir = (
-            self.resolveDirectory(self.m_output_dir)
-            if self.m_output_dir
-            else os.getcwd()
-        )
-        b_indices = [i for i, part in enumerate(path_parts) if part == "backends"]
-        v_indices = [i for i, part in enumerate(path_parts) if part == "variants"]
-
-        if b_indices:
-            b_idx = b_indices[-1]
-            scale_name = (
-                path_parts[b_idx + 1] if b_idx + 1 < len(path_parts) else base_name
-            )
-        elif v_indices:
-            scale_name = "variants"
-        else:
-            scale_name = base_name
-
-        # Several folders: named after each folder's parent too (backends+ior), so the
-        # chart never replaces the first folder's own one; folders sharing a parent
-        # (backends/small, backends/large) are named by their own path tails instead
-        f_combined = ""
-        if self.m_extra_dirs:
-            f_dirs = [
-                os.path.normpath(f_d) for f_d in (target_dir,) + self.m_extra_dirs
-            ]
-            f_parents = [os.path.basename(os.path.dirname(f_d)) for f_d in f_dirs]
-            if all(f_parents) and len(set(f_parents)) == len(f_parents):
-                f_names = f_parents
-            else:
-                f_names = [
-                    f_t.replace("/", "_") for f_t in self._uniqueTails(f_dirs, 1)
-                ]
-            f_combined = "+".join(f_names)
-        elif self._isIorOnly(target_dir):
-            # IOR setups alone (lsmio-archive/ior/<scale>): named apart from the
-            # backends of that scale, which may share the output directory
-            f_combined = "ior"
-        elif self._isEpocppOnly(target_dir):
-            # lsmio-archive/epocpp/<scale>: named apart from its scale's other charts
-            f_combined = "epocpp"
-        if len(f_combined) > self.MAX_COMBINED_NAME:
-            # Keep the file name within NAME_MAX: a prefix and a hash of the rest
-            import hashlib
-
-            f_combined = (
-                f_combined[: self.MAX_COMBINED_NAME - 9]
-                + "-"
-                + hashlib.sha1(f_combined.encode()).hexdigest()[:8]
-            )
-
-        os.makedirs(out_dir, exist_ok=True)
-        title = (
-            f"Comparison: {scale_name}"
-            + (f", {f_combined.replace('+', ' + ')}" if f_combined else "")
-            + f" ({f_op.upper()} - {f_stripes} stripes - {f_bs})"
-        )
-        # epocpp reports are MiB/s (lsmio::Benchmark), as named when they alone are drawn
-        f_epocpp_only = all(
-            f_pd.legend.startswith("epocpp-") for f_pd in plot_data_list
-        )
-        f_y_label = {
-            "runtime": "Min Runtime in s",
-            "cost": "I/O cost in s (Min Runtime - no-output baseline)",
-        }.get(f_op, "Max BW in MiB/s" if f_epocpp_only else "Max BW in MB")
-        meta_data = plot.PlotMetaData(title, "# of Nodes", f_y_label)
-
-        output_filename = os.path.join(
-            out_dir,
-            f"compare-{scale_name}{'-' + f_combined if f_combined else ''}"
-            f"-{f_op}-{f_stripes}-{f_bs}.png",
-        )
-        bar_plot = plot.MultiBarPlot(meta_data, *plot_data_list)
-        bar_plot.plot(output_filename)
-        log.Console.info(f"Comparison plot saved to {output_filename}")
-
-
-class PairedVariantRun(NamedTuple):
-    """Encapsulates a verified paired variant run directory and its control baseline directory."""
-
-    backend: str
-    variant: str
-    collision: Optional[int]
-    display_label: str
-    run_dir: str
-    base_dir: str
-    run_metadata: Dict[str, Any]
-    base_metadata: Dict[str, Any]
-
-    def toDict(self) -> Dict[str, Any]:
-        return {
-            "backend": self.backend,
-            "variant": self.variant,
-            "collision": self.collision,
-            "display_label": self.display_label,
-            "run_dir": self.run_dir,
-            "base_dir": self.base_dir,
-            "run_metadata": dict(self.run_metadata),
-            "base_metadata": dict(self.base_metadata),
-        }
-
-    @classmethod
-    def fromDict(cls, f_data: Dict[str, Any]) -> "PairedVariantRun":
-        return cls(
-            backend=str(f_data["backend"]),
-            variant=str(f_data["variant"]),
-            collision=int(f_data["collision"])
-            if f_data.get("collision") is not None
-            else None,
-            display_label=str(f_data["display_label"]),
-            run_dir=str(f_data["run_dir"]),
-            base_dir=str(f_data["base_dir"]),
-            run_metadata=dict(f_data["run_metadata"]),
-            base_metadata=dict(f_data["base_metadata"]),
-        )
-
-
-class CompareVariantsMain(BaseMain):
-    """Submode orchestrator for 'compare variants' (8-node baseline variant comparison).
-
-    Scans benchmark run archives, executes fault-tolerant parse-on-demand aggregation,
-    extracts 8-node baseline metrics across variants, sorts variants alphabetically,
-    and renders publication-ready comparison bar charts.
-    """
-
-    __slots__ = (
-        "m_request",
-        "m_archive_folder",
-        "m_op",
-        "m_stripes",
-        "m_blocksize",
-        "m_all",
-        "m_output_dir",
-    )
-
-    m_request: "CompareVariantsRequest"
-    m_archive_folder: str
-    m_op: str
-    m_stripes: int
-    m_blocksize: str
-    m_all: bool
-    m_output_dir: Optional[str]
-
-    def __init__(
-        self,
-        *f_args: Any,
-        f_request: Optional[Any] = None,
-        f_archive_folder: Optional[str] = None,
-        f_op: str = "both",
-        f_stripes: int = 4,
-        f_blocksize: str = "1M",
-        f_all: bool = False,
-        f_output_dir: Optional[str] = None,
-        **f_kwargs: Any,
-    ) -> None:
-        """Initialize CompareVariantsMain.
-
-        Command: compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
-
-        Args:
-            *f_args: Variable length argument list (e.g. folder, op, stripes, bs, or CLI argv).
-            f_request: Optional pre-constructed CompareVariantsRequest.
-            f_archive_folder: Optional path to archive folder.
-            f_op: Optional operation ('read', 'write', 'both').
-            f_stripes: Optional stripe count (4, 16).
-            f_blocksize: Optional block size ('64K', '1M', '8M').
-            f_all: Optional flag to run all 6 permutations.
-            f_output_dir: Optional output directory for generated plots.
-            **f_kwargs: Arbitrary keyword arguments.
-        """
-        super().__init__()
-        from lsmiotool.lib.cli import (
-            CompareVariantsRequest,
-            parseCompareArchiveArguments,
-            parseCompareArguments,
-        )
-
-        if f_request is not None:
-            req = f_request
-        elif len(f_args) == 1 and isinstance(f_args[0], CompareVariantsRequest):
-            req = f_args[0]
-        elif f_args and any(
-            isinstance(a, str)
-            and (a.startswith("-") or a in ("compare-archive", "compare", "variants"))
-            for a in f_args
-        ):
-            tokens = [str(a) for a in f_args]
-            if tokens and tokens[0] == "variants":
-                req = parseCompareArguments(tokens)
-            else:
-                req = parseCompareArchiveArguments(tokens)
-        else:
-            folder = f_archive_folder
-            op = f_op
-            stripes = f_stripes
-            blocksize = f_blocksize
-            all_val = f_all
-            out_dir = (
-                f_output_dir
-                or f_kwargs.get("f_output_dir")
-                or f_kwargs.get("output_dir")
-            )
-
-            if f_args:
-                folder = str(f_args[0])
-                if len(f_args) >= 2 and f_args[1] is not None:
-                    op = str(f_args[1])
-                if len(f_args) >= 3 and f_args[2] is not None:
-                    stripes = int(f_args[2])
-                if len(f_args) >= 4 and f_args[3] is not None:
-                    blocksize = str(f_args[3])
-                if len(f_args) >= 5 and f_args[4] is not None:
-                    all_val = bool(f_args[4])
-                if len(f_args) >= 6 and f_args[5] is not None:
-                    out_dir = str(f_args[5])
-
-            if folder is None:
-                req = parseCompareArchiveArguments([])
-            else:
-                req = CompareVariantsRequest(
-                    f_archive_folder=folder,
-                    f_op=op,
-                    f_stripes=stripes,
-                    f_blocksize=blocksize,
-                    f_all=all_val,
-                    f_output_dir=out_dir,
-                )
-
-        self.m_request = req
-        self.m_archive_folder = req.archive_folder
-        self.m_op = req.op
-        self.m_stripes = req.stripes
-        self.m_blocksize = req.blocksize
-        self.m_all = req.all
-        self.m_output_dir = req.output_dir
-
-    @property
-    def request(self) -> "CompareVariantsRequest":
-        return self.m_request
-
-    @property
-    def archive_folder(self) -> str:
-        return self.m_archive_folder
-
-    @property
-    def folder(self) -> str:
-        return self.m_archive_folder
-
-    @property
-    def m_folder(self) -> str:
-        return self.m_archive_folder
-
-    @property
-    def op(self) -> str:
-        return self.m_op
-
-    @property
-    def stripes(self) -> int:
-        return self.m_stripes
-
-    @property
-    def blocksize(self) -> str:
-        return self.m_blocksize
-
-    @property
-    def bs(self) -> str:
-        return self.m_blocksize
-
-    @property
-    def m_bs(self) -> str:
-        return self.m_blocksize
-
-    @property
-    def all(self) -> bool:
-        return self.m_all
-
-    @property
-    def output_dir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    @property
-    def outputDir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    def resolveDirectory(self, f_path: str) -> str:
-        """Resolves path string expanding user home (~) and normalizing to absolute path."""
-        expanded = os.path.expanduser(f_path)
-        return os.path.abspath(expanded)
-
-    def _ensureReportExists(self, f_child_path: str) -> bool:
-        """Check if lsm-report.csv exists in child directory, triggering parse-on-demand if missing.
-
-        A zero-byte lsm-report.csv counts as missing, and a regeneration that yields
-        no rows writes nothing into the archive.
-
-        Args:
-            f_child_path: Path to variant directory (bmtool layout or lsmiotool run root).
-
-        Returns:
-            True if a non-empty lsm-report.csv exists or was successfully generated.
-        """
-        from lsmiotool.lib.output import ensureLsmioReports
-
-        return ensureLsmioReports(
-            f_child_path, f_scale="variants", f_require_logs=False
-        )
-
-    def _extractMetrics(
-        self, f_child_path: str, f_op: str, f_stripes: int, f_blocksize: str
-    ) -> Optional[float]:
-        """Extract 8-node baseline maxMB bandwidth metric from lsm-report.csv.
-
-        Args:
-            f_child_path: Path to variant directory or csv file.
-            f_op: Operation ('read' or 'write').
-            f_stripes: Stripe count (4 or 16).
-            f_blocksize: Block size ('64K', '1M', '8M').
-
-        Returns:
-            Bandwidth in MB/s as float, or None on error or missing metric.
-        """
-        csv_path = (
-            os.path.join(f_child_path, "lsm-report.csv")
-            if os.path.isdir(f_child_path)
-            else f_child_path
-        )
-        if not os.path.isfile(csv_path):
-            return None
-
-        try:
-            from lsmiotool.lib.data import LsmioSummaryData
-
-            summary_data = LsmioSummaryData(csv_path)
-            op_key = f_op.lower()
-            stripes_key = int(f_stripes)
-            bs_key = f_blocksize.upper()
-            bw = summary_data.m_csv_data[op_key][stripes_key][bs_key][8]["maxMB"]
-            return float(bw)
-        except (KeyError, IndexError, ValueError, TypeError):
-            return None
-
-    _extractBaselineMetric = _extractMetrics
-
-    def _generateChart(
-        self,
-        f_arg1: Any,
-        f_arg2: Any,
-        f_arg3: Any,
-        f_arg4: Any,
-        f_arg5: Optional[Any] = None,
-        f_arg6: Optional[Any] = None,
-    ) -> str:
-        """Render single-series grouped bar chart using MultiBarPlot.
-
-        Supports both:
-          _generateChart(op, stripes, blocksize, variant_data)
-          _generateChart(base_name, op, stripes, bs, variant_data, output_dir)
-
-        Returns:
-            Absolute path to generated PNG chart.
-        """
-        from lsmiotool.lib import plot
-
-        if f_arg5 is not None and f_arg6 is not None:
-            archive_basename = str(f_arg1)
-            op = str(f_arg2)
-            stripes = int(f_arg3)
-            blocksize = str(f_arg4)
-            variant_data = list(f_arg5)
-            out_dir = str(f_arg6)
-        else:
-            op = str(f_arg1)
-            stripes = int(f_arg2)
-            blocksize = str(f_arg3)
-            variant_data = list(f_arg4)
-            archive_basename = os.path.basename(
-                self.resolveDirectory(self.m_archive_folder).rstrip(os.sep)
-            )
-            out_dir = (
-                self.resolveDirectory(self.m_output_dir)
-                if self.m_output_dir
-                else os.getcwd()
-            )
-
-        sorted_data = sorted(variant_data, key=lambda x: x[0])
-        sorted_variants = [x[0] for x in sorted_data]
-        sorted_bws = [x[1] for x in sorted_data]
-
-        series = [plot.PlotData(op.capitalize(), sorted_variants, sorted_bws)]
-        filename = f"compare-variants-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, filename)
-
-        title = f"LSMIO Variant Comparison ({op.capitalize()}, Stripes={stripes}, BS={blocksize.upper()})"
-        meta_data = plot.PlotMetaData(title, "Variant", "Max Bandwidth (MB/s)")
-
-        bar_plot = plot.MultiBarPlot(meta_data, *series)
-        bar_plot.plot(out_path)
-        log.Console.info(f"Comparison plot saved to {out_path}")
-        return out_path
-
-    def _pairDirectories(
-        self,
-        valid_runs: List[Tuple[Any, str]],
-    ) -> List[PairedVariantRun]:
-        variant_runs: List[Tuple[Any, str]] = []
-        twin_bases: Dict[Tuple[str, str, Optional[int]], Tuple[Any, str]] = {}
-        standalone_bases: Dict[Tuple[str, Optional[int]], Tuple[Any, str]] = {}
-
-        for res, path in valid_runs:
-            coll_int = int(res.collision) if res.collision is not None else None
-            if res.role == "run":
-                variant_runs.append((res, path))
-            elif res.role == "base":
-                twin_bases[(res.backend, res.variant, coll_int)] = (res, path)
-            elif res.role is None and res.variant == "default":
-                standalone_bases[(res.backend, coll_int)] = (res, path)
-
-        paired_results: List[PairedVariantRun] = []
-        for meta_run, path_run in variant_runs:
-            coll_int = (
-                int(meta_run.collision) if meta_run.collision is not None else None
-            )
-            base_match = twin_bases.get((meta_run.backend, meta_run.variant, coll_int))
-            if base_match is None:
-                base_match = standalone_bases.get(
-                    (meta_run.backend, coll_int)
-                ) or standalone_bases.get((meta_run.backend, None))
-            if base_match is not None:
-                meta_base, path_base = base_match
-                paired_results.append(
-                    PairedVariantRun(
-                        backend=meta_run.backend,
-                        variant=meta_run.variant,
-                        collision=coll_int,
-                        display_label=meta_run.display_label,
-                        run_dir=path_run,
-                        base_dir=path_base,
-                        run_metadata=meta_run._asdict(),
-                        base_metadata=meta_base._asdict(),
-                    )
-                )
-            else:
-                log.Console.warning(
-                    f"Orphaned variant run omitted (no matching baseline): {meta_run.raw_directory}"
-                )
-
-        return sorted(paired_results, key=lambda x: x.display_label)
-
-    def _computeDelta(
-        self,
-        f_run_bw: float,
-        f_base_bw: float,
-        f_metric: str = "percent",
-    ) -> float:
-        if f_metric == "percent":
-            return (
-                ((f_run_bw - f_base_bw) / f_base_bw) * 100.0 if f_base_bw > 0.0 else 0.0
-            )
-        return f_run_bw - f_base_bw
-
-    def _generateDeltaChart(
-        self,
-        op: str,
-        stripes: int,
-        blocksize: str,
-        delta_data: List[Tuple[str, float]],
-        metric: str = "percent",
-        out_dir: Optional[str] = None,
-    ) -> str:
-        from lsmiotool.lib import plot
-
-        sorted_data = sorted(delta_data, key=lambda x: x[0])
-        variants = [x[0] for x in sorted_data]
-        deltas = [x[1] for x in sorted_data]
-
-        series = plot.PlotData(op.capitalize(), variants, deltas)
-        archive_basename = (
-            os.path.basename(
-                self.resolveDirectory(self.m_archive_folder).rstrip(os.sep)
-            )
-            if self.m_archive_folder
-            else "archive"
-        )
-        out_dir_path = (
-            self.resolveDirectory(out_dir)
-            if out_dir
-            else (
-                self.resolveDirectory(self.m_output_dir)
-                if self.m_output_dir
-                else os.getcwd()
-            )
-        )
-        filename = f"compare-variants-delta-{archive_basename}-{op.lower()}-{stripes}-{blocksize.upper()}.png"
-        os.makedirs(out_dir_path, exist_ok=True)
-        out_path = os.path.join(out_dir_path, filename)
-
-        unit = "%" if metric == "percent" else "MB/s"
-        title = f"LSMIO Variant Delta vs Paired Baseline ({op.capitalize()}, Stripes={stripes}, BS={blocksize.upper()})"
-        meta_data = plot.PlotMetaData(title, "Variant", f"Delta Bandwidth ({unit})")
-
-        chart = plot.DeltaBarPlot(
-            meta_data, series, f_is_percentage=(metric == "percent")
-        )
-        chart.plot(out_path)
-        log.Console.info(f"Comparison delta plot saved to {out_path}")
-        return out_path
-
-    def run(self) -> int:
-        """Scan benchmark archive folder, extract variant metrics, and generate comparison plots.
-
-        Returns:
-            0 on success, 1 on no valid runs, 3 if archive folder does not exist.
-        """
-        target_dir = self.resolveDirectory(self.m_archive_folder)
-        if not os.path.isdir(target_dir):
-            sys.stderr.write(f"Archive folder not found: {self.m_archive_folder}\n")
-            return 3
-
-        from lsmiotool.lib.variants import VariantReverseResolver
-
-        entries = sorted(os.listdir(target_dir))
-        valid_runs: List[Tuple[Any, str]] = []
-        for entry in entries:
-            child_path = os.path.join(target_dir, entry)
-            if not os.path.isdir(child_path):
-                continue
-            res = VariantReverseResolver.resolve(entry)
-            if res is None:
-                continue
-            if self._ensureReportExists(child_path):
-                valid_runs.append((res, child_path))
-
-        if not valid_runs:
-            log.Console.warning("No valid benchmark runs found in archive folder")
-            return 1
-
-        ops = ["read", "write"] if self.m_op.lower() == "both" else [self.m_op.lower()]
-        from lsmiotool.lib.cli import CompareCliParser
-
-        perms = (
-            CompareCliParser.WORKLOAD_PERMUTATIONS
-            if self.m_all
-            else [(self.m_stripes, self.m_blocksize)]
-        )
-
-        # Determine if paired variant runs are present
-        has_paired_runs = any(res.role == "run" for res, _ in valid_runs)
-
-        if has_paired_runs:
-            paired_runs = self._pairDirectories(valid_runs)
-            if not paired_runs:
-                log.Console.warning("No matched paired runs found for delta comparison")
-                return 1
-
-            for op in ops:
-                for stripes, bs in perms:
-                    delta_data: List[Tuple[str, float]] = []
-                    for pair in paired_runs:
-                        bw_run = self._extractMetrics(pair.run_dir, op, stripes, bs)
-                        bw_base = self._extractMetrics(pair.base_dir, op, stripes, bs)
-                        if bw_run is not None and bw_base is not None:
-                            delta = self._computeDelta(bw_run, bw_base, "percent")
-                            delta_data.append((pair.display_label, delta))
-                    if delta_data:
-                        self._generateDeltaChart(
-                            op, stripes, bs, delta_data, metric="percent"
-                        )
-                    else:
-                        log.Console.warning(
-                            f"No paired benchmark data found for {op}, stripes={stripes}, bs={bs}"
-                        )
-        else:
-            for op in ops:
-                for stripes, bs in perms:
-                    variant_data: List[Tuple[str, float]] = []
-                    for res, child_path in valid_runs:
-                        bw = self._extractMetrics(child_path, op, stripes, bs)
-                        if bw is not None:
-                            variant_data.append((res.display_label, bw))
-                    if variant_data:
-                        self._generateChart(op, stripes, bs, variant_data)
-                    else:
-                        log.Console.warning(
-                            f"No benchmark data found in subdirectories for {op}, stripes={stripes}, bs={bs}"
-                        )
-
-        return 0
-
-
-# Backward compatibility alias for existing test imports and external callers
-CompareArchiveMain = CompareVariantsMain
 
 
 class CompareMain(BaseMain):
-    """Unified entry point and polymorphic dispatcher for 'compare' subcommand.
+    """Subcommand orchestrator for 'compare': runs the dataset builder and the panel plot."""
 
-    Supports initialization via:
-    1. Typed request object: CompareNodesRequest or CompareVariantsRequest
-    2. CLI token sequences starting with 'nodes' or 'variants'
-    3. Positional Python arguments (folder, op, stripes, bs) for test backward compatibility
-       (safeguarding ProfileSchemaTest.py:606 and TestCompareMain.py)
-    """
+    m_request: "CompareRequest"
 
-    m_request: Optional[Union["CompareNodesRequest", "CompareVariantsRequest"]]
-    m_submode: str
-    m_delegate: Union[CompareNodesMain, CompareVariantsMain]
-
-    def __init__(
-        self,
-        *f_args: Any,
-        f_request: Optional[
-            Union["CompareNodesRequest", "CompareVariantsRequest"]
-        ] = None,
-        **f_kwargs: Any,
-    ) -> None:
+    def __init__(self, f_request: "CompareRequest") -> None:
         super().__init__()
-        from lsmiotool.lib.cli import (
-            CompareNodesRequest,
-            CompareVariantsRequest,
-            parseCompareArguments,
-        )
+        from lsmiotool.lib import cli
 
-        if f_request is not None:
-            req = f_request
-            if getattr(req, "submode", "") == "variants" or isinstance(
-                req, CompareVariantsRequest
-            ):
-                self.m_submode = "variants"
-                self.m_delegate = CompareVariantsMain(f_request=req)
-            else:
-                self.m_submode = "nodes"
-                self.m_delegate = CompareNodesMain(f_request=req)
-            self.m_request = req
-        elif len(f_args) == 1 and isinstance(
-            f_args[0], (CompareNodesRequest, CompareVariantsRequest)
-        ):
-            req = f_args[0]
-            if getattr(req, "submode", "") == "variants" or isinstance(
-                req, CompareVariantsRequest
-            ):
-                self.m_submode = "variants"
-                self.m_delegate = CompareVariantsMain(f_request=req)
-            else:
-                self.m_submode = "nodes"
-                self.m_delegate = CompareNodesMain(f_request=req)
-            self.m_request = req
-        elif (
-            len(f_args) == 1
-            and isinstance(f_args[0], (list, tuple))
-            and f_args[0]
-            and str(f_args[0][0]).lower() in ("nodes", "variants", "compare")
-        ):
-            req = parseCompareArguments(f_args[0])
-            if getattr(req, "submode", "") == "variants" or isinstance(
-                req, CompareVariantsRequest
-            ):
-                self.m_submode = "variants"
-                self.m_delegate = CompareVariantsMain(f_request=req)
-            else:
-                self.m_submode = "nodes"
-                self.m_delegate = CompareNodesMain(f_request=req)
-            self.m_request = req
-        elif f_args and str(f_args[0]).lower() in ("nodes", "variants", "compare"):
-            tokens = [str(a) for a in f_args]
-            req = parseCompareArguments(tokens)
-            if getattr(req, "submode", "") == "variants" or isinstance(
-                req, CompareVariantsRequest
-            ):
-                self.m_submode = "variants"
-                self.m_delegate = CompareVariantsMain(f_request=req)
-            else:
-                self.m_submode = "nodes"
-                self.m_delegate = CompareNodesMain(f_request=req)
-            self.m_request = req
-        else:
-            # Legacy Python caller fallback (ProfileSchemaTest.py:606, TestCompareMain.py)
-            self.m_submode = "nodes"
-            self.m_delegate = CompareNodesMain(*f_args, **f_kwargs)
-            self.m_request = getattr(self.m_delegate, "m_request", None)
+        if not isinstance(f_request, cli.CompareRequest):
+            raise TypeError(
+                f"f_request must be an instance of CompareRequest, got {type(f_request).__name__}"
+            )
+        self.m_request = f_request
 
     @property
-    def request(
-        self,
-    ) -> Optional[Union["CompareNodesRequest", "CompareVariantsRequest"]]:
+    def request(self) -> "CompareRequest":
         return self.m_request
 
-    @property
-    def submode(self) -> str:
-        return self.m_submode
-
-    @property
-    def delegate(self) -> Union[CompareNodesMain, CompareVariantsMain]:
-        return self.m_delegate
-
-    @property
-    def m_folder(self) -> str:
-        return getattr(
-            self.m_delegate,
-            "m_folder",
-            getattr(self.m_delegate, "m_archive_folder", ""),
-        )
-
-    @property
-    def folder(self) -> str:
-        return self.m_folder
-
-    @property
-    def archive_folder(self) -> str:
-        return getattr(self.m_delegate, "m_archive_folder", "")
-
-    @property
-    def m_op(self) -> str:
-        return self.m_delegate.m_op
-
-    @property
-    def op(self) -> str:
-        return self.m_delegate.m_op
-
-    @property
-    def m_stripes(self) -> int:
-        return self.m_delegate.m_stripes
-
-    @property
-    def stripes(self) -> int:
-        return self.m_delegate.m_stripes
-
-    @property
-    def m_bs(self) -> str:
-        return getattr(
-            self.m_delegate,
-            "m_bs",
-            getattr(self.m_delegate, "m_blocksize", "1M"),
-        )
-
-    @property
-    def blocksize(self) -> str:
-        return self.m_bs
-
-    @property
-    def all(self) -> bool:
-        return getattr(self.m_delegate, "m_all", False)
-
-    @property
-    def m_output_dir(self) -> Optional[str]:
-        return self.m_delegate.m_output_dir
-
-    @property
-    def output_dir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    @property
-    def outputDir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    def resolveDirectory(self, f_path: str) -> str:
-        return self.m_delegate.resolveDirectory(f_path)
-
     def run(self) -> int:
-        return self.m_delegate.run()
+        from lsmiotool.lib import compare, plot
+
+        try:
+            f_dataset = compare.CompareDatasetBuilder(self.m_request).build()
+        except compare.CompareFolderError as f_err:
+            log.Console.error(str(f_err))
+            return 3
+        except (
+            compare.CompareKindError,
+            compare.CompareSelectionError,
+            compare.CompareNoDataError,
+        ) as f_err:
+            log.Console.error(str(f_err))
+            return 1
+
+        try:
+            os.makedirs(f_dataset.output_dir, exist_ok=True)
+        except OSError as f_err:
+            log.Console.error(
+                f"Cannot create the output directory {f_dataset.output_dir}: {f_err}"
+            )
+            return 1
+
+        for f_png in f_dataset.pngs:
+            try:
+                plot.ComparePanelPlot(f_png.figure, self.m_request.style).plot(
+                    f_png.path
+                )
+            except OSError as f_err:
+                log.Console.error(f"Cannot write {f_png.path}: {f_err}")
+                return 1
+            log.Console.info(f"Comparison plot saved to {f_png.path}")
+
+        return 0
 
 
 def _stdoutIsTerminal() -> bool:
@@ -2455,24 +1122,23 @@ class RunMain(BaseMain):
 
 
 class ArchiveMain(BaseMain):
-    """'lsmiotool archive': bmtool's archive command (include/archive.in.sh).
+    """'lsmiotool archive': export a finished lsmiotool run into the archive.
 
     Benchmark root: f_benchmark_root, else the site profile's benchmark root (hdd,
-    as bmtool's archive has no --ssd) - never the working directory.
-    Destination: --dest (resolved like bmtool's include/archive-dest.in.sh), else
-    <root>/lsmio-archive/{variants|baseline}; for ior, <root>/lsmio-archive/ior/<scale>,
-    where 'run ior' archives (an epocpp run archives to <root>/lsmio-archive/epocpp/<scale>
-    from --source). An inherited BM_ARCHIVE_DEST is ignored:
-    bmtool clears it before resolving the archive command's destination.
+    no --ssd) - never the working directory.
+    Destination: --dest, else <root>/lsmio-archive/{variants|baseline}; for ior,
+    <root>/lsmio-archive/ior/<scale>, where 'run ior' archives (an epocpp run archives
+    to <root>/lsmio-archive/epocpp/<scale> from --source). An inherited BM_ARCHIVE_DEST
+    is ignored.
     Arm: outputs-<arm>, arm = resolveArmId(setup, variant) with setup from --setup,
     else $BM_SETUP, else NATIVE (an lsmiotool run root: the run's own setup).
-    Source (--source, else resolved from the root):
-      - <root>/lsmio/outputs ($LSM_DIR_OBASE) holding bmtool outputs is moved like
-        bmtool does (reports generated first, an empty directory recreated);
-      - otherwise the latest lsmiotool run of 'lsmio <scale>' [variant] under
-        <root>/runs is exported in bmtool's layout (lib/export.py) for its succeeded
-        points; the run root stays where it is (no empty runs/run-* left behind) and
-        a run already exported to the destination is not archived again.
+    Source: --source takes an lsmiotool run root (manifest.json) only; any other
+    directory is refused and left untouched. Without --source, the latest standalone
+    lsmiotool run of 'lsmio <scale>' [variant] under <root>/runs is exported in the
+    archive layout (lib/export.py) for its succeeded points; the run root stays where
+    it is (no empty runs/run-* left behind) and a run already exported to the
+    destination is not archived again. Arms of a multi-arm run are archived with
+    --source <one of its run roots>.
     """
 
     m_request: Any
@@ -2713,13 +1379,28 @@ class ArchiveMain(BaseMain):
                 return f_run_root
         return None
 
-    @staticmethod
-    def _holdsOutputs(f_dir: str) -> bool:
-        """True for a directory with entries other than bmtool's .bm-job-ok marker."""
+    def _groupArmRunRoots(self, f_root: str, f_setup: Optional[str]) -> List[str]:
+        """Names of the runs under <f_root>/runs that match the request but were
+        skipped by _latestRunRoot as arms of a multi-arm run (readArmMarker)."""
+        from lsmiotool.lib.archive import ArchiveEngine
+
+        f_runs = os.path.join(f_root, "runs")
         try:
-            return any(f_entry != ".bm-job-ok" for f_entry in os.listdir(f_dir))
+            f_entries = sorted(os.listdir(f_runs), reverse=True)
         except OSError:
-            return False
+            return []
+        f_names: List[str] = []
+        for f_entry in f_entries:
+            f_run_root = os.path.join(f_runs, f_entry)
+            if os.path.islink(f_run_root) or not os.path.isfile(
+                os.path.join(f_run_root, "manifest.json")
+            ):
+                continue
+            if ArchiveEngine.readArmMarker(
+                f_run_root
+            ) is not None and self._runArmId(f_run_root, f_setup, False):
+                f_names.append(f_entry)
+        return f_names
 
     def run(self) -> int:
         """Archive the resolved source into the destination; 0 on success, 1 on error."""
@@ -2769,7 +1450,7 @@ class ArchiveMain(BaseMain):
                 f_target=self.m_request.target,
             )
 
-            # Source: explicit, else bmtool's $LSM_DIR_OBASE or the latest lsmiotool run
+            # Source: an explicit run root, else the latest standalone lsmiotool run
             f_run_root: Optional[str] = None
             if f_source:
                 if os.path.isfile(os.path.join(f_source, "manifest.json")):
@@ -2781,61 +1462,51 @@ class ArchiveMain(BaseMain):
                         "(manifest.json); an ior archive takes only an ior run root"
                     )
                 else:
-                    # bmtool's archive only ever moves its live outputs dir
-                    # (include/archive.in.sh moves $LSM_DIR_OBASE): never an archive, a copy
-                    # or outputs-failed, which moving would break or misfile
-                    f_bm_outputs = (
-                        os.path.realpath(os.path.join(f_root, "lsmio", "outputs"))
-                        if f_root
-                        else None
+                    # Only an lsmiotool run root is archived: never an archive, a copy
+                    # or any other directory, which moving would break or misfile
+                    raise ArchiveError(
+                        f"--source {f_source} is not an lsmiotool run root "
+                        "(manifest.json); refusing to archive it (--source takes the "
+                        "run root of an lsmiotool run)"
                     )
-                    if os.path.realpath(f_source) != f_bm_outputs:
-                        raise ArchiveError(
-                            f"--source {f_source} is neither an lsmiotool run root "
-                            "(manifest.json) nor bmtool's live outputs directory "
-                            f"({f_bm_outputs or '<benchmark_root>/lsmio/outputs'}); refusing "
-                            "to move it (move bmtool outputs there first)"
-                        )
             else:
                 if f_root is None:
                     raise ArchiveError(
                         "cannot resolve the benchmark root from the site profile; "
                         "pass --source"
                     )
-                f_outputs = os.path.join(f_root, "lsmio", "outputs")
+                f_runs_root = os.path.join(f_root, "runs")
                 f_latest = self._latestRunRoot(f_root, f_setup)
-                # bmtool's live outputs are LSMIO's: an ior archive takes only runs
-                f_has_outputs = not f_ior and self._holdsOutputs(f_outputs)
-                if f_has_outputs and f_latest is not None:
-                    raise ArchiveError(
-                        f"Both bmtool outputs ({f_outputs}) and an lsmiotool run "
-                        f"({f_latest}) could be archived; pick one with --source"
-                    )
                 if f_latest is not None:
                     f_run_root = f_latest
-                elif f_has_outputs:
-                    f_source = f_outputs
-                elif f_ior:
-                    raise ArchiveError(
-                        f"Nothing to archive: no lsmiotool run of 'ior {f_scale}'"
-                        + (f" ({f_setup})" if f_setup else "")
-                        + f" was found under {os.path.join(f_root, 'runs')} (a multi-setup "
-                        "ior run is archived with --source <one of its run roots>)"
-                    )
                 else:
+                    f_skipped = self._groupArmRunRoots(f_root, f_setup)
+                    f_hint = (
+                        f"; {len(f_skipped)} matching run(s) belong to a multi-arm "
+                        f"run and are not taken ({', '.join(f_skipped)}): archive one "
+                        "with --source <its run root>"
+                        if f_skipped
+                        else ""
+                    )
+                    if f_ior:
+                        raise ArchiveError(
+                            f"Nothing to archive: no lsmiotool run of 'ior {f_scale}'"
+                            + (f" ({f_setup})" if f_setup else "")
+                            + f" was found under {f_runs_root} (a multi-setup "
+                            "ior run is archived with --source <one of its run roots>)"
+                            + f_hint
+                        )
                     raise ArchiveError(
-                        f"Nothing to archive: {f_outputs} is missing or empty and no "
-                        f"lsmiotool run of 'lsmio {f_scale}'"
+                        f"Nothing to archive: no lsmiotool run of 'lsmio {f_scale}'"
                         + (
                             f" ({self.m_request.variant})"
                             if self.m_request.variant
                             else ""
                         )
-                        + f" was found under {os.path.join(f_root, 'runs')}"
-                        " (a failed bmtool job leaves its outputs in "
-                        f"{os.path.join(f_root, 'lsmio', 'outputs-failed')}; a variants, "
-                        "--versioned or backends run is archived with --source <one of "
-                        "its run roots>)"
+                        + f" was found under {f_runs_root} (a variants, --versioned "
+                        "or backends run is archived with --source <one of its run "
+                        "roots>)"
+                        + f_hint
                     )
 
             if f_run_root is not None:
@@ -2865,20 +1536,7 @@ class ArchiveMain(BaseMain):
                 log.Console.info(f"Archived {f_run_root} -> {f_target_dir}")
                 return 0
 
-            # bmtool outputs directory: include/archive.in.sh move-on-archive
-            f_arm_id = ArchiveEngine.resolveArmId(
-                f_setup=f_setup or "NATIVE",
-                f_variant=self.m_request.variant,
-            )
-            f_target_dir = ArchiveEngine.executeArchive(
-                f_source_dir=f_source,
-                f_dest_root=f_dest_root,
-                f_arm_id=f_arm_id,
-                f_scale=f_scale,
-            )
-            sys.stdout.write(f"Archived {f_source} -> {f_target_dir}\n")
-            log.Console.info(f"Archived {f_source} -> {f_target_dir}")
-            return 0
+            raise ArchiveError("Nothing to archive")
         except ArchiveError as f_err:
             sys.stderr.write(f"Archive error: {f_err}\n")
             log.Console.error(f"Archive error: {f_err}")

@@ -31,6 +31,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <lsmio/benchmark.hpp>
 #include <lsmio/lsmio.hpp>
@@ -85,7 +86,7 @@ void Benchmark::stop(bool idempotent) {
 
 int64_t Benchmark::sofar() const {
     if (!_isStarted) {
-        throw std::invalid_argument("ERROR: lsmio::Benchmark::stop: method ran without starting.");
+        throw std::invalid_argument("ERROR: lsmio::Benchmark::sofar: method ran without starting.");
     }
 
     auto delta = sch::duration_cast<sch::microseconds>(sch::steady_clock::now() - _start);
@@ -94,7 +95,7 @@ int64_t Benchmark::sofar() const {
 
 int64_t Benchmark::duration() const {
     if (_isStarted) {
-        throw std::invalid_argument("ERROR: lsmio::Benchmark::stop: method ran while running.");
+        throw std::invalid_argument("ERROR: lsmio::Benchmark::duration: method ran while running.");
     }
 
     auto delta = sch::duration_cast<sch::microseconds>(_stop - _start);
@@ -108,8 +109,8 @@ void Benchmark::addIteration(const std::string& name, int64_t duration, double b
         _failedIterations[name]++;
         return;
     }
-    if (bytes < 0.0 || ops < 0.0) {
-        LOG(WARNING) << "Benchmark::addIteration: Rejected negative bytes (" << bytes
+    if (!(std::isfinite(bytes) && bytes >= 0.0 && std::isfinite(ops) && ops >= 0.0)) {
+        LOG(WARNING) << "Benchmark::addIteration: Rejected negative or non-finite bytes (" << bytes
                      << ") or ops (" << ops << ") for metric '" << name << "'." << std::endl;
         _failedIterations[name]++;
         return;
@@ -177,13 +178,14 @@ std::string Benchmark::formatIterations(const std::string& name) {
         bw = bytes / duration / 1.024 / 1.024;
         if (bw < 0.0) bw = 0.00;
 
-        output += name + ":" + fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bw) + ":" +
-                  fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bytes / 1024 / 1024) +
-                  ":" + fmt::format("{:.0f}", ops) + ":" + "1\n";
+        std::string row = name + ":" + fmt::format("{:.2f}", bw) + ":" +
+                          fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bw) + ":" +
+                          fmt::format("{:.2f}", bytes / 1024 / 1024) + ":" +
+                          fmt::format("{:.0f}", ops) + ":" + "1\n";
+        row = std::regex_replace(row, std::regex(","), "");
+        row = std::regex_replace(row, std::regex(":"), ",");
+        output += row;
     }
-
-    output = std::regex_replace(output, std::regex(","), "");
-    output = std::regex_replace(output, std::regex(":"), ",");
 
     return output;
 }

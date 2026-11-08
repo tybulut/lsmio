@@ -708,141 +708,6 @@ class RunOrchestratorTest(unittest.TestCase):
             self.assertEqual(f_pt_view.state, PointRunState.SUCCEEDED)
             self.assertEqual(f_pt_view.handle.job_id, f_expected_id)
 
-    def testDispatchCrashRecoveryOutcomesNoDuplicate(self) -> None:
-        """Validates crash recovery during dispatch window without duplicate submissions."""
-        # ---------------------------------------------------------------------
-        # Scenario A: Dispatched exists, exactly 1 recovery candidate found -> recovers handle without duplicate submit
-        # ---------------------------------------------------------------------
-        f_orch = RunOrchestrator(
-            f_profile_resolver=self.m_registry,
-            f_command_runner=self.m_fake_runner,
-            f_poll_interval=0.01,
-        )
-
-        f_plan = RunPlanner.createPlan(
-            RunRequest("ior", "local"),
-            self.m_viking_profile,
-        )
-        f_broot = self.m_viking_profile.benchmark_roots["hdd"]
-        f_store = ArtifactStore(f_broot, f_plan.run_id)
-        f_store.allocateRun(f_plan)
-        f_store.preparePoint(f_plan.scale_points[0], f_plan.combinations, f_ordinal=0)
-        f_ev_store = EvidenceStore(f_store.layout, f_plan)
-        f_ev_store.recordSubmissionRequested(
-            f_plan.scale_points[0], "control", f_ordinal=0
-        )
-        f_ev_store.recordSubmissionDispatched(
-            f_plan.scale_points[0], "control", f_ordinal=0
-        )
-
-        f_token = f_plan.tokens[0]
-        self.m_fake_runner.m_recovery_candidates[f_token] = ["99991"]
-
-        self._mockWritePointResults(
-            f_ev_store, f_plan.scale_points[0], f_plan, f_ordinal=0
-        )
-
-        f_orch_recovered = RunOrchestrator(
-            f_profile_resolver=self.m_registry,
-            f_command_runner=self.m_fake_runner,
-            f_poll_interval=0.01,
-        )
-
-        f_submit_calls_before = len(
-            [f_c for f_c in self.m_fake_runner.m_calls if f_c[0] == "sbatch"]
-        )
-        f_view = f_orch_recovered.recoverRun(
-            f_plan,
-            f_broot,
-            f_worker_executable=self.m_worker_path,
-        )
-        f_submit_calls_after = len(
-            [f_c for f_c in self.m_fake_runner.m_calls if f_c[0] == "sbatch"]
-        )
-
-        self.assertEqual(
-            f_submit_calls_before,
-            f_submit_calls_after,
-            "Must NOT submit again during crash recovery",
-        )
-        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
-        self.assertEqual(f_view.point_states[0].handle.job_id, "99991")
-
-        # ---------------------------------------------------------------------
-        # Scenario B: Dispatched exists, 0 recovery candidates -> fails closed
-        # ---------------------------------------------------------------------
-        f_plan_b = RunPlanner.createPlan(
-            RunRequest("ior", "local"), self.m_viking_profile
-        )
-        f_store_b = ArtifactStore(
-            self.m_viking_profile.benchmark_roots["hdd"], f_plan_b.run_id
-        )
-        f_store_b.allocateRun(f_plan_b)
-        f_store_b.preparePoint(
-            f_plan_b.scale_points[0], f_plan_b.combinations, f_ordinal=0
-        )
-        f_ev_store_b = EvidenceStore(f_store_b.layout, f_plan_b)
-        f_ev_store_b.recordSubmissionRequested(
-            f_plan_b.scale_points[0], "control", f_ordinal=0
-        )
-        f_ev_store_b.recordSubmissionDispatched(
-            f_plan_b.scale_points[0], "control", f_ordinal=0
-        )
-
-        self.m_fake_runner.m_recovery_candidates[f_plan_b.tokens[0]] = []
-
-        f_orch_b = RunOrchestrator(
-            f_profile_resolver=self.m_registry,
-            f_command_runner=self.m_fake_runner,
-            f_poll_interval=0.01,
-        )
-
-        f_view_b = f_orch_b.recoverRun(
-            f_plan_b,
-            self.m_viking_profile.benchmark_roots["hdd"],
-            f_worker_executable=self.m_worker_path,
-        )
-        self.assertNotEqual(f_view_b.state, OverallRunState.SUCCEEDED)
-
-        # ---------------------------------------------------------------------
-        # Scenario C: Dispatched exists, >1 recovery candidates -> indeterminate fail closed
-        # ---------------------------------------------------------------------
-        f_plan_c = RunPlanner.createPlan(
-            RunRequest("ior", "local"), self.m_viking_profile
-        )
-        f_store_c = ArtifactStore(
-            self.m_viking_profile.benchmark_roots["hdd"], f_plan_c.run_id
-        )
-        f_store_c.allocateRun(f_plan_c)
-        f_store_c.preparePoint(
-            f_plan_c.scale_points[0], f_plan_c.combinations, f_ordinal=0
-        )
-        f_ev_store_c = EvidenceStore(f_store_c.layout, f_plan_c)
-        f_ev_store_c.recordSubmissionRequested(
-            f_plan_c.scale_points[0], "control", f_ordinal=0
-        )
-        f_ev_store_c.recordSubmissionDispatched(
-            f_plan_c.scale_points[0], "control", f_ordinal=0
-        )
-
-        self.m_fake_runner.m_recovery_candidates[f_plan_c.tokens[0]] = [
-            "99992",
-            "99993",
-        ]
-
-        f_orch_c = RunOrchestrator(
-            f_profile_resolver=self.m_registry,
-            f_command_runner=self.m_fake_runner,
-            f_poll_interval=0.01,
-        )
-
-        f_view_c = f_orch_c.recoverRun(
-            f_plan_c,
-            self.m_viking_profile.benchmark_roots["hdd"],
-            f_worker_executable=self.m_worker_path,
-        )
-        self.assertNotEqual(f_view_c.state, OverallRunState.SUCCEEDED)
-
     def testSameIdCollisionRejectsWithoutAnyWriteOrSubmit(self) -> None:
         """Asserts normal execute on existing run ID rejects collision before point preparation, scripts, evidence, or submit."""
         f_run_id = "test-collision-run-id"
@@ -919,77 +784,6 @@ class RunOrchestratorTest(unittest.TestCase):
             )
 
         self.assertIn("failed to allocate run", str(f_ctx.exception).lower())
-
-    def testInternalRecoverRunRequiresManifestMatchAndControlLock(self) -> None:
-        """Asserts internal recoverRun requires exact manifest match and acquires control lock."""
-        f_run_id = "test-internal-recover-run"
-        f_plan = RunPlanner.createPlan(
-            RunRequest("ior", "local"),
-            self.m_viking_profile,
-            f_run_id_source=lambda: f_run_id,
-        )
-        f_broot = self.m_viking_profile.benchmark_roots["hdd"]
-        f_store = ArtifactStore(f_broot, f_run_id)
-        f_store.allocateRun(f_plan)
-
-        # Pre-seed dispatch evidence
-        f_ev_store = EvidenceStore(f_store.layout, f_plan)
-        f_ev_store.recordSubmissionRequested(
-            f_plan.scale_points[0], "control", f_ordinal=0
-        )
-        f_ev_store.recordSubmissionDispatched(
-            f_plan.scale_points[0], "control", f_ordinal=0
-        )
-        f_token = f_plan.tokens[0]
-        self.m_fake_runner.m_recovery_candidates[f_token] = ["88881"]
-        self._mockWritePointResults(
-            f_ev_store, f_plan.scale_points[0], f_plan, f_ordinal=0
-        )
-
-        # 1. Lock contention test
-        f_lock = f_store.getControlLock()
-        f_lock.acquire(f_blocking=False)
-        self.assertTrue(f_lock.is_locked)
-
-        f_orch = RunOrchestrator(
-            f_profile_resolver=self.m_registry,
-            f_command_runner=self.m_fake_runner,
-            f_poll_interval=0.01,
-        )
-
-        try:
-            with self.assertRaises(OrchestrationError) as f_ctx:
-                f_orch.recoverRun(
-                    f_plan,
-                    f_broot,
-                    f_worker_executable=self.m_worker_path,
-                )
-            self.assertIn("control lock contention", str(f_ctx.exception).lower())
-        finally:
-            f_lock.release()
-
-        # 2. Manifest mismatch test
-        f_mismatched_plan = RunPlanner.createPlan(
-            RunRequest("ior", "bake"),
-            self.m_viking_profile,
-            f_run_id_source=lambda: f_run_id,
-        )
-        with self.assertRaises(OrchestrationError) as f_ctx:
-            f_orch.recoverRun(
-                f_mismatched_plan,
-                f_broot,
-                f_worker_executable=self.m_worker_path,
-            )
-        self.assertIn("does not match plan", str(f_ctx.exception).lower())
-
-        # 3. Successful recovery with matching manifest and free lock
-        f_view = f_orch.recoverRun(
-            f_plan,
-            f_broot,
-            f_worker_executable=self.m_worker_path,
-        )
-        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
-        self.assertEqual(f_view.point_states[0].handle.job_id, "88881")
 
     def testEveryBoundaryFailure(self) -> None:
         """Submit failure and lost job state stop the run; a failed job does not stop later points (bmtool)."""
@@ -1150,7 +944,7 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertNotEqual(f_view.state, OverallRunState.SUCCEEDED)
 
     def testControlExclusion(self) -> None:
-        """Asserts concurrent orchestrator normal execution is rejected on collision and recovery is blocked by ControlLock."""
+        """Asserts concurrent orchestrator normal execution is rejected on collision."""
         f_plan = RunPlanner.createPlan(
             RunRequest("ior", "local"),
             self.m_viking_profile,
@@ -1178,15 +972,6 @@ class RunOrchestratorTest(unittest.TestCase):
                     f_worker_executable=self.m_worker_path,
                 )
             self.assertIn("failed to allocate run", str(f_ctx.exception).lower())
-
-            # 2. Internal recoverRun on existing store must fail with lock contention while lock is held
-            with self.assertRaises(OrchestrationError) as f_ctx_rec:
-                f_orch_2.recoverRun(
-                    f_plan,
-                    f_broot,
-                    f_worker_executable=self.m_worker_path,
-                )
-            self.assertIn("lock contention", str(f_ctx_rec.exception).lower())
         finally:
             f_lock_1.release()
 
@@ -2754,54 +2539,6 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(f_out.count("Final State: SUCCEEDED"), 1)
         self.assertEqual(f_out.count("Exit Code: 0"), 1)
 
-    def testRecoveredHandleReportingInCrashRecovery(self) -> None:
-        """Chunk 019: Asserts recoverRun emits recovered point token and exact job ID."""
-        # Create a valid plan and store with a point already recorded
-        f_plan = RunPlanner.createPlan(
-            f_request=RunRequest("ior", "local"),
-            f_profile=self.m_viking_profile,
-        )
-        f_store = ArtifactStore(self.m_temp_dir, f_plan.run_id)
-        f_store.allocateRun(f_plan)
-
-        f_ev = EvidenceStore(f_store.layout, f_plan)
-        f_handle = JobHandle(
-            f_backend="slurm",
-            f_job_id="998877",
-        )
-        f_ev.recordSubmissionRecorded(
-            f_point=f_plan.scale_points[0],
-            f_writer_id="control",
-            f_handle=f_handle,
-            f_ordinal=0,
-        )
-        self._mockWritePointResults(f_ev, f_plan.scale_points[0], f_plan, f_ordinal=0)
-
-        f_reporter = RunReporter()
-        f_orch = RunOrchestrator(
-            f_profile_resolver=self.m_registry,
-            f_command_runner=self.m_fake_runner,
-            f_poll_interval=0.01,
-            f_reporter=f_reporter,
-        )
-
-        f_view = f_orch.recoverRun(
-            f_plan=f_plan,
-            f_root=f_store.layout.runRoot,
-            f_worker_executable=self.m_worker_path,
-        )
-
-        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
-        f_lines = f_reporter.lines
-        self.assertIn(f"Run ID: {f_plan.run_id}", f_lines)
-        self.assertIn(f"Run Root: {os.path.abspath(f_store.layout.runRoot)}", f_lines)
-        self.assertIn(
-            f"Point 00-tasks-1 Correlation Token: {f_plan.tokens[0]}", f_lines
-        )
-        self.assertIn("Point 00-tasks-1 Job ID: 998877", f_lines)
-        self.assertIn("Final State: SUCCEEDED", f_lines)
-        self.assertIn("Exit Code: 0", f_lines)
-
     def testQualifiedPbsIdPreservedInReport(self) -> None:
         """Chunk 019: Asserts qualified PBS job IDs (with server dot suffix) are reported verbatim."""
         f_fake_runner_pbs = FakeSchedulerCommandRunner()
@@ -3912,7 +3649,7 @@ class RunOrchestratorTest(unittest.TestCase):
             self.assertEqual(f_orch.exitCode, 130)
 
     def testResumeDoesNotSkipStandaloneRuns(self) -> None:
-        """M5: bmtool has no resume for a standalone (default-only) variants run or a
+        """There is no resume for a standalone (default-only) variants run or a
         versioned run without variants: they rerun and archive to a -N suffix."""
         f_main = os.path.join(self.m_bin_dir, "bm_native:main")
         with open(f_main, "w") as f_f:
@@ -3957,7 +3694,7 @@ class RunOrchestratorTest(unittest.TestCase):
                 self.assertEqual(len(f_runner.m_submit_calls), 1, f_req)
 
     def testInheritedArchiveDestIsIgnored(self) -> None:
-        """M18: like bmtool, an exported BM_ARCHIVE_DEST does not redirect a run's archive;
+        """An exported BM_ARCHIVE_DEST does not redirect a run's archive;
         only --dest does, so parse/compare find it at the default destination."""
         f_runner = FakeSchedulerCommandRunner()
         f_orch = RunOrchestrator(
@@ -3984,7 +3721,7 @@ class RunOrchestratorTest(unittest.TestCase):
             self.assertTrue(f_c.kwargs["f_node_dir"].startswith(f_expected_root))
 
     def testGroupRunsAreMarkedForArchive(self) -> None:
-        """M21: arms of a multi-arm run carry an arm marker, their archive dirs a run marker,
+        """Arms of a multi-arm run carry an arm marker, their archive dirs a run marker,
         so 'lsmiotool archive' never re-exports a group arm as a standalone run."""
         from lsmiotool.lib.archive import ArchiveEngine
         from lsmiotool.lib.main import ArchiveMain
@@ -4036,7 +3773,7 @@ class RunOrchestratorTest(unittest.TestCase):
             )
 
     def testArchiveCommandArchivesWhatAGroupRunLeft(self) -> None:
-        """M22/M27: 'archive --source <arm run root>' archives a group run's finished points
+        """'archive --source <arm run root>' archives a group run's finished points
         as :run/:base pairs when the run did not (here --no-archive; likewise a lost
         session or a failed archive step), leaves out an arm that failed, and is idempotent."""
         from lsmiotool.lib.main import ArchiveMain
@@ -4094,7 +3831,7 @@ class RunOrchestratorTest(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(f_dest)), f_pair)
 
     def testArchiveGroupRunUsesTheRunsDestinationPerBackendPoint(self) -> None:
-        """M22: without --dest a group run is archived where the run would have archived it
+        """Without --dest a group run is archived where the run would have archived it
         (recorded in its arm markers): backends/<scale>/outputs-<arm>/<nodes>."""
         f_lib = os.path.join(self.m_temp_dir, "lib")
         os.makedirs(f_lib, exist_ok=True)
@@ -4182,8 +3919,8 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertIn("still running", str(f_ctx.exception))
 
     def testArchiveGroupRunNeedsEveryRankToSucceed(self) -> None:
-        """L47: as bmtool keeps a run with a failed step (any failed rank) out of the
-        archive, a point is archived only when every rank result succeeded too."""
+        """A run with a failed step (any failed rank) stays out of the
+        archive: a point is archived only when every rank result succeeded too."""
         f_runner = FakeSchedulerCommandRunner()
         f_orch = RunOrchestrator(
             f_profile_resolver=self.m_registry,
@@ -4215,7 +3952,7 @@ class RunOrchestratorTest(unittest.TestCase):
         )
 
     def testArchiveGroupRunNeverReplacesAnotherRunsBackendPoint(self) -> None:
-        """L44: archiving a backends run after the fact fills in missing <nodes> dirs but
+        """Archiving a backends run after the fact fills in missing <nodes> dirs but
         never replaces one holding another run's results (only a job replaces, as bmtool)."""
         from lsmiotool.lib.archive import ArchiveEngine
 
@@ -4307,14 +4044,15 @@ class RunOrchestratorTest(unittest.TestCase):
         )
 
     def testArchiveRefusesToMoveAnArchiveOrFailedOutputs(self) -> None:
-        """M23: --source may not be an archive dir (run marker), anything inside an archive
-        destination, or a failed bmtool job's outputs; the source is left untouched."""
+        """--source must be a run root: an archive dir (run marker), anything inside an
+        archive destination and any other non-run-root directory are refused and left
+        untouched."""
         from lsmiotool.lib.archive import ArchiveEngine
         from lsmiotool.lib.main import ArchiveMain
 
         f_root = self.m_viking_root_hdd
 
-        def bmtoolOutputs(f_dir: str) -> str:
+        def rankLogs(f_dir: str) -> str:
             os.makedirs(os.path.join(f_dir, "8", "2026-10-10"), exist_ok=True)
             with open(
                 os.path.join(f_dir, "8", "2026-10-10", "out-native-4-1M.txt"), "w"
@@ -4322,16 +4060,16 @@ class RunOrchestratorTest(unittest.TestCase):
                 f_f.write("write,1,1,1,1,1,10\n")
             return f_dir
 
-        f_marked = bmtoolOutputs(os.path.join(self.m_temp_dir, "copied-archive"))
+        f_marked = rankLogs(os.path.join(self.m_temp_dir, "copied-archive"))
         ArchiveEngine.writeRunMarker(f_marked, "run-x", f_marked, ["00-tasks-8"])
         f_cases = [
             f_marked,
-            bmtoolOutputs(
+            rankLogs(
                 os.path.join(
                     f_root, "lsmio-archive", "variants", "outputs-native-no-footer:run"
                 )
             ),
-            bmtoolOutputs(os.path.join(f_root, "lsmio", "outputs-failed", "job-1")),
+            rankLogs(os.path.join(f_root, "lsmio", "outputs-failed", "job-1")),
         ]
         f_dest = os.path.join(self.m_temp_dir, "dest")
         with patch.object(ArchiveMain, "_benchmarkRoot", return_value=f_root):

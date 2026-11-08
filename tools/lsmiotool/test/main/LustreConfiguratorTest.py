@@ -31,8 +31,10 @@
 import os
 import shutil
 import tempfile
+import types
 import unittest
 from typing import Any, List, Mapping, Optional, Sequence
+from unittest.mock import patch
 
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import Combination
@@ -681,6 +683,279 @@ class LustreConfiguratorTest(unittest.TestCase):
         self.assertEqual(f_argv1, f_argv3)
         self.assertEqual(f_argv1, f_argv4)
         self.assertEqual(f_argv1, f_argv5)
+
+
+class LustreConfiguratorContractTest(unittest.TestCase):
+    """Contract tests for LustreConfigurator combination parsing, pool resolution, containment, and execution error handling."""
+
+    def setUp(self) -> None:
+        self.m_combo_valid = (16, "8M")
+        self.m_target_valid = (
+            "/mnt/scratch/benchmark/runs/r1/points/00-tasks-1/data/c16/b8M"
+        )
+
+    def testExtractCombinationStripeBlockAttributes(self) -> None:
+        """Validates combination descriptor with stripe and block attributes."""
+        f_combo = types.SimpleNamespace(stripe=8, block="2M")
+        f_stripe, f_block = LustreConfigurator._extractCombination(f_combo)
+        self.assertEqual(f_stripe, 8)
+        self.assertEqual(f_block, "2M")
+
+    def testExtractCombinationDictVariants(self) -> None:
+        """Validates dictionary combination descriptors with stripe_count/block_size and stripe/block keys."""
+        f_cases = [
+            ({"stripe_count": 8, "block_size": "2M"}, (8, "2M")),
+            ({"stripe": 4, "block": "1M"}, (4, "1M")),
+        ]
+        for f_dict, f_expected in f_cases:
+            with self.subTest(combo_dict=f_dict):
+                self.assertEqual(
+                    LustreConfigurator._extractCombination(f_dict), f_expected
+                )
+
+    def testExtractCombinationUnsupportedType(self) -> None:
+        """Validates rejection of unsupported combination descriptor types."""
+        f_unsupported = [12345, 3.14, {1, 2}, [1, "2M", 3], object()]
+        for f_bad in f_unsupported:
+            with self.subTest(bad_type=type(f_bad).__name__):
+                with self.assertRaisesRegex(
+                    LustreConfigurationError, "Unsupported combination descriptor type"
+                ):
+                    LustreConfigurator._extractCombination(f_bad)
+
+    def testExtractCombinationStringStripeValidation(self) -> None:
+        """Validates parsing of numeric string stripe counts and rejection of non-numeric string stripe counts."""
+        # 1. Valid string stripe count
+        f_stripe, f_block = LustreConfigurator._extractCombination(("8", "2M"))
+        self.assertEqual(f_stripe, 8)
+        self.assertEqual(f_block, "2M")
+
+        # 2. Non-numeric string stripe count
+        with self.assertRaisesRegex(
+            LustreConfigurationError,
+            r"Stripe count must be a positive integer, got string: 'invalid_count'",
+        ):
+            LustreConfigurator._extractCombination(("invalid_count", "2M"))
+
+    def testResolvePoolInvalidStorageClass(self) -> None:
+        """Validates rejection of invalid storage class specifiers during pool resolution."""
+        f_bad_classes = [
+            "nvram",
+            "archive",
+            types.SimpleNamespace(value="tape"),
+            123,
+        ]
+        for f_sc in f_bad_classes:
+            with self.subTest(storage_class=f_sc):
+                with self.assertRaisesRegex(
+                    LustreConfigurationError, "Invalid storage class for pool resolution"
+                ):
+                    LustreConfigurator.resolvePool("VIKING2", f_storage_class=f_sc)
+
+    def testResolvePoolGetLustrePoolExceptionFallback(self) -> None:
+        """Validates fallback to string storage key when getLustrePool(enum) raises an exception."""
+
+        class _StringOnlyProfile:
+            def getLustrePool(self, sc: Any) -> Optional[str]:
+                if not isinstance(sc, str):
+                    raise TypeError("Expected string storage key")
+                return f"fallback_pool_{sc}"
+
+        f_prof = _StringOnlyProfile()
+        f_res = LustreConfigurator.resolvePool(f_prof, f_storage_class=StorageClass.SSD)
+        self.assertEqual(f_res, "fallback_pool_ssd")
+
+    def testResolvePoolLustrePoolsAttributeVariants(self) -> None:
+        """Validates pool resolution from lustre_pools attribute with dict, non-dict, and enum keys."""
+        # 1. lustre_pools is not a dict -> returns None
+        f_prof_none = types.SimpleNamespace(lustre_pools=None)
+        self.assertIsNone(LustreConfigurator.resolvePool(f_prof_none))
+
+        # 2. lustre_pools dict with StorageClass enum keys
+        f_prof_enum = types.SimpleNamespace(
+            lustre_pools={
+                StorageClass.HDD: "enum_hdd_pool",
+                StorageClass.SSD: "enum_ssd_pool",
+            }
+        )
+        self.assertEqual(
+            LustreConfigurator.resolvePool(f_prof_enum, f_storage_class="hdd"),
+            "enum_hdd_pool",
+        )
+        self.assertEqual(
+            LustreConfigurator.resolvePool(f_prof_enum, f_storage_class="ssd"),
+            "enum_ssd_pool",
+        )
+
+        # 3. Custom mapping where get(enum) raises an exception
+        class _EnumRejectingMapping(dict):
+            def get(self, key: Any, default: Any = None) -> Any:
+                if not isinstance(key, str):
+                    raise TypeError("Enum lookup rejected")
+                return super().get(key, default)
+
+        f_prof_reject = types.SimpleNamespace(
+            lustre_pools=_EnumRejectingMapping({"other": "val"})
+        )
+        self.assertIsNone(
+            LustreConfigurator.resolvePool(f_prof_reject, f_storage_class="hdd")
+        )
+
+    def testResolvePoolPoolsAttributeVariants(self) -> None:
+        """Validates pool resolution from pools attribute with dict and non-dict."""
+        # 1. pools is a dict
+        f_prof_dict = types.SimpleNamespace(
+            pools={"hdd": "custom_hdd_pool", "SSD": "custom_ssd_pool"}
+        )
+        self.assertEqual(
+            LustreConfigurator.resolvePool(f_prof_dict, f_storage_class="hdd"),
+            "custom_hdd_pool",
+        )
+        self.assertEqual(
+            LustreConfigurator.resolvePool(f_prof_dict, f_storage_class="ssd"),
+            "custom_ssd_pool",
+        )
+
+        # 2. pools is not a dict -> returns None
+        f_prof_not_dict = types.SimpleNamespace(pools=None)
+        self.assertIsNone(
+            LustreConfigurator.resolvePool(f_prof_not_dict, f_storage_class="hdd")
+        )
+
+    def testResolvePoolDirectPoolStringName(self) -> None:
+        """Validates resolving direct pool name token from string when not a known site name."""
+        f_pool = LustreConfigurator.resolvePool("scratch.direct_nvme")
+        self.assertEqual(f_pool, "scratch.direct_nvme")
+
+    def testResolvePoolDictProfileVariants(self) -> None:
+        """Validates pool resolution from dictionary profile containers."""
+        # 1. lustre_pools in dict
+        f_dict_lustre = {"lustre_pools": {"hdd": "dict_hdd_pool"}}
+        self.assertEqual(
+            LustreConfigurator.resolvePool(f_dict_lustre, f_storage_class="hdd"),
+            "dict_hdd_pool",
+        )
+
+        # 2. pools in dict
+        f_dict_pools = {"pools": {"hdd": "dict_pools_hdd"}}
+        self.assertEqual(
+            LustreConfigurator.resolvePool(f_dict_pools, f_storage_class="hdd"),
+            "dict_pools_hdd",
+        )
+
+        # 3. Non-dict or empty
+        self.assertIsNone(LustreConfigurator.resolvePool({"lustre_pools": None}))
+        self.assertIsNone(LustreConfigurator.resolvePool({}))
+
+    def testResolvePoolUnsupportedContainerType(self) -> None:
+        """Validates rejection of unsupported container types during pool resolution."""
+        f_unsupported = [12345, [1, 2], object()]
+        for f_bad in f_unsupported:
+            with self.subTest(bad_container=type(f_bad).__name__):
+                with self.assertRaisesRegex(
+                    LustreConfigurationError,
+                    "Unsupported profile container type for pool resolution",
+                ):
+                    LustreConfigurator.resolvePool(f_bad)
+
+    def testResolvePoolBlankStringReturnsNone(self) -> None:
+        """Validates that whitespace or blank resolved pool string returns None."""
+        f_cases = [{"pools": {"hdd": ""}}, {"pools": {"hdd": "   "}}]
+        for f_prof in f_cases:
+            with self.subTest(prof=f_prof):
+                self.assertIsNone(LustreConfigurator.resolvePool(f_prof))
+
+    def testResolvePoolInvalidPoolCharacters(self) -> None:
+        """Validates rejection of pool name tokens containing spaces, semicolons, or NUL bytes."""
+        f_invalid = [
+            {"pools": {"hdd": "pool with spaces"}},
+            {"pools": {"hdd": "pool;injection"}},
+            {"pools": {"hdd": "pool\0nul"}},
+        ]
+        for f_prof in f_invalid:
+            with self.subTest(prof=f_prof):
+                with self.assertRaisesRegex(
+                    LustreConfigurationError,
+                    r"Lustre pool name '.*' contains invalid characters",
+                ):
+                    LustreConfigurator.resolvePool(f_prof)
+
+    def testValidateTargetDirBlankOrNonString(self) -> None:
+        """Validates rejection of empty string, whitespace, None, or non-string target directories."""
+        f_invalid = ["", "   ", None, 12345, []]
+        for f_bad in f_invalid:
+            with self.subTest(bad_target=f_bad):
+                with self.assertRaisesRegex(
+                    LustreConfigurationError,
+                    "Target directory must be a non-empty string",
+                ):
+                    LustreConfigurator.validateTargetDir(f_bad)
+
+    def testValidateTargetDirGeneralPatternMismatchWhenCombinationNone(self) -> None:
+        """Validates target directory containment check under general pattern when combination is None."""
+        f_outside_path = (
+            "/mnt/lustre/users/user/benchmark/runs/r1/points/00-tasks-1/work/c16_b8M"
+        )
+        with self.assertRaisesRegex(
+            LustreConfigurationError,
+            r"Target directory '.*' is not contained under a point data directory",
+        ):
+            LustreConfigurator.validateTargetDir(f_outside_path, f_combination=None)
+
+    def testConfigureRunnerFromKwargs(self) -> None:
+        """Validates runner injection via kwargs when f_runner parameter is omitted."""
+        f_mock_runner = MockProcessRunner(f_returncode=0)
+        f_res = LustreConfigurator.configure(
+            None,
+            self.m_combo_valid,
+            self.m_target_valid,
+            runner=f_mock_runner,
+        )
+        self.assertTrue(f_res.is_success)
+        self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
+
+    def testConfigureDefaultProcessRunner(self) -> None:
+        """Validates configure default instantiation of ProcessRunner when runner is omitted."""
+        with patch.object(
+            ProcessRunner, "run", return_value=ProcessResult(0)
+        ) as f_mock_run:
+            f_res = LustreConfigurator.configure(
+                None,
+                self.m_combo_valid,
+                self.m_target_valid,
+            )
+            self.assertTrue(f_res.is_success)
+            f_mock_run.assert_called_once()
+
+    def testConfigureProcessExecutionError(self) -> None:
+        """Validates translation of ProcessExecutionError into LustreConfigurationError."""
+        f_mock_runner = MockProcessRunner(
+            f_exception_to_raise=ProcessExecutionError("I/O error during execution")
+        )
+        with self.assertRaises(LustreConfigurationError) as f_ctx:
+            LustreConfigurator.configure(
+                None,
+                self.m_combo_valid,
+                self.m_target_valid,
+                f_runner=f_mock_runner,
+            )
+        self.assertIn("execution error", str(f_ctx.exception).lower())
+        self.assertIsInstance(f_ctx.exception.__cause__, ProcessExecutionError)
+
+    def testConfigureUnexpectedException(self) -> None:
+        """Validates translation of unexpected runner exceptions into LustreConfigurationError."""
+        f_mock_runner = MockProcessRunner(
+            f_exception_to_raise=RuntimeError("Unexpected subprocess crash")
+        )
+        with self.assertRaises(LustreConfigurationError) as f_ctx:
+            LustreConfigurator.configure(
+                None,
+                self.m_combo_valid,
+                self.m_target_valid,
+                f_runner=f_mock_runner,
+            )
+        self.assertIn("unexpected error", str(f_ctx.exception).lower())
+        self.assertIsInstance(f_ctx.exception.__cause__, RuntimeError)
 
 
 if __name__ == "__main__":
