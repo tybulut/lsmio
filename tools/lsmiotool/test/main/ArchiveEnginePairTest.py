@@ -83,110 +83,13 @@ class ArchiveEnginePairTest(unittest.TestCase):
             self.assertEqual(run_2, expected_run_2)
             self.assertEqual(base_2, expected_base_2)
 
-    def testExecutePairedArchiveAtomicExecution(self) -> None:
-        """Asserts executePairedArchive moves run output, replicates baseline, and returns string tuple."""
-        with tempfile.TemporaryDirectory() as temp_root:
-            run_source = os.path.join(temp_root, "outputs_run")
-            base_source = os.path.join(temp_root, "outputs_base")
-            dest_root = os.path.join(temp_root, "archive")
-
-            os.makedirs(run_source)
-            os.makedirs(base_source)
-
-            with open(os.path.join(run_source, "run.log"), "w") as f:
-                f.write("variant run output")
-            with open(os.path.join(base_source, "base.log"), "w") as f:
-                f.write("baseline output")
-
-            target_run, target_base = ArchiveEngine.executePairedArchive(
-                f_run_source_dir=run_source,
-                f_base_source_dir=base_source,
-                f_dest_root=dest_root,
-                f_arm_id="native-footer",
-            )
-
-            # Check return types
-            self.assertIsInstance(target_run, str)
-            self.assertIsInstance(target_base, str)
-
-            # Check target files exist
-            self.assertTrue(os.path.isfile(os.path.join(target_run, "run.log")))
-            self.assertTrue(os.path.isfile(os.path.join(target_base, "base.log")))
-
-            # Verify active run source directory was recreated cleanly
-            self.assertTrue(os.path.isdir(run_source))
-            self.assertEqual(os.listdir(run_source), [])
-
-            # Verify base source directory was copied (remains intact)
-            self.assertTrue(os.path.isdir(base_source))
-            self.assertTrue(os.path.isfile(os.path.join(base_source, "base.log")))
-
-    def testReplicateArchive(self) -> None:
-        """Asserts replicateArchive creates destination copy without modifying source."""
-        with tempfile.TemporaryDirectory() as temp_root:
-            source_dir = os.path.join(temp_root, "staging")
-            dest_root = os.path.join(temp_root, "dest")
-            os.makedirs(source_dir)
-
-            with open(os.path.join(source_dir, "meta.txt"), "w") as f:
-                f.write("staged content")
-
-            target = ArchiveEngine.replicateArchive(
-                f_source_dir=source_dir,
-                f_dest_root=dest_root,
-                f_arm_id="native-footer",
-                f_role="base",
-            )
-
-            self.assertIsInstance(target, str)
-            self.assertTrue(os.path.isfile(os.path.join(target, "meta.txt")))
-            self.assertTrue(os.path.isfile(os.path.join(source_dir, "meta.txt")))
-
     def testInvalidInputsRaiseArchiveError(self) -> None:
-        """Asserts that invalid inputs or non-existent directories raise ArchiveError."""
+        """Asserts that invalid inputs raise ArchiveError."""
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(ArchiveError):
                 ArchiveEngine.resolvePairTargetDirectories("", "native")
             with self.assertRaises(ArchiveError):
                 ArchiveEngine.resolvePairTargetDirectories(temp_dir, "")
-
-            with self.assertRaises(ArchiveError):
-                ArchiveEngine.replicateArchive(
-                    os.path.join(temp_dir, "nonexistent"),
-                    temp_dir,
-                    "native",
-                )
-
-    def testExecuteArchiveAutoReportGeneration(self) -> None:
-        """Asserts executeArchive invokes LsmioAggOutput when benchmark logs exist and report is missing."""
-        from unittest.mock import MagicMock, patch
-
-        with tempfile.TemporaryDirectory() as temp_root:
-            source_dir = os.path.join(temp_root, "outputs")
-            dest_root = os.path.join(temp_root, "archive")
-            log_dir = os.path.join(source_dir, "8", "2026-09-12")
-            os.makedirs(log_dir)
-            with open(os.path.join(log_dir, "out-native-4-1M-test.txt"), "w") as f:
-                f.write("mock log")
-
-            with patch("lsmiotool.lib.output.LsmioAggOutput") as mock_agg_cls:
-                mock_agg = MagicMock()
-                mock_agg_cls.return_value = mock_agg
-
-                target = ArchiveEngine.executeArchive(
-                    f_source_dir=source_dir,
-                    f_dest_root=dest_root,
-                    f_arm_id="native-footer",
-                )
-
-                # Every node directory present is aggregated, whatever the scale
-                mock_agg_cls.assert_called_once_with(
-                    os.path.abspath(source_dir), f_scale=None
-                )
-                mock_agg.generateReports.assert_called_once_with(
-                    f_out_dir=os.path.abspath(source_dir)
-                )
-                self.assertTrue(os.path.exists(target))
 
     def testVersionedArmIdPairResolution(self) -> None:
         """Validates that versioned arm IDs resolve to symmetrical :run and :base targets."""

@@ -983,3 +983,261 @@ class ManifestTest(unittest.TestCase):
         self.assertTrue(f_reconstructed.request.fast)
         self.assertEqual(f_reconstructed, f_plan)
         self.assertEqual(ManifestSerializer.serialize(f_reconstructed), f_json_str)
+
+
+class ManifestDocumentContractTest(unittest.TestCase):
+    """Exhaustive contract tests for ManifestDocument validation guards, immutability, repr, and equality."""
+
+    def setUp(self) -> None:
+        self.m_default_profile_path = os.path.normpath(
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "etc", "environments.json"
+            )
+        )
+        self.m_profile_doc = ProfileLoader.load(self.m_default_profile_path)
+        self.m_test_user = "alice"
+        self.m_test_home = "/home/alice"
+        self.m_registry = EnvironmentResolver.resolveRegistry(
+            self.m_profile_doc, f_user=self.m_test_user, f_home=self.m_test_home
+        )
+        self.m_viking_profile = self.m_registry.getProfile("VIKING")
+        self.m_req = RunRequest("ior", "local")
+        self.m_plan = RunPlanner.createPlan(
+            f_request=self.m_req,
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-contract-doc",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        self.m_valid_doc = ManifestSerializer.deserialize(
+            ManifestSerializer.serialize(self.m_plan)
+        )
+
+    def _makeArgs(self, **f_overrides):
+        f_args = {
+            "f_schema_version": self.m_valid_doc.schema_version,
+            "f_run_id": self.m_valid_doc.run_id,
+            "f_created_at_utc": self.m_valid_doc.created_at_utc,
+            "f_request": self.m_valid_doc.request,
+            "f_site": self.m_valid_doc.site,
+            "f_plan": self.m_valid_doc.plan,
+            "f_scale_points": self.m_valid_doc.scale_points,
+            "f_combinations": self.m_valid_doc.combinations,
+            "f_points": self.m_valid_doc.points,
+            "f_tokens": self.m_valid_doc.tokens,
+        }
+        f_args.update(f_overrides)
+        return f_args
+
+    def testManifestDocumentSchemaVersionValidation(self) -> None:
+        """Assert non-int, bool, or != 1 schema_version raises ManifestValidationError (line 2062; arc [2057, 2062])."""
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_schema_version=2))
+        self.assertIn("schema_version must be integer 1, got: 2", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_schema_version=True))
+        self.assertIn("schema_version must be integer 1, got: True", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_schema_version="1"))
+        self.assertIn("schema_version must be integer 1, got: '1'", str(f_ctx.exception))
+
+    def testManifestDocumentRunIdValidation(self) -> None:
+        """Assert non-str, empty, or whitespace run_id raises ManifestValidationError (line 2066; arc [2065, 2066])."""
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_run_id=""))
+        self.assertIn("run_id must be a non-empty string, got: ''", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_run_id="   "))
+        self.assertIn("run_id must be a non-empty string, got: '   '", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_run_id=12345))
+        self.assertIn("run_id must be a non-empty string, got: 12345", str(f_ctx.exception))
+
+    def testManifestDocumentCreatedAtUtcValidation(self) -> None:
+        """Assert invalid created_at_utc format or date raises ManifestValidationError (lines 2070, 2074, 2079, 2080)."""
+        # Non-empty string check (line 2070; arc [2069, 2070])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_created_at_utc=""))
+        self.assertIn("created_at_utc must be a non-empty string, got: ''", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_created_at_utc="   "))
+        self.assertIn("created_at_utc must be a non-empty string, got: '   '", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_created_at_utc=None))
+        self.assertIn("created_at_utc must be a non-empty string, got: None", str(f_ctx.exception))
+
+        # ISO UTC pattern check (line 2074; arc [2073, 2074])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_created_at_utc="2026-08-20 12:00:00"))
+        self.assertIn("must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_created_at_utc="2026-08-20T12:00:00+00:00"))
+        self.assertIn("must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ", str(f_ctx.exception))
+
+        # Valid calendar date/time check (lines 2079, 2080)
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_created_at_utc="2026-02-30T12:00:00Z"))
+        self.assertIn("is not a valid UTC date/time", str(f_ctx.exception))
+
+    def testManifestDocumentRequestValidation(self) -> None:
+        """Assert non-RunRequest request raises ManifestValidationError (line 2085; arc [2084, 2085])."""
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_request="not-a-request"))
+        self.assertIn("request must be a RunRequest, got: 'not-a-request'", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_request=None))
+        self.assertIn("request must be a RunRequest, got: None", str(f_ctx.exception))
+
+    def testManifestDocumentSiteValidation(self) -> None:
+        """Assert non-SiteProfile site raises ManifestValidationError (line 2089; arc [2088, 2089])."""
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_site="not-a-site"))
+        self.assertIn("site must be a SiteProfile, got: 'not-a-site'", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_site=None))
+        self.assertIn("site must be a SiteProfile, got: None", str(f_ctx.exception))
+
+    def testManifestDocumentPlanValidation(self) -> None:
+        """Assert non-Mapping plan raises ManifestValidationError (line 2093; arc [2092, 2093])."""
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_plan="not-a-plan"))
+        self.assertIn("plan must be a mapping, got: 'not-a-plan'", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_plan=[1, 2, 3]))
+        self.assertIn("plan must be a mapping, got: [1, 2, 3]", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_plan=None))
+        self.assertIn("plan must be a mapping, got: None", str(f_ctx.exception))
+
+    def testManifestDocumentScalePointsAndCombinationsEmptyValidation(self) -> None:
+        """Assert empty scale_points or combinations raises ManifestValidationError (lines 2095, 2097)."""
+        # Scale points empty (line 2095; arc [2094, 2095])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_scale_points=()))
+        self.assertIn("scale_points must not be empty", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_scale_points=[]))
+        self.assertIn("scale_points must not be empty", str(f_ctx.exception))
+
+        # Combinations empty (line 2097; arc [2096, 2097])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_combinations=()))
+        self.assertIn("combinations must not be empty", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_combinations=[]))
+        self.assertIn("combinations must not be empty", str(f_ctx.exception))
+
+    def testManifestDocumentPointsAndTokensCountMismatchValidation(self) -> None:
+        """Assert points count != scale_points count or tokens != points raises ManifestValidationError (lines 2099, 2103)."""
+        # Points count mismatch (line 2099; arc [2098, 2099])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_points=()))
+        self.assertIn("points count (0) must equal scale_points count (1)", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_points=list(self.m_valid_doc.points) * 2))
+        self.assertIn("points count (2) must equal scale_points count (1)", str(f_ctx.exception))
+
+        # Tokens count mismatch (line 2103; arc [2102, 2103])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_tokens=()))
+        self.assertIn("tokens count (0) must equal points count (1)", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_tokens=list(self.m_valid_doc.tokens) * 2))
+        self.assertIn("tokens count (2) must equal points count (1)", str(f_ctx.exception))
+
+    def testManifestDocumentTokenFormatAndDuplicateValidation(self) -> None:
+        """Assert invalid token format or duplicate token raises ManifestValidationError (lines 2110, 2114)."""
+        # Token format invalid (line 2110; arc [2109, 2110])
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_tokens=["invalid-token"]))
+        self.assertIn("is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_tokens=[12345]))
+        self.assertIn("is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception))
+
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(**self._makeArgs(f_tokens=["lm-ZZZZZZZZZZZZZZZZZZZZZZZZ"]))
+        self.assertIn("is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception))
+
+        # Duplicate correlation tokens (line 2114; arc [2113, 2114])
+        f_sp2 = list(self.m_valid_doc.scale_points) * 2
+        f_pts2 = list(self.m_valid_doc.points) * 2
+        f_tok_dup = [self.m_valid_doc.tokens[0], self.m_valid_doc.tokens[0]]
+        with self.assertRaises(ManifestValidationError) as f_ctx:
+            ManifestDocument(
+                **self._makeArgs(
+                    f_scale_points=f_sp2, f_points=f_pts2, f_tokens=f_tok_dup
+                )
+            )
+        self.assertIn(
+            f"Duplicate correlation token: '{self.m_valid_doc.tokens[0]}'",
+            str(f_ctx.exception),
+        )
+
+    def testManifestDocumentUnfrozenMutationAndDeletion(self) -> None:
+        """Assert unfrozen instance allows attribute mutation and deletion via super() (lines 2132, 2139)."""
+        f_unfrozen = ManifestDocument.__new__(ManifestDocument)
+
+        # Unfrozen mutation via __setattr__ (line 2132; arc [2130, 2132])
+        f_unfrozen.m_run_id = "unfrozen-run-id"
+        self.assertEqual(f_unfrozen.m_run_id, "unfrozen-run-id")
+
+        # Unfrozen deletion via __delattr__ (line 2139; arc [2135, 2139])
+        del f_unfrozen.m_run_id
+        self.assertFalse(hasattr(f_unfrozen, "m_run_id"))
+
+    def testManifestDocumentReprAndEquality(self) -> None:
+        """Assert repr formatting and equality contract against non-manifest objects (lines 2212, 2239)."""
+        # Repr (line 2212)
+        f_repr = repr(self.m_valid_doc)
+        self.assertTrue(
+            f_repr.startswith("ManifestDocument(schema_version=1, run_id='run-contract-doc'")
+        )
+        self.assertIn("request=RunRequest(target='ior'", f_repr)
+        self.assertIn("site=", f_repr)
+        self.assertIn("tokens=('lm-000000000000000000000001',)", f_repr)
+
+        # Equality against non-ManifestDocument (line 2239; arc [2226, 2239])
+        self.assertFalse(self.m_valid_doc == "not-a-manifest")
+        self.assertFalse(self.m_valid_doc == 42)
+        self.assertFalse(self.m_valid_doc is None)
+        self.assertFalse(self.m_valid_doc == {"run_id": "run-contract-doc"})
+
+        # Equality against equal ManifestDocument
+        f_doc_copy = ManifestDocument(**self._makeArgs())
+        self.assertEqual(self.m_valid_doc, f_doc_copy)
+
+    def testManifestDocumentValidDirectConstructionAndProperties(self) -> None:
+        """Assert direct construction assigns attributes, properties, and serializations match."""
+        f_doc = ManifestDocument(**self._makeArgs())
+        self.assertEqual(f_doc.schema_version, 1)
+        self.assertEqual(f_doc.run_id, "run-contract-doc")
+        self.assertEqual(f_doc.created_at_utc, "2026-08-20T12:00:00Z")
+        self.assertEqual(f_doc.request, self.m_valid_doc.request)
+        self.assertEqual(f_doc.site, self.m_valid_doc.site)
+        self.assertEqual(f_doc.site.toDict(), self.m_viking_profile.toDict())
+        self.assertEqual(f_doc.plan, self.m_valid_doc.plan)
+        self.assertEqual(f_doc.scale_points, self.m_valid_doc.scale_points)
+        self.assertEqual(f_doc.combinations, self.m_valid_doc.combinations)
+        self.assertEqual(f_doc.points, self.m_valid_doc.points)
+        self.assertEqual(f_doc.tokens, self.m_valid_doc.tokens)
+
+        self.assertEqual(f_doc.toDict(), self.m_valid_doc.toDict())
+        self.assertEqual(f_doc.toJson(), self.m_valid_doc.toJson())
+        self.assertEqual(f_doc.toRunPlan(), self.m_valid_doc.toRunPlan())

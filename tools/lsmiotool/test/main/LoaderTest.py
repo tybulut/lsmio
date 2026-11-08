@@ -38,14 +38,12 @@ import lsmiotool.test as test_package
 
 _PREEXISTING_MODULE_NAMES = (
     "lsmiotool.test.main.BaselineGateTest",
-    "lsmiotool.test.main.test_dirs",
     "lsmiotool.test.main.test_hpc",
     "lsmiotool.test.parse.TestCompareMain",
     "lsmiotool.test.parse.TestEndToEndParse",
     "lsmiotool.test.parse.TestLmpData",
     "lsmiotool.test.parse.TestMultiBarPlot",
     "lsmiotool.test.parse.TestOutputAggregation",
-    "lsmiotool.test.parse.TestParseLegacyMain",
     "lsmiotool.test.parse.test_data",
     "lsmiotool.test.parse.test_log",
     "lsmiotool.test.parse.test_output",
@@ -57,7 +55,6 @@ _LEGACY_PREFIX_MODULE_NAMES = (
     "lsmiotool.test.parse.TestLmpData",
     "lsmiotool.test.parse.TestMultiBarPlot",
     "lsmiotool.test.parse.TestOutputAggregation",
-    "lsmiotool.test.parse.TestParseLegacyMain",
 )
 
 _SUBSEQUENT_MODULE_NAMES = (
@@ -66,13 +63,12 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.ArchiveTest",
     "lsmiotool.test.main.ArmGroupTest",
     "lsmiotool.test.main.ArtifactStoreTest",
-    "lsmiotool.test.main.BmtoolBackendsTest",
-    "lsmiotool.test.main.BmtoolRelocationTest",
-    "lsmiotool.test.main.BmtoolRunTeeTest",
-    "lsmiotool.test.main.BmtoolSetupTest",
-    "lsmiotool.test.main.CompareArchiveCliParserTest",
+    "lsmiotool.test.main.BenchmarkCommandTest",
     "lsmiotool.test.main.CompareCliParserTest",
-    "lsmiotool.test.main.CompareNodesTest",
+    "lsmiotool.test.main.CompareDatasetBuilderTest",
+    "lsmiotool.test.main.ComparePanelPlotTest",
+    "lsmiotool.test.main.CompareReportReaderTest",
+    "lsmiotool.test.main.CompatTest",
     "lsmiotool.test.main.CoverageContractTest",
     "lsmiotool.test.main.DeltaBarPlotTest",
     "lsmiotool.test.main.DetachTest",
@@ -90,6 +86,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.LatexMainTest",
     "lsmiotool.test.main.LauncherTest",
     "lsmiotool.test.main.LegacyEnvDetectionTest",
+    "lsmiotool.test.main.LibPackageTest",
     "lsmiotool.test.main.LmpAdapterTest",
     "lsmiotool.test.main.LoaderTest",
     "lsmiotool.test.main.LsmioAdapterTest",
@@ -121,8 +118,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.VariantReverseResolverTest",
     "lsmiotool.test.main.VersionTest",
     "lsmiotool.test.main.WorkerEntryTest",
-    "lsmiotool.test.parse.BmtoolParityTest",
-    "lsmiotool.test.parse.CompareArchiveMainTest",
+    "lsmiotool.test.parse.ArchiveReportFormatTest",
     "lsmiotool.test.parse.LsmioAggOutputTest",
     "lsmiotool.test.parse.RunParseTest",
 )
@@ -172,7 +168,7 @@ class LoaderTest(unittest.TestCase):
             ),
         )
 
-    def testLegacyPrefixInventoryHasSixModulesAndThirtyThreeTestsExactlyOnce(
+    def testLegacyPrefixInventoryHasFiveModulesAndTwentyTestsExactlyOnce(
         self,
     ) -> None:
         modules_by_name = {
@@ -187,7 +183,7 @@ class LoaderTest(unittest.TestCase):
             tuple(module.__name__ for module in legacy_modules),
             _LEGACY_PREFIX_MODULE_NAMES,
         )
-        self.assertEqual(len(test_ids), 33)
+        self.assertEqual(len(test_ids), 20)
         self.assertEqual(len(test_ids), len(set(test_ids)))
 
     def testLexicalOrderIndependentOfWalkOrder(self) -> None:
@@ -295,9 +291,9 @@ class LoaderTest(unittest.TestCase):
             _PREEXISTING_MODULE_NAMES,
         )
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
-        self.assertEqual(len(preexisting_test_ids), 61)
+        self.assertEqual(len(preexisting_test_ids), 59)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 1092)
+        self.assertEqual(len(all_test_ids), 1435)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

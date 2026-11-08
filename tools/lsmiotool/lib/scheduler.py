@@ -200,6 +200,10 @@ class JobSpec:
     ) -> None:
         if f_point_id is None:
             raise SchedulerScriptError("point_id cannot be None")
+        if isinstance(f_point_id, ScalePoint):
+            # Directory-name form without an ordinal (as ArtifactLayout.pointDirName);
+            # callers that know the ordinal pass pointDirName(point, ordinal) as a str.
+            f_point_id = f"tasks-{f_point_id.tasks}"
         f_norm_point_id = str(f_point_id).strip()
         if not f_norm_point_id:
             raise SchedulerScriptError("point_id cannot be empty")

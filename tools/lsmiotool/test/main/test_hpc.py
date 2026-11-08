@@ -28,11 +28,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import os
 import subprocess
+import types
 import unittest
 from unittest.mock import patch, MagicMock
 
 from lsmiotool.lib import env, hpc
+from lsmiotool.lib.profile import ProfileLoader, ProfileSchemaError
+from lsmiotool.lib.site import EnvironmentResolver, SiteResolutionError
 
 
 class TestHpcModules(unittest.TestCase):
@@ -97,3 +101,76 @@ class TestHpcModules(unittest.TestCase):
             self.m_hpc_modules.load(env.HpcEnv.VIKING)
 
         self.assertEqual(f_context.exception.returncode, 9)
+
+    def testProfileRecordResolvesThroughResolver(self) -> None:
+        """A ProfileRecord resolves through EnvironmentResolver to the same modules."""
+        with patch.dict(os.environ, {"USER": "alice", "HOME": "/home/alice"}):
+            f_record = ProfileLoader.load(
+                EnvironmentResolver.getDefaultProfilePath()
+            ).getProfile("VIKING")
+            f_before = f_record.toDict()
+            f_profile = self.m_hpc_modules._resolveSiteProfile(f_record)
+            f_cmds = self.m_hpc_modules.shellCommands(f_record)
+            self.assertEqual(f_profile.name, "VIKING")
+            self.assertEqual(f_profile.modules, tuple(f_record.modules))
+            self.assertEqual(
+                self.m_hpc_modules.getModules(f_record),
+                self.m_hpc_modules.getModules(env.HpcEnv.VIKING),
+            )
+            self.assertEqual(
+                f_cmds,
+                ["module purge"] + [f"module load {f_m}" for f_m in f_record.modules],
+            )
+            self.assertEqual(f_record.toDict(), f_before)
+
+    def testNamedObjectResolvesByStrippedUpperName(self) -> None:
+        """An object with a str name resolves by its stripped, upper-cased name."""
+        f_rows = (
+            (" viking ", env.HpcEnv.VIKING),
+            ("viking2", env.HpcEnv.VIKING2),
+            ("Isambard\n", env.HpcEnv.ISAMBARD),
+        )
+        with patch.dict(os.environ, {"USER": "alice", "HOME": "/home/alice"}):
+            for f_raw, f_expected in f_rows:
+                with self.subTest(name=f_raw):
+                    f_obj = types.SimpleNamespace(name=f_raw)
+                    self.assertEqual(
+                        self.m_hpc_modules.getModules(f_obj),
+                        self.m_hpc_modules.getModules(f_expected),
+                    )
+                    self.assertEqual(
+                        self.m_hpc_modules._resolveSiteProfile(f_obj).name,
+                        f_expected.name,
+                    )
+                    self.assertEqual(f_obj.name, f_raw)
+
+    def testNamedObjectWithEmptyNameRaises(self) -> None:
+        """An object with an empty name is looked up as '' and not found."""
+        with patch.dict(os.environ, {"USER": "alice", "HOME": "/home/alice"}):
+            with self.assertRaises(ProfileSchemaError) as f_ctx:
+                self.m_hpc_modules.getModules(types.SimpleNamespace(name=""))
+        self.assertIn("Profile '' not found", str(f_ctx.exception))
+
+    def testUnsupportedIdentifierRaises(self) -> None:
+        """Identifiers that are neither site, record, enum, str nor named raise."""
+        f_sentinel = object()
+        f_values = (
+            42,
+            None,
+            f_sentinel,
+            types.SimpleNamespace(name=7),
+            types.SimpleNamespace(),
+        )
+        with patch.dict(os.environ, {"USER": "alice", "HOME": "/home/alice"}):
+            with patch(
+                "lsmiotool.lib.hpc.EnvironmentResolver.resolveProfile"
+            ) as f_resolve:
+                for f_value in f_values:
+                    with self.subTest(value=repr(f_value)):
+                        with self.assertRaises(SiteResolutionError) as f_ctx:
+                            self.m_hpc_modules.getModules(f_value)
+                        self.assertEqual(
+                            str(f_ctx.exception),
+                            f"Unsupported HPC environment identifier: {f_value!r}",
+                        )
+                f_resolve.assert_not_called()

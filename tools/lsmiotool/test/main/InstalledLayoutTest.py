@@ -421,22 +421,19 @@ class InstalledLayoutTest(unittest.TestCase):
                 os.path.dirname(__file__),
                 "..",
                 "..",
-                "..",
-                "..",
-                "tools",
-                "bmtool",
+                "share",
                 "lmp-reaxff",
             )
         )
-        if os.path.isdir(f_source_dir):
-            f_assets = sorted(os.listdir(f_source_dir))
-            self.assertEqual(
-                f_assets,
-                ["data.hns-equil", "ffield.reax.hns", "in.reaxc.hns"],
-                "Source LMP assets must match exact upstream filenames",
-            )
-            self.assertNotIn("in.reaxff.hns", f_assets)
-            self.assertNotIn("data.hns", f_assets)
+        self.assertTrue(os.path.isdir(f_source_dir), f_source_dir)
+        f_assets = sorted(os.listdir(f_source_dir))
+        self.assertEqual(
+            f_assets,
+            ["data.hns-equil", "ffield.reax.hns", "in.reaxc.hns"],
+            "Source LMP assets must match exact upstream filenames",
+        )
+        self.assertNotIn("in.reaxff.hns", f_assets)
+        self.assertNotIn("data.hns", f_assets)
 
     def testRuntimeLayoutHasNoArtifactRole(self) -> None:
         """Asserts that RuntimeLayout has no artifact roles and ArtifactLayout has no resource roles (F-02)."""

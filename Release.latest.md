@@ -1,5 +1,1 @@
-- Improved memory management in LSMIO backends
-- Started formal bmtool deprecation in favor of lsmiotool
-- Fast incremental builds
-- Removed unused benchmark code paths
-- Various bug fixes
+- New version

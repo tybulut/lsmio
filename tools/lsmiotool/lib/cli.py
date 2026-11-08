@@ -32,8 +32,11 @@
 
 import os
 from pathlib import Path
+import re
 import stat
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, ClassVar, Dict, List, Optional, Sequence, Tuple, Union
+
+_INT_RE = re.compile(r"^[0-9]+$")
 
 from lsmiotool.lib.archive import ArchiveError, ArchiveRequest
 from lsmiotool.lib.run import RunRequest
@@ -46,13 +49,11 @@ LSMIOTOOL_HELP = """How to run
 common cmds:
   archive <benchmark> <scale> [<variant>] [--dest <path>] [--setup <name>] [--source <path>]
   cancel <run root | run id>  stop a running 'run' (its job is cancelled)
-  compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
+  compare <lsmio|ior|epocpp|variants> <folder> ... [options]
   load-modules  load needed HPC modules
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parse ior <local|bake|small|large> [--output-dir <dir>]
-  parseLegacy <ior|lsmio|lmp> <local|bake|small|large|variants> [<path>]
-  parseLegacy lsmio backends <local|bake|small|large> [<path>]
-  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--versioned] [--fast] [--foreground]
+  run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--versioned] [--fast] [--foreground]
   run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
@@ -66,7 +67,7 @@ other cmds:
 options:
   --debug     enable debug mode and run
   --help      print this help screen
-  --ssd       use SSD storage instead
+  --ssd       use SSD storage instead (applies to run)
   --version   print version and exit
 """
 
@@ -85,15 +86,15 @@ Arguments:
 Options:
   --dest <path> Archive destination directory (default: <benchmark_root>/lsmio-archive/{variants|baseline};
                 ior/<scale> for ior, epocpp/<scale> for epocpp).
-                Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored, as in bmtool.
+                Relative paths resolve against <benchmark_root>. BM_ARCHIVE_DEST is ignored.
                 Note: '--dest=value' syntax is strictly rejected; use '--dest <path>'.
   --setup <name>
                 LSMIO setup naming the arm, outputs-<arm> (default: $BM_SETUP, else NATIVE;
                 for an lsmiotool run, the run's own setup). For ior: the IOR setup of the
                 run to archive (BASE, COLLECTIVE, HDF5, HDF5-C, FSYNC, REVERSE).
   --source <path>
-                What to archive: an lsmiotool run root, or bmtool's live outputs directory
-                <benchmark_root>/lsmio/outputs (the only bmtool directory moved, as in bmtool).
+                What to archive: an lsmiotool run root (manifest.json). Any other directory
+                is refused and left untouched.
                 The run root of any arm of a variants, --versioned or backends run archives that
                 whole run: each finished point (every combination and rank succeeded) not
                 archived yet, as :run/:base pairs or outputs-<backend>/<nodes>, in the run's own
@@ -102,13 +103,11 @@ Options:
                 e.g. after --no-archive or when its process ended before its jobs did; a run
                 still running is refused.
 
-Source (default): <benchmark_root> is the site profile's benchmark root.
-  - <benchmark_root>/lsmio/outputs, when it holds bmtool outputs: moved to
-    <dest>/outputs-<arm> and recreated empty, like bmtool archive.
-  - otherwise the latest lsmiotool run of 'lsmio <scale>' (and <variant>) under
-    <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
-    in bmtool's layout with reports; the run root is left in place.
-  Both present is an error: pick one with --source.
+Source (default): <benchmark_root> is the site profile's benchmark root. The latest
+  standalone lsmiotool run of 'lsmio <scale>' (and <variant>) under
+  <benchmark_root>/runs: its succeeded points are copied into <dest>/outputs-<arm>
+  with reports; the run root is left in place. The arms of a multi-arm run are not
+  taken: archive one with --source <its run root>.
   For ior, only lsmiotool runs: the latest standalone run of 'ior <scale>' (made before
   'run ior' ran its setups as arms); its points go to <dest>/outputs-ior[-<setup>]/<nodes>
   with ior-report.csv. A 'run ior' run archives itself, or with --source <one of its
@@ -116,7 +115,7 @@ Source (default): <benchmark_root> is the site profile's benchmark root.
 """
 
 RUN_HELP_TEXT = """Usage:
-  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--versioned] [--fast] [--foreground]
+  lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--versioned] [--fast] [--foreground]
   lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
@@ -198,8 +197,8 @@ Options:
                 it ends. Ctrl-C then only stops the following; 'lsmiotool cancel <run root>'
                 stops the run (and cancels its job).
 
-Global Options (preserved for legacy compatibility):
-  --ssd, -s     Accepted before or after command.
+Global Options:
+  --ssd, -s     Accepted before or after the command; applies to 'run' only.
 """
 
 LATEX_HELP_TEXT = """Usage:
@@ -233,6 +232,10 @@ Arguments:
                 'parse ior <scale>' regenerates ior-report.csv in every outputs-* of
                 <benchmark_root>/lsmio-archive/ior/<scale> (or --output-dir), where
                 'run ior <scale>' archives its IOR setups.
+  <target>      A directory of rank logs (<nodes>/<date>/out-*) is an IOR outputs
+                directory, whatever it is named, when a rank log starts with the IOR
+                banner; it gets ior-report.csv. Other such directories get the LSMIO
+                reports.
 
 Options:
   --output-dir <dir>
@@ -242,52 +245,67 @@ Options:
 """
 
 COMPARE_HELP_TEXT = """Usage:
-  lsmiotool compare <nodes|variants> <folder> ... [--output-dir <dir>] [--all]
+  lsmiotool compare <lsmio|ior|epocpp|variants> <folder> [<folder> ...] [options]
 
-Submodes:
-  nodes <folder> <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
-  nodes <folder> [read|write] --all [--output-dir <dir>]
-      Compares performance across node counts for a benchmark folder (or several:
-      nodes <folder> <folder> ... [read|write] ...).
-      Arguments:
-          <folder>: Archive folder with one outputs-<backend> directory per backend (e.g. <archive>/backends/<scale>).
-                    Further folders are charted with it, e.g. the IOR setups 'run ior' archived:
-                    compare nodes <archive>/backends/small <archive>/ior/small --all
-                    (plots are named by the first folder's scale and every folder's
-                    parent, e.g. compare-small-backends+ior-write-4-1M.png; an arm in
-                    several folders is labelled '<arm> (<parent>/<folder>)'). A folder of
-                    IOR setups alone gives compare-<scale>-ior-*.png, apart from its
-                    scale's backends charts.
-          <read|write>: Operation to compare ('read' or 'write'); optional with --all.
-                    An epocpp archive (<benchmark_root>/lsmio-archive/epocpp/<scale>)
-                    charts its bandwidth arms for read/write (Max() of MiB/s), and its
-                    wall-time arms for 'runtime' (Min() of EPOCpp's Runtime) or 'cost'
-                    (that minus the no-output baseline's, epocpp-cost.csv); its plots
-                    are
-                    named compare-<scale>-epocpp-*.png.
-          [stripes]: Stripe count: 4 or 16 (default: 4).
-          [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
-      Options:
-          --all: Generate charts for all 6 (stripes, blocksize) permutations, for the given
-                 operation or, without one, for both read and write (12 charts). Not combinable
-                 with <stripes>/<blocksize>.
-          --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
+Benchmarks (the word says how every folder is read):
+  lsmio     a backends archive (<archive>/backends/<scale>): one outputs-<backend>
+            per backend (lsm-report.csv). Metrics: write, read.
+  ior       an IOR archive (<archive>/ior/<scale>): one outputs-ior[-<setup>] per
+            setup (ior-report.csv). Metrics: write, read.
+  epocpp    an epocpp archive (<archive>/epocpp/<scale>): outputs-epocpp-<arm>
+            (epocpp-report.csv, epocpp-cost.csv). Metrics: runtime (Min() of
+            EPOCpp's Runtime; the no-output baseline, in grey, and each backend),
+            cost (runtime minus the baseline's; backends only), write, read.
+  variants  a variants archive (<archive>/variants, <archive>/variants-versioned):
+            one outputs-<variant> per variant (lsm-report.csv). Metrics: write,
+            read. The variants are the x-axis, each named under its bar; node
+            counts and combinations are panels. Folders of :run/:base pairs chart
+            each run's % change against its base; folders without pairs chart MiB/s.
+  write and read are Max() of MiB/s. Missing reports are built first.
+  Several folders: lsmio and ior folders chart together; the first folder decides
+  which word fits (lsmio: it is not IOR-only; ior: it holds only IOR arms).
+  epocpp folders chart only with epocpp folders; variants folders only with
+  variants folders of the same kind (unpaired, paired or versioned).
 
-  variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
-      Compares performance across benchmark/storage variants on fixed 8-node baseline runs.
-      Arguments:
-          <archive_folder>: Archive folder containing outputs-* run subdirectories.
-          [operation]: Operation to compare: 'read', 'write', or 'both' (default: 'both').
-          [stripes]: Stripe count: 4 or 16 (default: 4).
-          [blocksize]: Block size: '64K', '1M', or '8M' (default: '1M').
-      Options:
-          --all: Generate comparison charts across all 6 (stripes, blocksize) permutations, per
-                 operation (12 with the default 'both'). Not combinable with <stripes>/<blocksize>.
-          --output-dir <dir>: Destination directory for generated PNG plots (default: current working directory).
+Options (anywhere after the benchmark word):
+  --by nodes|combinations
+                nodes (default): one PNG; a row per stripe/block combination and
+                a column per metric; node count on x, one series per arm.
+                combinations: one PNG per node count; a row per metric; the
+                stripe/block combinations on x, one series per arm.
+                variants: x is the variants, one series per folder; nodes gives
+                a row per combination and node count, combinations a PNG per
+                node count with a row per combination; a column per metric.
+  --style bars|lines
+                bars (default), or a line with markers per series.
+  --metrics <list>    Comma-separated, in panel order (default: write,read;
+                      epocpp: runtime,write,read; cost only when listed).
+  --nodes <list>      Only these node counts, e.g. 16 or 8,16.
+  --stripes <list>    Only these stripe counts: 4, 16 or 4,16.
+  --block <list>      Only these block sizes: 64K, 1M, 8M, e.g. 64K,8M.
+  --output-dir <dir>  Where the PNGs go (default: the current directory).
+
+  Everything the folders hold is charted; the options only narrow it. A value
+  no folder holds is an error that lists the values they do hold.
+  A report value that cannot be read is drawn as a gap and named in a warning.
+
+Output (<scale>: the first folder's scale; with several folders <names> joins
+each folder's parent with '+'):
+  compare-<scale>-<benchmark>[-<names>]-by-nodes.png
+  compare-<scale>-<benchmark>[-<names>]-by-combinations-<nodes>.png  (one per node count)
+
+Exit status: 0 the charts were written; 1 nothing to chart, folders that cannot
+be charted together, a value the folders do not hold, or a PNG not written;
+2 invalid arguments; 3 a folder not found.
+
+Examples:
+  lsmiotool compare lsmio <archive>/backends/small
+  lsmiotool compare lsmio <archive>/backends/small --nodes 16
+  lsmiotool compare lsmio <archive>/backends/small <archive>/ior/small --stripes 16
+  lsmiotool compare epocpp <archive>/epocpp/bake --by combinations
+  lsmiotool compare epocpp <archive>/epocpp/small --metrics cost,write --style lines
+  lsmiotool compare variants <archive>/variants-versioned --block 1M,8M
 """
-
-# Backward compatibility alias
-COMPARE_ARCHIVE_HELP_TEXT = COMPARE_HELP_TEXT
 
 
 class PackageValidationError(Exception):
@@ -338,8 +356,6 @@ class LatexCliParseError(CliParseError):
     pass
 
 
-# Backward compatibility alias for existing test imports and external callers
-CompareArchiveCliParseError = CompareCliParseError
 
 
 class RunCliParser:
@@ -746,8 +762,7 @@ class RunCliParser:
                         f"Destination path after {f_tok!r} cannot be empty."
                     )
                 # Absolute paths are normalised here; relative paths stay verbatim and
-                # are resolved against the benchmark root by archive.resolveArchiveDest,
-                # matching bmtool/include/archive-dest.in.sh.
+                # are resolved against the benchmark root by archive.resolveArchiveDest.
                 f_dest_val = f_val.strip()
                 f_out_dir = (
                     str(Path(f_dest_val).resolve())
@@ -1080,20 +1095,21 @@ class ParseCliParser:
         lsmiotool parse ior <local|bake|small|large> [options]
 
     Arguments:
-        <target>: Run root path (also an archived one), manifest file path, bmtool-layout
-            outputs directory, or benchmark name ('ior', 'lsmio', 'lmp'). A benchmark
-            name selects the latest run of that benchmark under the site profile's
-            benchmark root.
+        <target>: Run root path (also an archived one), manifest file path, archive-layout
+            outputs directory (<nodes>/<date>/out-* rank logs; an IOR directory is
+            recognised by name or by the IOR banner in its rank logs), or benchmark
+            name ('ior', 'lsmio', 'lmp'). A benchmark name selects the latest run of
+            that benchmark under the site profile's benchmark root.
         <scale>: With 'lsmio', restricts the latest-run search to that scale.
             'parse lsmio variants' and 'parse lsmio backends <scale>' instead
             regenerate the reports of every outputs-* directory in the archive
-            destination, like bmtool. 'parse ior <scale>' regenerates the
+            destination. 'parse ior <scale>' regenerates the
             ior-report.csv of every IOR setup 'run ior <scale>' archived
             (<root>/lsmio-archive/ior/<scale>/outputs-*).
 
     Options:
         --output-dir <dir>: Destination directory for reports (default: current working
-            directory; for a bmtool-layout directory, the directory itself; for the
+            directory; for an archive-layout directory, the directory itself; for the
             archive forms, the archive destination to regenerate).
         --format <format>: Report format ('csv' or 'json', default: 'csv').
     """
@@ -1259,7 +1275,7 @@ class ParseCliParser:
 
         if f_target.lower() == "ior" and f_mode == "backends" and f_format != "csv":
             raise ParseCliParseError(
-                "'parse ior <scale>' writes ior-report.csv only (bmtool ior-parse.sh); "
+                "'parse ior <scale>' writes ior-report.csv only; "
                 "--format json is not supported"
             )
         if f_target.lower() == "epocpp" and f_format != "csv":
@@ -1302,8 +1318,8 @@ class ArchiveCliParser:
         --setup <name>: LSMIO setup naming the arm (default: $BM_SETUP, else NATIVE;
             for an lsmiotool run, the run's own setup); for ior, the IOR setup of the
             run to archive.
-        --source <path>: What to archive: an lsmiotool run root or a bmtool outputs
-            directory (default: resolved from the benchmark root, see ArchiveMain).
+        --source <path>: What to archive: an lsmiotool run root (default: the
+            latest standalone run under the benchmark root, see ArchiveMain).
     """
 
     VALID_BENCHMARKS = frozenset({"lsmio", "ior", "epocpp"})
@@ -1517,86 +1533,173 @@ def parseArchiveArguments(f_argv: Sequence[str]) -> ArchiveRequest:
     return ArchiveCliParser.parse(f_argv=f_argv)
 
 
-class CompareNodesRequest:
-    """Immutable parsed and validated request value object for 'compare nodes'."""
+class CompareRequest:
+    """Immutable parsed and validated request value object for 'compare <benchmark>'."""
 
     __slots__ = (
-        "m_folder",
-        "m_extra_folders",
-        "m_op",
-        "m_stripes",
-        "m_blocksize",
-        "m_output_dir",
-        "m_all",
         "_frozen",
+        "m_benchmark",
+        "m_blocks",
+        "m_by",
+        "m_folders",
+        "m_metrics",
+        "m_nodes",
+        "m_output_dir",
+        "m_stripes",
+        "m_style",
     )
 
     def __init__(
         self,
-        f_folder: str,
-        f_op: Optional[str] = None,
-        f_stripes: int = 4,
-        f_blocksize: str = "1M",
+        f_benchmark: str,
+        f_folders: Sequence[str],
+        f_by: str = "nodes",
+        f_style: str = "bars",
+        f_metrics: Optional[Sequence[str]] = None,
+        f_nodes: Optional[Sequence[int]] = None,
+        f_stripes: Optional[Sequence[int]] = None,
+        f_blocks: Optional[Sequence[str]] = None,
         f_output_dir: Optional[str] = None,
-        f_all: bool = False,
-        f_extra_folders: Sequence[str] = (),
     ) -> None:
-        if not isinstance(f_folder, str) or not f_folder.strip():
-            raise ValueError(f"folder must be a non-empty string, got: {f_folder!r}")
-        if isinstance(f_extra_folders, str) or any(
-            not isinstance(f_f, str) or not f_f.strip() for f_f in f_extra_folders
-        ):
-            raise ValueError(
-                f"extra folders must be non-empty strings, got: {f_extra_folders!r}"
-            )
-        if not isinstance(f_all, bool):
-            raise ValueError(f"all must be a boolean, got: {f_all!r}")
-        # With --all the operation is optional: 'both' charts read and write
-        if f_op is None and f_all:
-            f_op = "both"
-        if not isinstance(f_op, str) or not f_op.strip():
-            raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
-        f_norm_op = f_op.strip().lower()
-        # runtime and cost chart an epocpp archive's wall-time arms
-        f_valid_ops = ("read", "write", "runtime", "cost") + (
-            ("both",) if f_all else ()
-        )
-        if f_norm_op not in f_valid_ops:
-            raise ValueError(f"op must be one of {f_valid_ops}, got: {f_op!r}")
         if (
-            isinstance(f_stripes, bool)
-            or not isinstance(f_stripes, int)
-            or f_stripes <= 0
-        ):
-            raise ValueError(f"stripes must be a positive integer, got: {f_stripes!r}")
-        if not isinstance(f_blocksize, str) or not f_blocksize.strip():
-            raise ValueError(
-                f"blocksize must be a non-empty string, got: {f_blocksize!r}"
-            )
-        f_norm_bs = f_blocksize.strip().upper()
-        if f_norm_bs not in ("64K", "1M", "8M"):
-            raise ValueError(
-                f"blocksize must be one of ('64K', '1M', '8M'), got: {f_blocksize!r}"
-            )
-        if f_output_dir is not None and (
-            not isinstance(f_output_dir, str) or not f_output_dir.strip()
+            not isinstance(f_benchmark, str)
+            or f_benchmark.strip().lower() not in CompareCliParser.VALID_BENCHMARKS
         ):
             raise ValueError(
-                f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
+                f"benchmark must be one of {CompareCliParser.VALID_BENCHMARKS}, got: {f_benchmark!r}"
+            )
+        f_norm_benchmark = f_benchmark.strip().lower()
+
+        if (
+            isinstance(f_folders, (str, bytes))
+            or not isinstance(f_folders, Sequence)
+            or not f_folders
+            or any(not isinstance(f_f, str) or not f_f.strip() for f_f in f_folders)
+        ):
+            raise ValueError(
+                f"folders must be a non-empty sequence of non-empty strings, got: {f_folders!r}"
+            )
+        f_norm_folders = tuple(f_f.strip() for f_f in f_folders)
+
+        if (
+            not isinstance(f_by, str)
+            or f_by.strip().lower() not in CompareCliParser.VALID_BY
+        ):
+            raise ValueError(
+                f"by must be one of {CompareCliParser.VALID_BY}, got: {f_by!r}"
+            )
+        f_norm_by = f_by.strip().lower()
+
+        if (
+            not isinstance(f_style, str)
+            or f_style.strip().lower() not in CompareCliParser.VALID_STYLES
+        ):
+            raise ValueError(
+                f"style must be one of {CompareCliParser.VALID_STYLES}, got: {f_style!r}"
+            )
+        f_norm_style = f_style.strip().lower()
+
+        f_norm_metrics: Optional[Tuple[str, ...]] = None
+        if f_metrics is not None:
+            f_valid_metrics = CompareCliParser.BENCHMARK_METRICS[f_norm_benchmark]
+            if (
+                isinstance(f_metrics, (str, bytes))
+                or not isinstance(f_metrics, Sequence)
+                or not f_metrics
+                or any(
+                    not isinstance(f_m, str)
+                    or f_m.strip().lower() not in f_valid_metrics
+                    for f_m in f_metrics
+                )
+                or len(
+                    {f_m.strip().lower() for f_m in f_metrics if isinstance(f_m, str)}
+                )
+                != len(f_metrics)
+            ):
+                raise ValueError(
+                    f"metrics must be None or unique items from {f_valid_metrics}, got: {f_metrics!r}"
+                )
+            f_norm_metrics = tuple(f_m.strip().lower() for f_m in f_metrics)
+
+        f_norm_nodes: Optional[Tuple[int, ...]] = None
+        if f_nodes is not None:
+            if (
+                isinstance(f_nodes, (str, bytes))
+                or not isinstance(f_nodes, Sequence)
+                or not f_nodes
+                or any(
+                    isinstance(f_n, bool) or not isinstance(f_n, int) or f_n <= 0
+                    for f_n in f_nodes
+                )
+                or len(set(f_nodes)) != len(f_nodes)
+            ):
+                raise ValueError(
+                    f"nodes must be None or unique positive integers, got: {f_nodes!r}"
+                )
+            f_norm_nodes = tuple(sorted(f_nodes))
+
+        f_norm_stripes: Optional[Tuple[int, ...]] = None
+        if f_stripes is not None:
+            if (
+                isinstance(f_stripes, (str, bytes))
+                or not isinstance(f_stripes, Sequence)
+                or not f_stripes
+                or any(
+                    isinstance(f_s, bool)
+                    or not isinstance(f_s, int)
+                    or f_s not in CompareCliParser.VALID_STRIPES
+                    for f_s in f_stripes
+                )
+                or len(set(f_stripes)) != len(f_stripes)
+            ):
+                raise ValueError(
+                    f"stripes must be None or unique items from {CompareCliParser.VALID_STRIPES}, got: {f_stripes!r}"
+                )
+            f_norm_stripes = tuple(sorted(f_stripes))
+
+        f_norm_blocks: Optional[Tuple[str, ...]] = None
+        if f_blocks is not None:
+            if (
+                isinstance(f_blocks, (str, bytes))
+                or not isinstance(f_blocks, Sequence)
+                or not f_blocks
+                or any(
+                    not isinstance(f_b, str)
+                    or f_b.strip().upper() not in CompareCliParser.VALID_BLOCKSIZES
+                    for f_b in f_blocks
+                )
+                or len(
+                    {f_b.strip().upper() for f_b in f_blocks if isinstance(f_b, str)}
+                )
+                != len(f_blocks)
+            ):
+                raise ValueError(
+                    f"blocks must be None or unique items from {CompareCliParser.VALID_BLOCKSIZES}, got: {f_blocks!r}"
+                )
+            f_norm_blocks_set = {f_b.strip().upper() for f_b in f_blocks}
+            f_norm_blocks = tuple(
+                f_b
+                for f_b in CompareCliParser.VALID_BLOCKSIZES
+                if f_b in f_norm_blocks_set
             )
 
-        super().__setattr__("m_folder", f_folder.strip())
-        super().__setattr__(
-            "m_extra_folders", tuple(f_f.strip() for f_f in f_extra_folders)
-        )
-        super().__setattr__("m_op", f_norm_op)
-        super().__setattr__("m_stripes", f_stripes)
-        super().__setattr__("m_blocksize", f_norm_bs)
-        super().__setattr__(
-            "m_output_dir",
-            f_output_dir.strip() if f_output_dir is not None else None,
-        )
-        super().__setattr__("m_all", f_all)
+        f_norm_output_dir: Optional[str] = None
+        if f_output_dir is not None:
+            if not isinstance(f_output_dir, str) or not f_output_dir.strip():
+                raise ValueError(
+                    f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
+                )
+            f_norm_output_dir = f_output_dir.strip()
+
+        super().__setattr__("m_benchmark", f_norm_benchmark)
+        super().__setattr__("m_folders", f_norm_folders)
+        super().__setattr__("m_by", f_norm_by)
+        super().__setattr__("m_style", f_norm_style)
+        super().__setattr__("m_metrics", f_norm_metrics)
+        super().__setattr__("m_nodes", f_norm_nodes)
+        super().__setattr__("m_stripes", f_norm_stripes)
+        super().__setattr__("m_blocks", f_norm_blocks)
+        super().__setattr__("m_output_dir", f_norm_output_dir)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -1612,242 +1715,78 @@ class CompareNodesRequest:
         super().__delattr__(f_key)
 
     @property
-    def submode(self) -> str:
-        return "nodes"
-
-    @property
-    def all(self) -> bool:
-        return self.m_all
+    def benchmark(self) -> str:
+        return self.m_benchmark
 
     @property
     def folders(self) -> Tuple[str, ...]:
-        """Every folder charted: the first (it names the plots), then the others."""
-        return (self.m_folder,) + self.m_extra_folders
+        return self.m_folders
 
     @property
-    def folder(self) -> str:
-        return self.m_folder
+    def by(self) -> str:
+        return self.m_by
 
     @property
-    def op(self) -> str:
-        return self.m_op
+    def style(self) -> str:
+        return self.m_style
 
     @property
-    def stripes(self) -> int:
+    def metrics(self) -> Optional[Tuple[str, ...]]:
+        return self.m_metrics
+
+    @property
+    def nodes(self) -> Optional[Tuple[int, ...]]:
+        return self.m_nodes
+
+    @property
+    def stripes(self) -> Optional[Tuple[int, ...]]:
         return self.m_stripes
 
     @property
-    def blocksize(self) -> str:
-        return self.m_blocksize
+    def blocks(self) -> Optional[Tuple[str, ...]]:
+        return self.m_blocks
 
     @property
     def output_dir(self) -> Optional[str]:
         return self.m_output_dir
 
-    @property
-    def outputDir(self) -> Optional[str]:
-        return self.m_output_dir
-
     def toDict(self) -> Dict[str, Any]:
         return {
-            "submode": "nodes",
-            "folder": self.m_folder,
-            **(
-                {"extra_folders": list(self.m_extra_folders)}
-                if self.m_extra_folders
-                else {}
-            ),
-            "op": self.m_op,
-            "stripes": self.m_stripes,
-            "blocksize": self.m_blocksize,
-            "output_dir": self.m_output_dir,
-            "all": self.m_all,
-        }
-
-    def __repr__(self) -> str:
-        return (
-            f"CompareNodesRequest(folder={self.m_folder!r}, "
-            f"extra_folders={self.m_extra_folders!r}, "
-            f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
-            f"blocksize={self.m_blocksize!r}, "
-            f"output_dir={self.m_output_dir!r}, all={self.m_all!r})"
-        )
-
-    def __eq__(self, f_other: Any) -> bool:
-        if isinstance(f_other, CompareNodesRequest):
-            return (
-                self.m_folder == f_other.m_folder
-                and self.m_extra_folders == f_other.m_extra_folders
-                and self.m_op == f_other.m_op
-                and self.m_stripes == f_other.m_stripes
-                and self.m_blocksize == f_other.m_blocksize
-                and self.m_output_dir == f_other.m_output_dir
-                and self.m_all == f_other.m_all
-            )
-        return False
-
-    def __hash__(self) -> int:
-        return hash(
-            (
-                self.m_folder,
-                self.m_extra_folders,
-                self.m_op,
-                self.m_stripes,
-                self.m_blocksize,
-                self.m_output_dir,
-                self.m_all,
-            )
-        )
-
-
-class CompareVariantsRequest:
-    """Immutable parsed and validated request value object for 'compare variants'."""
-
-    __slots__ = (
-        "m_archive_folder",
-        "m_op",
-        "m_stripes",
-        "m_blocksize",
-        "m_all",
-        "m_output_dir",
-        "_frozen",
-    )
-
-    def __init__(
-        self,
-        f_archive_folder: str,
-        f_op: str = "both",
-        f_stripes: int = 4,
-        f_blocksize: str = "1M",
-        f_all: bool = False,
-        f_output_dir: Optional[str] = None,
-    ) -> None:
-        if not isinstance(f_archive_folder, str) or not f_archive_folder.strip():
-            raise ValueError(
-                f"archive_folder must be a non-empty string, got: {f_archive_folder!r}"
-            )
-        if not isinstance(f_op, str) or not f_op.strip():
-            raise ValueError(f"op must be a non-empty string, got: {f_op!r}")
-        f_norm_op = f_op.strip().lower()
-        if f_norm_op not in ("read", "write", "both"):
-            raise ValueError(
-                f"op must be one of ('read', 'write', 'both'), got: {f_op!r}"
-            )
-        if (
-            isinstance(f_stripes, bool)
-            or not isinstance(f_stripes, int)
-            or f_stripes not in (4, 16)
-        ):
-            raise ValueError(f"stripes must be 4 or 16, got: {f_stripes!r}")
-        if not isinstance(f_blocksize, str) or not f_blocksize.strip():
-            raise ValueError(
-                f"blocksize must be a non-empty string, got: {f_blocksize!r}"
-            )
-        f_norm_bs = f_blocksize.strip().upper()
-        if f_norm_bs not in ("64K", "1M", "8M"):
-            raise ValueError(
-                f"blocksize must be one of ('64K', '1M', '8M'), got: {f_blocksize!r}"
-            )
-        if not isinstance(f_all, bool):
-            raise ValueError(f"all must be a boolean, got: {f_all!r}")
-        if f_output_dir is not None and (
-            not isinstance(f_output_dir, str) or not f_output_dir.strip()
-        ):
-            raise ValueError(
-                f"output_dir must be a non-empty string or None, got: {f_output_dir!r}"
-            )
-
-        super().__setattr__("m_archive_folder", f_archive_folder.strip())
-        super().__setattr__("m_op", f_norm_op)
-        super().__setattr__("m_stripes", f_stripes)
-        super().__setattr__("m_blocksize", f_norm_bs)
-        super().__setattr__("m_all", f_all)
-        super().__setattr__(
-            "m_output_dir",
-            f_output_dir.strip() if f_output_dir is not None else None,
-        )
-        super().__setattr__("_frozen", True)
-
-    def __setattr__(self, f_key: str, f_value: Any) -> None:
-        if getattr(self, "_frozen", False):
-            raise AttributeError(f"Cannot modify immutable {self.__class__.__name__}")
-        super().__setattr__(f_key, f_value)
-
-    def __delattr__(self, f_key: str) -> None:
-        if getattr(self, "_frozen", False):
-            raise AttributeError(
-                f"Cannot delete attribute from immutable {self.__class__.__name__}"
-            )
-        super().__delattr__(f_key)
-
-    @property
-    def submode(self) -> str:
-        return "variants"
-
-    @property
-    def archive_folder(self) -> str:
-        return self.m_archive_folder
-
-    @property
-    def archiveFolder(self) -> str:
-        return self.m_archive_folder
-
-    @property
-    def folder(self) -> str:
-        return self.m_archive_folder
-
-    @property
-    def op(self) -> str:
-        return self.m_op
-
-    @property
-    def stripes(self) -> int:
-        return self.m_stripes
-
-    @property
-    def blocksize(self) -> str:
-        return self.m_blocksize
-
-    @property
-    def all(self) -> bool:
-        return self.m_all
-
-    @property
-    def output_dir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    @property
-    def outputDir(self) -> Optional[str]:
-        return self.m_output_dir
-
-    def toDict(self) -> Dict[str, Any]:
-        return {
-            "submode": "variants",
-            "archive_folder": self.m_archive_folder,
-            "folder": self.m_archive_folder,
-            "op": self.m_op,
-            "stripes": self.m_stripes,
-            "blocksize": self.m_blocksize,
-            "all": self.m_all,
+            "benchmark": self.m_benchmark,
+            "folders": list(self.m_folders),
+            "by": self.m_by,
+            "style": self.m_style,
+            "metrics": list(self.m_metrics) if self.m_metrics is not None else None,
+            "nodes": list(self.m_nodes) if self.m_nodes is not None else None,
+            "stripes": list(self.m_stripes) if self.m_stripes is not None else None,
+            "blocks": list(self.m_blocks) if self.m_blocks is not None else None,
             "output_dir": self.m_output_dir,
         }
 
     def __repr__(self) -> str:
         return (
-            f"CompareVariantsRequest(archive_folder={self.m_archive_folder!r}, "
-            f"op={self.m_op!r}, stripes={self.m_stripes!r}, "
-            f"blocksize={self.m_blocksize!r}, all={self.m_all!r}, "
+            f"CompareRequest(benchmark={self.m_benchmark!r}, "
+            f"folders={self.m_folders!r}, "
+            f"by={self.m_by!r}, "
+            f"style={self.m_style!r}, "
+            f"metrics={self.m_metrics!r}, "
+            f"nodes={self.m_nodes!r}, "
+            f"stripes={self.m_stripes!r}, "
+            f"blocks={self.m_blocks!r}, "
             f"output_dir={self.m_output_dir!r})"
         )
 
-    def __eq__(self, f_other: Any) -> bool:
-        if isinstance(f_other, CompareVariantsRequest):
+    def __eq__(self, f_other: object) -> bool:
+        if isinstance(f_other, CompareRequest):
             return (
-                self.m_archive_folder == f_other.m_archive_folder
-                and self.m_op == f_other.m_op
+                self.m_benchmark == f_other.m_benchmark
+                and self.m_folders == f_other.m_folders
+                and self.m_by == f_other.m_by
+                and self.m_style == f_other.m_style
+                and self.m_metrics == f_other.m_metrics
+                and self.m_nodes == f_other.m_nodes
                 and self.m_stripes == f_other.m_stripes
-                and self.m_blocksize == f_other.m_blocksize
-                and self.m_all == f_other.m_all
+                and self.m_blocks == f_other.m_blocks
                 and self.m_output_dir == f_other.m_output_dir
             )
         return False
@@ -1855,64 +1794,73 @@ class CompareVariantsRequest:
     def __hash__(self) -> int:
         return hash(
             (
-                self.m_archive_folder,
-                self.m_op,
+                self.m_benchmark,
+                self.m_folders,
+                self.m_by,
+                self.m_style,
+                self.m_metrics,
+                self.m_nodes,
                 self.m_stripes,
-                self.m_blocksize,
-                self.m_all,
+                self.m_blocks,
                 self.m_output_dir,
             )
         )
 
 
-# Backward compatibility alias for existing test imports and internal callers
-CompareArchiveRequest = CompareVariantsRequest
-
-
 class CompareCliParser:
-    """Pure standard-library two-tier parser for 'lsmiotool compare' CLI arguments.
+    """Pure standard-library parser for 'lsmiotool compare' CLI arguments.
 
     Grammar:
-        lsmiotool compare nodes <folder> [<folder> ...] <read|write> [<stripes>] [<blocksize>] [--output-dir <dir>]
-        lsmiotool compare nodes <folder> [<folder> ...] [read|write] --all [--output-dir <dir>]
-        lsmiotool compare variants <archive_folder> [read|write|both] [<stripes>] [<blocksize>] [--all] [--output-dir <dir>]
+        lsmiotool compare <lsmio|ior|epocpp|variants> <folder> ... [options]
+
+    Options:
+        --by nodes|combinations
+        --style bars|lines
+        --metrics <list>
+        --nodes <list>
+        --stripes <list>
+        --block <list>
+        --output-dir <dir>
     """
 
-    VALID_SUBMODES: Tuple[str, ...] = ("nodes", "variants")
-    # runtime and cost: an epocpp archive's wall-time arms (epocpp-report.csv,
-    # epocpp-cost.csv)
-    VALID_OPERATIONS_NODES: Tuple[str, ...] = ("read", "write", "runtime", "cost")
-    VALID_OPERATIONS_VARIANTS: Tuple[str, ...] = ("read", "write", "both")
-    VALID_OPERATIONS: Tuple[str, ...] = (
-        "read",
-        "write",
-        "both",
-        "runtime",
-        "cost",
-    )
+    VALID_BENCHMARKS: Tuple[str, ...] = ("lsmio", "ior", "epocpp", "variants")
+    BENCHMARK_METRICS: ClassVar[Dict[str, Tuple[str, ...]]] = {
+        "lsmio": ("write", "read"),
+        "ior": ("write", "read"),
+        "variants": ("write", "read"),
+        "epocpp": ("runtime", "cost", "write", "read"),
+    }
+    DEFAULT_METRICS: ClassVar[Dict[str, Tuple[str, ...]]] = {
+        "lsmio": ("write", "read"),
+        "ior": ("write", "read"),
+        "variants": ("write", "read"),
+        "epocpp": ("runtime", "write", "read"),
+    }
     VALID_STRIPES: Tuple[int, ...] = (4, 16)
     VALID_BLOCKSIZES: Tuple[str, ...] = ("64K", "1M", "8M")
-    WORKLOAD_PERMUTATIONS: Tuple[Tuple[int, str], ...] = (
+    COMBINATIONS: Tuple[Tuple[int, str], ...] = (
         (4, "64K"),
-        (16, "64K"),
         (4, "1M"),
-        (16, "1M"),
         (4, "8M"),
+        (16, "64K"),
+        (16, "1M"),
         (16, "8M"),
     )
+    VALID_BY: Tuple[str, ...] = ("nodes", "combinations")
+    VALID_STYLES: Tuple[str, ...] = ("bars", "lines")
 
     @classmethod
     def parse(
         cls,
         f_argv: Sequence[str],
-    ) -> Union[CompareNodesRequest, CompareVariantsRequest]:
-        """Parses argument sequence into an immutable canonical CompareNodesRequest or CompareVariantsRequest.
+    ) -> CompareRequest:
+        """Parses argument sequence into an immutable canonical CompareRequest.
 
         Args:
             f_argv: Sequence of argument strings (either including or excluding leading 'compare').
 
         Returns:
-            Canonical CompareNodesRequest or CompareVariantsRequest instance.
+            Canonical CompareRequest instance.
 
         Raises:
             CompareCliParseError: If syntax, arity, flags, or values are invalid.
@@ -1935,355 +1883,226 @@ class CompareCliParser:
                 )
 
         for f_tok in f_tokens:
-            if f_tok.startswith("--all="):
+            if f_tok.strip().lower() == "compare-archive":
                 raise CompareCliParseError(
-                    f"Prohibit '--all=value' syntax ({f_tok!r}); '--all' takes no value."
-                )
-            if f_tok.startswith("--output-dir="):
-                raise CompareCliParseError(
-                    f"Prohibit '--output-dir=value' syntax ({f_tok!r}); use '--output-dir <dir>' with explicit separate argument."
+                    "'compare-archive' was removed: use 'compare <lsmio|ior|epocpp|variants> <folder> ...'"
                 )
 
-        f_cmd_indices: List[int] = [
-            f_idx
-            for f_idx, f_tok in enumerate(f_tokens)
-            if f_tok.lower() in ("compare", "compare-archive")
-        ]
+        if f_tokens and f_tokens[0].strip().lower() == "compare":
+            f_tokens = f_tokens[1:]
 
-        if f_cmd_indices:
-            f_cmd_idx = f_cmd_indices[0]
-            f_pre_tokens = f_tokens[:f_cmd_idx]
-            f_post_tokens = f_tokens[f_cmd_idx + 1 :]
-
-            for f_pre_tok in f_pre_tokens:
-                raise CompareCliParseError(
-                    f"Unexpected token before {f_tokens[f_cmd_idx]!r}: {f_pre_tok!r}"
-                )
-        else:
-            f_post_tokens = f_tokens[:]
-
-        if not f_post_tokens:
-            raise CompareCliParseError(
-                "Missing required submode: 'nodes' or 'variants'"
-            )
-
-        f_submode_tok = f_post_tokens[0]
-        f_submode_norm = f_submode_tok.strip().lower()
-
-        if f_submode_norm == "nodes":
-            return cls._parseNodes(f_post_tokens[1:])
-        elif f_submode_norm == "variants":
-            return cls._parseVariants(f_post_tokens[1:])
-        else:
-            raise CompareCliParseError(
-                f"Invalid submode {f_submode_tok!r}. Must be 'nodes' or 'variants'"
-            )
-
-    @classmethod
-    def _parseNodes(
-        cls,
-        f_tokens: Sequence[str],
-    ) -> CompareNodesRequest:
-        if not f_tokens:
-            raise CompareCliParseError("Missing required positional argument: <folder>")
-
-        f_folder_tok = f_tokens[0]
-        if f_folder_tok.startswith("-"):
-            raise CompareCliParseError(
-                f"Unexpected option {f_folder_tok!r} placed before positional argument <folder>."
-            )
-
-        f_folder = f_folder_tok.strip()
-        if not f_folder:
-            raise CompareCliParseError("Folder path cannot be empty.")
-
-        f_op: Optional[str] = None
-        f_stripes: int = 4
-        f_blocksize: str = "1M"
-        f_output_dir: Optional[str] = None
-        f_all = f_tokens.count("--all") > 0
-        if f_tokens.count("--all") > 1:
-            raise CompareCliParseError("Duplicate '--all' option specified.")
-
-        f_remaining_tokens = f_tokens[1:]
-        f_pos_idx = 0
-        f_rem_idx = 0
-        # Further folders, charted with the first: tokens before <read|write> that name a
-        # path (with a '/') or an existing directory; any other word is a bad operation
-        f_extra_folders: List[str] = []
-
-        while f_rem_idx < len(f_remaining_tokens):
-            f_tok = f_remaining_tokens[f_rem_idx]
-            if f_tok.startswith("-"):
-                break
-
-            if (
-                f_pos_idx == 0
-                and f_tok.strip()
-                and f_tok.strip().lower() not in cls.VALID_OPERATIONS
-                and (
-                    os.sep in f_tok
-                    or (
-                        # A stripe count or block size is never a folder ('./4' is)
-                        not f_tok.strip().isdigit()
-                        and f_tok.strip().upper() not in cls.VALID_BLOCKSIZES
-                        and os.path.isdir(os.path.expanduser(f_tok.strip()))
-                    )
-                )
-            ):
-                f_extra_folders.append(f_tok.strip())
-                f_rem_idx += 1
-            elif f_pos_idx == 0:
-                f_op_norm = f_tok.strip().lower()
-                if f_op_norm not in cls.VALID_OPERATIONS_NODES:
-                    raise CompareCliParseError(
-                        f"Invalid operation: {f_tok!r}. Must be 'read', 'write', "
-                        "'runtime' or 'cost' (a further folder is a path with '/' or "
-                        "an existing directory)"
-                    )
-                f_op = f_op_norm
-                f_pos_idx += 1
-                f_rem_idx += 1
-            elif f_pos_idx == 1:
-                try:
-                    f_stripes_val = int(f_tok)
-                except ValueError:
-                    raise CompareCliParseError(
-                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
-                    )
-                if f_stripes_val not in cls.VALID_STRIPES:
-                    raise CompareCliParseError(
-                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
-                    )
-                f_stripes = f_stripes_val
-                f_pos_idx += 1
-                f_rem_idx += 1
-            elif f_pos_idx == 2:
-                f_bs_norm = f_tok.strip().upper()
-                if f_bs_norm not in cls.VALID_BLOCKSIZES:
-                    raise CompareCliParseError(
-                        f"Invalid blocksize: {f_tok!r}. Must be one of: {cls.VALID_BLOCKSIZES}"
-                    )
-                f_blocksize = f_bs_norm
-                f_pos_idx += 1
-                f_rem_idx += 1
-            else:
-                raise CompareCliParseError(
-                    f"Unexpected extra positional argument: {f_tok!r}"
-                )
-
-        if f_op is None and not f_all:
-            raise CompareCliParseError(
-                "Missing required positional argument: <read|write>"
-            )
-        if f_all and f_pos_idx > 1:
-            raise CompareCliParseError(
-                "'--all' charts every <stripes> and <blocksize>; do not give them"
-            )
-
-        f_output_dir_seen = False
-
-        while f_rem_idx < len(f_remaining_tokens):
-            f_tok = f_remaining_tokens[f_rem_idx]
-            if f_tok == "--output-dir":
-                if f_output_dir_seen:
-                    raise CompareCliParseError(
-                        "Duplicate '--output-dir' option specified."
-                    )
-                if f_rem_idx + 1 >= len(f_remaining_tokens):
-                    raise CompareCliParseError(
-                        "Missing value after '--output-dir' option."
-                    )
-                f_val = f_remaining_tokens[f_rem_idx + 1]
-                if f_val.startswith("-"):
-                    raise CompareCliParseError(
-                        f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
-                    )
-                if not f_val.strip():
-                    raise CompareCliParseError("Output directory path cannot be empty.")
-                f_output_dir = f_val.strip()
-                f_output_dir_seen = True
-                f_rem_idx += 2
-            elif f_tok == "--all":
-                f_rem_idx += 1
-            elif f_tok.startswith("-"):
-                raise CompareCliParseError(f"Unknown option: {f_tok!r}")
-            else:
-                raise CompareCliParseError(
-                    f"Unexpected extra positional argument: {f_tok!r}"
-                )
-
-        return CompareNodesRequest(
-            f_folder=f_folder,
-            f_op=f_op,
-            f_stripes=f_stripes,
-            f_blocksize=f_blocksize,
-            f_output_dir=f_output_dir,
-            f_all=f_all,
-            f_extra_folders=f_extra_folders,
-        )
-
-    @classmethod
-    def _parseVariants(
-        cls,
-        f_tokens: Sequence[str],
-    ) -> CompareVariantsRequest:
         if not f_tokens:
             raise CompareCliParseError(
-                "Missing required positional argument: <archive_folder>"
+                "Missing benchmark: lsmio, ior, epocpp or variants"
             )
 
-        f_archive_folder_tok = f_tokens[0]
-        if f_archive_folder_tok.startswith("-"):
+        f_word = f_tokens[0].strip().lower()
+        if f_word == "nodes":
             raise CompareCliParseError(
-                f"Unexpected option {f_archive_folder_tok!r} placed before positional argument <archive_folder>."
+                "'compare nodes' was removed: use 'compare <lsmio|ior|epocpp> <folder> ...'"
+            )
+        if f_word not in cls.VALID_BENCHMARKS:
+            raise CompareCliParseError(
+                f"Invalid benchmark {f_tokens[0]!r}: must be lsmio, ior, epocpp or variants"
             )
 
-        f_archive_folder = f_archive_folder_tok.strip()
-        if not f_archive_folder:
-            raise CompareCliParseError("Archive folder path cannot be empty.")
-
-        f_op: str = "both"
-        f_stripes: int = 4
-        f_blocksize: str = "1M"
-        f_all: bool = False
-        f_output_dir: Optional[str] = None
-
-        f_remaining_tokens = f_tokens[1:]
-        f_pos_idx = 0
+        f_remaining = f_tokens[1:]
+        f_folders: List[str] = []
+        f_raw_options: Dict[str, str] = {}
         f_rem_idx = 0
+        f_known_opts = {
+            "--by",
+            "--style",
+            "--metrics",
+            "--nodes",
+            "--stripes",
+            "--block",
+            "--output-dir",
+        }
 
-        while f_rem_idx < len(f_remaining_tokens):
-            f_tok = f_remaining_tokens[f_rem_idx]
+        while f_rem_idx < len(f_remaining):
+            f_tok = f_remaining[f_rem_idx]
             if f_tok.startswith("-"):
-                break
-
-            if f_pos_idx == 0:
-                f_op_norm = f_tok.strip().lower()
-                if f_op_norm not in cls.VALID_OPERATIONS_VARIANTS:
+                if "=" in f_tok:
+                    f_opt_name = f_tok.split("=", 1)[0]
+                    if f_opt_name in f_known_opts or f_opt_name == "--all":
+                        raise CompareCliParseError(
+                            f"Prohibit '{f_opt_name}=value' syntax ({f_tok!r}); use '{f_opt_name} <value>'"
+                        )
+                    raise CompareCliParseError(f"Unknown option: {f_tok!r}")
+                if f_tok == "--all":
                     raise CompareCliParseError(
-                        f"Invalid operation: {f_tok!r}. Must be one of: {cls.VALID_OPERATIONS_VARIANTS}"
+                        "'--all' was removed: everything is charted by default; narrow with --metrics, --nodes, --stripes or --block"
                     )
-                f_op = f_op_norm
-                f_pos_idx += 1
-                f_rem_idx += 1
-            elif f_pos_idx == 1:
-                try:
-                    f_stripes_val = int(f_tok)
-                except ValueError:
-                    raise CompareCliParseError(
-                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
-                    )
-                if f_stripes_val not in cls.VALID_STRIPES:
-                    raise CompareCliParseError(
-                        f"Invalid stripes: {f_tok!r}. Must be one of: {cls.VALID_STRIPES}"
-                    )
-                f_stripes = f_stripes_val
-                f_pos_idx += 1
-                f_rem_idx += 1
-            elif f_pos_idx == 2:
-                f_bs_norm = f_tok.strip().upper()
-                if f_bs_norm not in cls.VALID_BLOCKSIZES:
-                    raise CompareCliParseError(
-                        f"Invalid blocksize: {f_tok!r}. Must be one of: {cls.VALID_BLOCKSIZES}"
-                    )
-                f_blocksize = f_bs_norm
-                f_pos_idx += 1
-                f_rem_idx += 1
+                if f_tok in f_known_opts:
+                    if f_tok in f_raw_options:
+                        raise CompareCliParseError(
+                            f"Duplicate '{f_tok}' option specified."
+                        )
+                    if f_rem_idx + 1 >= len(f_remaining):
+                        raise CompareCliParseError(
+                            f"Missing value after '{f_tok}' option."
+                        )
+                    f_val = f_remaining[f_rem_idx + 1]
+                    if f_val.startswith("-"):
+                        raise CompareCliParseError(
+                            f"Missing valid value after '{f_tok}' option, got option-like token: {f_val!r}"
+                        )
+                    if not f_val.strip():
+                        raise CompareCliParseError(f"{f_tok} value cannot be empty.")
+                    f_raw_options[f_tok] = f_val
+                    f_rem_idx += 2
+                else:
+                    raise CompareCliParseError(f"Unknown option: {f_tok!r}")
             else:
-                raise CompareCliParseError(
-                    f"Unexpected extra positional argument: {f_tok!r}"
-                )
-
-        f_all_seen = False
-        f_output_dir_seen = False
-
-        while f_rem_idx < len(f_remaining_tokens):
-            f_tok = f_remaining_tokens[f_rem_idx]
-            if f_tok == "--all":
-                if f_all_seen:
-                    raise CompareCliParseError("Duplicate '--all' option specified.")
-                f_all = True
-                f_all_seen = True
+                f_bare = f_tok.strip()
+                if not f_bare:
+                    raise CompareCliParseError("Folder path cannot be empty.")
+                f_bare_lower = f_bare.lower()
+                if f_bare_lower in ("read", "write", "both", "runtime", "cost"):
+                    raise CompareCliParseError(
+                        f"{f_tok!r} is not a folder: use --metrics (a folder of that name is written ./{f_tok})"
+                    )
+                if f_bare in ("4", "16"):
+                    raise CompareCliParseError(
+                        f"{f_tok!r} is not a folder: use --stripes (a folder of that name is written ./{f_tok})"
+                    )
+                if f_bare.upper() in cls.VALID_BLOCKSIZES:
+                    raise CompareCliParseError(
+                        f"{f_tok!r} is not a folder: use --block (a folder of that name is written ./{f_tok})"
+                    )
+                f_folders.append(f_bare)
                 f_rem_idx += 1
-            elif f_tok == "--output-dir":
-                if f_output_dir_seen:
-                    raise CompareCliParseError(
-                        "Duplicate '--output-dir' option specified."
-                    )
-                if f_rem_idx + 1 >= len(f_remaining_tokens):
-                    raise CompareCliParseError(
-                        "Missing value after '--output-dir' option."
-                    )
-                f_val = f_remaining_tokens[f_rem_idx + 1]
-                if f_val.startswith("-"):
-                    raise CompareCliParseError(
-                        f"Missing valid value after '--output-dir' option, got option-like token: {f_val!r}"
-                    )
-                if not f_val.strip():
-                    raise CompareCliParseError("Output directory path cannot be empty.")
-                f_output_dir = f_val.strip()
-                f_output_dir_seen = True
-                f_rem_idx += 2
-            elif f_tok.startswith("-"):
-                raise CompareCliParseError(f"Unknown option: {f_tok!r}")
-            else:
-                raise CompareCliParseError(
-                    f"Unexpected extra positional argument: {f_tok!r}"
-                )
-        if f_all and f_pos_idx > 1:
+
+        if not f_folders:
             raise CompareCliParseError(
-                "'--all' charts every <stripes> and <blocksize>; do not give them"
+                f"Missing <folder>: compare {f_word} <folder> [<folder> ...]"
             )
 
-        return CompareVariantsRequest(
-            f_archive_folder=f_archive_folder,
-            f_op=f_op,
-            f_stripes=f_stripes,
-            f_blocksize=f_blocksize,
-            f_all=f_all,
-            f_output_dir=f_output_dir,
-        )
+        f_by_val: str = "nodes"
+        if "--by" in f_raw_options:
+            f_norm_by = f_raw_options["--by"].strip().lower()
+            if f_norm_by not in cls.VALID_BY:
+                raise CompareCliParseError(
+                    f"Invalid --by value {f_raw_options['--by']!r}: must be nodes or combinations"
+                )
+            f_by_val = f_norm_by
+
+        f_style_val: str = "bars"
+        if "--style" in f_raw_options:
+            f_norm_style = f_raw_options["--style"].strip().lower()
+            if f_norm_style not in cls.VALID_STYLES:
+                raise CompareCliParseError(
+                    f"Invalid --style value {f_raw_options['--style']!r}: must be bars or lines"
+                )
+            f_style_val = f_norm_style
+
+        f_output_dir: Optional[str] = None
+        if "--output-dir" in f_raw_options:
+            f_output_dir = f_raw_options["--output-dir"].strip()
+
+        f_metrics_val: Optional[Tuple[str, ...]] = None
+        if "--metrics" in f_raw_options:
+            f_raw = f_raw_options["--metrics"]
+            f_items = [f_i.strip() for f_i in f_raw.split(",")]
+            if any(not f_i for f_i in f_items):
+                raise CompareCliParseError(f"--metrics: empty item in {f_raw!r}")
+            f_norm_m_list: List[str] = []
+            f_seen_m = set()
+            for f_i in f_items:
+                f_m = f_i.lower()
+                if f_m not in cls.BENCHMARK_METRICS[f_word]:
+                    f_valid_list = ", ".join(cls.BENCHMARK_METRICS[f_word])
+                    raise CompareCliParseError(
+                        f"--metrics: invalid metric {f_i!r} for compare {f_word}: must be {f_valid_list}"
+                    )
+                if f_m in f_seen_m:
+                    raise CompareCliParseError(f"--metrics: repeated item {f_i!r}")
+                f_seen_m.add(f_m)
+                f_norm_m_list.append(f_m)
+            f_metrics_val = tuple(f_norm_m_list)
+
+        f_nodes_val: Optional[Tuple[int, ...]] = None
+        if "--nodes" in f_raw_options:
+            f_raw = f_raw_options["--nodes"]
+            f_items = [f_i.strip() for f_i in f_raw.split(",")]
+            if any(not f_i for f_i in f_items):
+                raise CompareCliParseError(f"--nodes: empty item in {f_raw!r}")
+            f_nodes_list: List[int] = []
+            f_seen_n = set()
+            for f_i in f_items:
+                if not _INT_RE.match(f_i) or int(f_i) <= 0:
+                    raise CompareCliParseError(
+                        f"--nodes: invalid node count {f_i!r}"
+                    )
+                f_n = int(f_i)
+                if f_n in f_seen_n:
+                    raise CompareCliParseError(f"--nodes: repeated item {f_i!r}")
+                f_seen_n.add(f_n)
+                f_nodes_list.append(f_n)
+            f_nodes_val = tuple(f_nodes_list)
+
+        f_stripes_val: Optional[Tuple[int, ...]] = None
+        if "--stripes" in f_raw_options:
+            f_raw = f_raw_options["--stripes"]
+            f_items = [f_i.strip() for f_i in f_raw.split(",")]
+            if any(not f_i for f_i in f_items):
+                raise CompareCliParseError(f"--stripes: empty item in {f_raw!r}")
+            f_stripes_list: List[int] = []
+            f_seen_s = set()
+            for f_i in f_items:
+                if not _INT_RE.match(f_i) or int(f_i) not in cls.VALID_STRIPES:
+                    raise CompareCliParseError(
+                        f"--stripes: invalid stripe count {f_i!r}: must be 4 or 16"
+                    )
+                f_s = int(f_i)
+                if f_s in f_seen_s:
+                    raise CompareCliParseError(f"--stripes: repeated item {f_i!r}")
+                f_seen_s.add(f_s)
+                f_stripes_list.append(f_s)
+            f_stripes_val = tuple(f_stripes_list)
+
+        f_blocks_val: Optional[Tuple[str, ...]] = None
+        if "--block" in f_raw_options:
+            f_raw = f_raw_options["--block"]
+            f_items = [f_i.strip() for f_i in f_raw.split(",")]
+            if any(not f_i for f_i in f_items):
+                raise CompareCliParseError(f"--block: empty item in {f_raw!r}")
+            f_blocks_list: List[str] = []
+            f_seen_b = set()
+            for f_i in f_items:
+                f_b = f_i.upper()
+                if f_b not in cls.VALID_BLOCKSIZES:
+                    raise CompareCliParseError(
+                        f"--block: invalid block size {f_i!r}: must be 64K, 1M or 8M"
+                    )
+                if f_b in f_seen_b:
+                    raise CompareCliParseError(f"--block: repeated item {f_i!r}")
+                f_seen_b.add(f_b)
+                f_blocks_list.append(f_b)
+            f_blocks_val = tuple(f_blocks_list)
+
+        try:
+            return CompareRequest(
+                f_benchmark=f_word,
+                f_folders=tuple(f_folders),
+                f_by=f_by_val,
+                f_style=f_style_val,
+                f_metrics=f_metrics_val,
+                f_nodes=f_nodes_val,
+                f_stripes=f_stripes_val,
+                f_blocks=f_blocks_val,
+                f_output_dir=f_output_dir,
+            )
+        except ValueError as f_err:
+            raise CompareCliParseError(str(f_err)) from f_err
 
 
 def parseCompareArguments(
     f_argv: Sequence[str],
-) -> Union[CompareNodesRequest, CompareVariantsRequest]:
+) -> CompareRequest:
     """Convenience function wrapping CompareCliParser.parse."""
     return CompareCliParser.parse(f_argv=f_argv)
-
-
-def parseCompareArchiveArguments(
-    f_argv: Sequence[str],
-) -> CompareVariantsRequest:
-    """Compatibility wrapper delegating to CompareCliParser.parse in variants mode."""
-    if f_argv is None or isinstance(f_argv, (str, bytes)):
-        raise CompareCliParseError(
-            f"f_argv must be a sequence of argument strings, got: {type(f_argv).__name__}"
-        )
-    try:
-        tokens = list(f_argv)
-    except TypeError:
-        raise CompareCliParseError(
-            f"f_argv must be iterable, got: {type(f_argv).__name__}"
-        )
-    for f_idx, f_elem in enumerate(tokens):
-        if not isinstance(f_elem, str):
-            raise CompareCliParseError(
-                f"All argv elements must be strings, got {type(f_elem).__name__} at index {f_idx}"
-            )
-    if not tokens or (tokens[0] != "variants" and tokens[0] != "compare-archive"):
-        tokens.insert(0, "variants")
-    elif tokens and tokens[0] == "compare-archive":
-        tokens[0] = "variants"
-    req = CompareCliParser.parse(tokens)
-    if isinstance(req, CompareVariantsRequest):
-        return req
-    raise CompareCliParseError("Expected variants request")
-
-
-# Backward compatibility alias
-CompareArchiveCliParser = CompareCliParser
 
 
 class LatexRequest:

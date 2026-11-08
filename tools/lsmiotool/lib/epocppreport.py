@@ -478,7 +478,7 @@ def writeCostReport(f_scale_dir: str) -> Optional[str]:
 def timeSeries(
     f_arm_dir: str, f_metric: str, f_stripes: int, f_bs: str
 ) -> Tuple[List[int], List[float]]:
-    """(node counts, values) of an arm for 'compare nodes': the Best of 'write'/'read'
+    """(node counts, values) of an arm's metric: the Best of 'write'/'read'
     (bandwidth arms), 'runtime' (wall-time arms) or 'cost' (wall-time backend arms, from
     the scale's epocpp-cost.csv); empty when the arm has no such metric."""
     f_points: Dict[int, float] = {}

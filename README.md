@@ -13,7 +13,7 @@ LSMIO is an asynchronous, high-throughput storage engine and parallel I/O middle
 To navigate the detailed architectural, testing, and operational guides across the LSMIO codebase:
 
 - [**Benchmark Subsystem Guide**](benchmark/README.md): Comprehensive reference for synthetic benchmark targets (`bm_native`, `bm_adios`, `bm_rocksdb`, `bm_leveldb`, `bm_manager`), CLI flag catalog, high-performance read flags (`--lsmio-mmap`, `--lsmio-pread`), scaling models, and the `micro.sh` runner.
-- [**Testing & Verification Guide**](test/README.md): Exhaustive documentation covering CTest orchestration, GoogleTest suites, MPI multi-rank integration fixtures, execution protocols (`test`, `xtest`, `ptest`), and debugging workflows (`gdb`, `lldb`, AddressSanitizer).
+- [**Testing & Verification Guide**](test/README.md): Exhaustive documentation covering CTest orchestration, GoogleTest suites, MPI multi-rank integration fixtures, execution protocols (`test`, `xtest`, `py-xtest`), and debugging workflows (`gdb`, `lldb`, AddressSanitizer).
 - [**Tools & Orchestration Guide**](tools/README.md): User and architectural manual for the `lsmiotool` framework, HPC batch scheduler orchestration (Slurm & PBS), report parsing (`lsmiotool parse`), scaling and variant comparison (`lsmiotool compare`), and the canonical 26-variant catalog.
 
 ---
@@ -77,6 +77,7 @@ On HPC systems such as Viking, ARCHER2, or Isambard:
   ```bash
   ./tools/lsmiotool/lsmiotool load-modules
   ```
+- **Compiler**: Build on clusters with `env CC=gcc CXX=g++ ./build.sh clean install`, so that a system Clang 19 or newer is not picked over the module GCC (lsmio prefers Clang when none is set).
 - **Custom Dependencies**: Packages listed under `doc/dependencies/` provide standalone installation scripts targeting `$HOME/src` as the default prefix. Dependencies with filenames starting with `9` are optional.
 
 ---
@@ -114,7 +115,7 @@ LSMIO provides a centralized build script `build.sh`:
 ./build.sh xtest
 
 # Run Python toolchain tests
-./build.sh ptest
+./build.sh py-xtest
 ```
 
 > [!TIP]

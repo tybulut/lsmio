@@ -209,7 +209,8 @@ class LSMIOHelper {
 };
 
 /**
- * Prints stack trace after a segmentation fault
+ * Prints stack trace after a segmentation fault.
+ * Async-signal-safe; writes trace to STDERR_FILENO and exits with EXIT_FAILURE.
  * @param signal the signal that is caught
  */
 void handlerSIGSEGV(int signal);
@@ -235,24 +236,11 @@ std::string to_string(const StorageType v);
  */
 std::string to_string(const MemtableType v);
 
+/// Stream overloads for the lsmio enums (found by ADL); each writes to_string(v).
+std::ostream &operator<<(std::ostream &os, MPIAggType v);
+std::ostream &operator<<(std::ostream &os, StorageType v);
+std::ostream &operator<<(std::ostream &os, MemtableType v);
+
 }  // namespace lsmio
-
-/// Stream overload for MPIAggType.
-std::ostream &operator<<(std::ostream &os, lsmio::MPIAggType v);
-
-/// Stream overload for StorageType.
-std::ostream &operator<<(std::ostream &os, lsmio::StorageType v);
-
-/// Stream overload for MemtableType.
-std::ostream &operator<<(std::ostream &os, lsmio::MemtableType v);
-
-/// Stream overload for MPIAggType (const reference).
-std::ostream &operator<<(std::ostream &os, const lsmio::MPIAggType &v);
-
-/// Stream overload for StorageType (const reference).
-std::ostream &operator<<(std::ostream &os, const lsmio::StorageType &v);
-
-/// Stream overload for MemtableType (const reference).
-std::ostream &operator<<(std::ostream &os, const lsmio::MemtableType &v);
 
 #endif  // _LSMIO_LSMIO_H

@@ -331,97 +331,15 @@ class ArchiveTest(unittest.TestCase):
                 t3, os.path.join(temp_dir, "outputs-native-mmap-btree-3")
             )
 
-    def testArchiveEngineAtomicMoveAndRecreation(self) -> None:
-        """Tasks 4.5.6: Asserts atomic move-on-archive and clean active directory recreation."""
-        with tempfile.TemporaryDirectory() as temp_root:
-            source_dir = os.path.join(temp_root, "outputs")
-            dest_root = os.path.join(temp_root, "lsmio-archive")
-            os.makedirs(source_dir)
-
-            # Create test payload inside source directory
-            test_file = os.path.join(source_dir, "rank-0.db")
-            with open(test_file, "w") as f:
-                f.write("benchmark payload data")
-
-            # First archive run
-            target_1 = ArchiveEngine.executeArchive(
-                f_source_dir=source_dir,
-                f_dest_root=dest_root,
-                f_arm_id="native-no-footer",
-            )
-            expected_target_1 = os.path.join(dest_root, "outputs-native-no-footer")
-            self.assertEqual(target_1, expected_target_1)
-
-            # Verify files moved to target
-            self.assertTrue(os.path.exists(target_1))
-            self.assertTrue(os.path.isfile(os.path.join(target_1, "rank-0.db")))
-
-            # Verify clean directory recreation (INV-ARCH-7)
-            self.assertTrue(os.path.exists(source_dir))
-            self.assertTrue(os.path.isdir(source_dir))
-            self.assertEqual(os.listdir(source_dir), [])
-
-            # Second archive run: populate and move again (should resolve collision to -1)
-            test_file_2 = os.path.join(source_dir, "rank-1.db")
-            with open(test_file_2, "w") as f:
-                f.write("second payload")
-            # bmtool's clean-finish marker is dropped, not archived
-            open(os.path.join(source_dir, ".bm-job-ok"), "w").close()
-
-            target_2 = ArchiveEngine.executeArchive(
-                f_source_dir=source_dir,
-                f_dest_root=dest_root,
-                f_arm_id="native-no-footer",
-            )
-            expected_target_2 = os.path.join(dest_root, "outputs-native-no-footer-1")
-            self.assertEqual(target_2, expected_target_2)
-            self.assertTrue(os.path.isfile(os.path.join(target_2, "rank-1.db")))
-            self.assertEqual(os.listdir(target_2), ["rank-1.db"])
-            self.assertEqual(os.listdir(source_dir), [])
-
-            # Failure modes: non-existent source directory raises ArchiveError
-            with self.assertRaises(ArchiveError) as f_raised:
-                ArchiveEngine.executeArchive(
-                    f_source_dir=os.path.join(temp_root, "nonexistent"),
-                    f_dest_root=dest_root,
-                    f_arm_id="native",
-                )
-            self.assertNotIn("outputs-failed", str(f_raised.exception))
-
-            # A failed bmtool job moved its outputs to a sibling outputs-failed: say so
-            f_failed_root = os.path.join(temp_root, "failed-job")
-            os.makedirs(os.path.join(f_failed_root, "outputs-failed"))
-            with self.assertRaisesRegex(
-                ArchiveError,
-                r"failed benchmark job leaves its outputs in .*outputs-failed",
-            ):
-                ArchiveEngine.executeArchive(
-                    f_source_dir=os.path.join(f_failed_root, "outputs"),
-                    f_dest_root=dest_root,
-                    f_arm_id="native",
-                )
-
-            # Failure mode: source path is not a directory
-            fake_file = os.path.join(temp_root, "fake.txt")
-            with open(fake_file, "w") as f:
-                f.write("text")
-            with self.assertRaises(ArchiveError):
-                ArchiveEngine.executeArchive(
-                    f_source_dir=fake_file,
-                    f_dest_root=dest_root,
-                    f_arm_id="native",
-                )
-
     def testArchiveMainRunSuccess(self) -> None:
-        """Tasks 4.5.7: Asserts ArchiveMain dispatching and successful execution."""
+        """Tasks 4.5.7: Asserts ArchiveMain dispatching and non-run-root refusals."""
         with (
             tempfile.TemporaryDirectory() as temp_root,
             patch.object(ArchiveMain, "_benchmarkRoot", return_value=temp_root),
         ):
-            # bmtool's live outputs dir, the only bmtool directory archive moves (L48)
-            source_dir = os.path.join(temp_root, "lsmio", "outputs")
             dest_root = os.path.join(temp_root, "lsmio-archive")
-            # bmtool outputs layout: <nodes>/<date>/out-*.txt
+            # Rank logs <nodes>/<date>/out-*.txt in a plain directory, not a run root
+            source_dir = os.path.join(temp_root, "rank-logs")
             payload_rel = os.path.join(
                 "8", "2026-10-10", "out-native-no-footer-4-1M-2026-10-10-node1-0.txt"
             )
@@ -430,7 +348,7 @@ class ArchiveTest(unittest.TestCase):
             with open(payload_file, "w") as f:
                 f.write("write,1,1,1,1,1,10\nread,2,2,2,2,2,10\n")
 
-            # M20: an arbitrary directory is never moved
+            # An arbitrary directory is never moved
             stray_dir = os.path.join(temp_root, "not-outputs")
             os.makedirs(stray_dir)
             open(os.path.join(stray_dir, "notes.txt"), "w").close()
@@ -443,15 +361,18 @@ class ArchiveTest(unittest.TestCase):
                 )
             self.assertTrue(os.path.isfile(os.path.join(stray_dir, "notes.txt")))
 
-            # L48: bmtool-format outputs anywhere else (a copy, an old archive) are not moved
+            # Rank logs anywhere else (a copy, an old archive) are not moved either
             copy_dir = os.path.join(temp_root, "outputs-copy")
             shutil.copytree(source_dir, copy_dir)
             with patch("sys.stderr", new_callable=io.StringIO) as f_err:
                 self.assertEqual(
                     ArchiveMain(f_request=stray_req, f_source_dir=copy_dir).run(), 1
                 )
-            self.assertIn("bmtool's live outputs directory", f_err.getvalue())
+            self.assertIn("not an lsmiotool run root", f_err.getvalue())
+            self.assertIn("refusing", f_err.getvalue())
             self.assertTrue(os.path.isfile(os.path.join(copy_dir, payload_rel)))
+            self.assertTrue(os.path.isfile(payload_file))
+            self.assertFalse(os.path.exists(dest_root))
 
             # Initialize ArchiveMain with direct request
             req = ArchiveRequest(
@@ -468,34 +389,9 @@ class ArchiveTest(unittest.TestCase):
             self.assertEqual(main_inst.request, req)
             self.assertEqual(main_inst.sourceDir, source_dir)
             self.assertIsNone(main_inst.runtimeLayout)
-
-            # Run archive execution
-            ret_code = main_inst.run()
-            self.assertEqual(ret_code, 0)
-
-            # Verify target directory created with payload
-            expected_target = os.path.join(dest_root, "outputs-native-no-footer")
-            self.assertTrue(os.path.isdir(expected_target))
-            self.assertTrue(os.path.isfile(os.path.join(expected_target, payload_rel)))
-
-            # Verify source directory cleanly recreated
-            self.assertTrue(os.path.isdir(source_dir))
-            self.assertEqual(os.listdir(source_dir), [])
-
-            # Test initializing ArchiveMain with argv sequence
-            os.makedirs(os.path.dirname(payload_file))
-            with open(payload_file, "w") as f:
-                f.write("write,3,3,3,3,3,10\n")
-
-            main_inst2 = ArchiveMain(
-                ["lsmio", "baseline", "no-footer", "--dest", dest_root],
-                f_source_dir=source_dir,
-            )
-            ret_code2 = main_inst2.run()
-            self.assertEqual(ret_code2, 0)
-            expected_target2 = os.path.join(dest_root, "outputs-native-no-footer-1")
-            self.assertTrue(os.path.isdir(expected_target2))
-            self.assertEqual(os.listdir(source_dir), [])
+            with patch("sys.stderr", new_callable=io.StringIO):
+                self.assertEqual(main_inst.run(), 1)
+            self.assertTrue(os.path.isfile(payload_file))
 
     def testArchiveMainRunError(self) -> None:
         """Tasks 4.5.7: Asserts ArchiveMain error handling returns non-zero on failure."""
@@ -514,7 +410,7 @@ class ArchiveTest(unittest.TestCase):
 
 
 class ArchiveDestResolverTest(unittest.TestCase):
-    """Asserts resolveArchiveDest mirrors bmtool/include/archive-dest.in.sh."""
+    """Asserts resolveArchiveDest: partitioned defaults, absolute and relative --dest."""
 
     def testDefaultPartitioning(self) -> None:
         from lsmiotool.lib.archive import resolveArchiveDest
@@ -621,9 +517,8 @@ class ArchiveDestResolverTest(unittest.TestCase):
         )
 
 
-class ArchiveCommandBmtoolParityTest(unittest.TestCase):
-    """M8: 'lsmiotool archive' resolves like bmtool's archive command
-    (bmtool archive dispatch, include/archive.in.sh, include/archive-dest.in.sh)."""
+class ArchiveCommandTest(unittest.TestCase):
+    """'lsmiotool archive': source, setup and destination resolution of a run root."""
 
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.mkdtemp(prefix="lsmiotool-archivecmd-")
@@ -653,19 +548,22 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         ):
             return f_inst.run(), f_stderr.getvalue()
 
-    def _bmtoolOutputs(self) -> str:
-        from lsmiotool.test.parse.BmtoolParityTest import writeBmtoolLayout
+    def _plainRankLogDir(self) -> str:
+        """A plain directory of rank logs (no manifest.json): not a run root."""
+        from lsmiotool.test.fixtures.ArchiveLayoutFixtures import writeBmtoolLayout
 
-        f_outputs = os.path.join(self.m_root, "lsmio", "outputs")
-        writeBmtoolLayout(f_outputs, ["8"])
-        open(os.path.join(f_outputs, ".bm-job-ok"), "w").close()
-        return f_outputs
+        f_stray = os.path.join(self.m_root, "lsmio", "stray")
+        writeBmtoolLayout(f_stray, ["8"])
+        return f_stray
 
     def _lsmiotoolRun(
-        self, f_run_id: str, f_variant: Optional[str] = "autotune"
+        self,
+        f_run_id: str,
+        f_variant: Optional[str] = "autotune",
+        f_setup: str = "NATIVE",
     ) -> str:
         """A succeeded 'lsmio variants <variant>' run root under <root>/runs."""
-        from lsmiotool.test.parse.BmtoolParityTest import rankLog, rankValues
+        from lsmiotool.test.fixtures.ArchiveLayoutFixtures import rankLog, rankValues
         from lsmiotool.test.parse.RunParseTest import RunParseTest
 
         f_helper = RunParseTest("testExplicitSucceededPaths")
@@ -673,7 +571,7 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         try:
             f_helper.m_temp_dir = self.m_root
             f_run_root, f_plan, _ = f_helper._setupSucceededRun(
-                f_run_id, "lsmio", "variants", f_variant=f_variant
+                f_run_id, "lsmio", "variants", f_setup=f_setup, f_variant=f_variant
             )
         finally:
             f_helper.m_temp_dir = self.m_temp_dir
@@ -689,49 +587,74 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
                         f_f.write(rankLog(f_vals["write"], f_vals["read"]))
         return f_run_root
 
-    def testBmtoolOutputsFromBenchmarkRootNotCwd(self) -> None:
-        f_outputs = self._bmtoolOutputs()
+    def testRunRootFromBenchmarkRootNotCwd(self) -> None:
+        f_run_root = self._lsmiotoolRun("run-20261010T000000Z-cwd1")
         f_cwd = os.path.join(self.m_temp_dir, "cwd")
         os.makedirs(os.path.join(f_cwd, "outputs"))
         open(os.path.join(f_cwd, "outputs", "decoy"), "w").close()
         os.chdir(f_cwd)
 
         with patch.dict(os.environ, {"BM_ARCHIVE_DEST": "/inherited/dest"}):
-            f_code, f_err = self._archive(["lsmio", "variants"])
+            f_code, f_err = self._archive(["lsmio", "variants", "autotune"])
         self.assertEqual(f_code, 0, f_err)
         f_target = os.path.join(
-            self.m_root, "lsmio-archive", "variants", "outputs-native"
+            self.m_root, "lsmio-archive", "variants", "outputs-native-autotune"
         )
         self.assertTrue(os.path.isfile(os.path.join(f_target, "lsm-report.csv")))
-        self.assertTrue(os.path.isdir(os.path.join(f_target, "8", "2026-10-07")))
-        self.assertFalse(os.path.exists(os.path.join(f_target, ".bm-job-ok")))
-        # bmtool recreates $LSM_DIR_OBASE empty; the cwd is untouched
-        self.assertEqual(os.listdir(f_outputs), [])
+        self.assertTrue(os.path.isdir(os.path.join(f_target, "8")))
+        # The run root stays; the cwd is untouched
+        self.assertTrue(os.path.isfile(os.path.join(f_run_root, "manifest.json")))
         self.assertEqual(os.listdir(os.path.join(f_cwd, "outputs")), ["decoy"])
         self.assertFalse(os.path.exists("/inherited/dest"))
 
     def testSetupFromOptionThenBmSetup(self) -> None:
-        self._bmtoolOutputs()
-        f_code, f_err = self._archive(
-            ["lsmio", "small"], f_environ={"BM_SETUP": "ROCKSDB"}
-        )
-        self.assertEqual(f_code, 0, f_err)
+        """--setup wins over $BM_SETUP, which names the run's setup; a bad $BM_SETUP fails."""
         f_base = os.path.join(self.m_root, "lsmio-archive", "baseline")
-        self.assertTrue(os.path.isdir(os.path.join(f_base, "outputs-rocksdb")))
-
-        self._bmtoolOutputs()
+        self._lsmiotoolRun(
+            "run-20261010T000000Z-set1", f_variant=None, f_setup="ROCKSDB"
+        )
         f_code, f_err = self._archive(
-            ["lsmio", "small", "--setup", "adios"], f_environ={"BM_SETUP": "ROCKSDB"}
+            ["lsmio", "variants"], f_environ={"BM_SETUP": "ROCKSDB"}
         )
         self.assertEqual(f_code, 0, f_err)
-        self.assertTrue(os.path.isdir(os.path.join(f_base, "outputs-adios")))
+        self.assertTrue(
+            os.path.isdir(
+                os.path.join(self.m_root, "lsmio-archive", "variants", "outputs-rocksdb")
+            )
+        )
 
-        self._bmtoolOutputs()
+        self._lsmiotoolRun("run-20261010T000000Z-set2", f_variant=None, f_setup="ADIOS")
         f_code, f_err = self._archive(
-            ["lsmio", "small"], f_environ={"BM_SETUP": "BOGUS"}
+            ["lsmio", "variants", "--setup", "adios"],
+            f_environ={"BM_SETUP": "ROCKSDB"},
+        )
+        self.assertEqual(f_code, 0, f_err)
+        self.assertTrue(
+            os.path.isdir(
+                os.path.join(self.m_root, "lsmio-archive", "variants", "outputs-adios")
+            )
+        )
+        self.assertFalse(os.path.exists(f_base))
+
+        f_code, f_err = self._archive(
+            ["lsmio", "variants"], f_environ={"BM_SETUP": "BOGUS"}
         )
         self.assertEqual(f_code, 1)
         self.assertIn("BM_SETUP", f_err)
+
+    def testGroupArmRunsAreNamedWhenNothingElseIsFound(self) -> None:
+        """TO-21: runs skipped as arms of a multi-arm run are named, with --source."""
+        f_run_root = self._lsmiotoolRun("run-20261010T000000Z-arm1", f_variant=None)
+        with open(
+            os.path.join(f_run_root, ArchiveEngine.ARM_MARKER_FILE), "w"
+        ) as f_f:
+            f_f.write('{"arm_id": "native"}')
+        f_code, f_err = self._archive(["lsmio", "variants"])
+        self.assertEqual(f_code, 1)
+        self.assertIn("Nothing to archive", f_err)
+        self.assertIn("run-20261010T000000Z-arm1", f_err)
+        self.assertIn("multi-arm", f_err)
+        self.assertIn("--source <its run root>", f_err)
 
     def testRunRootExportedNotMoved(self) -> None:
         f_run_root = self._lsmiotoolRun("run-20261010T000000Z-aaaa")
@@ -858,8 +781,8 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         """'archive ior <scale>': a single-setup ior run goes to ior/<scale> as
         outputs-ior[-<setup>], in bmtool's IOR layout with ior-report.csv."""
         f_run_root = self._iorRun("run-20261014T000000Z-ior1", "HDF5-C")
-        # bmtool's LSMIO outputs and BM_SETUP play no part in an ior archive
-        self._bmtoolOutputs()
+        # Other directories and BM_SETUP play no part in an ior archive
+        self._plainRankLogDir()
         f_code, f_err = self._archive(
             ["ior", "local"], f_environ={"BM_SETUP": "ROCKSDB"}
         )
@@ -896,8 +819,9 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
         self.assertIn("does not match", f_err)
 
     def testIorArchiveTakesOnlyRunRoots(self) -> None:
-        """bmtool never archived IOR: its live LSMIO outputs are never an ior --source."""
-        f_outputs = self._bmtoolOutputs()
+        """Only lsmiotool run roots are archived for ior: a plain directory of rank logs
+        is never an ior --source."""
+        f_outputs = self._plainRankLogDir()
         f_before = sorted(os.listdir(f_outputs))
         for f_extra in ([], ["--setup", "HDF5"]):
             f_code, f_err = self._archive(
@@ -925,27 +849,19 @@ class ArchiveCommandBmtoolParityTest(unittest.TestCase):
                 with self.assertRaises(ArchiveCliParseError):
                     parseArchiveArguments(f_argv)
 
-    def testAmbiguousSourceNeedsExplicitSource(self) -> None:
+    def testExplicitRunRootSourceMustMatchRequest(self) -> None:
         f_run_root = self._lsmiotoolRun("run-20261010T000000Z-bbbb", f_variant=None)
-        f_outputs = self._bmtoolOutputs()
-        f_code, f_err = self._archive(["lsmio", "variants"])
+        f_stray = self._plainRankLogDir()
+        f_code, f_err = self._archive(["lsmio", "variants", "--source", f_stray])
         self.assertEqual(f_code, 1)
-        self.assertIn("--source", f_err)
+        self.assertIn("refusing", f_err)
+        self.assertTrue(os.path.isdir(os.path.join(f_stray, "8")))
 
         f_code, f_err = self._archive(["lsmio", "variants", "--source", f_run_root])
         self.assertEqual(f_code, 0, f_err)
         self.assertTrue(
             os.path.isdir(
                 os.path.join(self.m_root, "lsmio-archive", "variants", "outputs-native")
-            )
-        )
-        f_code, f_err = self._archive(["lsmio", "variants", "--source", f_outputs])
-        self.assertEqual(f_code, 0, f_err)
-        self.assertTrue(
-            os.path.isdir(
-                os.path.join(
-                    self.m_root, "lsmio-archive", "variants", "outputs-native-1"
-                )
             )
         )
         # An explicit run root must match the request

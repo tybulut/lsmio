@@ -33,7 +33,7 @@ from typing import Dict, List, Optional, Any
 
 
 class MockLogGenerator:
-    """Fixture class to programmatically write fake IOR, LSMIO, and LMP logs."""
+    """Fixture class to programmatically write fake IOR and LSMIO logs."""
 
     m_base_dir: str
 
@@ -151,34 +151,6 @@ read,{f_read_bw:.2f},0.798,1048576,1048576,10
             f.write(content)
         return f_file_path
 
-    def generateLmpFile(
-        self,
-        f_file_path: str,
-        f_node_count: int = 1,
-        f_stripe_count: int = 4,
-        f_stripe_size: str = "64K",
-        f_throughput: float = 123.45,
-    ) -> str:
-        """Generate a mock LMP output log file.
-
-        Args:
-            f_file_path: Destination path.
-            f_node_count: Number of nodes.
-            f_stripe_count: Stripe count.
-            f_stripe_size: Stripe size.
-            f_throughput: Throughput metric in MiB/s.
-
-        Returns:
-            Absolute path to the created file.
-        """
-        os.makedirs(os.path.dirname(os.path.abspath(f_file_path)), exist_ok=True)
-        content = f""".write, bw: {f_throughput:.2f}, total: 1024MB
-write,{f_stripe_size},{f_throughput:.2f}
-"""
-        with open(f_file_path, "w") as f:
-            f.write(content)
-        return f_file_path
-
     def generateMockDirectoryTree(
         self,
         f_base_dir: str,
@@ -192,7 +164,7 @@ write,{f_stripe_size},{f_throughput:.2f}
 
         Args:
             f_base_dir: Root directory path.
-            f_bench_type: Benchmark type ('ior', 'lsmio', 'lmp').
+            f_bench_type: Benchmark type ('ior', 'lsmio').
             f_nodes: List of node counts.
             f_stripes: List of stripe counts.
             f_sizes: List of stripe sizes.
@@ -216,8 +188,6 @@ write,{f_stripe_size},{f_throughput:.2f}
                             self.generateIorFile(file_path, n_int, int(rf), bs)
                         elif f_bench_type == "lsmio":
                             self.generateLsmioFile(file_path, n_int, int(rf), bs)
-                        elif f_bench_type == "lmp":
-                            self.generateLmpFile(file_path, n_int, int(rf), bs)
         return f_base_dir
 
     def generateMockFile(
@@ -227,7 +197,7 @@ write,{f_stripe_size},{f_throughput:.2f}
 
         Args:
             f_file_name: Destination path.
-            f_bench_type: Type of log file ('ior', 'lsmio', 'lmp').
+            f_bench_type: Type of log file ('ior', 'lsmio').
             **kwargs: Additional parameters for the generator.
 
         Returns:
@@ -235,6 +205,4 @@ write,{f_stripe_size},{f_throughput:.2f}
         """
         if f_bench_type == "ior":
             return self.generateIorFile(f_file_name, **kwargs)
-        elif f_bench_type == "lmp":
-            return self.generateLmpFile(f_file_name, **kwargs)
         return self.generateLsmioFile(f_file_name, **kwargs)

@@ -1,0 +1,13 @@
+# Clang profile list (-fprofile-list) for the instrumented lsmio libraries.
+#
+# Only functions defined in a .cpp file are instrumented. Header code (lsmio's
+# own headers, ADIOS2's .inl files, libstdc++) gets no profile counters, so the
+# objects that hold a copy of the same inline function cannot disagree about it:
+# llvm-cov would otherwise drop the function with "functions have mismatched
+# data". The in-scope sources are lib/**/*.cpp; header code is out of scope.
+#
+# Keep the "source:" form. The older "src:" entries switch the default to
+# "forbid" and would turn all instrumentation off.
+[clang]
+source:*=skip
+source:*.cpp=allow

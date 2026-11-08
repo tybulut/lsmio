@@ -274,11 +274,11 @@ class ArtifactLayout:
                 raise ContainmentError(f"Invalid point directory name: {f_point!r}")
             return f_name
         if isinstance(f_point, int):
-            if f_point < 0:
-                raise ArtifactError(
-                    f"ordinal/point integer must be non-negative, got: {f_point}"
-                )
-            return f"{f_point:02d}-tasks-1"
+            # The layout has no plan: EvidenceStore resolves an int (plan index or
+            # task count) to the plan's ScalePoint and ordinal before naming it.
+            raise ArtifactError(
+                "Integer point needs a plan to be named; resolve it to a ScalePoint and ordinal first"
+            )
         if isinstance(f_point, ScalePoint):
             if f_ordinal is not None:
                 return f"{f_ordinal:02d}-tasks-{f_point.tasks}"

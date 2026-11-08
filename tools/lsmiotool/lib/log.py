@@ -158,7 +158,9 @@ class Log:
     @classmethod
     def fixPermissions(cls, f_uid: int, f_gid: int) -> None:
         """Fix permissions on log file."""
-        log_file = LogOutput.outputs
+        # LogOutput always writes to the module constant LOG_FILE (its log_file
+        # instance attribute is a copy of it); this classmethod has no instance.
+        log_file = LOG_FILE
         if not os.path.exists(log_file):
             open(log_file, "a+").close()
         os.chown(log_file, f_uid, f_gid)

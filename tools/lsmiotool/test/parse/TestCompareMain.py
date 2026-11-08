@@ -1,5 +1,5 @@
 #
-# Copyright 2023 Serdar Bulut
+# Copyright 2026 Serdar Bulut
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -31,234 +31,250 @@
 import os
 import tempfile
 import unittest
-from unittest import TestCase
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from lsmiotool.lib import main, plot
-from lsmiotool.lib.cli import CompareNodesRequest, CompareVariantsRequest
+from lsmiotool.lib import main
+from lsmiotool.lib.cli import CompareRequest
 
 
-class TestCompareMain(TestCase):
+class TestCompareMain(unittest.TestCase):
     """Unit and functional tests for CompareMain command."""
 
     m_temp_dir: tempfile.TemporaryDirectory
-    m_created_files: list
 
     def setUp(self) -> None:
         self.m_temp_dir = tempfile.TemporaryDirectory()
-        self.m_created_files = []
 
     def tearDown(self) -> None:
         self.m_temp_dir.cleanup()
-        for f in self.m_created_files:
-            if os.path.exists(f):
-                try:
-                    os.remove(f)
-                except OSError:
-                    pass
 
-    def testInitValidArguments(self) -> None:
-        """Test initialization with explicit arguments, typed requests, and polymorphic delegation."""
-        # 1. Legacy positional initialization
-        cm = main.CompareMain("/tmp/bench", "read", "16", "8M")
-        self.assertEqual(cm.m_folder, "/tmp/bench")
-        self.assertEqual(cm.m_op, "read")
-        self.assertEqual(cm.m_stripes, 16)
-        self.assertEqual(cm.m_bs, "8M")
-        self.assertEqual(cm.submode, "nodes")
-        self.assertIsInstance(cm.m_delegate, main.CompareNodesMain)
-
-        # 2. Direct CompareNodesMain instantiation
-        cnm = main.CompareNodesMain("/tmp/bench", "read", "16", "8M")
-        self.assertEqual(cnm.m_folder, "/tmp/bench")
-        self.assertEqual(cnm.m_op, "read")
-        self.assertEqual(cnm.m_stripes, 16)
-        self.assertEqual(cnm.m_bs, "8M")
-
-        # 3. Typed CompareNodesRequest initialization
-        req_nodes = CompareNodesRequest(
-            "/tmp/bench", "read", 16, "8M", f_output_dir="/tmp/out"
-        )
-        cm_req = main.CompareMain(f_request=req_nodes)
-        self.assertEqual(cm_req.m_folder, "/tmp/bench")
-        self.assertEqual(cm_req.m_op, "read")
-        self.assertEqual(cm_req.m_stripes, 16)
-        self.assertEqual(cm_req.m_bs, "8M")
-        self.assertEqual(cm_req.m_output_dir, "/tmp/out")
-        self.assertEqual(cm_req.submode, "nodes")
-        self.assertIsInstance(cm_req.m_delegate, main.CompareNodesMain)
-
-        # 4. Polymorphic delegation to CompareVariantsMain
-        req_variants = CompareVariantsRequest("/tmp/archive", "write", 16, "8M")
-        cm_var = main.CompareMain(f_request=req_variants)
-        self.assertEqual(cm_var.submode, "variants")
-        self.assertIsInstance(cm_var.m_delegate, main.CompareVariantsMain)
-        self.assertEqual(cm_var.m_folder, "/tmp/archive")
-
-        # 5. CLI tokens polymorphic delegation
-        cm_cli_nodes = main.CompareMain("nodes", "/tmp/bench2", "write", "16", "8M")
-        self.assertEqual(cm_cli_nodes.submode, "nodes")
-        self.assertIsInstance(cm_cli_nodes.m_delegate, main.CompareNodesMain)
-
-        cm_cli_var = main.CompareMain(["variants", "/tmp/archive2", "read", "4", "1M"])
-        self.assertEqual(cm_cli_var.submode, "variants")
-        self.assertIsInstance(cm_cli_var.m_delegate, main.CompareVariantsMain)
-
-    def testInitDefaultFallback(self) -> None:
-        """Test default fallbacks for optional arguments."""
-        cm = main.CompareMain("/tmp/bench", "WRITE")
-        self.assertEqual(cm.m_folder, "/tmp/bench")
-        self.assertEqual(cm.m_op, "write")
-        self.assertEqual(cm.m_stripes, 4)
-        self.assertEqual(cm.m_bs, "1M")
-
-    def testInitMissingArguments(self) -> None:
-        """Test exit when missing required arguments."""
-        with self.assertRaises(SystemExit):
-            main.CompareMain("only_one_arg")
-
-    def testInitInvalidOperation(self) -> None:
-        """Test exit when operation is neither read nor write."""
-        with self.assertRaises(SystemExit):
-            main.CompareMain("/tmp/bench", "invalid_op")
-
-    def testInitInvalidStripes(self) -> None:
-        """Test exit when stripes cannot be converted to integer."""
-        with self.assertRaises(SystemExit):
-            main.CompareMain("/tmp/bench", "read", "invalid_stripes")
-
-    def testResolveDirectory(self) -> None:
-        """Test path resolution for absolute, relative, and home-based paths."""
-        cm = main.CompareMain("/tmp/bench", "read")
-        # Absolute path
-        self.assertEqual(cm.resolveDirectory("/var/log"), "/var/log")
-        # Relative path
-        self.assertEqual(
-            cm.resolveDirectory("./foo"),
-            os.path.abspath(os.path.join(os.getcwd(), "foo")),
-        )
-        # Home expansion
-        home_path = os.path.expanduser("~/benchmark_test")
-        self.assertEqual(cm.resolveDirectory("~/benchmark_test"), home_path)
-
-    def testMissingDirectoryHandling(self) -> None:
-        """Test handling of non-existent target directory."""
-        non_existent_dir = os.path.join(
-            self.m_temp_dir.name, "does_not_exist_987654321"
-        )
-        cm = main.CompareMain(non_existent_dir, "read")
-        with self.assertRaises(SystemExit):
-            cm.run()
-
-    def testRunNoDataWarning(self) -> None:
-        """Test graceful warning when subdirectories contain no valid report data and output directory routing."""
-        # 1. No data warning handling
-        empty_subdir = os.path.join(self.m_temp_dir.name, "sub_empty")
-        os.makedirs(empty_subdir, exist_ok=True)
-        cm = main.CompareMain(self.m_temp_dir.name, "read", "4", "1M")
-
-        with patch("lsmiotool.lib.log.Console.warning") as mock_warn:
-            ret = cm.run()
-            self.assertEqual(ret, 0)
-            mock_warn.assert_called_once()
-
-        # 2. Output directory plot routing (INV-ARCH-9)
-        bench_dir = os.path.join(self.m_temp_dir.name, "bench_nodes")
-        node_dir = os.path.join(bench_dir, "01")
-        os.makedirs(node_dir, exist_ok=True)
-        report_file = os.path.join(node_dir, "lsm-report.csv")
-        with open(report_file, "w") as f:
+    def _setupLsmioArchive(self, f_scale: str = "small") -> str:
+        scale_dir = os.path.join(self.m_temp_dir.name, "archive", "backends", f_scale)
+        native_dir = os.path.join(scale_dir, "outputs-native")
+        os.makedirs(native_dir, exist_ok=True)
+        report_file = os.path.join(native_dir, "lsm-report.csv")
+        with open(report_file, "w", encoding="utf-8") as f:
             f.write(
                 "N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,Max(OPs),Min(OPs),Mean(OPs),StdDev,Mean(s)\n"
-                "1,4,1M,read,1000.0,900.0,950.0,20.0,1000.0,900.0,950.0,20.0,0.5\n"
+                "1,4,1M,write,100.0,90.0,95.0,2.0,100,90,95,2,0.5\n"
+                "1,4,1M,read,80.0,70.0,75.0,2.0,80,70,75,2,0.5\n"
+                "2,4,1M,write,190.0,180.0,185.0,2.0,190,180,185,2,0.5\n"
+                "2,4,1M,read,150.0,140.0,145.0,2.0,150,140,145,2,0.5\n"
             )
+        return scale_dir
 
-        custom_out = os.path.join(self.m_temp_dir.name, "custom_plots")
-        req = CompareNodesRequest(bench_dir, "read", 4, "1M", f_output_dir=custom_out)
-        cm_routing = main.CompareNodesMain(f_request=req)
-        ret_routing = cm_routing.run()
-        self.assertEqual(ret_routing, 0)
+    def testInitTakesOnlyACompareRequest(self) -> None:
+        """T18: CompareMain requires a CompareRequest and exposes .request; has no delegate or submode."""
+        req = CompareRequest("lsmio", ("/tmp/bench",))
+        cm = main.CompareMain(f_request=req)
+        self.assertIs(cm.request, req)
+        self.assertFalse(hasattr(cm, "delegate"))
+        self.assertFalse(hasattr(cm, "submode"))
 
-        expected_png = os.path.join(custom_out, "compare-bench_nodes-read-4-1M.png")
-        self.assertTrue(
-            os.path.exists(expected_png),
-            f"Expected plot {expected_png} to exist in custom output directory",
-        )
-        self.assertGreater(os.path.getsize(expected_png), 0)
+        with self.assertRaises(TypeError):
+            main.CompareMain("f", "read")  # type: ignore
+        with self.assertRaises(TypeError):
+            main.CompareMain(f_request="x")  # type: ignore
+        with self.assertRaises(TypeError):
+            main.CompareMain(["nodes", "f", "read"])  # type: ignore
 
-    def testEndToEndCompareExecution(self) -> None:
-        """Functional end-to-end test against synthetic viking2 dataset."""
-        candidate_paths = [
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "..",
-                "..",
-                "..",
-                "..",
-                "lsmio-data",
-                "synthetic",
-                "viking2",
-                "lsmio-2026-08-04",
-            ),
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "..",
-                "..",
-                "..",
-                "lsmio-data",
-                "synthetic",
-                "viking2",
-                "lsmio-2026-08-04",
-            ),
-            "/Users/sbulut/src/bulut/lsmio-data/synthetic/viking2/lsmio-2026-08-04",
-            os.path.expanduser("~/src/lsmio-data/synthetic/viking2/lsmio-2026-08-04"),
+    def testMissingFolderExits3(self) -> None:
+        """T4: Non-existent folder exits 3, names folder in error, creates no output dir."""
+        missing = os.path.join(self.m_temp_dir.name, "does_not_exist")
+        out_dir = os.path.join(self.m_temp_dir.name, "png_out")
+        req = CompareRequest("lsmio", (missing,), f_output_dir=out_dir)
+        cm = main.CompareMain(f_request=req)
+
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            code = cm.run()
+
+        self.assertEqual(code, 3)
+        mock_err.assert_called_once()
+        self.assertIn(missing, mock_err.call_args[0][0])
+        self.assertFalse(os.path.exists(out_dir))
+
+    def testKindErrorExits1WithoutOutputDir(self) -> None:
+        """T5: Folder of wrong benchmark kind exits 1, creates no output dir."""
+        epocpp_dir = os.path.join(self.m_temp_dir.name, "epocpp_archive")
+        os.makedirs(os.path.join(epocpp_dir, "outputs-epocpp-posix"), exist_ok=True)
+        out_dir = os.path.join(self.m_temp_dir.name, "png_out")
+
+        req = CompareRequest("lsmio", (epocpp_dir,), f_output_dir=out_dir)
+        cm = main.CompareMain(f_request=req)
+
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            code = cm.run()
+
+        self.assertEqual(code, 1)
+        mock_err.assert_called_once()
+        self.assertIn("not a lsmio folder", mock_err.call_args[0][0])
+        self.assertFalse(os.path.exists(out_dir))
+
+    def testSelectionErrorExits1WithoutOutputDir(self) -> None:
+        """T6: Request with unavailable selection exits 1, creates no output dir."""
+        scale_dir = self._setupLsmioArchive()
+        out_dir = os.path.join(self.m_temp_dir.name, "png_out")
+
+        req = CompareRequest("lsmio", (scale_dir,), f_nodes=(61,), f_output_dir=out_dir)
+        cm = main.CompareMain(f_request=req)
+
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            code = cm.run()
+
+        self.assertEqual(code, 1)
+        mock_err.assert_called_once()
+        self.assertIn("61", mock_err.call_args[0][0])
+        self.assertFalse(os.path.exists(out_dir))
+
+    def testNoDataExits1(self) -> None:
+        """No data in admitted folder exits 1."""
+        empty_dir = os.path.join(self.m_temp_dir.name, "empty_bench")
+        os.makedirs(empty_dir, exist_ok=True)
+
+        req = CompareRequest("lsmio", (empty_dir,))
+        cm = main.CompareMain(f_request=req)
+
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            code = cm.run()
+
+        self.assertEqual(code, 1)
+        mock_err.assert_called_once()
+
+    def testChartsWrittenAndLogged(self) -> None:
+        """T7, T15, T9: Real plotting on lsmio fixture with --by nodes, combinations, and cwd fallback."""
+        scale_dir = self._setupLsmioArchive()
+        out_dir = os.path.join(self.m_temp_dir.name, "png", "x")
+        self.assertFalse(os.path.exists(out_dir))
+
+        # 1. Standard --by nodes
+        req = CompareRequest("lsmio", (scale_dir,), f_output_dir=out_dir)
+        cm = main.CompareMain(f_request=req)
+
+        with patch("lsmiotool.lib.log.Console.info") as mock_info:
+            ret = cm.run()
+
+        self.assertEqual(ret, 0)
+        self.assertTrue(os.path.isdir(out_dir))
+        subdirs = [
+            e for e in os.listdir(out_dir) if os.path.isdir(os.path.join(out_dir, e))
         ]
-        target_dir = ""
-        for p in candidate_paths:
-            p_abs = os.path.abspath(p)
-            if os.path.exists(p_abs):
-                target_dir = p_abs
-                break
+        self.assertEqual(subdirs, [])
 
-        if not target_dir:
-            self.skipTest("Synthetic viking2 dataset not found at expected locations")
+        png_path = os.path.join(out_dir, "compare-small-lsmio-by-nodes.png")
+        self.assertTrue(os.path.exists(png_path))
+        self.assertGreater(os.path.getsize(png_path), 0)
+        mock_info.assert_called_with(f"Comparison plot saved to {png_path}")
 
-        with patch("os.getcwd", return_value=self.m_temp_dir.name):
-            # 1. Test Read comparison
-            cm_read = main.CompareMain(target_dir, "read", "4", "1M")
-            cm_read.run()
+        # 2. --style lines --by combinations: one PNG per node count (1 and 2)
+        comb_out = os.path.join(self.m_temp_dir.name, "png", "comb")
+        req_comb = CompareRequest(
+            "lsmio",
+            (scale_dir,),
+            f_by="combinations",
+            f_style="lines",
+            f_output_dir=comb_out,
+        )
+        ret_comb = main.CompareMain(f_request=req_comb).run()
+        self.assertEqual(ret_comb, 0)
+        png_1 = os.path.join(comb_out, "compare-small-lsmio-by-combinations-1.png")
+        png_2 = os.path.join(comb_out, "compare-small-lsmio-by-combinations-2.png")
+        self.assertTrue(os.path.exists(png_1))
+        self.assertTrue(os.path.exists(png_2))
+        self.assertGreater(os.path.getsize(png_1), 0)
+        self.assertGreater(os.path.getsize(png_2), 0)
 
-            expected_read_png = os.path.join(
-                self.m_temp_dir.name, "compare-lsmio-2026-08-04-read-4-1M.png"
-            )
-            self.assertTrue(
-                os.path.exists(expected_read_png),
-                f"Generated comparison plot {expected_read_png} must exist",
-            )
-            self.assertGreater(
-                os.path.getsize(expected_read_png),
-                0,
-                "Generated comparison plot must not be empty",
+        # 3. No --output-dir: PNG goes to patched cwd
+        cwd_dir = os.path.join(self.m_temp_dir.name, "cwd_test")
+        os.makedirs(cwd_dir, exist_ok=True)
+        req_cwd = CompareRequest("lsmio", (scale_dir,))
+        with patch("os.getcwd", return_value=cwd_dir):
+            ret_cwd = main.CompareMain(f_request=req_cwd).run()
+        self.assertEqual(ret_cwd, 0)
+        self.assertTrue(
+            os.path.exists(os.path.join(cwd_dir, "compare-small-lsmio-by-nodes.png"))
+        )
+
+    def testOutputDirCannotBeCreatedExits1(self) -> None:
+        """T16: Failure to create output directory exits 1 with error."""
+        scale_dir = self._setupLsmioArchive()
+        blocked_file = os.path.join(self.m_temp_dir.name, "blocked_file")
+        with open(blocked_file, "w", encoding="utf-8") as f:
+            f.write("data")
+        out_dir = os.path.join(blocked_file, "out")
+
+        req = CompareRequest("lsmio", (scale_dir,), f_output_dir=out_dir)
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            ret = main.CompareMain(f_request=req).run()
+
+        self.assertEqual(ret, 1)
+        mock_err.assert_called_once()
+        self.assertIn("Cannot create the output directory", mock_err.call_args[0][0])
+
+    def testPngNotSavedExits1KeepingEarlierPngs(self) -> None:
+        """T16: Save failure on later PNG exits 1, keeping earlier PNGs."""
+        scale_dir = self._setupLsmioArchive()
+        out_dir = os.path.join(self.m_temp_dir.name, "png_collide")
+        os.makedirs(out_dir, exist_ok=True)
+        collide_path = os.path.join(
+            out_dir, "compare-small-lsmio-by-combinations-2.png"
+        )
+        os.makedirs(collide_path, exist_ok=True)
+
+        req = CompareRequest(
+            "lsmio", (scale_dir,), f_by="combinations", f_output_dir=out_dir
+        )
+        with patch("lsmiotool.lib.log.Console.error") as mock_err:
+            ret = main.CompareMain(f_request=req).run()
+
+        self.assertEqual(ret, 1)
+        mock_err.assert_called_once()
+        self.assertIn(collide_path, mock_err.call_args[0][0])
+
+        png_1 = os.path.join(out_dir, "compare-small-lsmio-by-combinations-1.png")
+        self.assertTrue(os.path.exists(png_1))
+
+    def testBrokenPointsOnlyStillWritesPngs(self) -> None:
+        """T21, T9: All values broken still writes PNG with no_data; verifies style passed to ComparePanelPlot."""
+        scale_dir = os.path.join(self.m_temp_dir.name, "archive", "backends", "broken")
+        native_dir = os.path.join(scale_dir, "outputs-native")
+        os.makedirs(native_dir, exist_ok=True)
+        report_file = os.path.join(native_dir, "lsm-report.csv")
+        with open(report_file, "w", encoding="utf-8") as f:
+            f.write(
+                "N,Stripes,BlockSize,Operation,Max(MiB),Min(MiB),Mean(MiB),StdDev,Max(OPs),Min(OPs),Mean(OPs),StdDev,Mean(s)\n"
+                "1,4,1M,write,abc,abc,abc,abc,abc,abc,abc,abc,abc\n"
+                "1,4,1M,read,abc,abc,abc,abc,abc,abc,abc,abc,abc\n"
             )
 
-            # 2. Test Write comparison
-            cm_write = main.CompareMain(target_dir, "write", "4", "1M")
-            cm_write.run()
+        out_dir = os.path.join(self.m_temp_dir.name, "png_broken")
+        req_default = CompareRequest("lsmio", (scale_dir,), f_output_dir=out_dir)
 
-            expected_write_png = os.path.join(
-                self.m_temp_dir.name, "compare-lsmio-2026-08-04-write-4-1M.png"
-            )
-            self.assertTrue(
-                os.path.exists(expected_write_png),
-                f"Generated comparison plot {expected_write_png} must exist",
-            )
-            self.assertGreater(
-                os.path.getsize(expected_write_png),
-                0,
-                "Generated comparison plot must not be empty",
-            )
+        # 1. Default style is "bars"; panels have no_data True
+        with patch("lsmiotool.lib.plot.ComparePanelPlot") as mock_plot_cls:
+            mock_plot_instance = mock_plot_cls.return_value
+            mock_plot_instance.plot.return_value = None
+            ret = main.CompareMain(f_request=req_default).run()
+            self.assertEqual(ret, 0)
+            self.assertTrue(mock_plot_cls.called)
+            for call in mock_plot_cls.call_args_list:
+                self.assertEqual(call[0][1], "bars")
+                fig = call[0][0]
+                for row in fig.grid:
+                    for panel in row:
+                        self.assertTrue(panel.no_data)
+
+        # 2. Explicit style="lines" passes "lines" to ComparePanelPlot
+        req_lines = CompareRequest(
+            "lsmio", (scale_dir,), f_style="lines", f_output_dir=out_dir
+        )
+        with patch("lsmiotool.lib.plot.ComparePanelPlot") as mock_plot_cls:
+            mock_plot_instance = mock_plot_cls.return_value
+            mock_plot_instance.plot.return_value = None
+            ret = main.CompareMain(f_request=req_lines).run()
+            self.assertEqual(ret, 0)
+            self.assertTrue(mock_plot_cls.called)
+            for call in mock_plot_cls.call_args_list:
+                self.assertEqual(call[0][1], "lines")
 
 
 if __name__ == "__main__":

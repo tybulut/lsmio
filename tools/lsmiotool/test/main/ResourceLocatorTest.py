@@ -34,6 +34,7 @@ import pathlib
 import shutil
 import tempfile
 import unittest
+from typing import Any, Dict
 from unittest.mock import patch
 
 from lsmiotool.lib.resources import (
@@ -586,3 +587,213 @@ class ResourceLocatorTest(unittest.TestCase):
                 f_worker_executable="/worker",
                 f_version_file="/VERSION",
             )
+
+    def testExecutionModePredicates(self) -> None:
+        """Both spellings of the mode predicates agree and the value lookup is stable."""
+        for f_mode, f_src, f_inst in (
+            (ExecutionMode.SOURCE, True, False),
+            (ExecutionMode.INSTALLED, False, True),
+        ):
+            with self.subTest(f_mode=f_mode):
+                self.assertIs(f_mode.isSource, f_src)
+                self.assertIs(f_mode.is_source, f_src)
+                self.assertIs(f_mode.isInstalled, f_inst)
+                self.assertIs(f_mode.is_installed, f_inst)
+        self.assertIs(ExecutionMode("source"), ExecutionMode.SOURCE)
+        self.assertIs(ExecutionMode("installed"), ExecutionMode.INSTALLED)
+
+    def testInstallRelativeLayoutCamelCaseAliases(self) -> None:
+        """camelCase accessors equal the snake_case properties and the toDict values."""
+        f_rel = self._createSampleInstalledLayout()
+        f_rows = (
+            ("packageRoot", "package_root", "../share/lsmio/python"),
+            (
+                "profileFile",
+                "profile_file",
+                "../share/lsmio/python/lsmiotool/etc/environments.json",
+            ),
+            ("assetRoot", "asset_root", "../share/lsmio/lmp-reaxff"),
+            (
+                "workerExecutable",
+                "worker_executable",
+                "../libexec/lsmio/lsmiotool-worker",
+            ),
+            ("versionFile", "version_file", "../share/lsmio/python/VERSION"),
+        )
+        for f_camel, f_snake, f_value in f_rows:
+            with self.subTest(f_camel=f_camel):
+                self.assertEqual(getattr(f_rel, f_camel), f_value)
+                self.assertEqual(getattr(f_rel, f_camel), getattr(f_rel, f_snake))
+                self.assertEqual(getattr(f_rel, f_camel), f_rel.toDict()[f_snake])
+        self.assertEqual(f_rel, self._createSampleInstalledLayout())
+
+    def testLayoutsAssignableOnlyUntilFrozen(self) -> None:
+        """Before _frozen is set writes and deletes work; afterwards both are rejected."""
+        for f_cls in (InstallRelativeLayout, RuntimeLayout):
+            with self.subTest(f_cls=f_cls.__name__):
+                f_obj = f_cls.__new__(f_cls)
+                f_obj.m_package_root = "/p"
+                self.assertEqual(f_obj.m_package_root, "/p")
+                del f_obj.m_package_root
+                self.assertFalse(hasattr(f_obj, "m_package_root"))
+                f_obj._frozen = True
+                with self.assertRaises(AttributeError) as f_ctx:
+                    f_obj.m_package_root = "/q"
+                self.assertEqual(
+                    str(f_ctx.exception),
+                    f"{f_cls.__name__} is immutable; cannot set attribute 'm_package_root'",
+                )
+                with self.assertRaises(AttributeError) as f_ctx:
+                    del f_obj._frozen
+                self.assertEqual(
+                    str(f_ctx.exception),
+                    f"{f_cls.__name__} is immutable; cannot delete attribute '_frozen'",
+                )
+                self.assertFalse(hasattr(f_obj, "m_package_root"))
+                self.assertIs(f_obj._frozen, True)
+
+    def _validRuntimeKwargs(self) -> Dict[str, Any]:
+        return {
+            "f_execution_mode": ExecutionMode.SOURCE,
+            "f_package_root": "/package",
+            "f_profile_file": "/etc/environments.json",
+            "f_asset_root": "/lmp-reaxff",
+            "f_worker_executable": "/worker",
+            "f_version_file": "/VERSION",
+        }
+
+    def testRuntimeLayoutRejectsBlankOrNonStringPath(self) -> None:
+        """Blank and non-string path fields raise with the exact field message."""
+        f_rows = (
+            ("f_package_root", ""),
+            ("f_package_root", "   "),
+            ("f_profile_file", None),
+            ("f_asset_root", 5),
+            ("f_worker_executable", b"/w"),
+            ("f_version_file", ""),
+        )
+        for f_key, f_value in f_rows:
+            with self.subTest(f_key=f_key, f_value=f_value):
+                f_kwargs = self._validRuntimeKwargs()
+                f_kwargs[f_key] = f_value
+                with self.assertRaises(LayoutConfigurationError) as f_ctx:
+                    RuntimeLayout(**f_kwargs)
+                self.assertEqual(
+                    str(f_ctx.exception),
+                    f"Runtime layout field '{f_key[2:]}' must be a non-empty string, got: "
+                    + repr(f_value),
+                )
+
+    def testRuntimeLayoutRejectsNulBytePath(self) -> None:
+        """A NUL byte in a path field raises with the exact field message."""
+        f_rows = (
+            (
+                "f_version_file",
+                "/VER\0SION",
+                "Runtime layout field 'version_file' contains NUL byte: '/VER\\x00SION'",
+            ),
+            (
+                "f_package_root",
+                "\0",
+                "Runtime layout field 'package_root' contains NUL byte: '\\x00'",
+            ),
+        )
+        for f_key, f_value, f_message in f_rows:
+            with self.subTest(f_key=f_key):
+                f_kwargs = self._validRuntimeKwargs()
+                f_kwargs[f_key] = f_value
+                with self.assertRaises(LayoutConfigurationError) as f_ctx:
+                    RuntimeLayout(**f_kwargs)
+                self.assertEqual(str(f_ctx.exception), f_message)
+
+    def testForSourceOutsideToolsTreeDerivesLayoutFromEntry(self) -> None:
+        """Entries outside a tools/lsmiotool tree derive the package and version paths."""
+        f_rows = (
+            ("/opt/x/lib/mod.py", "/opt/x", "/opt/VERSION"),
+            ("/opt/lib/x", "/opt", "/VERSION"),
+            ("/lib/mod.py", "/", "/VERSION"),
+            ("/opt/x/lsmiotool", "/opt/x", "/opt/VERSION"),
+            ("/opt/x/lsmiotool-worker", "/opt/x", "/opt/VERSION"),
+            ("/opt/x/run.py", "/opt/x", "/opt/VERSION"),
+            ("/lsmiotool", "/", "/VERSION"),
+            ("/opt/x/dir", "/opt/x/dir", "/opt/x/VERSION"),
+            ("/single", "/single", "/VERSION"),
+            ("/", "/", "/VERSION"),
+            ("  /opt/x/dir/  ", "/opt/x/dir", "/opt/x/VERSION"),
+            ("/opt/a/../x/dir", "/opt/x/dir", "/opt/x/VERSION"),
+        )
+        for f_entry, f_pkg, f_version in f_rows:
+            with self.subTest(f_entry=f_entry):
+                f_layout = ResourceLocator.forSource(f_entry)
+                self.assertEqual(f_layout.package_root, f_pkg)
+                self.assertEqual(
+                    f_layout.profile_file,
+                    os.path.normpath(os.path.join(f_pkg, "etc", "environments.json")),
+                )
+                self.assertEqual(
+                    f_layout.asset_root,
+                    os.path.normpath(os.path.join(f_pkg, "share", "lmp-reaxff")),
+                )
+                self.assertEqual(
+                    f_layout.worker_executable,
+                    os.path.normpath(os.path.join(f_pkg, "lsmiotool-worker")),
+                )
+                self.assertEqual(f_layout.version_file, f_version)
+                self.assertIs(f_layout.execution_mode, ExecutionMode.SOURCE)
+                self.assertTrue(f_layout.is_source)
+
+        # A relative entry resolves against the current directory.
+        os.chdir(self.m_temp_dir)
+        f_cwd = os.getcwd()
+        f_layout = ResourceLocator.forSource("lib/mod.py")
+        self.assertEqual(f_layout.package_root, f_cwd)
+        self.assertEqual(
+            f_layout.version_file, os.path.join(os.path.dirname(f_cwd), "VERSION")
+        )
+        self.assertEqual(os.getcwd(), f_cwd)
+
+    def testResolveRelativePathRejectsInvalidInput(self) -> None:
+        """The defensive guards of _resolveRelativePath raise with exact messages."""
+        f_empty = "Relative path for 'package_root' must be a non-empty string, got: "
+        f_nul = "Relative path for 'package_root' contains NUL byte: "
+        f_abs = "Relative path for 'package_root' must not be absolute: "
+        f_rows = (
+            ("", f_empty),
+            ("   ", f_empty),
+            (None, f_empty),
+            (7, f_empty),
+            ("a\0b", f_nul),
+            ("/etc", f_abs),
+            ("  /etc", f_abs),
+            ("\\server\\share", f_abs),
+        )
+        for f_value, f_prefix in f_rows:
+            with self.subTest(f_value=f_value):
+                with self.assertRaises(LayoutConfigurationError) as f_ctx:
+                    ResourceLocator._resolveRelativePath(
+                        "/anchor/bin", f_value, "package_root"  # type: ignore
+                    )
+                self.assertEqual(str(f_ctx.exception), f_prefix + repr(f_value))
+
+    def testForInstalledSkipsEmptyAndDotPathTokens(self) -> None:
+        """Empty and dot tokens in relative constants are dropped when resolving."""
+        f_rel = InstallRelativeLayout(
+            f_package_root="./../share//lsmio/./python/",
+            f_profile_file="..//etc/./environments.json",
+            f_asset_root="../share/lmp-reaxff/.",
+            f_worker_executable=".\\..\\libexec\\worker",
+            f_version_file="../VERSION",
+        )
+        f_layout = ResourceLocator.forInstalled("/inst/bin/lsmiotool", f_rel)
+        self.assertEqual(
+            f_layout.toDict(),
+            {
+                "execution_mode": "installed",
+                "package_root": "/inst/share/lsmio/python",
+                "profile_file": "/inst/etc/environments.json",
+                "asset_root": "/inst/share/lmp-reaxff",
+                "worker_executable": "/inst/libexec/worker",
+                "version_file": "/inst/VERSION",
+            },
+        )
+        self.assertEqual(f_rel.package_root, "./../share//lsmio/./python/")

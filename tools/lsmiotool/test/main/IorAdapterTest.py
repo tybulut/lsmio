@@ -396,6 +396,288 @@ class IorAdapterTest(unittest.TestCase):
         self.assertEqual(f_dict["working_dir"], f_cmd1.working_dir)
         self.assertEqual(f_dict["is_rank_local"], False)
 
+    def testSegmentsValidation(self) -> None:
+        """Verify getSegments argument type and value validation (cases 030-A1, 030-A2)."""
+        # 030-A1: non-string block size raises BenchmarkConfigurationError
+        for f_bad in (123, None, [], {"bs": "1M"}):
+            with self.subTest(block_size=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    IorAdapter.getSegments(f_bad)  # type: ignore[arg-type]
+                self.assertIn("Block size must be a string, got:", str(f_cm.exception))
+
+        # 030-A2: unsupported block size string raises BenchmarkConfigurationError
+        for f_unsupported in ("2M", "16M", "32K", "INVALID"):
+            with self.subTest(block_size=f_unsupported):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    IorAdapter.getSegments(f_unsupported)
+                self.assertIn("Unsupported IOR block size:", str(f_cm.exception))
+                self.assertIn("Allowed: ['64K', '1M', '8M']", str(f_cm.exception))
+
+    def testBuildCommandArgumentValidation(self) -> None:
+        """Verify buildCommand input argument validation for executable, setup, block_size, and working_dir (cases 030-B1 to 030-B4)."""
+        # 030-B1: executable invalid / empty
+        for f_bad_exe in (123, None, "", "   ", "\t"):
+            with self.subTest(executable=f_bad_exe):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        f_executable=f_bad_exe,  # type: ignore[arg-type]
+                        f_block_size="1M",
+                    )
+                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+
+        # 030-B2: setup invalid / empty
+        for f_bad_setup in (123, None, "", "   "):
+            with self.subTest(setup=f_bad_setup):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_setup=f_bad_setup,  # type: ignore[arg-type]
+                        f_block_size="1M",
+                    )
+                self.assertIn("Setup must be a non-empty string", str(f_cm.exception))
+
+        # 030-B3: block_size invalid / empty string
+        for f_bad_bs in (123, "", "   ", "\n"):
+            with self.subTest(block_size=f_bad_bs):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_block_size=f_bad_bs,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Block size must be a non-empty string", str(f_cm.exception))
+
+        # 030-B4: working_dir invalid / empty
+        for f_bad_dir in (123, None, "", "   "):
+            with self.subTest(working_dir=f_bad_dir):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_block_size="1M",
+                        f_working_dir=f_bad_dir,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Working directory must be a non-empty string", str(f_cm.exception))
+
+    def testBuildCommandPathValidation(self) -> None:
+        """Verify output_path, stdout_path, and stderr_path validation in buildCommand (cases 030-C1 to 030-C6)."""
+        # 030-C1: output_path non-string / empty
+        for f_bad in (123, "", "   ", "\t"):
+            with self.subTest(output_path=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_block_size="1M",
+                        f_output_path=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Output path must be a non-empty string", str(f_cm.exception))
+
+        # 030-C2: output_path contains NUL byte
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.buildCommand(
+                self.m_executable,
+                f_block_size="1M",
+                f_output_path="/tmp/out\0file.dat",
+            )
+        self.assertIn("Output path contains NUL byte:", str(f_cm.exception))
+
+        # 030-C3: stdout_path non-string / empty
+        for f_bad in (123, "", "   ", "\n"):
+            with self.subTest(stdout_path=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_block_size="1M",
+                        f_stdout_path=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Stdout path must be a non-empty string", str(f_cm.exception))
+
+        # 030-C4: stdout_path contains NUL byte
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.buildCommand(
+                self.m_executable,
+                f_block_size="1M",
+                f_stdout_path="/tmp/stdout\0.log",
+            )
+        self.assertIn("Stdout path contains NUL byte:", str(f_cm.exception))
+
+        # 030-C5: stderr_path non-string / empty
+        for f_bad in (123, "", "   ", "\t"):
+            with self.subTest(stderr_path=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_block_size="1M",
+                        f_stderr_path=f_bad,  # type: ignore[arg-type]
+                    )
+                self.assertIn("Stderr path must be a non-empty string", str(f_cm.exception))
+
+        # 030-C6: stderr_path contains NUL byte
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.buildCommand(
+                self.m_executable,
+                f_block_size="1M",
+                f_stderr_path="/tmp/stderr\0.log",
+            )
+        self.assertIn("Stderr path contains NUL byte:", str(f_cm.exception))
+
+    def testBuildCommandCombinationBlockSizeVariations(self) -> None:
+        """Verify combination-based block size resolution variants and errors (cases 030-D1 to 030-D4)."""
+        # 030-D1: string with '_b'
+        f_cmd1 = self.m_adapter.buildCommand(
+            self.m_executable,
+            f_combination="c16_b1M",
+            f_working_dir=self.m_work_dir,
+        )
+        self.assertIn("-b=1M", f_cmd1.argv)
+        self.assertIn("-t=1M", f_cmd1.argv)
+        self.assertIn("-s=1024", f_cmd1.argv)
+
+        # 030-D2: plain block size string without '_b'
+        f_cmd2 = self.m_adapter.buildCommand(
+            self.m_executable,
+            f_combination="8M",
+            f_working_dir=self.m_work_dir,
+        )
+        self.assertIn("-b=8M", f_cmd2.argv)
+        self.assertIn("-t=8M", f_cmd2.argv)
+        self.assertIn("-s=128", f_cmd2.argv)
+
+        # 030-D3: tuple or list with length >= 2
+        for f_combo, f_exp_bs, f_exp_seg in (
+            ([16, "64K"], "64K", "16384"),
+            ((16, "64K"), "64K", "16384"),
+            (["c1", "1M", "extra"], "1M", "1024"),
+        ):
+            with self.subTest(combo=f_combo):
+                f_cmd = self.m_adapter.buildCommand(
+                    self.m_executable,
+                    f_combination=f_combo,
+                    f_working_dir=self.m_work_dir,
+                )
+                self.assertIn(f"-b={f_exp_bs}", f_cmd.argv)
+                self.assertIn(f"-t={f_exp_bs}", f_cmd.argv)
+                self.assertIn(f"-s={f_exp_seg}", f_cmd.argv)
+
+        # 030-D4: invalid combination type or insufficient length raises BenchmarkConfigurationError
+        for f_bad_combo in (123, (), [16], object()):
+            with self.subTest(bad_combo=f_bad_combo):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.buildCommand(
+                        self.m_executable,
+                        f_combination=f_bad_combo,
+                        f_working_dir=self.m_work_dir,
+                    )
+                self.assertIn(
+                    "Block size must be specified directly or via combination",
+                    str(f_cm.exception),
+                )
+
+    def testBuildCommandConvenienceAliases(self) -> None:
+        """Verify convenience aliases buildBenchmarkCommand, createCommand, and build_command (case 030-E1)."""
+        f_kwargs = {
+            "f_executable": self.m_executable,
+            "f_setup": "BASE",
+            "f_block_size": "1M",
+            "f_working_dir": self.m_work_dir,
+        }
+        f_golden = self.m_adapter.buildCommand(**f_kwargs)
+        self.assertEqual(self.m_adapter.buildBenchmarkCommand(**f_kwargs), f_golden)
+        self.assertEqual(self.m_adapter.createCommand(**f_kwargs), f_golden)
+        self.assertEqual(self.m_adapter.build_command(**f_kwargs), f_golden)
+
+    def testProbeCapabilityValidation(self) -> None:
+        """Verify probeCapability executable validation (cases 030-F1, 030-F2)."""
+        # 030-F1: non-string / empty executable
+        for f_bad in (123, None, "", "   ", "\t"):
+            with self.subTest(executable=f_bad):
+                with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+                    self.m_adapter.probeCapability(f_executable=f_bad)  # type: ignore[arg-type]
+                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+
+        # 030-F2: NUL byte in executable
+        with self.assertRaises(BenchmarkConfigurationError) as f_cm:
+            self.m_adapter.probeCapability(f_executable="/bin/ior\0")
+        self.assertIn("Executable contains NUL byte:", str(f_cm.exception))
+
+    def testProbeCapabilityUnexpectedException(self) -> None:
+        """Verify unexpected runner exceptions are wrapped in BenchmarkProbeError (case 030-G1)."""
+        def _failingRunner(_argv: Sequence[str]) -> Any:
+            raise RuntimeError("Unexpected probe runner crash")
+
+        with self.assertRaises(BenchmarkProbeError) as f_cm:
+            self.m_adapter.probeCapability(self.m_executable, f_runner=_failingRunner)
+        self.assertIn(
+            "IOR probe runner raised unexpected error for",
+            str(f_cm.exception),
+        )
+        self.assertIsInstance(f_cm.exception.__cause__, RuntimeError)
+
+    def testProbeCapabilityRunnerResultTypes(self) -> None:
+        """Verify probeCapability handling across runner result types (cases 030-H1 to 030-H6)."""
+        # 030-H1: result with exit_code attribute (no returncode)
+        class ExitCodeResult:
+            exit_code = 0
+            stdout = "IOR-3.3.0"
+            stderr = ""
+
+        f_res_exit = self.m_adapter.probeCapability(
+            self.m_executable, f_runner=lambda a: ExitCodeResult()
+        )
+        self.assertEqual(f_res_exit, CapabilityState.VERIFIED)
+
+        # 030-H2: 3-tuple result (exit_code, stdout, stderr)
+        f_res_tuple3 = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: (0, "IOR-3.3.0", "stderr debug output"),
+        )
+        self.assertEqual(f_res_tuple3, CapabilityState.VERIFIED)
+
+        # 030-H3: 2-tuple result (exit_code, stdout)
+        f_res_tuple2 = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: (0, "IOR-3.3.0"),
+        )
+        self.assertEqual(f_res_tuple2, CapabilityState.VERIFIED)
+
+        # 030-H4: int result (non-zero and zero)
+        with self.assertRaises(BenchmarkProbeError) as f_cm_fail:
+            self.m_adapter.probeCapability(
+                self.m_executable, f_runner=lambda a: 1
+            )
+        self.assertIn("probe failed with exit code 1", str(f_cm_fail.exception))
+
+        with self.assertRaises(BenchmarkProbeError) as f_cm_empty:
+            self.m_adapter.probeCapability(
+                self.m_executable, f_runner=lambda a: 0
+            )
+        self.assertIn("produced empty probe output", str(f_cm_empty.exception))
+
+        # 030-H5: str result
+        f_res_str = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: "IOR-3.3.0: Parallel IO Benchmark",
+        )
+        self.assertEqual(f_res_str, CapabilityState.VERIFIED)
+
+        # 030-H6: custom object with __str__ returning banner text
+        class CustomStrResult:
+            def __str__(self) -> str:
+                return "IOR-3.3.0"
+
+        f_res_custom = self.m_adapter.probeCapability(
+            self.m_executable,
+            f_runner=lambda a: CustomStrResult(),
+        )
+        self.assertEqual(f_res_custom, CapabilityState.VERIFIED)
+
+    def testProbeCapabilityUnrecognizedOutput(self) -> None:
+        """Verify probeCapability raises BenchmarkProbeError when output has exit code 0 but no recognizable signature (case 030-I1)."""
+        with self.assertRaises(BenchmarkProbeError) as f_cm:
+            self.m_adapter.probeCapability(
+                self.m_executable,
+                f_runner=lambda a: (0, "unrecognized banner text with zero matching keywords", ""),
+            )
+        self.assertIn("produced unrecognized probe output:", str(f_cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

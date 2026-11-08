@@ -28,12 +28,15 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+from collections.abc import Sequence
 import hashlib
 import os
 import re
 import shlex
 import subprocess
+import types
 import unittest
+from unittest.mock import patch
 
 from lsmiotool.lib import env, hpc
 from lsmiotool.lib.env import HpcEnv
@@ -403,3 +406,96 @@ echo "CONTROLLER_EXECUTED_UNEXPECTEDLY"
         self.assertEqual(ModuleSetup.render([]), "")
         self.assertEqual(ModuleSetup.renderCommands(()), [])
         self.assertEqual(ModuleSetup.render(()), "")
+
+
+class ModuleSetupContractTest(unittest.TestCase):
+    """Contract tests for ModuleSetup validation guards, container extraction, and empty fallbacks."""
+
+    def testValidateModulesRejectsInvalidContainers(self) -> None:
+        """Validates that validateModules rejects None, strings, bytes, and non-iterable collections."""
+        with self.subTest(case="none"):
+            with self.assertRaises(ModuleRenderError) as f_cm:
+                ModuleSetup.validateModules(None)  # type: ignore
+            self.assertIn("Module sequence cannot be None", str(f_cm.exception))
+
+        with self.subTest(case="str"):
+            with self.assertRaises(ModuleRenderError) as f_cm:
+                ModuleSetup.validateModules("mod/1.0")  # type: ignore
+            self.assertIn(
+                "Module sequence must be an iterable collection, not str",
+                str(f_cm.exception),
+            )
+
+        with self.subTest(case="bytes"):
+            with self.assertRaises(ModuleRenderError) as f_cm:
+                ModuleSetup.validateModules(b"mod/1.0")  # type: ignore
+            self.assertIn(
+                "Module sequence must be an iterable collection, not bytes",
+                str(f_cm.exception),
+            )
+
+        for f_bad in [123, object()]:
+            with self.subTest(bad=f_bad):
+                with self.assertRaises(ModuleRenderError) as f_cm:
+                    ModuleSetup.validateModules(f_bad)  # type: ignore
+                self.assertIn(
+                    f"Module sequence must be an iterable collection, got {type(f_bad).__name__}",
+                    str(f_cm.exception),
+                )
+
+    def testExtractModulesProfileModulesNone(self) -> None:
+        """Validates that profile with .modules=None extracts empty tuple and renders empty."""
+        f_prof = types.SimpleNamespace(modules=None)
+        self.assertEqual(ModuleSetup._extractModules(f_prof), ())
+        self.assertEqual(ModuleSetup.renderCommands(f_prof), [])
+        self.assertEqual(ModuleSetup.render(f_prof), "")
+
+    def testExtractModulesProfileModulesStringOrBytes(self) -> None:
+        """Validates that profile with string or bytes modules raises ModuleRenderError."""
+        for f_bad_mod in ["mod/1.0", b"mod/1.0"]:
+            with self.subTest(mod=f_bad_mod):
+                f_prof = types.SimpleNamespace(modules=f_bad_mod)
+                with self.assertRaises(ModuleRenderError) as f_cm:
+                    ModuleSetup._extractModules(f_prof)
+                self.assertIn(
+                    f"Profile modules must be a sequence of strings, got {type(f_bad_mod).__name__}",
+                    str(f_cm.exception),
+                )
+
+    def testExtractModulesNamedObjectResolutionFailure(self) -> None:
+        """Validates that profile with an unresolvable name raises ModuleRenderError."""
+        f_bad_named = types.SimpleNamespace(name="NONEXISTENT_SITE_NAME_XYZ")
+        with self.assertRaises(ModuleRenderError) as f_cm:
+            ModuleSetup.renderCommands(f_bad_named)
+        self.assertIn("Failed to resolve site profile for", str(f_cm.exception))
+        self.assertIn("NONEXISTENT_SITE_NAME_XYZ", str(f_cm.exception))
+
+    def testExtractModulesUnsupportedContainerType(self) -> None:
+        """Validates that unsupported profile or module container types raise ModuleRenderError."""
+        for f_bad in [12345, {"a": 1}, object()]:
+            with self.subTest(bad=f_bad):
+                with self.assertRaises(ModuleRenderError) as f_cm:
+                    ModuleSetup.renderCommands(f_bad)
+                self.assertIn(
+                    f"Unsupported profile or module container type: {type(f_bad).__name__}",
+                    str(f_cm.exception),
+                )
+
+    def testRenderCommandsEmptyValidatedModules(self) -> None:
+        """Validates fallback to empty list when validated modules evaluates to empty collection."""
+
+        class _TruthyEmptySequence(Sequence):
+            def __len__(self) -> int:
+                return 0
+
+            def __getitem__(self, i):
+                raise IndexError
+
+            def __bool__(self) -> bool:
+                return True
+
+        f_prof = types.SimpleNamespace(modules=_TruthyEmptySequence())
+        self.assertEqual(ModuleSetup.renderCommands(f_prof), [])
+
+        with patch.object(ModuleSetup, "validateModules", return_value=()):
+            self.assertEqual(ModuleSetup.renderCommands(["gcc/11.2.0"]), [])

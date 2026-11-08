@@ -36,6 +36,12 @@ from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 
 from lsmiotool.lib.log import Console
+import math
+
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+
+from lsmiotool.lib.compare import CompareFigure, ComparePanel
 
 
 class PlotMetaData:
@@ -324,3 +330,219 @@ class DeltaBarPlot(MultiBarPlot):
         plt.tight_layout()
         plt.savefig(f_file_name, bbox_inches="tight")
         plt.close()
+
+
+class ComparePanelPlot:
+    """Renders grouped bar or line charts for lsmiotool compare invocations."""
+
+    m_figure: CompareFigure
+    m_style: str
+
+    def __init__(self, f_figure: CompareFigure, f_style: str) -> None:
+        """Initialize ComparePanelPlot with figure spec and style ('bars' or 'lines')."""
+        if f_style not in ("bars", "lines"):
+            raise ValueError(
+                f"Invalid plot style '{f_style}': must be 'bars' or 'lines'"
+            )
+        self.m_figure: CompareFigure = f_figure
+        self.m_style: str = f_style
+
+    def _widestLabelInches(self, f_fig: "plt.Figure") -> float:
+        """Width in inches of the widest line of any x category label."""
+        renderer = f_fig.canvas.get_renderer()
+        widest = 0.0
+        for cat in self.m_figure.x_categories:
+            for line in str(cat).split("\n"):
+                text = f_fig.text(0, 0, line, fontsize=plt.rcParams["xtick.labelsize"])
+                widest = max(widest, text.get_window_extent(renderer).width / f_fig.dpi)
+                text.remove()
+        return widest
+
+    def _makeLegend(self, f_fig: "plt.Figure", f_ncol: int, f_anchor_y: float):
+        """Adds the figure legend, lower centre at f_anchor_y (figure fraction)."""
+        handles = []
+        labels = []
+        for idx in self.m_figure.legend:
+            series = self.m_figure.series[idx]
+            if self.m_style == "bars":
+                handle = Patch(facecolor=series.colour, label=series.label)
+            else:
+                handle = Line2D(
+                    [0],
+                    [0],
+                    color=series.colour,
+                    marker="o",
+                    label=series.label,
+                )
+            handles.append(handle)
+            labels.append(series.label)
+        return f_fig.legend(
+            handles=handles,
+            labels=labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, f_anchor_y),
+            ncol=f_ncol,
+            frameon=True,
+        )
+
+    def _legendHeightInches(self, f_fig: "plt.Figure", f_ncol: int) -> float:
+        """Height in inches of the legend as drawn with f_ncol columns."""
+        legend = self._makeLegend(f_fig, f_ncol, 0.0)
+        height = legend.get_window_extent(f_fig.canvas.get_renderer()).height
+        legend.remove()
+        return height / f_fig.dpi
+
+    def draw(self) -> "plt.Figure":
+        """Builds and returns the matplotlib figure without saving or closing it."""
+        grid = self.m_figure.grid
+        n_rows = len(grid)
+        n_cols = len(grid[0]) if n_rows > 0 else 0
+        if n_rows == 0 or n_cols == 0:
+            fig, _ = plt.subplots(1, 1, squeeze=False)
+            return fig
+
+        n_cats = len(self.m_figure.x_categories)
+        panel_height = 4.0
+        grid_height = panel_height * n_rows
+
+        # Provisional size; panel width and legend height are set once the
+        # label and legend extents can be measured.
+        fig, axes = plt.subplots(
+            n_rows, n_cols, squeeze=False, figsize=(5.0 * n_cols, grid_height + 2.0)
+        )
+
+        panel_width = max(5.0, 0.45 * n_cats + 1.5)
+        if n_cats <= 6:
+            # Unrotated tick labels: one slot per category must hold the widest line.
+            label_width = self._widestLabelInches(fig)
+            panel_width = max(panel_width, (label_width + 0.2) * (n_cats + 0.1) + 1.5)
+        fig_width = panel_width * n_cols
+
+        n_legend = len(self.m_figure.legend)
+        ncol = min(n_legend, max(1, int(fig_width / 2.5))) if n_legend > 0 else 1
+        legend_height = self._legendHeightInches(fig, ncol) if n_legend > 0 else 0.0
+        # Title band: the suptitle's own height between two 0.1 in pads.
+        title_text = fig.text(
+            0, 0, self.m_figure.title, fontsize=plt.rcParams["figure.titlesize"]
+        )
+        title_height = (
+            title_text.get_window_extent(fig.canvas.get_renderer()).height / fig.dpi
+        )
+        title_text.remove()
+        top_height = title_height + 0.2
+        fig_height = grid_height + legend_height + 0.2 + top_height
+        fig.set_size_inches(fig_width, fig_height)
+
+        for r in range(n_rows):
+            for c in range(n_cols):
+                panel: ComparePanel = grid[r][c]
+                ax = axes[r][c]
+
+                ax.set_title(panel.title)
+                ax.set_ylabel(panel.y_label)
+                if r == n_rows - 1:
+                    ax.set_xlabel(self.m_figure.x_label)
+
+                ax.set_xticks(range(n_cats))
+                if n_cats > 6:
+                    rotation = 60 if n_cats > 15 else 45
+                    ax.set_xticklabels(
+                        [str(cat) for cat in self.m_figure.x_categories],
+                        rotation=rotation,
+                        ha="right",
+                        rotation_mode="anchor",
+                    )
+                else:
+                    ax.set_xticklabels([str(cat) for cat in self.m_figure.x_categories])
+
+                if panel.zero_line:
+                    ax.axhline(0, color="black", linewidth=0.8)
+
+                if self.m_style == "bars":
+                    n_series = len(panel.values)
+                    width = (0.8 / n_series) if n_series > 0 else 0.8
+                    for i, (series_idx, cat_vals) in enumerate(panel.values):
+                        series = self.m_figure.series[series_idx]
+                        offset = (i - (n_series - 1) / 2.0) * width
+                        finite_xs: List[float] = []
+                        finite_ys: List[float] = []
+                        for cat_idx, v in enumerate(cat_vals):
+                            if v is not None and not math.isnan(v):
+                                finite_xs.append(cat_idx + offset)
+                                finite_ys.append(v)
+                        if finite_xs:
+                            bars = ax.bar(
+                                finite_xs,
+                                finite_ys,
+                                width=width,
+                                color=series.colour,
+                            )
+                            if panel.value_labels:
+                                for bar, val in zip(bars, finite_ys):
+                                    va = "bottom" if val >= 0.0 else "top"
+                                    label = f"{val:+.1f}%"
+                                    ax.annotate(
+                                        label,
+                                        (bar.get_x() + bar.get_width() / 2.0, val),
+                                        xytext=(0, 3 if val >= 0.0 else -10),
+                                        textcoords="offset points",
+                                        ha="center",
+                                        va=va,
+                                        fontsize=9,
+                                    )
+                else:
+                    for series_idx, cat_vals in panel.values:
+                        series = self.m_figure.series[series_idx]
+                        y_vals = [
+                            math.nan if (v is None or math.isnan(v)) else float(v)
+                            for v in cat_vals
+                        ]
+                        ax.plot(
+                            range(n_cats),
+                            y_vals,
+                            color=series.colour,
+                            marker="o",
+                        )
+                    finite = [
+                        v
+                        for _, cat_vals in panel.values
+                        for v in cat_vals
+                        if v is not None and not math.isnan(v)
+                    ]
+                    # Lines start at 0 as bars do, unless the data is negative.
+                    if finite and min(finite) >= 0.0:
+                        top = max(finite) * 1.05
+                        ax.set_ylim(0.0, top if top > 0.0 else 1.0)
+                    elif finite and max(finite) <= 0.0:
+                        ax.set_ylim(min(finite) * 1.05, 0.0)
+
+                if panel.no_data:
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "no data",
+                        transform=ax.transAxes,
+                        ha="center",
+                        va="center",
+                    )
+
+                ax.grid(True, axis="y", linestyle="--", alpha=0.6)
+
+        fig.suptitle(self.m_figure.title, y=1.0 - 0.1 / fig_height, va="top")
+
+        bottom_frac = (legend_height + 0.2) / fig_height
+        # tight_layout itself keeps the panels below the suptitle.
+        fig.tight_layout(rect=[0, bottom_frac, 1, 1.0])
+
+        if self.m_figure.legend:
+            self._makeLegend(fig, ncol, 0.1 / fig_height)
+
+        return fig
+
+    def plot(self, f_file_name: str) -> None:
+        """Builds the figure, saves it to file, and ensures the figure is closed."""
+        fig = self.draw()
+        try:
+            fig.savefig(f_file_name, bbox_inches="tight")
+        finally:
+            plt.close(fig)

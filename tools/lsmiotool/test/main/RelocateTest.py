@@ -28,7 +28,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-"""Unit tests for ARCHER2 relocation of the worker tree off /home (H11, bmtool:112-142)."""
+"""Unit tests for ARCHER2 relocation of the worker tree off /home."""
 
 import os
 import shutil

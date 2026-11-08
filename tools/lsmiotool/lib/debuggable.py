@@ -34,7 +34,7 @@ import traceback
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from lsmiotool.lib.log import Log, LOG_LEVEL
+from lsmiotool.lib.log import Console, Log, LOG_LEVEL
 
 
 class DebuggableObject:
@@ -108,4 +108,4 @@ class DebuggableObject:
     @classmethod
     def __str__(cls) -> str:
         """Return class name as string."""
-        return cls.__class__.__name__
+        return cls.__name__
