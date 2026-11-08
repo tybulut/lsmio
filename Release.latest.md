@@ -1,1 +1,2 @@
-- New version
+- Build improvements including code coverage tool changes
+- Bmtool shell script retirement
