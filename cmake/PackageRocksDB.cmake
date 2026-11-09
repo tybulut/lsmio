@@ -58,13 +58,11 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
     # Snappy is guaranteed by PackageLevelDB.cmake (system package or FetchContent target `snappy`).
     # When Snappy came from FetchContent rather than a system install, pre-populate the variables
-    # RocksDB's FindSnappy.cmake checks (Snappy_INCLUDE_DIRS and Snappy_LIBRARIES) and add `snappy`
-    # to RocksDBTargets so RocksDB's install(EXPORT RocksDBTargets) succeeds.
+    # RocksDB's FindSnappy.cmake checks (Snappy_INCLUDE_DIRS and Snappy_LIBRARIES).
     if(TARGET snappy AND NOT Snappy_FOUND)
       set(Snappy_INCLUDE_DIR "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dir")
       set(Snappy_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dirs")
       set(Snappy_LIBRARIES snappy CACHE STRING "Snappy libraries")
-      install(TARGETS snappy EXPORT RocksDBTargets)
     endif()
     set(WITH_SNAPPY YES CACHE BOOL "with snappy")
 
