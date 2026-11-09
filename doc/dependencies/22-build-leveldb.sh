@@ -5,6 +5,10 @@ cd $HOME/src/packages/22-leveldb
 
 git clone https://github.com/google/snappy.git
 
+cd snappy
+git checkout 1.2.1
+cd ..
+
 rm -rf snappy-build
 mkdir snappy-build
 cd snappy-build
@@ -27,6 +31,7 @@ cd $HOME/src/packages/22-leveldb
 git clone https://github.com/google/leveldb.git
 
 cd leveldb
+git checkout 1.23
 git submodule update
 cd ..
 

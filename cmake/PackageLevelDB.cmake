@@ -26,8 +26,14 @@ if (NOT leveldb_FOUND AND NOT TARGET leveldb)
 
 
   # leveldb
+  # Pre-set HAVE_SNAPPY so LevelDB's check_library_exists(snappy snappy_compress "" HAVE_SNAPPY)
+  # does not disable Snappy when `snappy` comes from FetchContent and is not yet compiled at
+  # configure time. Disable LEVELDB_INSTALL (and export `snappy` to leveldbTargets if needed) so
+  # linking FetchContent `snappy` into `leveldb` never trips install(EXPORT leveldbTargets).
+  set(HAVE_SNAPPY ON CACHE BOOL "Build LevelDB with Snappy")
   option(LEVELDB_BUILD_TESTS "Build tests" OFF)
   option(LEVELDB_BUILD_BENCHMARKS "Build benchmarks" OFF)
+  option(LEVELDB_INSTALL "Install LevelDB's header and library" OFF)
   FetchContent_Declare(
     leveldb
     GIT_REPOSITORY https://github.com/google/leveldb.git

@@ -5,6 +5,10 @@ cd $HOME/src/packages/01-gflags
 
 git clone https://github.com/gflags/gflags.git
 
+cd gflags
+git checkout v2.2.2
+cd ..
+
 rm -rf gflags-build
 mkdir gflags-build
 

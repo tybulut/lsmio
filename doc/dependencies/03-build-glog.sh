@@ -5,6 +5,10 @@ cd $HOME/src/packages/03-glog
 
 git clone https://github.com/google/glog.git
 
+cd glog
+git checkout v0.7.1
+cd ..
+
 rm -rf glog-build
 mkdir glog-build
 

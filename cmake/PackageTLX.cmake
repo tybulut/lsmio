@@ -5,7 +5,7 @@ if (NOT tlx_FOUND AND NOT TARGET tlx)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
-  option(tlx_BUILD_TESTS "Build tests" OFF)
+  option(TLX_BUILD_TESTS "Build tests" OFF)
   FetchContent_Declare(
     tlx
     GIT_REPOSITORY https://github.com/tlx/tlx.git

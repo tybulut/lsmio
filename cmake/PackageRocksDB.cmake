@@ -108,7 +108,7 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
     FetchContent_Declare(
       rocksdb
       GIT_REPOSITORY https://github.com/facebook/rocksdb.git
-      GIT_TAG        v8.11.4
+      GIT_TAG        v10.6.2
       GIT_SUBMODULES ""
       GIT_PROGRESS   TRUE
     )
