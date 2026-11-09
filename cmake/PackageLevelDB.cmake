@@ -14,7 +14,13 @@ if (NOT Snappy_FOUND AND NOT TARGET snappy)
     GIT_PROGRESS   TRUE
   )
 
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
+      "Minimum CMake policy version for third-party deps with old cmake_minimum_required")
   FetchContent_MakeAvailable(snappy)
+  unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
+  if (NOT MSVC)
+    target_compile_options(snappy PRIVATE -frtti)
+  endif()
   add_library(Snappy::snappy ALIAS snappy)
 endif()
 
@@ -26,6 +32,10 @@ if (NOT leveldb_FOUND AND NOT TARGET leveldb)
 
 
   # leveldb
+  # Pre-set HAVE_SNAPPY so LevelDB's check_library_exists(snappy snappy_compress "" HAVE_SNAPPY)
+  # does not disable Snappy when `snappy` comes from FetchContent and is not yet compiled at
+  # configure time.
+  set(HAVE_SNAPPY ON CACHE BOOL "Build LevelDB with Snappy")
   option(LEVELDB_BUILD_TESTS "Build tests" OFF)
   option(LEVELDB_BUILD_BENCHMARKS "Build benchmarks" OFF)
   FetchContent_Declare(

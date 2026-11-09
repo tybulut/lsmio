@@ -1057,9 +1057,7 @@ class ParseIorOutputsDirTest(unittest.TestCase):
             f_f.write("HDF5-DIAG: Error detected in HDF5 (1.14.0) MPI-process 0:\n")
         f_code, f_out, f_err = self._run([f_dir])
         self.assertEqual(f_code, 0, f_err)
-        self.assertTrue(
-            data.isUsableReport(os.path.join(f_dir, data.IOR_REPORT_FILE))
-        )
+        self.assertTrue(data.isUsableReport(os.path.join(f_dir, data.IOR_REPORT_FILE)))
         self.assertIn("=== Generating report for output-ior-hdf5 ===", f_out)
         self._assertNoLsmioFiles(f_dir)
 

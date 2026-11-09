@@ -30,6 +30,7 @@
 
 #include <iostream>
 #include <lsmio/lsmio.hpp>
+#include <vector>
 
 #include "test_mpi_utils.hpp"
 
@@ -121,8 +122,8 @@ TEST_P(MPITests, AggregateTokens) {
 
     int send_token = 10000 + processRank;
     int aggregatorRank = 0;
-    MPI_Request reqs[numProcesses];
-    MPI_Status statuses[numProcesses];
+    std::vector<MPI_Request> reqs(numProcesses);
+    std::vector<MPI_Status> statuses(numProcesses);
 
     if (processRank != aggregatorRank) {
         MPI_Isend(&send_token, 1, MPI_INT, aggregatorRank, 0, comm, &reqs[processRank]);
@@ -134,7 +135,7 @@ TEST_P(MPITests, AggregateTokens) {
     }
 
     int recv_i, req_count;
-    int token_received[numProcesses];
+    std::vector<int> token_received(numProcesses);
     for (recv_i = 0, req_count = 0; recv_i < numProcesses; recv_i++) {
         if (recv_i == aggregatorRank) continue;
 
@@ -142,7 +143,7 @@ TEST_P(MPITests, AggregateTokens) {
     }
 
     LOG(INFO) << "test_aggregate_tokens: Waiting for all." << std::endl;
-    MPI_Waitall(req_count, reqs, statuses);
+    MPI_Waitall(req_count, reqs.data(), statuses.data());
 
     for (recv_i = 0; recv_i < numProcesses; recv_i++) {
         if (recv_i == aggregatorRank) continue;
@@ -165,8 +166,8 @@ TEST_P(MPITests, AggregateBuffer) {
 
     std::string tokenString = "HelloWorld";
     int aggregatorRank = 0;
-    MPI_Request reqs[numProcesses];
-    MPI_Status statuses[numProcesses];
+    std::vector<MPI_Request> reqs(numProcesses);
+    std::vector<MPI_Status> statuses(numProcesses);
 
     if (processRank != aggregatorRank) {
         MPI_Isend(tokenString.c_str(), tokenString.size(), MPI_CHAR, aggregatorRank, 0, comm,
@@ -189,7 +190,7 @@ TEST_P(MPITests, AggregateBuffer) {
     }
 
     LOG(INFO) << "test_aggregate_buffer: Waiting for all." << std::endl;
-    MPI_Waitall(req_count, reqs, statuses);
+    MPI_Waitall(req_count, reqs.data(), statuses.data());
 
     for (recv_i = 0; recv_i < numProcesses; recv_i++) {
         if (recv_i == aggregatorRank) continue;
@@ -217,8 +218,8 @@ TEST_P(MPITests, ProbeSize) {
 
     std::string tokenString = "HelloWorld";
     int aggregatorRank = 0;
-    MPI_Request reqs[numProcesses];
-    MPI_Status statuses[numProcesses];
+    std::vector<MPI_Request> reqs(numProcesses);
+    std::vector<MPI_Status> statuses(numProcesses);
 
     if (processRank != aggregatorRank) {
         MPI_Isend(tokenString.c_str(), tokenString.size(), MPI_CHAR, aggregatorRank, 0, comm,
@@ -253,7 +254,7 @@ TEST_P(MPITests, ProbeSize) {
     }
 
     LOG(INFO) << "test_aggregate_buffer: Waiting for all." << std::endl;
-    MPI_Waitall(req_count, reqs, statuses);
+    MPI_Waitall(req_count, reqs.data(), statuses.data());
 
     for (recv_i = 0; recv_i < numProcesses; recv_i++) {
         if (recv_i == aggregatorRank) continue;
@@ -282,22 +283,24 @@ TEST_P(MPITests, AggregateString) {
     std::string tokenString = generateRankString(processRank);
     int tokenSize = tokenString.size();
     int aggregatorRank = 0;
-    MPI_Request reqs[numProcesses];
-    MPI_Status statuses[numProcesses];
+    std::vector<MPI_Request> reqs(numProcesses);
+    std::vector<MPI_Status> statuses(numProcesses);
 
     if (processRank != aggregatorRank) {
-        MPI_Isend(&tokenSize, 1, MPI_INT, aggregatorRank, 0, comm, &reqs[processRank]);
+        MPI_Request sendReqs[2];
+        MPI_Status sendStatuses[2];
+        MPI_Isend(&tokenSize, 1, MPI_INT, aggregatorRank, 0, comm, &sendReqs[0]);
         MPI_Isend(tokenString.c_str(), tokenString.size(), MPI_CHAR, aggregatorRank, 0, comm,
-                  &reqs[processRank]);
+                  &sendReqs[1]);
         LOG(INFO) << "test_aggregate_string:"
                   << " rank: " << processRank << " sent : " << tokenString
                   << " to: " << aggregatorRank << std::endl;
-        MPI_Wait(&reqs[processRank], &statuses[processRank]);
+        MPI_Waitall(2, sendReqs, sendStatuses);
         return;
     }
 
     int recv_i, req_count;
-    int sizeReceived[numProcesses];
+    std::vector<int> sizeReceived(numProcesses);
     for (recv_i = 0, req_count = 0; recv_i < numProcesses; recv_i++) {
         if (recv_i == aggregatorRank) continue;
 
@@ -305,7 +308,7 @@ TEST_P(MPITests, AggregateString) {
     }
 
     LOG(INFO) << "test_aggregate_string: Waiting for all sizes." << std::endl;
-    MPI_Waitall(req_count, reqs, statuses);
+    MPI_Waitall(req_count, reqs.data(), statuses.data());
 
     char **bufReceived = new char *[numProcesses];
     for (recv_i = 0, req_count = 0; recv_i < numProcesses; recv_i++) {
@@ -317,7 +320,7 @@ TEST_P(MPITests, AggregateString) {
     }
 
     LOG(INFO) << "test_aggregate_string: Waiting for all buffers." << std::endl;
-    MPI_Waitall(req_count, reqs, statuses);
+    MPI_Waitall(req_count, reqs.data(), statuses.data());
 
     for (recv_i = 0; recv_i < numProcesses; recv_i++) {
         if (recv_i == aggregatorRank) continue;

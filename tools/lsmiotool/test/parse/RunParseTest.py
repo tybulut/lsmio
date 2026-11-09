@@ -790,9 +790,13 @@ class RunParseTest(unittest.TestCase):
         for f_val in [-1, "0", 1.0]:
             f_rows.append(("f_ordinal", f_val, "ordinal must be non-negative integer"))
         for f_val in ["", "  ", None]:
-            f_rows.append(("f_point_dir", f_val, "point_dir must be a non-empty string"))
+            f_rows.append(
+                ("f_point_dir", f_val, "point_dir must be a non-empty string")
+            )
         for f_val in [None, "x"]:
-            f_rows.append(("f_state_view", f_val, "state_view must be a PointStateView"))
+            f_rows.append(
+                ("f_state_view", f_val, "state_view must be a PointStateView")
+            )
         for f_key, f_val, f_prefix in f_rows:
             with self.subTest(f_key=f_key, f_val=f_val):
                 f_kwargs = self._pointKwargs(f_pt)
@@ -986,7 +990,9 @@ class RunParseTest(unittest.TestCase):
                 )
 
     @staticmethod
-    def _failingFor(f_real: Any, f_match: Any, f_error: Optional[Exception] = None) -> Any:
+    def _failingFor(
+        f_real: Any, f_match: Any, f_error: Optional[Exception] = None
+    ) -> Any:
         """Return a side_effect raising PermissionError for matching paths and delegating otherwise."""
 
         def f_side_effect(f_path: Any, *f_args: Any, **f_kwargs: Any) -> Any:
@@ -1184,9 +1190,7 @@ class RunParseTest(unittest.TestCase):
         self.assertTrue(RunRootResolver._manifestMatches(man("run-d"), None, None))
         self.assertFalse(RunRootResolver._manifestMatches(man("run-d"), "lsmio", None))
         self.assertFalse(RunRootResolver._manifestMatches(man("run-e"), "lsmio", None))
-        self.assertFalse(
-            RunRootResolver._manifestMatches(man("nope"), "lsmio", None)
-        )
+        self.assertFalse(RunRootResolver._manifestMatches(man("nope"), "lsmio", None))
         for f_args, f_want in [
             ((f_bm, "lmp"), "run-b"),
             ((f_bm, "lammps"), "run-b"),
@@ -1253,7 +1257,9 @@ class RunParseTest(unittest.TestCase):
         f_denied = PermissionError(13, "Permission denied")
         with patch(
             "os.listdir",
-            side_effect=self._failingFor(os.listdir, lambda f_p: f_p == f_runs, f_denied),
+            side_effect=self._failingFor(
+                os.listdir, lambda f_p: f_p == f_runs, f_denied
+            ),
         ):
             with self.assertRaises(RunRootResolutionError) as f_cm:
                 RunRootResolver.inferLatestRun(f_bm)
@@ -1347,7 +1353,8 @@ class RunParseTest(unittest.TestCase):
         self.assertEqual(str(f_cm.exception), "Target contains NUL byte: 'x\\x00y'")
         f_run = RunRootResolver.resolveTarget("lsmio", f_benchmark_root=self.m_temp_dir)
         self.assertEqual(
-            f_run.run_root, os.path.join(self.m_temp_dir, "lsmio", "runs", "run-c11-001")
+            f_run.run_root,
+            os.path.join(self.m_temp_dir, "lsmio", "runs", "run-c11-001"),
         )
         f_run = RunRootResolver.resolveTarget(
             "no-such-target", f_benchmark_root=" " + self.m_temp_dir + " "

@@ -67,10 +67,19 @@ class LatexCliParserTest(unittest.TestCase):
     def testValuesAreStripped(self) -> None:
         """Surrounding whitespace is removed from the path and the option values."""
         f_req = parseLatexArguments(
-            ["latex", "data", " s.yaml ", "--data-dir", " raw ", "--output-dir", " out "]
+            [
+                "latex",
+                "data",
+                " s.yaml ",
+                "--data-dir",
+                " raw ",
+                "--output-dir",
+                " out ",
+            ]
         )
         self.assertEqual(
-            (f_req.sources_path, f_req.data_dir, f_req.output_dir), ("s.yaml", "raw", "out")
+            (f_req.sources_path, f_req.data_dir, f_req.output_dir),
+            ("s.yaml", "raw", "out"),
         )
 
     def assertRejected(self, f_argv: object, f_text: str) -> None:
@@ -93,19 +102,34 @@ class LatexCliParserTest(unittest.TestCase):
             "needs the path of a sources.yaml",
         )
         self.assertRejected(
-            ["latex", "data", "  ", "--data-dir", "d", "--output-dir", "o"], "cannot be empty"
+            ["latex", "data", "  ", "--data-dir", "d", "--output-dir", "o"],
+            "cannot be empty",
         )
 
     def testRejectsMissingRequiredOptions(self) -> None:
         """Each mode names the options it cannot do without."""
-        self.assertRejected(["latex", "data", "s.yaml", "--data-dir", "d"], "needs --output-dir")
-        self.assertRejected(["latex", "data", "s.yaml", "--output-dir", "o"], "needs --data-dir")
+        self.assertRejected(
+            ["latex", "data", "s.yaml", "--data-dir", "d"], "needs --output-dir"
+        )
+        self.assertRejected(
+            ["latex", "data", "s.yaml", "--output-dir", "o"], "needs --data-dir"
+        )
         self.assertRejected(["latex", "plots", "s.yaml"], "needs --tsv-dir")
 
     def testRejectsOptionsOfTheOtherMode(self) -> None:
         """--tsv-dir belongs to plots and --data-dir to data."""
         self.assertRejected(
-            ["latex", "data", "s.yaml", "--data-dir", "d", "--output-dir", "o", "--tsv-dir", "t"],
+            [
+                "latex",
+                "data",
+                "s.yaml",
+                "--data-dir",
+                "d",
+                "--output-dir",
+                "o",
+                "--tsv-dir",
+                "t",
+            ],
             "Unknown option for latex data: '--tsv-dir'",
         )
         self.assertRejected(
@@ -119,15 +143,20 @@ class LatexCliParserTest(unittest.TestCase):
         self.assertRejected(f_ok + ["--data-dir", "e"], "Duplicate '--data-dir'")
         self.assertRejected(f_ok[:-1], "Missing value after '--output-dir'")
         self.assertRejected(
-            ["latex", "data", "s.yaml", "--data-dir"], "Missing value after '--data-dir'"
+            ["latex", "data", "s.yaml", "--data-dir"],
+            "Missing value after '--data-dir'",
         )
         self.assertRejected(
-            ["latex", "data", "s.yaml", "--data-dir", "--output-dir", "o"], "option-like token"
+            ["latex", "data", "s.yaml", "--data-dir", "--output-dir", "o"],
+            "option-like token",
         )
         self.assertRejected(
-            ["latex", "data", "s.yaml", "--data-dir", "  ", "--output-dir", "o"], "cannot be empty"
+            ["latex", "data", "s.yaml", "--data-dir", "  ", "--output-dir", "o"],
+            "cannot be empty",
         )
-        self.assertRejected(f_ok + ["extra"], "Unexpected extra positional argument: 'extra'")
+        self.assertRejected(
+            f_ok + ["extra"], "Unexpected extra positional argument: 'extra'"
+        )
 
     def testRejectsANonSequence(self) -> None:
         """argv must be a sequence of strings."""

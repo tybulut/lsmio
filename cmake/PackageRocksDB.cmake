@@ -35,6 +35,55 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
   # rocksdb
   block()
+    # Compression codecs: mirror doc/dependencies/23-build-rocksdb.sh so source builds have a
+    # supported codec (Snappy, LZ4, Zstd). Include $HOME/src/usr and (on macOS) the Homebrew prefix
+    # in CMAKE_PREFIX_PATH so find_package locates codecs installed there.
+    if(DEFINED ENV{HOME} AND EXISTS "$ENV{HOME}/src/usr")
+      list(PREPEND CMAKE_PREFIX_PATH "$ENV{HOME}/src/usr")
+    endif()
+    if(APPLE)
+      find_program(_BREW_EXECUTABLE brew)
+      if(_BREW_EXECUTABLE)
+        execute_process(
+          COMMAND "${_BREW_EXECUTABLE}" --prefix
+          OUTPUT_VARIABLE _BREW_PREFIX
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          ERROR_QUIET
+        )
+        if(_BREW_PREFIX)
+          list(PREPEND CMAKE_PREFIX_PATH "${_BREW_PREFIX}")
+        endif()
+      endif()
+    endif()
+
+    # Snappy is guaranteed by PackageLevelDB.cmake (system package or FetchContent target `snappy`).
+    # When Snappy came from FetchContent rather than a system install, pre-populate the variables
+    # RocksDB's FindSnappy.cmake checks (Snappy_INCLUDE_DIRS and Snappy_LIBRARIES).
+    if(TARGET snappy AND NOT Snappy_FOUND)
+      set(Snappy_INCLUDE_DIR "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dir")
+      set(Snappy_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dirs")
+      set(Snappy_LIBRARIES snappy CACHE STRING "Snappy libraries")
+    endif()
+    set(WITH_SNAPPY YES CACHE BOOL "with snappy")
+
+    # Enable LZ4 and Zstd when their headers and libraries are available on the host (RocksDB's
+    # CMakeLists.txt calls find_package(lz4 REQUIRED) and find_package(zstd REQUIRED)).
+    find_path(_LSMIO_LZ4_INCLUDE_DIR NAMES lz4.h)
+    find_library(_LSMIO_LZ4_LIBRARY NAMES lz4)
+    if(_LSMIO_LZ4_INCLUDE_DIR AND _LSMIO_LZ4_LIBRARY)
+      set(WITH_LZ4 YES CACHE BOOL "with lz4")
+    else()
+      set(WITH_LZ4 NO CACHE BOOL "with lz4")
+    endif()
+
+    find_path(_LSMIO_ZSTD_INCLUDE_DIR NAMES zstd.h)
+    find_library(_LSMIO_ZSTD_LIBRARY NAMES zstd)
+    if(_LSMIO_ZSTD_INCLUDE_DIR AND _LSMIO_ZSTD_LIBRARY)
+      set(WITH_ZSTD YES CACHE BOOL "with zstd")
+    else()
+      set(WITH_ZSTD NO CACHE BOOL "with zstd")
+    endif()
+
     set(FAIL_ON_WARNINGS NO CACHE BOOL "fail on warnings")
     set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "-fPIC")
     # Features
@@ -57,7 +106,7 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
     FetchContent_Declare(
       rocksdb
       GIT_REPOSITORY https://github.com/facebook/rocksdb.git
-      GIT_TAG        v8.11.4
+      GIT_TAG        v10.6.2
       GIT_SUBMODULES ""
       GIT_PROGRESS   TRUE
     )

@@ -36,6 +36,7 @@ if (NOT ADIOS2_FOUND AND NOT TARGET ADIOS2)
   set(ADIOS2_USE_MPI        ON  CACHE BOOL   "Turn on MPI" FORCE)
   set(ADIOS2_USE_Fortran    OFF CACHE STRING "Turn off Fortran" FORCE)
   set(ADIOS2_USE_ZeroMQ     OFF CACHE BOOL   "Turn off ZeroMQ" FORCE)
+  set(ADIOS2_USE_OpenSSL    OFF CACHE BOOL   "Turn off OpenSSL" FORCE)
   # Testing and Examples
   set(BUILD_TESTING         OFF CACHE INTERNAL "Turn off Testing" FORCE)
   set(ADIOS2_BUILD_EXAMPLES OFF CACHE BOOL "Turn off Examples" FORCE)
@@ -59,6 +60,7 @@ if (NOT ADIOS2_FOUND AND NOT TARGET ADIOS2)
   set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
       "Minimum CMake policy version for third-party deps with old cmake_minimum_required")
   FetchContent_MakeAvailable(ADIOS2)
+  unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
   add_library(adios2::core ALIAS adios2_core)
   add_library(adios2::core_mpi ALIAS adios2_core_mpi)

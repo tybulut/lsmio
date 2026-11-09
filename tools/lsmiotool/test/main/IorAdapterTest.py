@@ -423,7 +423,9 @@ class IorAdapterTest(unittest.TestCase):
                         f_executable=f_bad_exe,  # type: ignore[arg-type]
                         f_block_size="1M",
                     )
-                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Executable must be a non-empty string", str(f_cm.exception)
+                )
 
         # 030-B2: setup invalid / empty
         for f_bad_setup in (123, None, "", "   "):
@@ -444,7 +446,9 @@ class IorAdapterTest(unittest.TestCase):
                         self.m_executable,
                         f_block_size=f_bad_bs,  # type: ignore[arg-type]
                     )
-                self.assertIn("Block size must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Block size must be a non-empty string", str(f_cm.exception)
+                )
 
         # 030-B4: working_dir invalid / empty
         for f_bad_dir in (123, None, "", "   "):
@@ -455,7 +459,9 @@ class IorAdapterTest(unittest.TestCase):
                         f_block_size="1M",
                         f_working_dir=f_bad_dir,  # type: ignore[arg-type]
                     )
-                self.assertIn("Working directory must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Working directory must be a non-empty string", str(f_cm.exception)
+                )
 
     def testBuildCommandPathValidation(self) -> None:
         """Verify output_path, stdout_path, and stderr_path validation in buildCommand (cases 030-C1 to 030-C6)."""
@@ -468,7 +474,9 @@ class IorAdapterTest(unittest.TestCase):
                         f_block_size="1M",
                         f_output_path=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("Output path must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Output path must be a non-empty string", str(f_cm.exception)
+                )
 
         # 030-C2: output_path contains NUL byte
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -488,7 +496,9 @@ class IorAdapterTest(unittest.TestCase):
                         f_block_size="1M",
                         f_stdout_path=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("Stdout path must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Stdout path must be a non-empty string", str(f_cm.exception)
+                )
 
         # 030-C4: stdout_path contains NUL byte
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -508,7 +518,9 @@ class IorAdapterTest(unittest.TestCase):
                         f_block_size="1M",
                         f_stderr_path=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("Stderr path must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Stderr path must be a non-empty string", str(f_cm.exception)
+                )
 
         # 030-C6: stderr_path contains NUL byte
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -591,7 +603,9 @@ class IorAdapterTest(unittest.TestCase):
             with self.subTest(executable=f_bad):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm:
                     self.m_adapter.probeCapability(f_executable=f_bad)  # type: ignore[arg-type]
-                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Executable must be a non-empty string", str(f_cm.exception)
+                )
 
         # 030-F2: NUL byte in executable
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -600,6 +614,7 @@ class IorAdapterTest(unittest.TestCase):
 
     def testProbeCapabilityUnexpectedException(self) -> None:
         """Verify unexpected runner exceptions are wrapped in BenchmarkProbeError (case 030-G1)."""
+
         def _failingRunner(_argv: Sequence[str]) -> Any:
             raise RuntimeError("Unexpected probe runner crash")
 
@@ -613,6 +628,7 @@ class IorAdapterTest(unittest.TestCase):
 
     def testProbeCapabilityRunnerResultTypes(self) -> None:
         """Verify probeCapability handling across runner result types (cases 030-H1 to 030-H6)."""
+
         # 030-H1: result with exit_code attribute (no returncode)
         class ExitCodeResult:
             exit_code = 0
@@ -640,15 +656,11 @@ class IorAdapterTest(unittest.TestCase):
 
         # 030-H4: int result (non-zero and zero)
         with self.assertRaises(BenchmarkProbeError) as f_cm_fail:
-            self.m_adapter.probeCapability(
-                self.m_executable, f_runner=lambda a: 1
-            )
+            self.m_adapter.probeCapability(self.m_executable, f_runner=lambda a: 1)
         self.assertIn("probe failed with exit code 1", str(f_cm_fail.exception))
 
         with self.assertRaises(BenchmarkProbeError) as f_cm_empty:
-            self.m_adapter.probeCapability(
-                self.m_executable, f_runner=lambda a: 0
-            )
+            self.m_adapter.probeCapability(self.m_executable, f_runner=lambda a: 0)
         self.assertIn("produced empty probe output", str(f_cm_empty.exception))
 
         # 030-H5: str result
@@ -674,7 +686,11 @@ class IorAdapterTest(unittest.TestCase):
         with self.assertRaises(BenchmarkProbeError) as f_cm:
             self.m_adapter.probeCapability(
                 self.m_executable,
-                f_runner=lambda a: (0, "unrecognized banner text with zero matching keywords", ""),
+                f_runner=lambda a: (
+                    0,
+                    "unrecognized banner text with zero matching keywords",
+                    "",
+                ),
             )
         self.assertIn("produced unrecognized probe output:", str(f_cm.exception))
 

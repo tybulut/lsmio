@@ -1735,7 +1735,8 @@ class SchedulerDomainValidationTest(unittest.TestCase):
         self.assertEqual(f_full.account, "acct")
         self.assertEqual(f_full.resources, {"a": 1})
         self.assertEqual(
-            repr(f_full), "JobSpec(point_id='3', script_path='/tmp/job.sh', job_name='lm-abc')"
+            repr(f_full),
+            "JobSpec(point_id='3', script_path='/tmp/job.sh', job_name='lm-abc')",
         )
 
     def testJobSpecEqualityAndHash(self) -> None:

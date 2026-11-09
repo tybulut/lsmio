@@ -31,6 +31,7 @@
 #include <iostream>
 #include <lsmio/manager/client/client_adios.hpp>
 #include <thread>  // NOLINT [build/c++11]
+#include <vector>
 
 namespace lsmio {
 
@@ -102,18 +103,21 @@ bool LSMIOClientAdios::recvCommand(int rank, std::string *command, std::string *
 
     int sizeReceived[3];
     _comm->Recv(sizeReceived, 3, rank, 0, hint);
+    for (int sz : sizeReceived) {
+        if (sz < 0 || sz > (1 << 30)) return false;
+    }
 
-    char cmdBuffer[sizeReceived[0]];
-    char keyBuffer[sizeReceived[1]];
-    char valBuffer[sizeReceived[2]];
+    std::vector<char> cmdBuffer(sizeReceived[0]);
+    std::vector<char> keyBuffer(sizeReceived[1]);
+    std::vector<char> valBuffer(sizeReceived[2]);
 
-    _comm->Recv(cmdBuffer, sizeReceived[0], rank, 0, hint);
-    _comm->Recv(cmdBuffer, sizeReceived[1], rank, 0, hint);
-    _comm->Recv(cmdBuffer, sizeReceived[2], rank, 0, hint);
+    _comm->Recv(cmdBuffer.data(), sizeReceived[0], rank, 0, hint);
+    _comm->Recv(keyBuffer.data(), sizeReceived[1], rank, 0, hint);
+    _comm->Recv(valBuffer.data(), sizeReceived[2], rank, 0, hint);
 
-    command->assign(cmdBuffer, sizeReceived[0]);
-    key->assign(keyBuffer, sizeReceived[1]);
-    value->assign(valBuffer, sizeReceived[2]);
+    command->assign(cmdBuffer.data(), sizeReceived[0]);
+    key->assign(keyBuffer.data(), sizeReceived[1]);
+    value->assign(valBuffer.data(), sizeReceived[2]);
 
     LOG(INFO) << "LSMIOClientAdios::recvCommandMPI:"
               << " rank: " << rank << " command: " << *command << " key: " << *key

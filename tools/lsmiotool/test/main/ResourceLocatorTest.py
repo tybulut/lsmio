@@ -771,7 +771,9 @@ class ResourceLocatorTest(unittest.TestCase):
             with self.subTest(f_value=f_value):
                 with self.assertRaises(LayoutConfigurationError) as f_ctx:
                     ResourceLocator._resolveRelativePath(
-                        "/anchor/bin", f_value, "package_root"  # type: ignore
+                        "/anchor/bin",
+                        f_value,
+                        "package_root",  # type: ignore
                     )
                 self.assertEqual(str(f_ctx.exception), f_prefix + repr(f_value))
 

@@ -179,10 +179,11 @@ void LSMIOStoreNative::close() {
 
         lock.unlock();
         try {
-            FlushMemtableToL0(std::move(memtable_to_flush));
+            FlushMemtableToL0(*memtable_to_flush);
         } catch (...) {
             m_bg_error.store(true, std::memory_order_release);
         }
+        memtable_to_flush.reset();
         lock.lock();
     }
 
@@ -193,7 +194,7 @@ void LSMIOStoreNative::close() {
 
 void LSMIOStoreNative::FlushWorkLoop() {
     while (true) {
-        std::unique_ptr<IMemtable> memtable_to_flush;
+        const IMemtable* flushing = nullptr;
 
         {
             std::unique_lock<std::mutex> lock(m_state_mutex);
@@ -205,17 +206,17 @@ void LSMIOStoreNative::FlushWorkLoop() {
             }
 
             if (!m_immutable_memtables.empty()) {
-                memtable_to_flush = std::move(m_immutable_memtables.front());
+                m_flushing_memtable = std::move(m_immutable_memtables.front());
                 m_immutable_memtables.pop_front();
-                m_flush_in_progress = true;
+                flushing = m_flushing_memtable.get();
             }
         }  // Release lock
 
         m_backpressure_cv.notify_all();
 
-        if (memtable_to_flush) {
+        if (flushing) {
             try {
-                FlushMemtableToL0(std::move(memtable_to_flush));
+                FlushMemtableToL0(*flushing);
             } catch (const std::exception& e) {
                 m_bg_error.store(true, std::memory_order_release);
                 std::cerr << "[NATIVE] ERROR in FlushWorkLoop: " << e.what() << std::endl;
@@ -224,22 +225,23 @@ void LSMIOStoreNative::FlushWorkLoop() {
                 std::cerr << "[NATIVE] UNKNOWN ERROR in FlushWorkLoop" << std::endl;
             }
 
+            std::unique_ptr<IMemtable> flushed_memtable;
             {
                 std::unique_lock<std::mutex> lock(m_state_mutex);
-                m_flush_in_progress = false;
+                flushed_memtable = std::move(m_flushing_memtable);
             }
             m_barrier_cv.notify_all();
         }
     }
 }
 
-void LSMIOStoreNative::FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable) {
-    if (!f_memtable || f_memtable->empty()) {
+void LSMIOStoreNative::FlushMemtableToL0(const IMemtable& f_memtable) {
+    if (f_memtable.empty()) {
         return;
     }
 
     try {
-        if (!m_sstable_manager || !m_sstable_manager->flushMemtable(*f_memtable, m_flush_buffer)) {
+        if (!m_sstable_manager || !m_sstable_manager->flushMemtable(f_memtable, m_flush_buffer)) {
             m_bg_error.store(true, std::memory_order_release);
         }
     } catch (const std::exception& e) {
@@ -259,6 +261,10 @@ bool LSMIOStoreNative::stopBatch() {
     return writeBarrier();
 }
 
+bool LSMIOStoreNative::isMutationKeyValid(const std::string& f_key) const noexcept {
+    return !f_key.empty() && f_key.size() <= m_max_key_len;
+}
+
 bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& f_key,
                                       const std::string& f_value, bool f_flush) {
     if (m_read_only) return false;
@@ -266,7 +272,7 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
 
     const bool is_del = (f_m_type == MutationType::Del);
     const size_t val_size = is_del ? MEMTABLE_TOMBSTONE.size() : f_value.size();
-    if (f_key.size() > m_max_key_len || val_size > m_max_value_len) return false;
+    if (!isMutationKeyValid(f_key) || val_size > m_max_value_len) return false;
 
     const size_t entry_size = f_key.size() + val_size;
 
@@ -309,7 +315,7 @@ bool LSMIOStoreNative::_batchMutation(MutationType f_m_type, const std::string& 
     if (m_bg_error.load(std::memory_order_relaxed)) return false;
     const bool is_del = (f_m_type == MutationType::Del);
     const size_t val_size = is_del ? MEMTABLE_TOMBSTONE.size() : f_value.size();
-    if (f_key.size() > m_max_key_len || val_size > m_max_value_len) return false;
+    if (!isMutationKeyValid(f_key) || val_size > m_max_value_len) return false;
     const size_t entry_size = f_key.size() + val_size;
 
     std::unique_lock<std::mutex> lock(m_state_mutex);
@@ -362,7 +368,7 @@ void LSMIOStoreNative::dropActiveMemtable() {
 bool LSMIOStoreNative::putBytes(const std::string& f_key, std::string_view f_value, bool f_flush) {
     if (m_read_only) return false;
     if (m_bg_error.load(std::memory_order_relaxed)) return false;
-    if (f_key.size() > m_max_key_len || f_value.size() > m_max_value_len) return false;
+    if (!isMutationKeyValid(f_key) || f_value.size() > m_max_value_len) return false;
     return _batchMutation(MutationType::Put, f_key, std::string(f_value), f_flush);
 }
 
@@ -395,6 +401,10 @@ bool LSMIOStoreNative::get(const std::string f_key, std::string* f_value) {
                 }
             }
         }
+
+        if (!found && m_flushing_memtable && m_flushing_memtable->get(f_key, result)) {
+            found = true;
+        }
     }
 
     if (!found) {
@@ -421,11 +431,15 @@ bool LSMIOStoreNative::getPrefix(const std::string f_prefix_key,
     {
         std::unique_lock<std::mutex> lock(m_state_mutex);
 
-        m_active_memtable->scan(f_prefix_key, results, deleted_keys);
+        if (m_flushing_memtable) {
+            m_flushing_memtable->scan(f_prefix_key, results, deleted_keys);
+        }
 
-        for (auto it = m_immutable_memtables.rbegin(); it != m_immutable_memtables.rend(); ++it) {
+        for (auto it = m_immutable_memtables.begin(); it != m_immutable_memtables.end(); ++it) {
             (*it)->scan(f_prefix_key, results, deleted_keys);
         }
+
+        m_active_memtable->scan(f_prefix_key, results, deleted_keys);
     }
 
     m_sstable_manager->scan(f_prefix_key, results, deleted_keys);
@@ -458,7 +472,7 @@ bool LSMIOStoreNative::writeBarrier() {
 
     m_barrier_cv.wait(lock, [this] {
         return m_bg_error.load(std::memory_order_relaxed) ||
-               (m_immutable_memtables.empty() && !m_flush_in_progress);
+               (m_immutable_memtables.empty() && !m_flushing_memtable);
     });
 
     return !m_bg_error.load(std::memory_order_relaxed);

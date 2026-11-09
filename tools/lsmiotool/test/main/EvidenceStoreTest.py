@@ -423,9 +423,7 @@ class EvidenceStoreTest(unittest.TestCase):
                 f_sp = f_points[f_idx]
                 f_name = f"{f_idx:02d}-tasks-{f_sp.tasks}"
                 self.m_artifact_store.preparePoint(f_sp, f_ordinal=f_idx)
-                f_rec = self.m_evidence_store.recordSubmissionRequested(
-                    f_int, "client"
-                )
+                f_rec = self.m_evidence_store.recordSubmissionRequested(f_int, "client")
                 f_path = os.path.join(
                     self.m_layout.pointsDir,
                     f_name,
@@ -486,9 +484,7 @@ class EvidenceStoreTest(unittest.TestCase):
                 )
         # Task count 4 matches plan index 2; an explicit ordinal must agree.
         with self.assertRaises(EvidencePlanError) as f_cm:
-            self.m_evidence_store.recordSubmissionRequested(
-                4, "client", f_ordinal=3
-            )
+            self.m_evidence_store.recordSubmissionRequested(4, "client", f_ordinal=3)
         self.assertEqual(
             str(f_cm.exception),
             f"Ordinal 3 contradicts point '4' matched at plan index 2 for run '{f_run}'",
@@ -1515,7 +1511,9 @@ class ResultPayloadValidatorTest(unittest.TestCase):
                 (self.m_ctrl_fail, "failure"),
             ):
                 with self.subTest(f_v=f_v, f_word=f_word):
-                    f_payload = {f_k: f_x for f_k, f_x in f_base.items() if f_k != "stage"}
+                    f_payload = {
+                        f_k: f_x for f_k, f_x in f_base.items() if f_k != "stage"
+                    }
                     if f_v is not f_absent:
                         f_payload["stage"] = f_v
                     self._assertRejects(

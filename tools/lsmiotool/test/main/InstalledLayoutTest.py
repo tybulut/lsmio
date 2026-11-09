@@ -290,7 +290,9 @@ class InstalledLayoutTest(unittest.TestCase):
             f_source_content = f_f.read()
         for f_wrapper_content in (f_public_content, f_source_content):
             self.assertIn("parseLatexArguments(args)", f_wrapper_content)
-            self.assertIn("main.LatexDataMain(f_request=latex_request)", f_wrapper_content)
+            self.assertIn(
+                "main.LatexDataMain(f_request=latex_request)", f_wrapper_content
+            )
             self.assertIn("main.LatexMain(f_request=latex_request)", f_wrapper_content)
             self.assertIn("LATEX_HELP_TEXT", f_wrapper_content)
             self.assertNotIn("LatexMain(*cmd_args)", f_wrapper_content)

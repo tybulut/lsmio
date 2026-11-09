@@ -693,7 +693,9 @@ class LmpAdapterTest(unittest.TestCase):
             with self.subTest(asset_root=f_bad):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm:
                     self.m_adapter.validateAssets(f_bad)  # type: ignore[arg-type]
-                self.assertIn("Asset root must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Asset root must be a non-empty string", str(f_cm.exception)
+                )
 
         # 033-A2: NUL byte in asset_root
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -733,7 +735,9 @@ class LmpAdapterTest(unittest.TestCase):
             with self.subTest(work_dir=f_bad):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm:
                     self.m_adapter.stageAssets("/tmp/assets", f_bad)  # type: ignore[arg-type]
-                self.assertIn("Working directory must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Working directory must be a non-empty string", str(f_cm.exception)
+                )
 
         # 033-B4: working_dir contains NUL byte
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -750,23 +754,31 @@ class LmpAdapterTest(unittest.TestCase):
                     f_f.write(b"content")
 
             # 033-C1: os.makedirs failure
-            with patch("os.makedirs", side_effect=OSError("Makedirs permission denied")):
+            with patch(
+                "os.makedirs", side_effect=OSError("Makedirs permission denied")
+            ):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm_mkdir:
                     self.m_adapter.stageAssets(f_asset_dir, "/tmp/fail_work")
-                self.assertIn("Failed to create LMP working directory", str(f_cm_mkdir.exception))
+                self.assertIn(
+                    "Failed to create LMP working directory", str(f_cm_mkdir.exception)
+                )
                 self.assertIsInstance(f_cm_mkdir.exception.__cause__, OSError)
 
             # 033-C2: file write failure
             f_real_open = open
 
-            def _failing_open(f_path: Any, f_mode: str = "r", *f_args: Any, **f_kwargs: Any) -> Any:
+            def _failing_open(
+                f_path: Any, f_mode: str = "r", *f_args: Any, **f_kwargs: Any
+            ) -> Any:
                 if "wb" in f_mode and "fail_stage" in str(f_path):
                     raise OSError("Disk write error")
                 return f_real_open(f_path, f_mode, *f_args, **f_kwargs)
 
             with patch("builtins.open", side_effect=_failing_open):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm_write:
-                    self.m_adapter.stageAssets(f_asset_dir, os.path.join(f_temp_base, "fail_stage"))
+                    self.m_adapter.stageAssets(
+                        f_asset_dir, os.path.join(f_temp_base, "fail_stage")
+                    )
                 self.assertIn("Failed to stage LMP asset", str(f_cm_write.exception))
                 self.assertIsInstance(f_cm_write.exception.__cause__, OSError)
 
@@ -782,7 +794,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_replication=4,
                         f_buffer_size_mb=32,
                     )
-                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Executable must be a non-empty string", str(f_cm.exception)
+                )
 
         # 033-D2: setup invalid / empty
         for f_bad in (123, None, "", "   "):
@@ -818,7 +832,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_replication=f_bad,  # type: ignore[arg-type]
                         f_buffer_size_mb=32,
                     )
-                self.assertIn("LMP replication must be a positive integer", str(f_cm.exception))
+                self.assertIn(
+                    "LMP replication must be a positive integer", str(f_cm.exception)
+                )
 
         # 033-D5: buffer_size_mb required for LSMIO and LSMIO-MMAP
         for f_setup in ("LSMIO", "LSMIO-MMAP"):
@@ -830,7 +846,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_replication=4,
                         f_buffer_size_mb=None,
                     )
-                self.assertIn("LMP buffer_size_mb is required for setup", str(f_cm.exception))
+                self.assertIn(
+                    "LMP buffer_size_mb is required for setup", str(f_cm.exception)
+                )
 
         # 033-D6: buffer_size_mb non-positive or non-int
         for f_bad in (0, -1, -32, True, False, "32", 32.0):
@@ -842,7 +860,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_replication=4,
                         f_buffer_size_mb=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("LMP buffer_size_mb must be a positive integer", str(f_cm.exception))
+                self.assertIn(
+                    "LMP buffer_size_mb must be a positive integer", str(f_cm.exception)
+                )
 
         # 033-D7: working_dir invalid / empty
         for f_bad in (123, None, "", "   "):
@@ -855,7 +875,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_buffer_size_mb=32,
                         f_working_dir=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("Working directory must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Working directory must be a non-empty string", str(f_cm.exception)
+                )
 
     def testBuildCommandPathValidation(self) -> None:
         """Verify stdout_path and stderr_path validation in buildCommand (cases 033-E1 to 033-E4)."""
@@ -870,7 +892,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_buffer_size_mb=32,
                         f_stdout_path=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("Stdout path must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Stdout path must be a non-empty string", str(f_cm.exception)
+                )
 
         # 033-E2: stdout_path contains NUL byte
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -894,7 +918,9 @@ class LmpAdapterTest(unittest.TestCase):
                         f_buffer_size_mb=32,
                         f_stderr_path=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn("Stderr path must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Stderr path must be a non-empty string", str(f_cm.exception)
+                )
 
         # 033-E4: stderr_path contains NUL byte
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -954,7 +980,9 @@ class LmpAdapterTest(unittest.TestCase):
             with self.subTest(executable=f_bad):
                 with self.assertRaises(BenchmarkConfigurationError) as f_cm:
                     self.m_adapter.probeCapability(f_executable=f_bad)  # type: ignore[arg-type]
-                self.assertIn("Executable must be a non-empty string", str(f_cm.exception))
+                self.assertIn(
+                    "Executable must be a non-empty string", str(f_cm.exception)
+                )
 
         # 033-H2: NUL byte in executable
         with self.assertRaises(BenchmarkConfigurationError) as f_cm:
@@ -963,6 +991,7 @@ class LmpAdapterTest(unittest.TestCase):
 
     def testProbeCapabilityUnexpectedException(self) -> None:
         """Verify unexpected runner exceptions are wrapped in BenchmarkProbeError (case 033-I1)."""
+
         def _failingRunner(_argv: Sequence[str]) -> Any:
             raise RuntimeError("Unexpected LMP probe crash")
 
@@ -980,6 +1009,7 @@ class LmpAdapterTest(unittest.TestCase):
 
     def testProbeCapabilityRunnerResultTypes(self) -> None:
         """Verify probeCapability handling across runner result types (cases 033-J1 to 033-J6)."""
+
         # 033-J1: result with exit_code attribute (no returncode)
         class ExitCodeResult:
             exit_code = 0
@@ -1063,7 +1093,11 @@ class LmpAdapterTest(unittest.TestCase):
         with self.assertRaises(BenchmarkProbeError) as f_cm:
             f_custom_adapter.probeCapability(
                 self.m_executable,
-                f_runner=lambda a: (0, "unrecognized banner text with neither keyword", ""),
+                f_runner=lambda a: (
+                    0,
+                    "unrecognized banner text with neither keyword",
+                    "",
+                ),
                 f_setup="BASE",
             )
         self.assertIn("produced unrecognized help output:", str(f_cm.exception))
@@ -1085,7 +1119,9 @@ class LmpAdapterTest(unittest.TestCase):
                 f_runner=lambda a: (0, "LAMMPS (2 Aug 2023) without required flag", ""),
                 f_setup=None,
             )
-        self.assertIn("required buffer flag ('buf') for setup 'LSMIO'", str(f_cm.exception))
+        self.assertIn(
+            "required buffer flag ('buf') for setup 'LSMIO'", str(f_cm.exception)
+        )
 
 
 if __name__ == "__main__":

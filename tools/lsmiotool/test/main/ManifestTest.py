@@ -1037,49 +1037,74 @@ class ManifestDocumentContractTest(unittest.TestCase):
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_schema_version=True))
-        self.assertIn("schema_version must be integer 1, got: True", str(f_ctx.exception))
+        self.assertIn(
+            "schema_version must be integer 1, got: True", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_schema_version="1"))
-        self.assertIn("schema_version must be integer 1, got: '1'", str(f_ctx.exception))
+        self.assertIn(
+            "schema_version must be integer 1, got: '1'", str(f_ctx.exception)
+        )
 
     def testManifestDocumentRunIdValidation(self) -> None:
         """Assert non-str, empty, or whitespace run_id raises ManifestValidationError (line 2066; arc [2065, 2066])."""
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_run_id=""))
-        self.assertIn("run_id must be a non-empty string, got: ''", str(f_ctx.exception))
+        self.assertIn(
+            "run_id must be a non-empty string, got: ''", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_run_id="   "))
-        self.assertIn("run_id must be a non-empty string, got: '   '", str(f_ctx.exception))
+        self.assertIn(
+            "run_id must be a non-empty string, got: '   '", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_run_id=12345))
-        self.assertIn("run_id must be a non-empty string, got: 12345", str(f_ctx.exception))
+        self.assertIn(
+            "run_id must be a non-empty string, got: 12345", str(f_ctx.exception)
+        )
 
     def testManifestDocumentCreatedAtUtcValidation(self) -> None:
         """Assert invalid created_at_utc format or date raises ManifestValidationError (lines 2070, 2074, 2079, 2080)."""
         # Non-empty string check (line 2070; arc [2069, 2070])
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_created_at_utc=""))
-        self.assertIn("created_at_utc must be a non-empty string, got: ''", str(f_ctx.exception))
+        self.assertIn(
+            "created_at_utc must be a non-empty string, got: ''", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_created_at_utc="   "))
-        self.assertIn("created_at_utc must be a non-empty string, got: '   '", str(f_ctx.exception))
+        self.assertIn(
+            "created_at_utc must be a non-empty string, got: '   '",
+            str(f_ctx.exception),
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_created_at_utc=None))
-        self.assertIn("created_at_utc must be a non-empty string, got: None", str(f_ctx.exception))
+        self.assertIn(
+            "created_at_utc must be a non-empty string, got: None", str(f_ctx.exception)
+        )
 
         # ISO UTC pattern check (line 2074; arc [2073, 2074])
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_created_at_utc="2026-08-20 12:00:00"))
-        self.assertIn("must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ", str(f_ctx.exception))
+        self.assertIn(
+            "must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ",
+            str(f_ctx.exception),
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
-            ManifestDocument(**self._makeArgs(f_created_at_utc="2026-08-20T12:00:00+00:00"))
-        self.assertIn("must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ", str(f_ctx.exception))
+            ManifestDocument(
+                **self._makeArgs(f_created_at_utc="2026-08-20T12:00:00+00:00")
+            )
+        self.assertIn(
+            "must match exact ISO 8601 UTC format YYYY-MM-DDTHH:MM:SSZ",
+            str(f_ctx.exception),
+        )
 
         # Valid calendar date/time check (lines 2079, 2080)
         with self.assertRaises(ManifestValidationError) as f_ctx:
@@ -1090,7 +1115,9 @@ class ManifestDocumentContractTest(unittest.TestCase):
         """Assert non-RunRequest request raises ManifestValidationError (line 2085; arc [2084, 2085])."""
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_request="not-a-request"))
-        self.assertIn("request must be a RunRequest, got: 'not-a-request'", str(f_ctx.exception))
+        self.assertIn(
+            "request must be a RunRequest, got: 'not-a-request'", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_request=None))
@@ -1100,7 +1127,9 @@ class ManifestDocumentContractTest(unittest.TestCase):
         """Assert non-SiteProfile site raises ManifestValidationError (line 2089; arc [2088, 2089])."""
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_site="not-a-site"))
-        self.assertIn("site must be a SiteProfile, got: 'not-a-site'", str(f_ctx.exception))
+        self.assertIn(
+            "site must be a SiteProfile, got: 'not-a-site'", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_site=None))
@@ -1145,35 +1174,53 @@ class ManifestDocumentContractTest(unittest.TestCase):
         # Points count mismatch (line 2099; arc [2098, 2099])
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_points=()))
-        self.assertIn("points count (0) must equal scale_points count (1)", str(f_ctx.exception))
+        self.assertIn(
+            "points count (0) must equal scale_points count (1)", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
-            ManifestDocument(**self._makeArgs(f_points=list(self.m_valid_doc.points) * 2))
-        self.assertIn("points count (2) must equal scale_points count (1)", str(f_ctx.exception))
+            ManifestDocument(
+                **self._makeArgs(f_points=list(self.m_valid_doc.points) * 2)
+            )
+        self.assertIn(
+            "points count (2) must equal scale_points count (1)", str(f_ctx.exception)
+        )
 
         # Tokens count mismatch (line 2103; arc [2102, 2103])
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_tokens=()))
-        self.assertIn("tokens count (0) must equal points count (1)", str(f_ctx.exception))
+        self.assertIn(
+            "tokens count (0) must equal points count (1)", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
-            ManifestDocument(**self._makeArgs(f_tokens=list(self.m_valid_doc.tokens) * 2))
-        self.assertIn("tokens count (2) must equal points count (1)", str(f_ctx.exception))
+            ManifestDocument(
+                **self._makeArgs(f_tokens=list(self.m_valid_doc.tokens) * 2)
+            )
+        self.assertIn(
+            "tokens count (2) must equal points count (1)", str(f_ctx.exception)
+        )
 
     def testManifestDocumentTokenFormatAndDuplicateValidation(self) -> None:
         """Assert invalid token format or duplicate token raises ManifestValidationError (lines 2110, 2114)."""
         # Token format invalid (line 2110; arc [2109, 2110])
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_tokens=["invalid-token"]))
-        self.assertIn("is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception))
+        self.assertIn(
+            "is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_tokens=[12345]))
-        self.assertIn("is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception))
+        self.assertIn(
+            "is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception)
+        )
 
         with self.assertRaises(ManifestValidationError) as f_ctx:
             ManifestDocument(**self._makeArgs(f_tokens=["lm-ZZZZZZZZZZZZZZZZZZZZZZZZ"]))
-        self.assertIn("is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception))
+        self.assertIn(
+            "is invalid; must match '^lm-[0-9a-f]{24}$'", str(f_ctx.exception)
+        )
 
         # Duplicate correlation tokens (line 2114; arc [2113, 2114])
         f_sp2 = list(self.m_valid_doc.scale_points) * 2
@@ -1207,7 +1254,9 @@ class ManifestDocumentContractTest(unittest.TestCase):
         # Repr (line 2212)
         f_repr = repr(self.m_valid_doc)
         self.assertTrue(
-            f_repr.startswith("ManifestDocument(schema_version=1, run_id='run-contract-doc'")
+            f_repr.startswith(
+                "ManifestDocument(schema_version=1, run_id='run-contract-doc'"
+            )
         )
         self.assertIn("request=RunRequest(target='ior'", f_repr)
         self.assertIn("site=", f_repr)

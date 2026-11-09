@@ -112,11 +112,8 @@ bool LSMIOStore::_batchMutation(MutationType mType, const std::string& key, std:
 }
 
 bool LSMIOStore::writeBarrier() {
-    bool status;
-
     LOG(INFO) << "LSMIOStore::writeBarrier: " << std::endl;
-    status = stopBatch();
-    return true;
+    return stopBatch();
 }
 
 }  // namespace lsmio

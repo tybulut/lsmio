@@ -37,7 +37,10 @@ class LibPackageTest(unittest.TestCase):
     def testEnumAssignsIndexesAndKeywordValues(self) -> None:
         """enum() numbers positional names and lets keywords add or override."""
         f_rows = (
-            (enum("ERROR", "WARNING", "DEBUG", "INFO"), {"ERROR": 0, "WARNING": 1, "DEBUG": 2, "INFO": 3}),
+            (
+                enum("ERROR", "WARNING", "DEBUG", "INFO"),
+                {"ERROR": 0, "WARNING": 1, "DEBUG": 2, "INFO": 3},
+            ),
             (enum("A", B=5), {"A": 0, "B": 5}),
             (enum("A", A=9), {"A": 9}),
         )

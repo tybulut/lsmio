@@ -63,8 +63,17 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
         tableOptions.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
     }
 
+    // Pick first supported codec; kNoCompression closes both lists so find_first_of cannot fail.
     if (!gConfigLSMIO.compression) {
         _options.compression = rocksdb::kNoCompression;
+    } else {
+        static constexpr rocksdb::CompressionType preference[] = {
+            rocksdb::kSnappyCompression, rocksdb::kLZ4Compression, rocksdb::kZSTD,
+            rocksdb::kNoCompression};
+        std::vector<rocksdb::CompressionType> supported = rocksdb::GetSupportedCompressions();
+        supported.push_back(rocksdb::kNoCompression);
+        _options.compression = *std::find_first_of(std::begin(preference), std::end(preference),
+                                                   supported.begin(), supported.end());
     }
 
     if (gConfigLSMIO.cacheSize > 0) {

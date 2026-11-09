@@ -1,2 +1,2 @@
-- Build improvements including code coverage tool changes
-- Bmtool shell script retirement
+- Code coverage
+- Minor bug fixes

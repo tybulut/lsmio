@@ -31,6 +31,7 @@
 #include <gtest/gtest.h>
 #include <mpi.h>
 
+#include <filesystem>
 #include <iostream>
 #include <lsmio/manager/manager.hpp>
 #include <stdexcept>
@@ -146,6 +147,19 @@ TEST(managerMPIThreadTests, AggregationNeedsThreadMultiple) {
     // One rank on its own never aggregates
     EXPECT_NO_THROW(lm = new lsmio::LSMIOManager(rankFile, TEST_DIR_MGR, true, MPI_COMM_SELF));
     delete lm;
+}
+
+TEST(managerMPIConfigTests, UnknownStorageTypeRefusedOnEveryRank) {
+    lsmio::LSMIOConfig backupConfig = lsmio::gConfigLSMIO;
+    lsmio::gConfigLSMIO.storageType = static_cast<lsmio::StorageType>(42);
+    lsmio::gConfigLSMIO.mpiAggType = lsmio::MPIAggType::Entire;
+
+    EXPECT_THROW(new lsmio::LSMIOManager("test-mpi-mgr-badtype.db", "", true, MPI_COMM_WORLD),
+                 std::invalid_argument);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    lsmio::gConfigLSMIO = backupConfig;
+    EXPECT_FALSE(std::filesystem::exists("test-mpi-mgr-badtype.db"));
 }
 
 

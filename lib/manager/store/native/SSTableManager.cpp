@@ -30,7 +30,6 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -210,44 +209,33 @@ bool tryLoadFooterIndex(std::ifstream& f_file, uint64_t& f_file_size,
 
 namespace lsmio {
 
-SSTableManager::IndexNode::IndexNode(L0Index&& idx) : index(std::move(idx)) {}
+SSTableManager::IndexNode::IndexNode(L0Index&& idx, uint64_t f_file_len)
+    : index(std::move(idx)), m_file_len(f_file_len) {}
 
 SSTableManager::IndexNode::~IndexNode() {
     closeReader();
 }
 
 void SSTableManager::IndexNode::initReader(bool f_enable_mmap, bool f_enable_pread) {
-    if (f_enable_mmap) {
+    if ((f_enable_mmap || f_enable_pread) && m_file_len > 0) {
         int fd = ::open(index.path.c_str(), O_RDONLY);
         if (fd >= 0) {
-            struct stat st;
-            bool stat_ok = (::fstat(fd, &st) == 0);
-            if (stat_ok && st.st_size > 0) {
+            if (f_enable_mmap) {
                 void* ptr =
-                    ::mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
+                    ::mmap(nullptr, static_cast<size_t>(m_file_len), PROT_READ, MAP_SHARED, fd, 0);
                 if (ptr != MAP_FAILED) {
                     m_mmap_ptr = static_cast<char*>(ptr);
-                    m_mmap_len = static_cast<size_t>(st.st_size);
+                    m_mmap_len = static_cast<size_t>(m_file_len);
                     ::posix_madvise(m_mmap_ptr, m_mmap_len, POSIX_MADV_WILLNEED);
-                    if (!f_enable_pread) {
-                        ::close(fd);
-                        fd = -1;
-                    } else {
-                        m_read_fd = fd;
-                        fd = -1;
-                    }
                 }
             }
-            if (fd >= 0) {
-                if (f_enable_pread && stat_ok && st.st_size > 0) {
-                    m_read_fd = fd;
-                } else {
-                    ::close(fd);
-                }
+
+            if (f_enable_pread) {
+                m_read_fd = fd;
+            } else {
+                ::close(fd);
             }
         }
-    } else if (f_enable_pread) {
-        m_read_fd = ::open(index.path.c_str(), O_RDONLY);
     }
 }
 
@@ -402,7 +390,7 @@ bool SSTableManager::flushMemtable(const IMemtable& f_memtable, std::vector<char
 
     dedupOffsets(new_index.offsets);
 
-    IndexNode* new_node = new IndexNode(std::move(new_index));
+    IndexNode* new_node = new IndexNode(std::move(new_index), current_offset);
     new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
     IndexNode* old_head = m_head.load(std::memory_order_relaxed);
     do {
@@ -521,6 +509,8 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             f_out_value.assign(tl_pread_buf.data() + 8 + key_len, val_len);
             return true;
         } else {
+            // bytes_read >= 8 + key_len => f_offset < 2^63, total_record_len < 2^32 (AI-5, AI-15).
+            if (f_offset + total_record_len > f_node.m_file_len) return false;
             m_pread_slow_path_count.fetch_add(1, std::memory_order_relaxed);
             f_out_value.resize(val_len);
             uint64_t val_in_buf = static_cast<uint64_t>(bytes_read) - (8ULL + key_len);
@@ -536,11 +526,11 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
             return true;
         }
     } else {
-        return readValueAt(f_node.index.path, f_offset, f_key, f_out_value);
+        return readValueAt(f_node.index.path, f_node.m_file_len, f_offset, f_key, f_out_value);
     }
 }
 
-bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
+bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_file_len, uint64_t f_offset,
                                  const std::string& f_key, std::string& f_out_value) {
     std::ifstream sst_file(f_path, std::ios::binary);
     if (!sst_file) {
@@ -568,6 +558,7 @@ bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_offset,
     uint32_t val_len;
     if (!readLe32(sst_file, val_len)) return false;
     if (val_len > READ_MAX_VAL_LEN) return false;
+    if (f_offset + 8 + key_len + val_len > f_file_len) return false;
 
     f_out_value.resize(val_len);
     sst_file.read(f_out_value.data(), val_len);
@@ -600,14 +591,17 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
         std::cout << "[NATIVE] Recovering state. Indexing " << found_files.size() << " SSTables..."
                   << std::endl;
 
+        std::vector<std::unique_ptr<IndexNode>> recovered_nodes;
         for (const auto& [id, path] : found_files) {
             L0Index new_index;
             new_index.path = path;
 
             std::ifstream sst_file(path, std::ios::binary);
+            uint64_t file_len = 0;
             if (sst_file) {
                 sst_file.seekg(0, std::ios::end);
                 uint64_t file_size = sst_file.tellg();
+                file_len = file_size;
 
                 if (!tryLoadFooterIndex(sst_file, file_size, new_index.offsets)) {
                     sst_file.clear();
@@ -628,10 +622,11 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
                         uint32_t val_len;
                         if (!readLe32(sst_file, val_len)) break;
                         if (val_len > READ_MAX_VAL_LEN) break;
+                        if (val_len > file_size - (current_offset + 8 + key_len)) break;
 
-                        // A zero-length key and value marks the zero padding
-                        // of a preallocated file that could not be trimmed:
-                        // end of real data.
+                        // A zero-length key and value marks the zero padding of a preallocated
+                        // file that could not be trimmed: end of real data (empty keys are
+                        // refused on write, so no real record has this header).
                         if (key_len == 0 && val_len == 0) break;
 
                         sst_file.seekg(val_len, std::ios::cur);  // Skip value
@@ -639,18 +634,25 @@ void SSTableManager::recoverState(size_t f_file_pool_size, size_t f_pre_alloc_by
                         new_index.offsets.emplace_back(std::move(key), current_offset);
                     }
                 }
+            } else {
+                const int err = errno;
+                throw std::runtime_error("SSTableManager: cannot open SSTable " + path + ": " +
+                                         std::generic_category().message(err));
             }
 
             dedupOffsets(new_index.offsets);
 
-            // Prepend during recovery to maintain newest-to-oldest order
-            // Since we iterate found_files Oldest -> Newest, prepending each results in Newest at
-            // head. No mutex needed during initialization single-thread context.
-            IndexNode* new_node = new IndexNode(std::move(new_index));
+            auto new_node = std::make_unique<IndexNode>(std::move(new_index), file_len);
             new_node->initReader(gConfigLSMIO.enableMMAP, gConfigLSMIO.enablePread);
-            IndexNode* old_head = m_head.load(std::memory_order_relaxed);
-            new_node->next = old_head;
-            m_head.store(new_node, std::memory_order_relaxed);
+            recovered_nodes.push_back(std::move(new_node));
+        }
+
+        // Prepend during recovery to maintain newest-to-oldest order
+        // Since we iterate found_files Oldest -> Newest, prepending each results in Newest at
+        // head. No mutex needed during initialization single-thread context.
+        for (auto& node : recovered_nodes) {
+            node->next = m_head.load(std::memory_order_relaxed);
+            m_head.store(node.release(), std::memory_order_relaxed);
         }
         std::cout << "[NATIVE] Recovery complete." << std::endl;
     }

@@ -6,7 +6,7 @@ cd $HOME/src/packages/02-gtest
 git clone https://github.com/google/googletest.git
 
 cd googletest
-git checkout v1.14.x
+git checkout v1.14.0
 cd ..
 
 rm -rf googletest-build

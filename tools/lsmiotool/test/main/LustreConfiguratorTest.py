@@ -494,7 +494,9 @@ class LustreConfiguratorTest(unittest.TestCase):
         # A symlinked data/ inside the point directory
         f_real_data = os.path.join(self.m_temp_dir, "elsewhere")
         os.makedirs(os.path.join(f_real_data, "c16", "b8M"))
-        f_linked_point = os.path.join(f_lustre, "benchmark", "runs", "r1", "points", "01")
+        f_linked_point = os.path.join(
+            f_lustre, "benchmark", "runs", "r1", "points", "01"
+        )
         os.makedirs(f_linked_point)
         os.symlink(f_real_data, os.path.join(f_linked_point, "data"))
         with self.assertRaisesRegex(LustreConfigurationError, "symlink"):
@@ -508,8 +510,18 @@ class LustreConfiguratorTest(unittest.TestCase):
         os.symlink(os.path.join(f_points, "00-tasks-1"), os.path.join(f_points, "02"))
         with self.assertRaisesRegex(LustreConfigurationError, "symlink"):
             LustreConfigurator.validateTargetDir(
-                os.path.join(f_work, "e281", "benchmark", "runs", "r1", "points", "02",
-                             "data", "c16", "b8M"),
+                os.path.join(
+                    f_work,
+                    "e281",
+                    "benchmark",
+                    "runs",
+                    "r1",
+                    "points",
+                    "02",
+                    "data",
+                    "c16",
+                    "b8M",
+                ),
                 f_combo,
             )
 
@@ -517,7 +529,8 @@ class LustreConfiguratorTest(unittest.TestCase):
         f_stripe_point = os.path.join(f_points, "03")
         os.makedirs(os.path.join(f_stripe_point, "data"))
         os.symlink(
-            os.path.join(f_real_data, "c16"), os.path.join(f_stripe_point, "data", "c16")
+            os.path.join(f_real_data, "c16"),
+            os.path.join(f_stripe_point, "data", "c16"),
         )
         os.symlink(os.path.join(f_runs, "r1"), os.path.join(f_runs, "r2"))
         os.makedirs(os.path.join(f_runs, "r3"))
@@ -527,7 +540,9 @@ class LustreConfiguratorTest(unittest.TestCase):
             os.path.join(f_runs, "r2", "points", "00-tasks-1", "data", "c16", "b8M"),
             os.path.join(f_runs, "r3", "points", "00-tasks-1", "data", "c16", "b8M"),
         ):
-            with self.assertRaisesRegex(LustreConfigurationError, "symlink", msg=f_linked):
+            with self.assertRaisesRegex(
+                LustreConfigurationError, "symlink", msg=f_linked
+            ):
                 LustreConfigurator.validateTargetDir(f_linked, f_combo)
 
         # A symlinked runs/ directory, just above the run root, is the site's
@@ -748,7 +763,8 @@ class LustreConfiguratorContractTest(unittest.TestCase):
         for f_sc in f_bad_classes:
             with self.subTest(storage_class=f_sc):
                 with self.assertRaisesRegex(
-                    LustreConfigurationError, "Invalid storage class for pool resolution"
+                    LustreConfigurationError,
+                    "Invalid storage class for pool resolution",
                 ):
                     LustreConfigurator.resolvePool("VIKING2", f_storage_class=f_sc)
 

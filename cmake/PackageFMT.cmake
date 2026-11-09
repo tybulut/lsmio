@@ -4,6 +4,7 @@ if (NOT fmt_FOUND AND NOT TARGET fmt)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
+  option(FMT_TEST "Generate the test target." OFF)
   FetchContent_Declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git

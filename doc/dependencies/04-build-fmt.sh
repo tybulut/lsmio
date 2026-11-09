@@ -5,6 +5,10 @@ cd $HOME/src/packages/04-fmt
 
 git clone https://github.com/fmtlib/fmt.git
 
+cd fmt
+git checkout 10.2.1
+cd ..
+
 rm -rf fmt-build
 mkdir fmt-build
 

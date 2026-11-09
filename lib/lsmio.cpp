@@ -28,13 +28,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <cstdlib>
 #include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <iostream>
-
 #include <lsmio/lsmio.hpp>
 
 namespace {

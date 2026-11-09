@@ -1,11 +1,11 @@
 # TLX
 list(APPEND CMAKE_MODULE_PATH "/usr/share/cmake")
-find_package(tlx QUIET)
+find_package(tlx QUIET NO_CMAKE_PACKAGE_REGISTRY)
 if (NOT tlx_FOUND AND NOT TARGET tlx)
   include(FetchContent)
   set(FETCHCONTENT_QUIET FALSE)
 
-  option(tlx_BUILD_TESTS "Build tests" OFF)
+  option(TLX_BUILD_TESTS "Build tests" OFF)
   FetchContent_Declare(
     tlx
     GIT_REPOSITORY https://github.com/tlx/tlx.git
@@ -23,7 +23,9 @@ if (NOT tlx_FOUND AND NOT TARGET tlx)
   set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
       "Minimum CMake policy version for third-party deps with old cmake_minimum_required")
   set(CMAKE_POLICY_DEFAULT_CMP0048 OLD CACHE STRING "Suppress CMP0048 warning")
+  set(CMAKE_EXPORT_NO_PACKAGE_REGISTRY ON)
   FetchContent_MakeAvailable(tlx)
+  unset(CMAKE_EXPORT_NO_PACKAGE_REGISTRY)
   unset(CMAKE_POLICY_DEFAULT_CMP0048 CACHE)
   unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
   include_directories(${tlx_SOURCE_DIR})

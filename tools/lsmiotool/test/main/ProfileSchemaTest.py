@@ -693,7 +693,8 @@ class ProfileSchemaTest(unittest.TestCase):
         with self.assertRaises(AttributeError) as f_ctx:
             del f_doc.m_profiles
         self.assertEqual(
-            str(f_ctx.exception), "Cannot delete attribute from immutable ProfileDocument"
+            str(f_ctx.exception),
+            "Cannot delete attribute from immutable ProfileDocument",
         )
         self.assertEqual(f_doc.schema_version, 1)
         self.assertEqual(
@@ -711,7 +712,12 @@ class ProfileSchemaTest(unittest.TestCase):
 
     def testSiteRecordMustBeDictionary(self) -> None:
         """A site record that is not a dictionary is rejected and named."""
-        for f_site, f_value in (("DEV", []), ("DEV", ""), ("DEV", None), ("VIKING", "x")):
+        for f_site, f_value in (
+            ("DEV", []),
+            ("DEV", ""),
+            ("DEV", None),
+            ("VIKING", "x"),
+        ):
             with self.subTest(f_site=f_site, f_value=repr(f_value)):
                 self._assertRejected(
                     self._mutated(f_site, (), f_value),
@@ -733,7 +739,12 @@ class ProfileSchemaTest(unittest.TestCase):
                     )
                 )
         f_rows.append(
-            ("DEV", ("launcher",), ["srun"], "Profile 'DEV'.launcher must be a non-empty string")
+            (
+                "DEV",
+                ("launcher",),
+                ["srun"],
+                "Profile 'DEV'.launcher must be a non-empty string",
+            )
         )
         f_rows.append(
             (
@@ -750,7 +761,14 @@ class ProfileSchemaTest(unittest.TestCase):
         f_prefix = "Profile 'DEV'.benchmark_roots"
         f_rows: List[Tuple[str, Tuple[str, ...], Any, str]] = []
         for f_value in ([], None, "x"):
-            f_rows.append(("DEV", ("benchmark_roots",), f_value, f"{f_prefix} must be a dictionary"))
+            f_rows.append(
+                (
+                    "DEV",
+                    ("benchmark_roots",),
+                    f_value,
+                    f"{f_prefix} must be a dictionary",
+                )
+            )
         f_rows += [
             (
                 "DEV",
@@ -791,7 +809,12 @@ class ProfileSchemaTest(unittest.TestCase):
         ]
         for f_value in ([], None):
             f_rows.append(
-                ("DEV", ("executables",), f_value, "Profile 'DEV'.executables must be a dictionary")
+                (
+                    "DEV",
+                    ("executables",),
+                    f_value,
+                    "Profile 'DEV'.executables must be a dictionary",
+                )
             )
         for f_key, f_value in (("ior", ""), ("lmp", None), ("epocpp", 1)):
             f_rows.append(
@@ -827,7 +850,12 @@ class ProfileSchemaTest(unittest.TestCase):
             )
         for f_value in ([], None):
             f_rows.append(
-                ("DEV", ("resources",), f_value, "Profile 'DEV'.resources must be a dictionary")
+                (
+                    "DEV",
+                    ("resources",),
+                    f_value,
+                    "Profile 'DEV'.resources must be a dictionary",
+                )
             )
         f_rows += [
             (
@@ -869,21 +897,40 @@ class ProfileSchemaTest(unittest.TestCase):
         f_cancel = "Profile 'DEV'.cancellation"
         f_rows: List[Tuple[str, Tuple[str, ...], Any, str]] = []
         for f_value in ([], None):
-            f_rows.append(("DEV", ("rank_identity",), f_value, f"{f_rank} must be a dictionary"))
+            f_rows.append(
+                ("DEV", ("rank_identity",), f_value, f"{f_rank} must be a dictionary")
+            )
         for f_value in ("", None, 1):
             f_rows.append(
-                ("DEV", ("rank_identity", "global"), f_value, f"{f_rank}['global'] must be a non-empty string")
+                (
+                    "DEV",
+                    ("rank_identity", "global"),
+                    f_value,
+                    f"{f_rank}['global'] must be a non-empty string",
+                )
             )
         for f_value in ("", None):
             f_rows.append(
-                ("DEV", ("rank_identity", "node"), f_value, f"{f_rank}['node'] must be a non-empty string")
+                (
+                    "DEV",
+                    ("rank_identity", "node"),
+                    f_value,
+                    f"{f_rank}['node'] must be a non-empty string",
+                )
             )
         for f_value in (5, False):
             f_rows.append(
-                ("DEV", ("rank_identity", "local"), f_value, f"{f_rank}['local'] must be a string or null")
+                (
+                    "DEV",
+                    ("rank_identity", "local"),
+                    f_value,
+                    f"{f_rank}['local'] must be a string or null",
+                )
             )
         for f_value in ([], None):
-            f_rows.append(("DEV", ("cancellation",), f_value, f"{f_cancel} must be a dictionary"))
+            f_rows.append(
+                ("DEV", ("cancellation",), f_value, f"{f_cancel} must be a dictionary")
+            )
         f_rows += [
             (
                 "DEV",
@@ -900,7 +947,12 @@ class ProfileSchemaTest(unittest.TestCase):
         ]
         for f_value in ([], None):
             f_rows.append(
-                ("DEV", ("lustre_pools",), f_value, "Profile 'DEV'.lustre_pools must be a dictionary")
+                (
+                    "DEV",
+                    ("lustre_pools",),
+                    f_value,
+                    "Profile 'DEV'.lustre_pools must be a dictionary",
+                )
             )
         f_rows += [
             (
@@ -929,7 +981,9 @@ class ProfileSchemaTest(unittest.TestCase):
 
     def testNullableFieldsAcceptNullAndEmptyString(self) -> None:
         """Fields documented as 'string or null' accept the empty string."""
-        f_canonical = ProfileLoader.load(self.m_env_json_path).getProfile("DEV").toDict()
+        f_canonical = (
+            ProfileLoader.load(self.m_env_json_path).getProfile("DEV").toDict()
+        )
         for f_local in ("", None):
             with self.subTest(f_local=repr(f_local)):
                 f_doc = self._mutated("DEV", ("resources", "small", "queue"), "")

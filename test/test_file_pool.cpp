@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -270,4 +271,149 @@ TEST_F(FilePoolTest, NonExistentDirectoryFailureClean) {
     auto f = pool.acquire();
     EXPECT_EQ(f.first, "");
     EXPECT_EQ(f.second, nullptr);
+}
+
+namespace {
+
+// Polls f_counter until it reaches f_target; returns false if f_timeout passes first.
+bool waitForCount(const std::atomic<int>& f_counter, int f_target,
+                  std::chrono::milliseconds f_timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + f_timeout;
+    while (f_counter.load(std::memory_order_acquire) < f_target) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+}  // namespace
+
+// acquire() after shutdown() still hands out a file that the worker had already queued.
+TEST_F(FilePoolTest, ShutdownStillHandsOutQueuedFile) {
+    std::atomic<int> hook_calls{0};
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", /*f_pool_size=*/2, /*f_start_id=*/1100,
+                         /*f_pre_allocation_size=*/0,
+                         /*f_acquire_timeout=*/std::chrono::milliseconds(2000),
+                         [&hook_calls]() { hook_calls.fetch_add(1, std::memory_order_release); });
+
+    // The worker calls the hook right before each createFile(). A second call therefore means
+    // the first file (id 1100) has already been pushed into the pool.
+    ASSERT_TRUE(waitForCount(hook_calls, 2, std::chrono::seconds(5)));
+    pool.shutdown();
+
+    auto queued = pool.acquire();
+    ASSERT_NE(queued.second, nullptr);
+    EXPECT_TRUE(queued.second->is_open());
+    EXPECT_EQ(std::filesystem::path(queued.first).filename().string(), "L0-001100.sst");
+    EXPECT_TRUE(std::filesystem::exists(queued.first));
+    queued.second->close();
+    EXPECT_EQ(pool.getFallbackCreations(), 0u);
+}
+
+// A file that the worker finishes creating after shutdown() is closed and removed, not queued.
+TEST_F(FilePoolTest, ShutdownDuringCreationRemovesNewFile) {
+    std::atomic<bool> release_worker{false};
+    std::atomic<int> hook_calls{0};
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", /*f_pool_size=*/1, /*f_start_id=*/1500,
+                         /*f_pre_allocation_size=*/0,
+                         /*f_acquire_timeout=*/std::chrono::seconds(10), [&]() {
+                             hook_calls.fetch_add(1, std::memory_order_release);
+                             while (!release_worker.load(std::memory_order_acquire)) {
+                                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                             }
+                         });
+
+    // Releases the worker before ~FilePool() joins it, even if an assertion ends the test early.
+    struct WorkerReleaseGuard {
+        std::atomic<bool>& m_flag;
+        ~WorkerReleaseGuard() {
+            m_flag.store(true, std::memory_order_release);
+        }
+    } guard{release_worker};
+
+    // The worker is now parked in the hook, before its first createFile().
+    ASSERT_TRUE(waitForCount(hook_calls, 1, std::chrono::seconds(5)));
+
+    std::thread stopper([&pool]() { pool.shutdown(); });
+    // The pool stays empty while the worker is parked, so acquire() returns only after
+    // shutdown() has set the flag and woken it.
+    auto f = pool.acquire();
+    EXPECT_EQ(f.first, "");
+    EXPECT_EQ(f.second, nullptr);
+
+    release_worker.store(true, std::memory_order_release);
+    stopper.join();
+
+    EXPECT_EQ(hook_calls.load(), 1);
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(test_dir) / "L0-001500.sst"));
+    EXPECT_TRUE(std::filesystem::is_empty(test_dir));
+    EXPECT_EQ(pool.getFallbackCreations(), 0u);
+}
+
+// A pre-allocation size that does not fit in off_t reaches posix_fallocate() as a negative
+// length, which fails with EINVAL on every filesystem without writing any data. The pool must
+// return {"", nullptr} and remove the file it had just created.
+TEST_F(FilePoolTest, FallocateFailureReturnsNullAndRemovesFile) {
+    lsmio::FilePool pool(test_dir, "L0-", ".sst", /*f_pool_size=*/0, /*f_start_id=*/1200,
+                         /*f_pre_allocation_size=*/size_t{1} << 63);
+
+    testing::internal::CaptureStderr();
+    auto f = pool.acquire();
+    const std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(f.first, "");
+    EXPECT_EQ(f.second, nullptr);
+#ifndef __APPLE__
+    EXPECT_NE(err.find("[FilePool] ERROR: posix_fallocate failed for "), std::string::npos) << err;
+#endif
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(test_dir) / "L0-001200.sst"));
+    EXPECT_TRUE(std::filesystem::is_empty(test_dir));
+    EXPECT_EQ(pool.getFallbackCreations(), 0u);
+}
+
+// Without pre-allocation the file is opened only by std::ofstream; in a directory that does not
+// exist the open fails and acquire() returns {"", nullptr} without creating anything.
+TEST_F(FilePoolTest, OnDemandOpenFailureInMissingDirectory) {
+    const std::string bad_dir = test_dir + "/missing";
+    lsmio::FilePool pool(bad_dir, "L0-", ".sst", /*f_pool_size=*/0, /*f_start_id=*/1300,
+                         /*f_pre_allocation_size=*/0);
+
+    testing::internal::CaptureStderr();
+    auto f = pool.acquire();
+    const std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(f.first, "");
+    EXPECT_EQ(f.second, nullptr);
+    EXPECT_NE(err.find("[FilePool] Failed to open "), std::string::npos) << err;
+    EXPECT_NE(err.find("L0-001300.sst"), std::string::npos) << err;
+    EXPECT_FALSE(std::filesystem::exists(bad_dir));
+    EXPECT_TRUE(std::filesystem::is_empty(test_dir));
+}
+
+// The worker backs off and retries while createFile() fails; a starved acquire() falls back to
+// a synchronous createFile(), which fails the same way and is counted as a fallback.
+TEST_F(FilePoolTest, ReplenishBacksOffWhileCreationFails) {
+    const std::string bad_dir = test_dir + "/missing";
+    std::atomic<int> hook_calls{0};
+    {
+        lsmio::FilePool pool(
+            bad_dir, "L0-", ".sst", /*f_pool_size=*/1, /*f_start_id=*/1400,
+            /*f_pre_allocation_size=*/0, /*f_acquire_timeout=*/std::chrono::milliseconds(30),
+            [&hook_calls]() { hook_calls.fetch_add(1, std::memory_order_release); });
+
+        // Nothing is acquired yet, so a successful first createFile() would fill the one-slot
+        // pool and park the worker. A second hook call proves the first creation failed and the
+        // worker came back after its 100 ms back-off.
+        ASSERT_TRUE(waitForCount(hook_calls, 2, std::chrono::seconds(5)));
+
+        auto f = pool.acquire();
+        EXPECT_EQ(f.first, "");
+        EXPECT_EQ(f.second, nullptr);
+        EXPECT_EQ(pool.getFallbackCreations(), 1u);
+    }
+    EXPECT_GE(hook_calls.load(), 2);
+    EXPECT_FALSE(std::filesystem::exists(bad_dir));
+    EXPECT_TRUE(std::filesystem::is_empty(test_dir));
 }

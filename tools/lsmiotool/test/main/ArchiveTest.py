@@ -313,23 +313,17 @@ class ArchiveTest(unittest.TestCase):
             # Case 2: Base target exists -> suffix -1
             os.makedirs(t0)
             t1 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
-            self.assertEqual(
-                t1, os.path.join(temp_dir, "outputs-native-mmap-btree-1")
-            )
+            self.assertEqual(t1, os.path.join(temp_dir, "outputs-native-mmap-btree-1"))
 
             # Case 3: -1 also exists -> suffix -2
             os.makedirs(t1)
             t2 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
-            self.assertEqual(
-                t2, os.path.join(temp_dir, "outputs-native-mmap-btree-2")
-            )
+            self.assertEqual(t2, os.path.join(temp_dir, "outputs-native-mmap-btree-2"))
 
             # Case 4: -2 also exists -> suffix -3
             os.makedirs(t2)
             t3 = ArchiveEngine.resolveTargetDirectory(temp_dir, arm_id)
-            self.assertEqual(
-                t3, os.path.join(temp_dir, "outputs-native-mmap-btree-3")
-            )
+            self.assertEqual(t3, os.path.join(temp_dir, "outputs-native-mmap-btree-3"))
 
     def testArchiveMainRunSuccess(self) -> None:
         """Tasks 4.5.7: Asserts ArchiveMain dispatching and non-run-root refusals."""
@@ -619,7 +613,9 @@ class ArchiveCommandTest(unittest.TestCase):
         self.assertEqual(f_code, 0, f_err)
         self.assertTrue(
             os.path.isdir(
-                os.path.join(self.m_root, "lsmio-archive", "variants", "outputs-rocksdb")
+                os.path.join(
+                    self.m_root, "lsmio-archive", "variants", "outputs-rocksdb"
+                )
             )
         )
 
@@ -645,9 +641,7 @@ class ArchiveCommandTest(unittest.TestCase):
     def testGroupArmRunsAreNamedWhenNothingElseIsFound(self) -> None:
         """TO-21: runs skipped as arms of a multi-arm run are named, with --source."""
         f_run_root = self._lsmiotoolRun("run-20261010T000000Z-arm1", f_variant=None)
-        with open(
-            os.path.join(f_run_root, ArchiveEngine.ARM_MARKER_FILE), "w"
-        ) as f_f:
+        with open(os.path.join(f_run_root, ArchiveEngine.ARM_MARKER_FILE), "w") as f_f:
             f_f.write('{"arm_id": "native"}')
         f_code, f_err = self._archive(["lsmio", "variants"])
         self.assertEqual(f_code, 1)
@@ -745,9 +739,7 @@ class ArchiveCommandTest(unittest.TestCase):
         f_code, f_err = self._archive(["lsmio", "variants"])
         self.assertEqual(f_code, 1)
         f_dest = os.path.join(self.m_root, "lsmio-archive", "variants")
-        self.assertFalse(
-            os.path.exists(os.path.join(f_dest, "outputs-native-m"))
-        )
+        self.assertFalse(os.path.exists(os.path.join(f_dest, "outputs-native-m")))
         self.assertFalse(os.path.exists(os.path.join(f_dest, "outputs-native")))
 
     def _iorRun(self, f_run_id: str, f_setup: str) -> str:

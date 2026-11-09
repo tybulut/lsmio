@@ -86,13 +86,17 @@ class LSMIOStoreNative : public LSMIOStore {
     std::condition_variable m_backpressure_cv;
     std::condition_variable m_barrier_cv;
     std::atomic<bool> m_shutting_down{false};
-    std::atomic<bool> m_flush_in_progress{false};
+    // the in-flight memtable: set and cleared under m_state_mutex by the flushing thread only; non-null exactly while a flush runs (AI-8)
+    std::unique_ptr<IMemtable> m_flushing_memtable;
     std::atomic<bool> m_bg_error{false};
     bool m_read_only{false};
 
     void FlushWorkLoop();
-    void FlushMemtableToL0(std::unique_ptr<IMemtable> f_memtable);
+    void FlushMemtableToL0(const IMemtable& f_memtable);
     void dropActiveMemtable();
+
+    // AI-7: 1 <= size <= maxKeyLen; an empty key is refused because its record could be the zero header that ends a footer-less scan
+    bool isMutationKeyValid(const std::string& f_key) const noexcept;
 
     // LSMIOStore Overrides
     bool startBatch() override;

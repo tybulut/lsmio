@@ -31,9 +31,13 @@
 #ifndef _LSMIO_STORE_LDB_HPP_
 #define _LSMIO_STORE_LDB_HPP_
 
+#include <leveldb/cache.h>
 #include <leveldb/db.h>
 #include <leveldb/filter_policy.h>
+#include <leveldb/write_batch.h>
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -43,14 +47,25 @@ namespace lsmio {
 
 class LSMIOStoreLDB : public LSMIOStore {
   private:
+    std::atomic<bool> _writeFailed{false};
+
+    // Owned filter policy and block cache. _options keeps raw copies of these pointers (ED-11, AI-3).
+    std::unique_ptr<const leveldb::FilterPolicy> _filterPolicy;
+    std::unique_ptr<leveldb::Cache> _blockCache;
+
     leveldb::WriteOptions _wOptions;
     leveldb::ReadOptions _rOptions;
     leveldb::Options _options;
-    leveldb::DB* _db;
-    leveldb::WriteBatch* _batch;
+    leveldb::DB* _db = nullptr;
+    // The store's one batch (AI-16); holds no entry when _batchSize == 0 (AI-2).
+    leveldb::WriteBatch _batch;
 
-    /// start / stop batching
-    /// @return bool success
+    /// Requires _batchMutex held. Writes the pending batch, if any, then clears it on every exit
+    /// (success, failure or exception). Returns true when nothing was pending or the write
+    /// succeeded; on failure sets _writeFailed.
+    bool _writePendingBatchLocked();
+
+    /// Returns true exactly when nothing is pending, and has no other effect.
     bool startBatch() override;
     bool stopBatch() override;
 
