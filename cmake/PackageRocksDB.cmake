@@ -58,10 +58,11 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
     # Snappy is guaranteed by PackageLevelDB.cmake (system package or FetchContent target `snappy`).
     # When Snappy came from FetchContent rather than a system install, pre-populate the variables
-    # RocksDB's FindSnappy.cmake checks and add `snappy` to RocksDBTargets so RocksDB's
-    # install(EXPORT RocksDBTargets) succeeds.
+    # RocksDB's FindSnappy.cmake checks (Snappy_INCLUDE_DIRS and Snappy_LIBRARIES) and add `snappy`
+    # to RocksDBTargets so RocksDB's install(EXPORT RocksDBTargets) succeeds.
     if(TARGET snappy AND NOT Snappy_FOUND)
       set(Snappy_INCLUDE_DIR "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dir")
+      set(Snappy_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dirs")
       set(Snappy_LIBRARIES snappy CACHE STRING "Snappy libraries")
       install(TARGETS snappy EXPORT RocksDBTargets)
     endif()
@@ -69,17 +70,17 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
     # Enable LZ4 and Zstd when their headers and libraries are available on the host (RocksDB's
     # CMakeLists.txt calls find_package(lz4 REQUIRED) and find_package(zstd REQUIRED)).
-    find_path(lz4_INCLUDE_DIRS NAMES lz4.h)
-    find_library(lz4_LIBRARIES NAMES lz4)
-    if(lz4_INCLUDE_DIRS AND lz4_LIBRARIES)
+    find_path(_LSMIO_LZ4_INCLUDE_DIR NAMES lz4.h)
+    find_library(_LSMIO_LZ4_LIBRARY NAMES lz4)
+    if(_LSMIO_LZ4_INCLUDE_DIR AND _LSMIO_LZ4_LIBRARY)
       set(WITH_LZ4 YES CACHE BOOL "with lz4")
     else()
       set(WITH_LZ4 NO CACHE BOOL "with lz4")
     endif()
 
-    find_path(ZSTD_INCLUDE_DIRS NAMES zstd.h)
-    find_library(ZSTD_LIBRARIES NAMES zstd)
-    if(ZSTD_INCLUDE_DIRS AND ZSTD_LIBRARIES)
+    find_path(_LSMIO_ZSTD_INCLUDE_DIR NAMES zstd.h)
+    find_library(_LSMIO_ZSTD_LIBRARY NAMES zstd)
+    if(_LSMIO_ZSTD_INCLUDE_DIR AND _LSMIO_ZSTD_LIBRARY)
       set(WITH_ZSTD YES CACHE BOOL "with zstd")
     else()
       set(WITH_ZSTD NO CACHE BOOL "with zstd")
