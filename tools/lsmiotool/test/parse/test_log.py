@@ -101,7 +101,12 @@ class LogApiTest(TestCase):
 
     def testSetLevelStoresEveryValidLevel(self) -> None:
         """setLevel stores each LogLevel, shared with Console."""
-        for f_level in (LogLevel.ERROR, LogLevel.WARNING, LogLevel.DEBUG, LogLevel.INFO):
+        for f_level in (
+            LogLevel.ERROR,
+            LogLevel.WARNING,
+            LogLevel.DEBUG,
+            LogLevel.INFO,
+        ):
             with self.subTest(level=f_level):
                 Log.setLevel(f_level)
                 self.assertIs(Log.getLevel(), f_level)
@@ -115,16 +120,19 @@ class LogApiTest(TestCase):
             with self.subTest(value=f_bad):
                 with self.assertRaises(ValueError) as f_ctx:
                     Log.setLevel(f_bad)
-                self.assertEqual(str(f_ctx.exception), "Log level must be a LogLevel enum")
+                self.assertEqual(
+                    str(f_ctx.exception), "Log level must be a LogLevel enum"
+                )
                 self.assertIs(Log.getLevel(), LogLevel.DEBUG)
 
     def testFixPermissionsChownsLogFile(self) -> None:
         """Log.fixPermissions creates the missing log file and chowns it."""
         with tempfile.TemporaryDirectory() as f_dir:
             f_path = os.path.join(f_dir, "x.log")
-            with patch("lsmiotool.lib.log.LOG_FILE", f_path), patch(
-                "lsmiotool.lib.log.os.chown"
-            ) as f_chown:
+            with (
+                patch("lsmiotool.lib.log.LOG_FILE", f_path),
+                patch("lsmiotool.lib.log.os.chown") as f_chown,
+            ):
                 Log.fixPermissions(12, 34)
                 self.assertTrue(os.path.exists(f_path))
                 f_chown.assert_called_once_with(f_path, 12, 34)

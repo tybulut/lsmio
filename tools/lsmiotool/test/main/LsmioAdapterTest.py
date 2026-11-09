@@ -894,9 +894,7 @@ class LsmioAdapterTest(unittest.TestCase):
         self.assertIn("--lsmio-no-pread", f_cmd.argv)
         self.assertIn("--lsmio-memtable", f_cmd.argv)
         self.assertIn("btree", f_cmd.argv)
-        self.assertEqual(
-            f_cmd.output_path, "/tmp/lsmio-rank-0-native-mmap-btree.db"
-        )
+        self.assertEqual(f_cmd.output_path, "/tmp/lsmio-rank-0-native-mmap-btree.db")
         self.assertIn("/tmp/lsmio-rank-0-native-mmap-btree.db", f_cmd.argv)
 
         # 2. Flush variant with exact flag

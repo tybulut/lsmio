@@ -218,20 +218,14 @@ class BenchmarkCommandContractTest(unittest.TestCase):
                         f_working_dir="/work",
                         f_is_rank_local=f_bad,  # type: ignore[arg-type]
                     )
-                self.assertIn(
-                    "is_rank_local must be a boolean", str(f_ctx.exception)
-                )
+                self.assertIn("is_rank_local must be a boolean", str(f_ctx.exception))
 
     def testBenchmarkCommandImmutabilityFrozenRaise(self) -> None:
         """Verify frozen BenchmarkCommand instance raises AttributeError upon attribute mutation or deletion."""
-        f_cmd = BenchmarkCommand(
-            ["cmd"], "/out", "/err", "/work", f_is_rank_local=True
-        )
+        f_cmd = BenchmarkCommand(["cmd"], "/out", "/err", "/work", f_is_rank_local=True)
         with self.assertRaises(AttributeError) as f_ctx:
             f_cmd.m_argv = ("new",)  # type: ignore[misc]
-        self.assertIn(
-            "Cannot modify immutable BenchmarkCommand", str(f_ctx.exception)
-        )
+        self.assertIn("Cannot modify immutable BenchmarkCommand", str(f_ctx.exception))
 
         with self.assertRaises(AttributeError) as f_ctx:
             del f_cmd.m_argv  # type: ignore[misc]
@@ -296,9 +290,7 @@ class BenchmarkCommandContractTest(unittest.TestCase):
 
     def testBenchmarkCommandRepr(self) -> None:
         """Verify BenchmarkCommand representation string contents."""
-        f_cmd = BenchmarkCommand(
-            ["cmd"], "/out", "/err", "/work", f_is_rank_local=True
-        )
+        f_cmd = BenchmarkCommand(["cmd"], "/out", "/err", "/work", f_is_rank_local=True)
         f_repr = repr(f_cmd)
         self.assertTrue(f_repr.startswith("BenchmarkCommand("))
         self.assertIn("argv=('cmd',)", f_repr)
@@ -369,7 +361,9 @@ class BenchmarkAdapterContractTest(unittest.TestCase):
         """Verify BenchmarkAdapter cannot be instantiated directly and incomplete subclasses raise TypeError."""
         with self.assertRaises(TypeError) as f_cm:
             BenchmarkAdapter()  # type: ignore[abstract]
-        self.assertIn("Can't instantiate abstract class BenchmarkAdapter", str(f_cm.exception))
+        self.assertIn(
+            "Can't instantiate abstract class BenchmarkAdapter", str(f_cm.exception)
+        )
 
         class IncompleteAdapter(BenchmarkAdapter):
             """Subclass missing defaultSetup, allowedSetups, and probeCapability."""
@@ -380,7 +374,10 @@ class BenchmarkAdapterContractTest(unittest.TestCase):
 
         with self.assertRaises(TypeError) as f_cm_incomplete:
             IncompleteAdapter()  # type: ignore[abstract]
-        self.assertIn("Can't instantiate abstract class IncompleteAdapter", str(f_cm_incomplete.exception))
+        self.assertIn(
+            "Can't instantiate abstract class IncompleteAdapter",
+            str(f_cm_incomplete.exception),
+        )
 
 
 class LsmioLaunchSpecContractTest(unittest.TestCase):
@@ -413,9 +410,7 @@ class LsmioLaunchSpecContractTest(unittest.TestCase):
                 f_setup="NATIVE\0",
                 f_executable="/bin/exe",
             )
-        self.assertIn(
-            "LsmioLaunchSpec setup contains NUL byte:", str(f_ctx.exception)
-        )
+        self.assertIn("LsmioLaunchSpec setup contains NUL byte:", str(f_ctx.exception))
 
     def testLsmioLaunchSpecRejectsInvalidExecutable(self) -> None:
         """Verify LsmioLaunchSpec rejects non-string or whitespace-only executable."""
@@ -528,9 +523,7 @@ class LsmioLaunchSpecContractTest(unittest.TestCase):
         )
         with self.assertRaises(AttributeError) as f_ctx:
             f_spec.m_setup = "NEW"  # type: ignore[misc]
-        self.assertIn(
-            "Cannot modify immutable LsmioLaunchSpec", str(f_ctx.exception)
-        )
+        self.assertIn("Cannot modify immutable LsmioLaunchSpec", str(f_ctx.exception))
 
         with self.assertRaises(AttributeError) as f_ctx:
             del f_spec.m_setup  # type: ignore[misc]
@@ -862,9 +855,7 @@ class LsmioBoundCommandContractTest(unittest.TestCase):
                 f_working_dir="/work",
                 f_result_path="/res/path\0.json",
             )
-        self.assertIn(
-            "result_path contains NUL byte:", str(f_ctx.exception)
-        )
+        self.assertIn("result_path contains NUL byte:", str(f_ctx.exception))
 
     def testLsmioBoundCommandRejectsInvalidOutputPath(self) -> None:
         """Verify LsmioBoundCommand rejects invalid non-string or whitespace-only output_path."""
@@ -893,9 +884,7 @@ class LsmioBoundCommandContractTest(unittest.TestCase):
                 f_working_dir="/work",
                 f_output_path="/out/path\0.bin",
             )
-        self.assertIn(
-            "output_path contains NUL byte:", str(f_ctx.exception)
-        )
+        self.assertIn("output_path contains NUL byte:", str(f_ctx.exception))
 
     def testLsmioBoundCommandDefaultsWhenPathsNone(self) -> None:
         """Verify LsmioBoundCommand defaults result_path and output_path to empty strings when None."""

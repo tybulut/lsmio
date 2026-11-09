@@ -127,7 +127,9 @@ def lsmRow(
     ]
 
 
-def writeReport(f_data_dir: str, f_source: str, f_name: str, f_rows: List[List[str]]) -> None:
+def writeReport(
+    f_data_dir: str, f_source: str, f_name: str, f_rows: List[List[str]]
+) -> None:
     """Write f_rows as the report f_name of the source directory f_source."""
     f_dir = os.path.join(f_data_dir, f_source)
     os.makedirs(f_dir, exist_ok=True)
@@ -156,17 +158,26 @@ def writeCutShortRun(
     f_bandwidths, before the summary; return the report row ior-parse.sh makes of it."""
     f_dir = os.path.join(f_data_dir, f_source, "2", "2023-10-29")
     os.makedirs(f_dir, exist_ok=True)
-    f_lines = ["IOR-3.3.0: MPI Coordinated Test of Parallel I/O", "api                 : MPIIO"]
+    f_lines = [
+        "IOR-3.3.0: MPI Coordinated Test of Parallel I/O",
+        "api                 : MPIIO",
+    ]
     if f_repetitions is not None:
         f_lines.append(f"repetitions         : {f_repetitions}")
-    f_lines.append("access    bw(MiB/s)  IOPS       Latency(s)  block(KiB) xfer(KiB)  iter")
+    f_lines.append(
+        "access    bw(MiB/s)  IOPS       Latency(s)  block(KiB) xfer(KiB)  iter"
+    )
     for f_pos, f_bw in enumerate(f_bandwidths):
         f_lines.append(iterationLine("write", f_bw, f_pos))
         f_lines.append(iterationLine("read", "900.00", f_pos))
     f_lines.append("ERROR: cannot open file to get file size, MPI MPI_ERR_NO_SUCH_FILE")
     with open(os.path.join(f_dir, f_name), "w") as f_file:
         f_file.write("\n".join(f_lines) + "\n")
-    return ["2", "4", "64K"] + iterationLine("write", f_bandwidths[-1], len(f_bandwidths) - 1).split() + [""]
+    return (
+        ["2", "4", "64K"]
+        + iterationLine("write", f_bandwidths[-1], len(f_bandwidths) - 1).split()
+        + [""]
+    )
 
 
 class PaperDataFormatTest(unittest.TestCase):
@@ -174,16 +185,22 @@ class PaperDataFormatTest(unittest.TestCase):
 
     def testIorRowDropsPaddingAndRoundsMeanSecondsHalfUp(self) -> None:
         """Node counts lose their zero padding; 1.115 becomes 1.12 (half up, not half even)."""
-        f_row = paperdata.formatRow("ior", iorRow("01", 16, "1M", "write", f_mean_s="1.115"))
+        f_row = paperdata.formatRow(
+            "ior", iorRow("01", 16, "1M", "write", f_mean_s="1.115")
+        )
         self.assertEqual(f_row[0], "1")
         self.assertEqual(f_row[1], "16")
         self.assertEqual(f_row[12], "1.12")
-        f_row = paperdata.formatRow("ior", iorRow("2", 4, "64K", "read", f_mean_s="0.125"))
+        f_row = paperdata.formatRow(
+            "ior", iorRow("2", 4, "64K", "read", f_mean_s="0.125")
+        )
         self.assertEqual(f_row[12], "0.13")
 
     def testIorRowKeepsMeasurementsAndWritesAggsAsInteger(self) -> None:
         """Two-decimal measurements stay as they are; aggs(MiB) 1024.0 becomes 1024."""
-        f_row = paperdata.formatRow("ior", iorRow("8", 4, "8M", "write", f_aggs="1024.0"))
+        f_row = paperdata.formatRow(
+            "ior", iorRow("8", 4, "8M", "write", f_aggs="1024.0")
+        )
         self.assertEqual(f_row[4:12], ["100.00", "50.00", "75.00", "1.50"] * 2)
         self.assertEqual(f_row[13:15], ["NA", "NA"])
         self.assertEqual(f_row[27], "1024")
@@ -225,7 +242,9 @@ class PaperDataFormatTest(unittest.TestCase):
 
     def testLsmioEmptyMeasurementsBecomeZero(self) -> None:
         """A run with no data (empty fields, 0 iterations) is written as zeros."""
-        f_row = paperdata.formatRow("lsmio", lsmRow("24", 4, "1M", "read", "", "", "", "0"))
+        f_row = paperdata.formatRow(
+            "lsmio", lsmRow("24", 4, "1M", "read", "", "", "", "0")
+        )
         self.assertEqual(f_row[4:7], ["0.00", "0.00", "0.00"])
         self.assertEqual(f_row[9], "0.00")
 
@@ -235,9 +254,13 @@ class PaperDataFormatTest(unittest.TestCase):
         for f_cell in ("nan", "abc", "inf"):
             with self.subTest(f_cell=f_cell):
                 with self.assertRaises(PaperDataError) as f_ctx:
-                    paperdata.formatRow("ior", iorRow("2", 4, "1M", "write", f_max=f_cell))
+                    paperdata.formatRow(
+                        "ior", iorRow("2", 4, "1M", "write", f_max=f_cell)
+                    )
                 self.assertIn("column 'Max(MiB)'", str(f_ctx.exception))
-                self.assertIn("nodes=2 stripes=4 block size=1M write", str(f_ctx.exception))
+                self.assertIn(
+                    "nodes=2 stripes=4 block size=1M write", str(f_ctx.exception)
+                )
         f_row = paperdata.formatRow("ior", iorRow("2", 4, "1M", "write", f_max="250"))
         self.assertEqual(f_row[4], "250.00")
         f_row = paperdata.formatRow("ior", iorRow("2", 4, "1M", "write", f_max="1e3"))
@@ -259,12 +282,19 @@ class PaperDataFormatTest(unittest.TestCase):
     def testHugeAggsIsWrittenExactly(self) -> None:
         """aggs(MiB) goes through Decimal, not float: no overflow, no lost digits."""
         f_big = "9" * 400
-        f_row = paperdata.formatRow("ior", iorRow("2", 4, "1M", "write", f_aggs=f_big + ".0"))
+        f_row = paperdata.formatRow(
+            "ior", iorRow("2", 4, "1M", "write", f_aggs=f_big + ".0")
+        )
         self.assertEqual(f_row[27], f_big)
 
     def testIorStonewallColumnsTakeNaIntegersAndDecimals(self) -> None:
         """Stonewall cells may be NA, empty or an integer (kept) or a decimal (two decimals)."""
-        for f_cell, f_written in [("NA", "NA"), ("", ""), ("12", "12"), ("1.5", "1.50")]:
+        for f_cell, f_written in [
+            ("NA", "NA"),
+            ("", ""),
+            ("12", "12"),
+            ("1.5", "1.50"),
+        ]:
             with self.subTest(f_cell=f_cell):
                 f_src = iorRow("2", 4, "1M", "write")
                 f_src[13] = f_cell
@@ -304,7 +334,9 @@ class PaperDataBuildTest(unittest.TestCase):
             lsmRow("10", 4, "64K", "write"),
         ]
         self.lsmio("src", f_rows)
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir
+        )
         self.assertEqual(f_result.lines[0], "\t".join(paperdata.LSMIO_HEADER))
         f_keys = [tuple(f_line.split("\t")[:4]) for f_line in f_result.lines[1:]]
         self.assertEqual(
@@ -330,7 +362,9 @@ class PaperDataBuildTest(unittest.TestCase):
             "lsm-report.csv",
             [["access", "max"], [], lsmRow("1", 4, "1M", "write")],
         )
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir
+        )
         self.assertEqual(len(f_result.lines), 2)
 
     def testStitchReplacesOnlyTheSelectedRows(self) -> None:
@@ -354,8 +388,12 @@ class PaperDataBuildTest(unittest.TestCase):
             ],
         )
         f_rule = StitchRule("b", Selection([2], [4], ["1M"]))
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir)
-        f_max = {tuple(f_l.split("\t")[:3]): f_l.split("\t")[4] for f_l in f_result.lines[1:]}
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir
+        )
+        f_max = {
+            tuple(f_l.split("\t")[:3]): f_l.split("\t")[4] for f_l in f_result.lines[1:]
+        }
         self.assertEqual(f_max[("1", "4", "1M")], "10.00")
         self.assertEqual(f_max[("2", "4", "1M")], "21.00")
         self.assertEqual(f_max[("1", "4", "64K")], "29.00")
@@ -367,8 +405,12 @@ class PaperDataBuildTest(unittest.TestCase):
         self.lsmio("a", [lsmRow("24", 4, "1M", "write", "", "", "", "0")])
         self.lsmio("b", [lsmRow("24", 4, "1M", "write", "1158", "859.94", "1035.36")])
         f_rule = StitchRule("b", Selection([24], [4], ["1M"], ["write"]))
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir)
-        self.assertEqual(f_result.lines[1].split("\t")[4:7], ["1158.00", "859.94", "1035.36"])
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir
+        )
+        self.assertEqual(
+            f_result.lines[1].split("\t")[4:7], ["1158.00", "859.94", "1035.36"]
+        )
         self.assertEqual(f_result.lines[1].split("\t")[9], "10.00")
 
     def testStitchThatSelectsNothingIsAnError(self) -> None:
@@ -377,7 +419,9 @@ class PaperDataBuildTest(unittest.TestCase):
         self.lsmio("b", [lsmRow("1", 4, "1M", "write")])
         f_rule = StitchRule("b", Selection([48]))
         with self.assertRaises(PaperDataError) as f_ctx:
-            paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir)
+            paperdata.buildDataset(
+                DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir
+            )
         self.assertIn("selects no row", str(f_ctx.exception))
 
     def testStitchValueThatSelectsNothingIsAnError(self) -> None:
@@ -386,11 +430,15 @@ class PaperDataBuildTest(unittest.TestCase):
         self.lsmio("b", [lsmRow("2", 4, "1M", "write", "21")])
         f_rule = StitchRule("b", Selection([2, 99], [4], ["1M", "8M"]))
         with self.assertRaises(PaperDataError) as f_ctx:
-            paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir)
+            paperdata.buildDataset(
+                DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir
+            )
         self.assertIn("stitch from b selects no row for nodes 99", str(f_ctx.exception))
         f_rule = StitchRule("b", Selection([2], [4], ["1M", "8M"]))
         with self.assertRaises(PaperDataError) as f_ctx:
-            paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir)
+            paperdata.buildDataset(
+                DatasetSpec("o.tsv", "lsmio", "a", [f_rule]), self.m_dir
+            )
         self.assertIn("selects no row for block_sizes 8M", str(f_ctx.exception))
 
     def iorWithAGap(self) -> None:
@@ -404,9 +452,15 @@ class PaperDataBuildTest(unittest.TestCase):
     def testPlaceholderIsNanWithNaSettingsByDefault(self) -> None:
         """By default a missing IOR run has nan measurements (a gap) and NA settings."""
         self.iorWithAGap()
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "src"), self.m_dir)
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "ior", "src"), self.m_dir
+        )
         self.assertEqual(f_result.placeholders, [(4, 4, "1M", "read")])
-        f_rows = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")]
+        f_rows = [
+            f_l.split("\t")
+            for f_l in f_result.lines[1:]
+            if f_l.startswith("4\t4\t1M\tread")
+        ]
         f_row = f_rows[0]
         self.assertEqual(f_row[4:13], ["nan"] * 9)
         self.assertEqual(f_row[13:], ["NA"] * 17)
@@ -422,8 +476,12 @@ class PaperDataBuildTest(unittest.TestCase):
                 lsmRow("1", 4, "1M", "read"),
             ],
         )
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
-        f_row = [f_l for f_l in f_result.lines[1:] if f_l.startswith("2\t4\t1M\tread")][0]
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir
+        )
+        f_row = [f_l for f_l in f_result.lines[1:] if f_l.startswith("2\t4\t1M\tread")][
+            0
+        ]
         # Iterations is a setting, not a measurement: NA like an IOR placeholder's settings
         self.assertEqual(f_row, "2\t4\t1M\tread" + "\tnan" * 5 + "\tNA")
 
@@ -437,7 +495,9 @@ class PaperDataBuildTest(unittest.TestCase):
                 iorRow("2", 4, "1M", "read"),
             ],
         )
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "src"), self.m_dir)
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "ior", "src"), self.m_dir
+        )
         self.assertEqual(f_result.placeholders, [(1, 4, "1M", "read")])
 
     def testPlaceholderCopiesThePrecedingNodeCountWithZeroedMeasurements(self) -> None:
@@ -448,7 +508,11 @@ class PaperDataBuildTest(unittest.TestCase):
             DatasetSpec("o.tsv", "ior", "src", f_fill=paperdata.FILL_ZERO), self.m_dir
         )
         self.assertEqual(f_result.placeholders, [(4, 4, "1M", "read")])
-        f_rows = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")]
+        f_rows = [
+            f_l.split("\t")
+            for f_l in f_result.lines[1:]
+            if f_l.startswith("4\t4\t1M\tread")
+        ]
         f_row = f_rows[0]
         self.assertEqual(f_row[4:13], ["0.00"] * 9)
         self.assertEqual(f_row[16], "2")
@@ -460,10 +524,20 @@ class PaperDataBuildTest(unittest.TestCase):
         self.iorWithAGap()
         f_rule = PlaceholderRule(Selection([4], [4], ["1M"], ["read"]), 1)
         f_result = paperdata.buildDataset(
-            DatasetSpec("o.tsv", "ior", "src", f_placeholders=[f_rule], f_fill=paperdata.FILL_ZERO),
+            DatasetSpec(
+                "o.tsv",
+                "ior",
+                "src",
+                f_placeholders=[f_rule],
+                f_fill=paperdata.FILL_ZERO,
+            ),
             self.m_dir,
         )
-        f_rows = [f_l.split("\t") for f_l in f_result.lines[1:] if f_l.startswith("4\t4\t1M\tread")]
+        f_rows = [
+            f_l.split("\t")
+            for f_l in f_result.lines[1:]
+            if f_l.startswith("4\t4\t1M\tread")
+        ]
         f_row = f_rows[0]
         self.assertEqual(f_row[16], "1")
         self.assertEqual(f_row[4:13], ["0.00"] * 9)
@@ -475,12 +549,17 @@ class PaperDataBuildTest(unittest.TestCase):
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
                 DatasetSpec(
-                    "o.tsv", "ior", "src", f_placeholders=[f_rule], f_fill=paperdata.FILL_ZERO
+                    "o.tsv",
+                    "ior",
+                    "src",
+                    f_placeholders=[f_rule],
+                    f_fill=paperdata.FILL_ZERO,
                 ),
                 self.m_dir,
             )
         self.assertIn(
-            "o.tsv: no run for nodes=48 stripes=4 block size=1M read", str(f_ctx.exception)
+            "o.tsv: no run for nodes=48 stripes=4 block size=1M read",
+            str(f_ctx.exception),
         )
 
     def testPlaceholderForTheFirstNodeCountHasNothingToCopy(self) -> None:
@@ -495,7 +574,8 @@ class PaperDataBuildTest(unittest.TestCase):
         )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
-                DatasetSpec("o.tsv", "ior", "src", f_fill=paperdata.FILL_ZERO), self.m_dir
+                DatasetSpec("o.tsv", "ior", "src", f_fill=paperdata.FILL_ZERO),
+                self.m_dir,
             )
         self.assertIn("o.tsv: no earlier node count", str(f_ctx.exception))
         self.assertIn("nodes=1 stripes=4 block size=1M read", str(f_ctx.exception))
@@ -514,7 +594,9 @@ class PaperDataBuildTest(unittest.TestCase):
             DatasetSpec("o.tsv", "lsmio", "src", f_fill=paperdata.FILL_ZERO), self.m_dir
         )
         self.assertEqual(f_result.placeholders, [(2, 4, "1M", "read")])
-        f_row = [f_l for f_l in f_result.lines[1:] if f_l.startswith("2\t4\t1M\tread")][0]
+        f_row = [f_l for f_l in f_result.lines[1:] if f_l.startswith("2\t4\t1M\tread")][
+            0
+        ]
         self.assertEqual(f_row, "2\t4\t1M\tread" + "\t0.00" * 6)
 
     def testMissingRunIsAnErrorWhenTheSpecSaysSo(self) -> None:
@@ -522,7 +604,8 @@ class PaperDataBuildTest(unittest.TestCase):
         self.iorWithAGap()
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
-                DatasetSpec("o.tsv", "ior", "src", f_missing=paperdata.MISSING_ERROR), self.m_dir
+                DatasetSpec("o.tsv", "ior", "src", f_missing=paperdata.MISSING_ERROR),
+                self.m_dir,
             )
         self.assertIn("no run for", str(f_ctx.exception))
 
@@ -534,7 +617,9 @@ class PaperDataBuildTest(unittest.TestCase):
 
     def testMalformedRowIsAnError(self) -> None:
         """A row whose stripe count is not a number is reported, not skipped."""
-        writeReport(self.m_dir, "src", "lsm-report.csv", [lsmRow("1", 4, "1M", "write")])
+        writeReport(
+            self.m_dir, "src", "lsm-report.csv", [lsmRow("1", 4, "1M", "write")]
+        )
         f_bad = lsmRow("2", 4, "1M", "write")
         f_bad[1] = "x"
         writeReport(self.m_dir, "bad", "lsm-report.csv", [f_bad])
@@ -552,7 +637,8 @@ class PaperDataBuildTest(unittest.TestCase):
     def testRunListedTwiceIsAnError(self) -> None:
         """Two rows for one run are not resolved silently; a stitch rule has to choose."""
         self.lsmio(
-            "src", [lsmRow("1", 4, "1M", "write", "10"), lsmRow("01", 4, "1M", "write", "11")]
+            "src",
+            [lsmRow("1", 4, "1M", "write", "10"), lsmRow("01", 4, "1M", "write", "11")],
         )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
@@ -568,21 +654,31 @@ class PaperDataBuildTest(unittest.TestCase):
             with self.subTest(f_cell=f_cell):
                 self.lsmio("src", [lsmRow("1", 4, "1M", "write", f_cell)])
                 with self.assertRaises(PaperDataError) as f_ctx:
-                    paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
+                    paperdata.buildDataset(
+                        DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir
+                    )
                 self.assertIn(f_text, str(f_ctx.exception))
                 self.assertIn("column 'Max (MiBs)'", str(f_ctx.exception))
-                self.assertIn("nodes=1 stripes=4 block size=1M write", str(f_ctx.exception))
+                self.assertIn(
+                    "nodes=1 stripes=4 block size=1M write", str(f_ctx.exception)
+                )
                 self.assertIn("o.tsv", str(f_ctx.exception))
 
     def testRowShorterThanTheHeaderIsReportedAsPadded(self) -> None:
         """A run cut short is listed in the result so generate can warn about it."""
-        self.ior("src", [iorRow("1", 4, "1M", "write")[:14], iorRow("2", 4, "1M", "write")])
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "ior", "src"), self.m_dir)
+        self.ior(
+            "src", [iorRow("1", 4, "1M", "write")[:14], iorRow("2", 4, "1M", "write")]
+        )
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "ior", "src"), self.m_dir
+        )
         self.assertEqual(f_result.padded, [(1, 4, "1M", "write")])
         self.assertEqual(f_result.placeholders, [])
 
     def rebuild(self) -> DatasetSpec:
-        return DatasetSpec("o.tsv", "ior", "src", f_cut_short=paperdata.CUT_SHORT_REBUILD)
+        return DatasetSpec(
+            "o.tsv", "ior", "src", f_cut_short=paperdata.CUT_SHORT_REBUILD
+        )
 
     def testCutShortRunIsRebuiltFromTheIterationsItFinished(self) -> None:
         """With cut_short rebuild, a run without IOR's summary gets Max, Min and Mean over
@@ -591,20 +687,27 @@ class PaperDataBuildTest(unittest.TestCase):
         self.ior("src", [iorRow("1", 4, "64K", "write"), f_row])
         f_result = paperdata.buildDataset(self.rebuild(), self.m_dir)
         f_line = f_result.lines[2].split("\t")
-        self.assertEqual(f_line[:7], ["2", "4", "64K", "write", "200.25", "100.50", "150.25"])
+        self.assertEqual(
+            f_line[:7], ["2", "4", "64K", "write", "200.25", "100.50", "150.25"]
+        )
         f_reps = paperdata.IOR_HEADER.index("reps")
         self.assertEqual(f_line[f_reps], "3")
         self.assertEqual(
-            [f_cell for f_col, f_cell in enumerate(f_line[7:], 7) if f_col != f_reps], ["NA"] * 22
+            [f_cell for f_col, f_cell in enumerate(f_line[7:], 7) if f_col != f_reps],
+            ["NA"] * 22,
         )
         self.assertEqual(f_result.padded, [])
         self.assertEqual(len(f_result.rebuilt), 1)
         f_run = f_result.rebuilt[0]
-        self.assertEqual((f_run.key, f_run.done, f_run.repetitions), ((2, 4, "64K", "write"), 3, 10))
+        self.assertEqual(
+            (f_run.key, f_run.done, f_run.repetitions), ((2, 4, "64K", "write"), 3, 10)
+        )
         self.assertTrue(f_run.output_file.endswith("node065-0.txt.2"))
         self.assertFalse(f_run.whole_numbers)
         # the complete run is written as before
-        self.assertEqual(f_result.lines[1].split("\t")[4:7], ["100.00", "50.00", "75.00"])
+        self.assertEqual(
+            f_result.lines[1].split("\t")[4:7], ["100.00", "50.00", "75.00"]
+        )
 
     def testRebuildMeanIsRoundedHalfUp(self) -> None:
         """The mean of 1.00 and 1.25 is 1.125, written 1.13."""
@@ -622,19 +725,41 @@ class PaperDataBuildTest(unittest.TestCase):
     def testRebuildNeedsExactlyOneOutputFileWithTheIterations(self) -> None:
         """No raw output, or two that both hold iterations, is an error."""
         f_row = writeCutShortRun(self.m_dir, "src", ["100.00"])
-        os.remove(os.path.join(self.m_dir, "src", "2", "2023-10-29", os.listdir(
-            os.path.join(self.m_dir, "src", "2", "2023-10-29"))[0]))
+        os.remove(
+            os.path.join(
+                self.m_dir,
+                "src",
+                "2",
+                "2023-10-29",
+                os.listdir(os.path.join(self.m_dir, "src", "2", "2023-10-29"))[0],
+            )
+        )
         self.ior("src", [f_row])
         self.assertRebuildFails("0 IOR output files")
         writeCutShortRun(self.m_dir, "src", ["100.00"])
-        writeCutShortRun(self.m_dir, "src", ["100.00"], "out-collective-4-64K-2023-10-29-node066-0.txt.2")
+        writeCutShortRun(
+            self.m_dir,
+            "src",
+            ["100.00"],
+            "out-collective-4-64K-2023-10-29-node066-0.txt.2",
+        )
         self.assertRebuildFails("2 IOR output files")
 
     def testRebuildIgnoresOutputsOfOtherCombinations(self) -> None:
         """Only out-<setup>-<stripes>-<block size>-... files of the run's combination count."""
         f_row = writeCutShortRun(self.m_dir, "src", ["100.00", "300.00"])
-        writeCutShortRun(self.m_dir, "src", ["5.00"], "out-collective-16-64K-2023-10-29-node065-0.txt.2")
-        writeCutShortRun(self.m_dir, "src", ["5.00"], "out-collective-4-1M-2023-10-29-node065-0.txt.2")
+        writeCutShortRun(
+            self.m_dir,
+            "src",
+            ["5.00"],
+            "out-collective-16-64K-2023-10-29-node065-0.txt.2",
+        )
+        writeCutShortRun(
+            self.m_dir,
+            "src",
+            ["5.00"],
+            "out-collective-4-1M-2023-10-29-node065-0.txt.2",
+        )
         self.ior("src", [f_row])
         f_line = paperdata.buildDataset(self.rebuild(), self.m_dir).lines[1].split("\t")
         self.assertEqual(f_line[4:7], ["300.00", "100.00", "200.00"])
@@ -651,8 +776,12 @@ class PaperDataBuildTest(unittest.TestCase):
         aborted job leaves them, are not the run's output."""
         f_row = writeCutShortRun(self.m_dir, "src", ["100.00", "300.00"])
         f_dir = os.path.join(self.m_dir, "src", "2", "2023-10-29")
-        open(os.path.join(f_dir, "out-collective-4-64K-2023-10-29-node066-0.txt.2"), "w").close()
-        with open(os.path.join(f_dir, "out-collective-4-64K-2023-10-29-node067-0.txt.2"), "w") as f_file:
+        open(
+            os.path.join(f_dir, "out-collective-4-64K-2023-10-29-node066-0.txt.2"), "w"
+        ).close()
+        with open(
+            os.path.join(f_dir, "out-collective-4-64K-2023-10-29-node067-0.txt.2"), "w"
+        ) as f_file:
             f_file.write("write(): cannot open file\nreadahead failed\n")
         self.ior("src", [f_row])
         f_line = paperdata.buildDataset(self.rebuild(), self.m_dir).lines[1].split("\t")
@@ -667,13 +796,17 @@ class PaperDataBuildTest(unittest.TestCase):
         ):
             with self.subTest(f_name=f_name):
                 f_source = f_name[:12]
-                f_row = writeCutShortRun(self.m_dir, f_source, ["10.00", "30.00"], f_name)
+                f_row = writeCutShortRun(
+                    self.m_dir, f_source, ["10.00", "30.00"], f_name
+                )
                 self.ior(f_source, [f_row])
                 f_spec = DatasetSpec(
                     "o.tsv", "ior", f_source, f_cut_short=paperdata.CUT_SHORT_REBUILD
                 )
                 f_result = paperdata.buildDataset(f_spec, self.m_dir)
-                self.assertEqual(f_result.lines[1].split("\t")[4:7], ["30.00", "10.00", "20.00"])
+                self.assertEqual(
+                    f_result.lines[1].split("\t")[4:7], ["30.00", "10.00", "20.00"]
+                )
                 self.assertTrue(f_result.rebuilt[0].output_file.endswith(f_name))
 
     def testRebuildReadsAStitchedRunFromTheStitchSource(self) -> None:
@@ -689,7 +822,9 @@ class PaperDataBuildTest(unittest.TestCase):
             f_cut_short=paperdata.CUT_SHORT_REBUILD,
         )
         f_result = paperdata.buildDataset(f_spec, self.m_dir)
-        self.assertEqual(f_result.lines[2].split("\t")[4:7], ["60.00", "40.00", "50.00"])
+        self.assertEqual(
+            f_result.lines[2].split("\t")[4:7], ["60.00", "40.00", "50.00"]
+        )
         self.assertIn(os.path.join("rerun", "2"), f_result.rebuilt[0].output_file)
 
     def testRebuildIterationWithoutABandwidthIsAnError(self) -> None:
@@ -700,7 +835,9 @@ class PaperDataBuildTest(unittest.TestCase):
 
     def testRebuildLeavesAShortRowWithoutMeasurementsAFailedRun(self) -> None:
         """A short row with every measurement empty is a failed run (nan), not rebuilt."""
-        self.ior("src", [["2", "4", "64K", "write", "", ""], iorRow("1", 4, "64K", "write")])
+        self.ior(
+            "src", [["2", "4", "64K", "write", "", ""], iorRow("1", 4, "64K", "write")]
+        )
         f_result = paperdata.buildDataset(self.rebuild(), self.m_dir)
         self.assertEqual(f_result.empty, [(2, 4, "64K", "write")])
         self.assertEqual(f_result.rebuilt, [])
@@ -712,7 +849,9 @@ class PaperDataBuildTest(unittest.TestCase):
         self.ior("src", [f_row])
         f_result = paperdata.buildDataset(self.rebuild(), self.m_dir)
         self.assertTrue(f_result.rebuilt[0].whole_numbers)
-        self.assertEqual(f_result.lines[1].split("\t")[4:7], ["4000.50", "3601.00", "3800.75"])
+        self.assertEqual(
+            f_result.lines[1].split("\t")[4:7], ["4000.50", "3601.00", "3800.75"]
+        )
 
     def testRebuildNeedsTheRepetitions(self) -> None:
         """Without IOR's 'repetitions' line the 'k of n' cannot be told."""
@@ -727,7 +866,11 @@ class PaperDataBuildTest(unittest.TestCase):
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
                 DatasetSpec(
-                    "o.tsv", "ior", "src", f_placeholders=[f_rule], f_fill=paperdata.FILL_ZERO
+                    "o.tsv",
+                    "ior",
+                    "src",
+                    f_placeholders=[f_rule],
+                    f_fill=paperdata.FILL_ZERO,
                 ),
                 self.m_dir,
             )
@@ -741,31 +884,48 @@ class PaperDataBuildTest(unittest.TestCase):
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
                 DatasetSpec(
-                    "o.tsv", "ior", "src", f_placeholders=[f_rule], f_fill=paperdata.FILL_ZERO
+                    "o.tsv",
+                    "ior",
+                    "src",
+                    f_placeholders=[f_rule],
+                    f_fill=paperdata.FILL_ZERO,
                 ),
                 self.m_dir,
             )
-        self.assertIn("placeholder rule 0 matches no missing run for nodes 2", str(f_ctx.exception))
+        self.assertIn(
+            "placeholder rule 0 matches no missing run for nodes 2",
+            str(f_ctx.exception),
+        )
 
     def lsmioWithAFailedRun(self) -> None:
         """Nodes 1 and 2 for 4/1M write; the 2-node run has every measurement empty."""
         self.lsmio(
             "src",
-            [lsmRow("1", 4, "1M", "write"), ["2", "4", "1M", "write", "", "", "", "", "", "0"]],
+            [
+                lsmRow("1", 4, "1M", "write"),
+                ["2", "4", "1M", "write", "", "", "", "", "", "0"],
+            ],
         )
 
     def testRunWithoutDataIsWrittenAsNanAndReported(self) -> None:
         """A failed run (every measurement empty) gets nan measurements by default and is
         listed in the result; its reported settings, LSMIO's Iterations too, stay."""
         self.lsmioWithAFailedRun()
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir)
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "src"), self.m_dir
+        )
         self.assertEqual(f_result.empty, [(2, 4, "1M", "write")])
         self.assertEqual(f_result.lines[2], "2\t4\t1M\twrite" + "\tnan" * 5 + "\t0.00")
         self.lsmio(
             "isrc10",
-            [lsmRow("1", 4, "1M", "write"), ["2", "4", "1M", "write", "", "", "", "", "", "10"]],
+            [
+                lsmRow("1", 4, "1M", "write"),
+                ["2", "4", "1M", "write", "", "", "", "", "", "10"],
+            ],
         )
-        f_result = paperdata.buildDataset(DatasetSpec("o.tsv", "lsmio", "isrc10"), self.m_dir)
+        f_result = paperdata.buildDataset(
+            DatasetSpec("o.tsv", "lsmio", "isrc10"), self.m_dir
+        )
         self.assertEqual(f_result.lines[2], "2\t4\t1M\twrite" + "\tnan" * 5 + "\t10.00")
         f_failed = iorRow("2", 4, "1M", "write")
         f_failed[4:13] = [""] * 9
@@ -792,12 +952,16 @@ class PaperDataBuildTest(unittest.TestCase):
         self.lsmio("b", [lsmRow("1", 4, "1M", "write", "11")])
         self.lsmio("c", [lsmRow("1", 4, "1M", "write", "12")])
         f_spec = DatasetSpec(
-            "o.tsv", "lsmio", "a", [StitchRule("b", Selection()), StitchRule("c", Selection())]
+            "o.tsv",
+            "lsmio",
+            "a",
+            [StitchRule("b", Selection()), StitchRule("c", Selection())],
         )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(f_spec, self.m_dir)
         self.assertIn(
-            "stitch rules from b and c both select the run for nodes=1", str(f_ctx.exception)
+            "stitch rules from b and c both select the run for nodes=1",
+            str(f_ctx.exception),
         )
 
     def testRowWiderThanTheHeaderIsAnError(self) -> None:
@@ -812,9 +976,12 @@ class PaperDataBuildTest(unittest.TestCase):
         self.lsmioWithAFailedRun()
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
-                DatasetSpec("o.tsv", "lsmio", "src", f_missing=paperdata.MISSING_ERROR), self.m_dir
+                DatasetSpec("o.tsv", "lsmio", "src", f_missing=paperdata.MISSING_ERROR),
+                self.m_dir,
             )
-        self.assertIn("nodes=2 stripes=4 block size=1M write has no data", str(f_ctx.exception))
+        self.assertIn(
+            "nodes=2 stripes=4 block size=1M write has no data", str(f_ctx.exception)
+        )
 
     def testRunWithSomeMeasurementsEmptyIsAnError(self) -> None:
         """A run with only some measurements empty is not a failed run; it is an error."""
@@ -825,7 +992,9 @@ class PaperDataBuildTest(unittest.TestCase):
 
     def testGridAddsPlaceholdersForANodeCountNoRunHas(self) -> None:
         """A node count of the grid missing from the whole report becomes placeholders."""
-        self.lsmio("src", [lsmRow("1", 4, "1M", "write"), lsmRow("2", 4, "1M", "write")])
+        self.lsmio(
+            "src", [lsmRow("1", 4, "1M", "write"), lsmRow("2", 4, "1M", "write")]
+        )
         f_spec = DatasetSpec("o.tsv", "lsmio", "src", f_grid=Selection([1, 2, 4]))
         f_result = paperdata.buildDataset(f_spec, self.m_dir)
         self.assertEqual(f_result.placeholders, [(4, 4, "1M", "write")])
@@ -835,14 +1004,19 @@ class PaperDataBuildTest(unittest.TestCase):
         """Every stripe count, block size and operation of the grid is expected."""
         self.lsmio("src", [lsmRow("1", 4, "1M", "write")])
         f_spec = DatasetSpec(
-            "o.tsv", "lsmio", "src", f_grid=Selection(None, None, None, ["read", "write"])
+            "o.tsv",
+            "lsmio",
+            "src",
+            f_grid=Selection(None, None, None, ["read", "write"]),
         )
         f_result = paperdata.buildDataset(f_spec, self.m_dir)
         self.assertEqual(f_result.placeholders, [(1, 4, "1M", "read")])
 
     def testRunOutsideTheGridIsAnError(self) -> None:
         """A report row the grid does not list is an error, not an extra chart row."""
-        self.lsmio("src", [lsmRow("1", 4, "1M", "write"), lsmRow("2", 4, "1M", "write")])
+        self.lsmio(
+            "src", [lsmRow("1", 4, "1M", "write"), lsmRow("2", 4, "1M", "write")]
+        )
         with self.assertRaises(PaperDataError) as f_ctx:
             paperdata.buildDataset(
                 DatasetSpec("o.tsv", "lsmio", "src", f_grid=Selection([1])), self.m_dir
@@ -879,7 +1053,11 @@ class PaperDataGenerateTest(unittest.TestCase):
     def testWritesEveryTsvWithCrlfLineEnds(self) -> None:
         """Files land under the output dir, each line ends in CRLF, the last one too."""
         f_sources = paperdata.PaperSources(
-            [DatasetSpec("hdd/bm/a.tsv", "lsmio", "a"), DatasetSpec("b.tsv", "lsmio", "a")], []
+            [
+                DatasetSpec("hdd/bm/a.tsv", "lsmio", "a"),
+                DatasetSpec("b.tsv", "lsmio", "a"),
+            ],
+            [],
         )
         f_results = paperdata.generate(f_sources, self.m_data, self.m_out)
         self.assertEqual(len(f_results), 2)
@@ -916,11 +1094,15 @@ class PaperDataGenerateTest(unittest.TestCase):
             "ior-report.csv",
             [iorRow("1", 4, "1M", "write")[:14], iorRow("2", 4, "1M", "write")],
         )
-        f_sources = paperdata.PaperSources([DatasetSpec("short.tsv", "ior", "short")], [])
+        f_sources = paperdata.PaperSources(
+            [DatasetSpec("short.tsv", "ior", "short")], []
+        )
         with patch.object(paperdata.Console, "warning") as f_warning:
             paperdata.generate(f_sources, self.m_data, self.m_out)
         f_warning.assert_called_once()
-        self.assertIn("nodes=1 stripes=4 block size=1M write", f_warning.call_args[0][0])
+        self.assertIn(
+            "nodes=1 stripes=4 block size=1M write", f_warning.call_args[0][0]
+        )
         self.assertIn("fewer columns than the header", f_warning.call_args[0][0])
 
     def testWarnsForEveryRebuiltRun(self) -> None:
@@ -928,13 +1110,20 @@ class PaperDataGenerateTest(unittest.TestCase):
         f_row = writeCutShortRun(self.m_data, "short", ["100.00", "200.00", "300.00"])
         writeReport(self.m_data, "short", "ior-report.csv", [f_row])
         f_sources = paperdata.PaperSources(
-            [DatasetSpec("short.tsv", "ior", "short", f_cut_short=paperdata.CUT_SHORT_REBUILD)], []
+            [
+                DatasetSpec(
+                    "short.tsv", "ior", "short", f_cut_short=paperdata.CUT_SHORT_REBUILD
+                )
+            ],
+            [],
         )
         with patch.object(paperdata.Console, "warning") as f_warning:
             paperdata.generate(f_sources, self.m_data, self.m_out)
         f_warning.assert_called_once()
         f_text = f_warning.call_args[0][0]
-        self.assertIn("nodes=2 stripes=4 block size=64K write has no IOR summary", f_text)
+        self.assertIn(
+            "nodes=2 stripes=4 block size=64K write has no IOR summary", f_text
+        )
         self.assertIn("rebuilt from the 3 of 10 iterations it finished", f_text)
 
     def testWarnsWhenARebuiltRunHasWholeNumberBandwidths(self) -> None:
@@ -942,7 +1131,12 @@ class PaperDataGenerateTest(unittest.TestCase):
         f_row = writeCutShortRun(self.m_data, "short", ["3601", "4000"])
         writeReport(self.m_data, "short", "ior-report.csv", [f_row])
         f_sources = paperdata.PaperSources(
-            [DatasetSpec("short.tsv", "ior", "short", f_cut_short=paperdata.CUT_SHORT_REBUILD)], []
+            [
+                DatasetSpec(
+                    "short.tsv", "ior", "short", f_cut_short=paperdata.CUT_SHORT_REBUILD
+                )
+            ],
+            [],
         )
         with patch.object(paperdata.Console, "warning") as f_warning:
             paperdata.generate(f_sources, self.m_data, self.m_out)
@@ -956,7 +1150,10 @@ class PaperDataGenerateTest(unittest.TestCase):
             self.m_data,
             "failed",
             "lsm-report.csv",
-            [lsmRow("1", 4, "1M", "write"), ["2", "4", "1M", "write", "", "", "", "", "", "0"]],
+            [
+                lsmRow("1", 4, "1M", "write"),
+                ["2", "4", "1M", "write", "", "", "", "", "", "0"],
+            ],
         )
         for f_fill, f_written in [
             (paperdata.FILL_NAN, "written as nan (a gap)"),
@@ -970,7 +1167,8 @@ class PaperDataGenerateTest(unittest.TestCase):
                     )
                 f_warning.assert_called_once()
                 self.assertIn(
-                    "nodes=2 stripes=4 block size=1M write has no data", f_warning.call_args[0][0]
+                    "nodes=2 stripes=4 block size=1M write has no data",
+                    f_warning.call_args[0][0],
                 )
                 self.assertIn(f_written, f_warning.call_args[0][0])
 
@@ -992,7 +1190,11 @@ class PaperDataGenerateTest(unittest.TestCase):
     def testWritesNothingWhenADatasetFailsToBuild(self) -> None:
         """A failing dataset stops the run before any TSV is written."""
         f_sources = paperdata.PaperSources(
-            [DatasetSpec("a.tsv", "lsmio", "a"), DatasetSpec("b.tsv", "lsmio", "nowhere")], []
+            [
+                DatasetSpec("a.tsv", "lsmio", "a"),
+                DatasetSpec("b.tsv", "lsmio", "nowhere"),
+            ],
+            [],
         )
         with self.assertRaises(PaperDataError):
             paperdata.generate(f_sources, self.m_data, self.m_out)
@@ -1027,7 +1229,9 @@ def sourcesDoc() -> Dict[str, Any]:
                 "output": "hdd/a.tsv",
                 "kind": "ior",
                 "source": "viking/a",
-                "stitch": [{"source": "viking/b", "nodes": [24], "block_sizes": ["1M"]}],
+                "stitch": [
+                    {"source": "viking/b", "nodes": [24], "block_sizes": ["1M"]}
+                ],
                 "fill": "zero",
                 "placeholders": [{"nodes": [24], "copy_from_node": 16}],
             }
@@ -1090,7 +1294,8 @@ class PaperSourcesTest(unittest.TestCase):
         f_sources = self.load(self.doc())
         f_spec = f_sources.datasets[0]
         self.assertEqual(
-            (f_spec.output, f_spec.kind, f_spec.source), ("hdd/a.tsv", "ior", "viking/a")
+            (f_spec.output, f_spec.kind, f_spec.source),
+            ("hdd/a.tsv", "ior", "viking/a"),
         )
         self.assertEqual(f_spec.missing, paperdata.MISSING_PLACEHOLDER)
         self.assertEqual(f_spec.stitch[0].source, "viking/b")
@@ -1208,10 +1413,17 @@ class PaperSourcesTest(unittest.TestCase):
         f_doc = self.doc()
         f_doc["grid"] = {"nodes": [1, 2], "ops": ["read", "write"]}
         f_doc["datasets"].append(
-            {"output": "b.tsv", "kind": "lsmio", "source": "viking/c", "grid": {"stripes": [4]}}
+            {
+                "output": "b.tsv",
+                "kind": "lsmio",
+                "source": "viking/c",
+                "grid": {"stripes": [4]},
+            }
         )
         f_first, f_second = self.load(f_doc).datasets
-        self.assertEqual((f_first.grid.nodes, f_first.grid.ops), ([1, 2], ["read", "write"]))
+        self.assertEqual(
+            (f_first.grid.nodes, f_first.grid.ops), ([1, 2], ["read", "write"])
+        )
         self.assertEqual((f_second.grid.nodes, f_second.grid.stripes), (None, [4]))
 
     def testSeriesMayNameItsDatasetWithAnEquivalentPath(self) -> None:
@@ -1247,7 +1459,9 @@ class PaperSourcesTest(unittest.TestCase):
             "      - {<<: *write, label: R, op: read}\n"
         )
         f_read = f_sources.figures[0].series[1]
-        self.assertEqual((f_read.label, f_read.op, f_read.block_size), ("R", "read", "64K"))
+        self.assertEqual(
+            (f_read.label, f_read.op, f_read.block_size), ("R", "read", "64K")
+        )
 
     def testUnquotedYesOrNoIsRejected(self) -> None:
         """YAML reads an unquoted no as a boolean; the schema check catches it."""
@@ -1297,10 +1511,14 @@ class PaperSourcesTest(unittest.TestCase):
     def testCutShortIsKeepOrRebuildAndRebuildIsForIorOnly(self) -> None:
         """cut_short defaults to keep; rebuild reads IOR outputs, so an lsmio dataset
         cannot have it."""
-        self.assertEqual(self.load(self.doc()).datasets[0].cut_short, paperdata.CUT_SHORT_KEEP)
+        self.assertEqual(
+            self.load(self.doc()).datasets[0].cut_short, paperdata.CUT_SHORT_KEEP
+        )
         f_doc = self.doc()
         f_doc["datasets"][0]["cut_short"] = "rebuild"
-        self.assertEqual(self.load(f_doc).datasets[0].cut_short, paperdata.CUT_SHORT_REBUILD)
+        self.assertEqual(
+            self.load(f_doc).datasets[0].cut_short, paperdata.CUT_SHORT_REBUILD
+        )
         f_doc["datasets"][0]["cut_short"] = "drop"
         self.assertRejected(f_doc, "cut_short 'drop' must be 'keep' or 'rebuild'")
         f_doc = self.doc()
@@ -1317,7 +1535,9 @@ class PaperSourcesTest(unittest.TestCase):
                 del f_doc["figures"]
                 self.assertRejected(f_doc, "must name a file")
         f_doc = self.doc()
-        f_doc["datasets"].append({"output": "hdd", "kind": "lsmio", "source": "viking/c"})
+        f_doc["datasets"].append(
+            {"output": "hdd", "kind": "lsmio", "source": "viking/c"}
+        )
         self.assertRejected(f_doc, "output hdd is a directory of output hdd/a.tsv")
 
     def testRejectsBadFigures(self) -> None:
@@ -1371,7 +1591,9 @@ class PaperDataReadSeriesTest(unittest.TestCase):
                 ]:
                     f_file.write(f_row + "\r\n")
             f_series = paperdata.SeriesSpec("L", "x.tsv", 4, "64K", "write")
-            self.assertEqual(paperdata.readSeries(f_path, f_series), ([2, 10], [200.0, 300.0]))
+            self.assertEqual(
+                paperdata.readSeries(f_path, f_series), ([2, 10], [200.0, 300.0])
+            )
             f_none = paperdata.SeriesSpec("L", "x.tsv", 4, "8M", "write")
             self.assertEqual(paperdata.readSeries(f_path, f_none), ([], []))
 
@@ -1414,7 +1636,9 @@ class PaperDataGoldenTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as f_out:
             with patch.object(paperdata.Console, "warning"):
                 f_results = paperdata.generate(
-                    f_sources, os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"), f_out
+                    f_sources,
+                    os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"),
+                    f_out,
                 )
             # The paper's 7, then 31 of the later runs (Viking2 and Archer2)
             self.assertEqual(len(f_results), 38)
@@ -1433,9 +1657,13 @@ class PaperDataGoldenTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as f_out:
             with patch.object(paperdata.Console, "warning"):
                 f_results = paperdata.generate(
-                    f_sources, os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"), f_out
+                    f_sources,
+                    os.path.join(_REPO_ROOT, "lsmio-data", "synthetic"),
+                    f_out,
                 )
-        f_gaps = {f_r.spec.output: f_r.placeholders for f_r in f_results if f_r.placeholders}
+        f_gaps = {
+            f_r.spec.output: f_r.placeholders for f_r in f_results if f_r.placeholders
+        }
 
         def wholeNode(f_node: int) -> list:
             return [

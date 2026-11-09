@@ -579,7 +579,9 @@ class DetachInProcessTest(unittest.TestCase):
         self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_DFL)
         self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_DFL)
         self.assertTrue(callable(signal.getsignal(signal.SIGINT)))
-        self.assertIsNot(signal.getsignal(signal.SIGINT), self.m_handlers[signal.SIGINT])
+        self.assertIsNot(
+            signal.getsignal(signal.SIGINT), self.m_handlers[signal.SIGINT]
+        )
         self.assertEqual(self._mask(), set())
         self.assertEqual([f_f.mode for f_f in self.m_files], ["rb"])
 

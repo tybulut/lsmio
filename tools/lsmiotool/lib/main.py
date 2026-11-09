@@ -524,7 +524,9 @@ class ParseMain(BaseMain):
         f_written = 0
         for f_dir in f_dirs:
             f_base = os.path.basename(os.path.normpath(f_dir))
-            f_label = f_base[len("outputs-") :] if f_base.startswith("outputs-") else f_base
+            f_label = (
+                f_base[len("outputs-") :] if f_base.startswith("outputs-") else f_base
+            )
             sys.stdout.write(f"=== Generating report for {f_label} ===\n")
             try:
                 # None (no summary rows) is the failure; an old report may exist
@@ -860,9 +862,6 @@ class ParseMain(BaseMain):
         except Exception as f_err:
             sys.stderr.write(f"Error: {f_err}\n")
             return 1
-
-
-
 
 
 class CompareMain(BaseMain):
@@ -1396,9 +1395,9 @@ class ArchiveMain(BaseMain):
                 os.path.join(f_run_root, "manifest.json")
             ):
                 continue
-            if ArchiveEngine.readArmMarker(
-                f_run_root
-            ) is not None and self._runArmId(f_run_root, f_setup, False):
+            if ArchiveEngine.readArmMarker(f_run_root) is not None and self._runArmId(
+                f_run_root, f_setup, False
+            ):
                 f_names.append(f_entry)
         return f_names
 
@@ -1505,8 +1504,7 @@ class ArchiveMain(BaseMain):
                         )
                         + f" was found under {f_runs_root} (a variants, --versioned "
                         "or backends run is archived with --source <one of its run "
-                        "roots>)"
-                        + f_hint
+                        "roots>)" + f_hint
                     )
 
             if f_run_root is not None:
@@ -1803,7 +1801,9 @@ class LatexDataMain(BaseMain):
         f_request = self.m_request
         f_output_dir = os.path.expanduser(f_request.output_dir)
         try:
-            f_sources = paperdata.loadSources(os.path.expanduser(f_request.sources_path))
+            f_sources = paperdata.loadSources(
+                os.path.expanduser(f_request.sources_path)
+            )
             f_results = paperdata.generate(
                 f_sources, os.path.expanduser(f_request.data_dir), f_output_dir
             )
@@ -1811,7 +1811,9 @@ class LatexDataMain(BaseMain):
             log.Console.error(str(f_err))
             return 1
         for f_result in f_results:
-            sys.stdout.write(f"Wrote {os.path.join(f_output_dir, f_result.spec.output)}\n")
+            sys.stdout.write(
+                f"Wrote {os.path.join(f_output_dir, f_result.spec.output)}\n"
+            )
             for f_line in f_result.provenance:
                 sys.stdout.write(f"  {f_line}\n")
         return 0
@@ -1841,7 +1843,9 @@ class LatexMain(BaseMain):
         f_tsv_dir = os.path.expanduser(f_request.tsv_dir)
         f_output_dir = os.path.expanduser(f_request.output_dir or os.getcwd())
         try:
-            f_sources = paperdata.loadSources(os.path.expanduser(f_request.sources_path))
+            f_sources = paperdata.loadSources(
+                os.path.expanduser(f_request.sources_path)
+            )
             if not f_sources.figures:
                 raise paperdata.PaperDataError(
                     f"{f_request.sources_path} defines no figures"
@@ -1860,10 +1864,14 @@ class LatexMain(BaseMain):
                         )
                     f_plots.append(
                         plot.PlotData(
-                            f_series.label, f_x, [f_v / f_figure.y_divisor for f_v in f_y]
+                            f_series.label,
+                            f_x,
+                            [f_v / f_figure.y_divisor for f_v in f_y],
                         )
                     )
-                f_meta = plot.PlotMetaData(f_figure.title, "# of Nodes", f_figure.y_label)
+                f_meta = plot.PlotMetaData(
+                    f_figure.title, "# of Nodes", f_figure.y_label
+                )
                 f_path = os.path.join(f_output_dir, f_figure.file)
                 os.makedirs(os.path.dirname(f_path), exist_ok=True)
                 plot.MultiPlot(f_meta, *f_plots).plot(f_path)

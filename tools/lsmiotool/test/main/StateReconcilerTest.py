@@ -1501,7 +1501,9 @@ class PointStateViewContractTest(unittest.TestCase):
                         f_scale_point=f_sp,
                         f_state=PointRunState.NOT_STARTED,
                     )
-                self.assertIn("point_id must be a non-empty string, got:", str(f_cm.exception))
+                self.assertIn(
+                    "point_id must be a non-empty string, got:", str(f_cm.exception)
+                )
 
     def testPointStateViewRejectsInvalidOrdinal(self) -> None:
         """Tests that PointStateView constructor rejects non-integer or negative ordinal."""
@@ -1515,7 +1517,9 @@ class PointStateViewContractTest(unittest.TestCase):
                         f_scale_point=f_sp,
                         f_state=PointRunState.NOT_STARTED,
                     )
-                self.assertIn("ordinal must be a non-negative integer, got:", str(f_cm.exception))
+                self.assertIn(
+                    "ordinal must be a non-negative integer, got:", str(f_cm.exception)
+                )
 
     def testPointStateViewRejectsInvalidScalePoint(self) -> None:
         """Tests that PointStateView constructor rejects non-ScalePoint instances."""
@@ -1528,12 +1532,20 @@ class PointStateViewContractTest(unittest.TestCase):
                         f_scale_point=f_bad_sp,  # type: ignore
                         f_state=PointRunState.NOT_STARTED,
                     )
-                self.assertIn("scale_point must be ScalePoint, got:", str(f_cm.exception))
+                self.assertIn(
+                    "scale_point must be ScalePoint, got:", str(f_cm.exception)
+                )
 
     def testPointStateViewRejectsInvalidState(self) -> None:
         """Tests that PointStateView constructor rejects non-PointRunState instances."""
         f_sp = ScalePoint(1, 1, 1)
-        for f_bad_st in (None, "running", 123, SchedulerJobState.SUCCEEDED, OverallRunState.SUCCEEDED):
+        for f_bad_st in (
+            None,
+            "running",
+            123,
+            SchedulerJobState.SUCCEEDED,
+            OverallRunState.SUCCEEDED,
+        ):
             with self.subTest(bad_st=f_bad_st):
                 with self.assertRaises(StateError) as f_cm:
                     PointStateView(
@@ -1557,12 +1569,19 @@ class PointStateViewContractTest(unittest.TestCase):
                         f_state=PointRunState.NOT_STARTED,
                         f_handle=f_bad_h,  # type: ignore
                     )
-                self.assertIn("handle must be JobHandle or None, got:", str(f_cm.exception))
+                self.assertIn(
+                    "handle must be JobHandle or None, got:", str(f_cm.exception)
+                )
 
     def testPointStateViewRejectsInvalidSchedulerState(self) -> None:
         """Tests that PointStateView constructor rejects non-SchedulerJobState when scheduler state is provided."""
         f_sp = ScalePoint(1, 1, 1)
-        for f_bad_sched in ("queued", 123, PointRunState.SUCCEEDED, OverallRunState.SUCCEEDED):
+        for f_bad_sched in (
+            "queued",
+            123,
+            PointRunState.SUCCEEDED,
+            OverallRunState.SUCCEEDED,
+        ):
             with self.subTest(bad_sched=f_bad_sched):
                 with self.assertRaises(StateError) as f_cm:
                     PointStateView(
@@ -1572,26 +1591,39 @@ class PointStateViewContractTest(unittest.TestCase):
                         f_state=PointRunState.NOT_STARTED,
                         f_scheduler_state=f_bad_sched,  # type: ignore
                     )
-                self.assertIn("scheduler_state must be SchedulerJobState or None, got:", str(f_cm.exception))
+                self.assertIn(
+                    "scheduler_state must be SchedulerJobState or None, got:",
+                    str(f_cm.exception),
+                )
 
     def testPointStateViewImmutabilityFrozenRaise(self) -> None:
         """Tests that initialized PointStateView rejects attribute mutations and deletions."""
         f_pv = PointStateView("pt-1", 0, ScalePoint(1, 1, 1), PointRunState.RUNNING)
         with self.assertRaises(AttributeError) as f_cm_set1:
             f_pv.m_point_id = "pt-2"  # type: ignore
-        self.assertIn("Cannot modify immutable PointStateView", str(f_cm_set1.exception))
+        self.assertIn(
+            "Cannot modify immutable PointStateView", str(f_cm_set1.exception)
+        )
 
         with self.assertRaises(AttributeError) as f_cm_set2:
             f_pv.point_id = "pt-2"  # type: ignore
-        self.assertIn("Cannot modify immutable PointStateView", str(f_cm_set2.exception))
+        self.assertIn(
+            "Cannot modify immutable PointStateView", str(f_cm_set2.exception)
+        )
 
         with self.assertRaises(AttributeError) as f_cm_del1:
             del f_pv.m_point_id
-        self.assertIn("Cannot delete attribute from immutable PointStateView", str(f_cm_del1.exception))
+        self.assertIn(
+            "Cannot delete attribute from immutable PointStateView",
+            str(f_cm_del1.exception),
+        )
 
         with self.assertRaises(AttributeError) as f_cm_del2:
             del f_pv.m_ordinal
-        self.assertIn("Cannot delete attribute from immutable PointStateView", str(f_cm_del2.exception))
+        self.assertIn(
+            "Cannot delete attribute from immutable PointStateView",
+            str(f_cm_del2.exception),
+        )
 
         self.assertEqual(f_pv.point_id, "pt-1")
         self.assertEqual(f_pv.ordinal, 0)
@@ -1652,7 +1684,14 @@ class PointStateViewContractTest(unittest.TestCase):
     def testPointStateViewPropertiesNonTerminalAndNoneOptionals(self) -> None:
         """Tests PointStateView non-terminal properties and None optional fields."""
         f_sp = ScalePoint(1, 1, 1)
-        f_pv = PointStateView("pt-running", 0, f_sp, PointRunState.RUNNING, f_handle=None, f_scheduler_state=None)
+        f_pv = PointStateView(
+            "pt-running",
+            0,
+            f_sp,
+            PointRunState.RUNNING,
+            f_handle=None,
+            f_scheduler_state=None,
+        )
         self.assertFalse(f_pv.isTerminal)
         self.assertFalse(f_pv.is_terminal)
         self.assertFalse(f_pv.isSuccess)
@@ -1702,7 +1741,14 @@ class PointStateViewContractTest(unittest.TestCase):
     def testPointStateViewEqualityNonPointStateView(self) -> None:
         """Tests that PointStateView returns False when compared to objects of other types."""
         f_pv = PointStateView("pt-1", 0, ScalePoint(1, 1, 1), PointRunState.RUNNING)
-        for f_other in ("string", 123, None, object(), [], RunStateView("run-1", OverallRunState.NOT_STARTED)):
+        for f_other in (
+            "string",
+            123,
+            None,
+            object(),
+            [],
+            RunStateView("run-1", OverallRunState.NOT_STARTED),
+        ):
             with self.subTest(other=f_other):
                 self.assertFalse(f_pv == f_other)
                 self.assertTrue(f_pv != f_other)
@@ -1737,16 +1783,126 @@ class PointStateViewContractTest(unittest.TestCase):
         )
         self.assertEqual(f_base, f_identical)
 
-        f_diff_point_id = PointStateView("pt-2", 0, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3"], ["d1"])
-        f_diff_ordinal = PointStateView("pt-1", 1, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3"], ["d1"])
-        f_diff_sp = PointStateView("pt-1", 0, ScalePoint(4, 1, 4), PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3"], ["d1"])
-        f_diff_state = PointStateView("pt-1", 0, f_sp, PointRunState.FAILED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3"], ["d1"])
-        f_diff_handle = PointStateView("pt-1", 0, f_sp, PointRunState.SUCCEEDED, JobHandle("slurm", "999"), SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3"], ["d1"])
-        f_diff_scheduler = PointStateView("pt-1", 0, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.FAILED, ["c1"], ["c2"], ["c3"], ["d1"])
-        f_diff_completed = PointStateView("pt-1", 0, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1_diff"], ["c2"], ["c3"], ["d1"])
-        f_diff_failed = PointStateView("pt-1", 0, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2_diff"], ["c3"], ["d1"])
-        f_diff_missing = PointStateView("pt-1", 0, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3_diff"], ["d1"])
-        f_diff_diagnostics = PointStateView("pt-1", 0, f_sp, PointRunState.SUCCEEDED, f_h, SchedulerJobState.SUCCEEDED, ["c1"], ["c2"], ["c3"], ["d1_diff"])
+        f_diff_point_id = PointStateView(
+            "pt-2",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_ordinal = PointStateView(
+            "pt-1",
+            1,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_sp = PointStateView(
+            "pt-1",
+            0,
+            ScalePoint(4, 1, 4),
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_state = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.FAILED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_handle = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            JobHandle("slurm", "999"),
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_scheduler = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.FAILED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_completed = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1_diff"],
+            ["c2"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_failed = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2_diff"],
+            ["c3"],
+            ["d1"],
+        )
+        f_diff_missing = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3_diff"],
+            ["d1"],
+        )
+        f_diff_diagnostics = PointStateView(
+            "pt-1",
+            0,
+            f_sp,
+            PointRunState.SUCCEEDED,
+            f_h,
+            SchedulerJobState.SUCCEEDED,
+            ["c1"],
+            ["c2"],
+            ["c3"],
+            ["d1_diff"],
+        )
 
         for f_label, f_variant in (
             ("point_id", f_diff_point_id),
@@ -1774,23 +1930,40 @@ class RunStateViewContractTest(unittest.TestCase):
             with self.subTest(bad_id=f_bad_id):
                 with self.assertRaises(StateError) as f_cm:
                     RunStateView(f_run_id=f_bad_id, f_state=OverallRunState.NOT_STARTED)  # type: ignore
-                self.assertIn("run_id must be a non-empty string, got:", str(f_cm.exception))
+                self.assertIn(
+                    "run_id must be a non-empty string, got:", str(f_cm.exception)
+                )
 
     def testRunStateViewRejectsInvalidState(self) -> None:
         """Tests that RunStateView constructor rejects non-OverallRunState instances."""
-        for f_bad_st in (None, "not_started", 123, PointRunState.SUCCEEDED, SchedulerJobState.SUCCEEDED):
+        for f_bad_st in (
+            None,
+            "not_started",
+            123,
+            PointRunState.SUCCEEDED,
+            SchedulerJobState.SUCCEEDED,
+        ):
             with self.subTest(bad_st=f_bad_st):
                 with self.assertRaises(StateError) as f_cm:
                     RunStateView("run-1", f_bad_st)  # type: ignore
-                self.assertIn("state must be OverallRunState, got:", str(f_cm.exception))
+                self.assertIn(
+                    "state must be OverallRunState, got:", str(f_cm.exception)
+                )
 
     def testRunStateViewRejectsInvalidActivePointOrdinal(self) -> None:
         """Tests that RunStateView constructor rejects negative or non-integer active_point_ordinal."""
         for f_bad_ord in (-1, -99, "0", 1.5, []):
             with self.subTest(bad_ord=f_bad_ord):
                 with self.assertRaises(StateError) as f_cm:
-                    RunStateView("run-1", OverallRunState.IN_PROGRESS, f_active_point_ordinal=f_bad_ord)  # type: ignore
-                self.assertIn("active_point_ordinal must be non-negative integer or None, got:", str(f_cm.exception))
+                    RunStateView(
+                        "run-1",
+                        OverallRunState.IN_PROGRESS,
+                        f_active_point_ordinal=f_bad_ord,
+                    )  # type: ignore
+                self.assertIn(
+                    "active_point_ordinal must be non-negative integer or None, got:",
+                    str(f_cm.exception),
+                )
 
     def testRunStateViewImmutabilityFrozenRaise(self) -> None:
         """Tests that initialized RunStateView rejects attribute modifications and deletions."""
@@ -1805,11 +1978,17 @@ class RunStateViewContractTest(unittest.TestCase):
 
         with self.assertRaises(AttributeError) as f_cm_del1:
             del f_rv.m_run_id
-        self.assertIn("Cannot delete attribute from immutable RunStateView", str(f_cm_del1.exception))
+        self.assertIn(
+            "Cannot delete attribute from immutable RunStateView",
+            str(f_cm_del1.exception),
+        )
 
         with self.assertRaises(AttributeError) as f_cm_del2:
             del f_rv.m_state
-        self.assertIn("Cannot delete attribute from immutable RunStateView", str(f_cm_del2.exception))
+        self.assertIn(
+            "Cannot delete attribute from immutable RunStateView",
+            str(f_cm_del2.exception),
+        )
 
         self.assertEqual(f_rv.run_id, "run-1")
         self.assertEqual(f_rv.state, OverallRunState.IN_PROGRESS)
@@ -1906,7 +2085,14 @@ class RunStateViewContractTest(unittest.TestCase):
     def testRunStateViewEqualityNonRunStateView(self) -> None:
         """Tests that RunStateView returns False when compared to objects of other types."""
         f_rv = RunStateView("run-1", OverallRunState.NOT_STARTED)
-        for f_other in ("string", 123, None, object(), [], PointStateView("pt-1", 0, ScalePoint(1, 1, 1), PointRunState.NOT_STARTED)):
+        for f_other in (
+            "string",
+            123,
+            None,
+            object(),
+            [],
+            PointStateView("pt-1", 0, ScalePoint(1, 1, 1), PointRunState.NOT_STARTED),
+        ):
             with self.subTest(other=f_other):
                 self.assertFalse(f_rv == f_other)
                 self.assertTrue(f_rv != f_other)
@@ -1915,17 +2101,35 @@ class RunStateViewContractTest(unittest.TestCase):
         """Tests RunStateView equality comparison across all 7 member fields."""
         f_pv1 = PointStateView("pt-0", 0, ScalePoint(1, 1, 1), PointRunState.SUCCEEDED)
         f_pv2 = PointStateView("pt-1", 1, ScalePoint(4, 1, 4), PointRunState.SUCCEEDED)
-        f_base = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, True)
-        f_identical = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, True)
+        f_base = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, True
+        )
+        f_identical = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, True
+        )
         self.assertEqual(f_base, f_identical)
 
-        f_diff_run_id = RunStateView("run-2", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, True)
-        f_diff_state = RunStateView("run-1", OverallRunState.FAILED, [f_pv1], 0, ["d1"], False, True)
-        f_diff_points = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv2], 0, ["d1"], False, True)
-        f_diff_active = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv1], 1, ["d1"], False, True)
-        f_diff_diag = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d2"], False, True)
-        f_diff_interruption = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], True, True)
-        f_diff_marker = RunStateView("run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, False)
+        f_diff_run_id = RunStateView(
+            "run-2", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, True
+        )
+        f_diff_state = RunStateView(
+            "run-1", OverallRunState.FAILED, [f_pv1], 0, ["d1"], False, True
+        )
+        f_diff_points = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv2], 0, ["d1"], False, True
+        )
+        f_diff_active = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv1], 1, ["d1"], False, True
+        )
+        f_diff_diag = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d2"], False, True
+        )
+        f_diff_interruption = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], True, True
+        )
+        f_diff_marker = RunStateView(
+            "run-1", OverallRunState.SUCCEEDED, [f_pv1], 0, ["d1"], False, False
+        )
 
         for f_label, f_variant in (
             ("run_id", f_diff_run_id),
@@ -1967,7 +2171,9 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
         f_scale: str = "local",
         f_setup: str = "NATIVE",
     ) -> RunPlan:
-        f_req = RunRequest(f_target=f_target, f_scale=f_scale, f_ssd=False, f_setup=f_setup)
+        f_req = RunRequest(
+            f_target=f_target, f_scale=f_scale, f_ssd=False, f_setup=f_setup
+        )
         f_tokens = [f"lm-{i:024d}" for i in range(1, 20)]
         f_tok_idx = 0
 
@@ -1992,7 +2198,9 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
         f_scale: str = "local",
         f_setup: str = "NATIVE",
     ) -> Tuple[RunPlan, ArtifactStore, EvidenceStore]:
-        f_plan = self._createTestPlan(f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup)
+        f_plan = self._createTestPlan(
+            f_run_id, f_target=f_target, f_scale=f_scale, f_setup=f_setup
+        )
         f_art_store = ArtifactStore(self.m_temp_dir, f_run_id)
         f_art_store.allocateRun(f_plan)
         for f_idx, f_sp in enumerate(f_plan.scale_points):
@@ -2016,7 +2224,9 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
             with self.subTest(bad_store=f_bad_store):
                 with self.assertRaises(StateError) as ctx:
                     StateReconciler.reconcile(f_plan, f_bad_store)
-                self.assertIn("f_evidence_store must be EvidenceStore, got:", str(ctx.exception))
+                self.assertIn(
+                    "f_evidence_store must be EvidenceStore, got:", str(ctx.exception)
+                )
 
     def testReconcileControlStreamIgnoredKind(self) -> None:
         """Verifies that non-interruption and non-marker control events are skipped in reconcile."""
@@ -2050,8 +2260,15 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
             f_f.write("{corrupt_json")
         f_rv = StateReconciler.reconcile(f_plan, f_store)
         self.assertEqual(f_rv.state, OverallRunState.INDETERMINATE)
-        self.assertTrue(any("Control stream error for writer 'w1'" in d for d in f_rv.diagnostics))
-        self.assertTrue(any("Overall INDETERMINATE due to corrupt control stream" in d for d in f_rv.diagnostics))
+        self.assertTrue(
+            any("Control stream error for writer 'w1'" in d for d in f_rv.diagnostics)
+        )
+        self.assertTrue(
+            any(
+                "Overall INDETERMINATE due to corrupt control stream" in d
+                for d in f_rv.diagnostics
+            )
+        )
 
     def testReconcileInterruptedPrecedesMarkerSameWriter(self) -> None:
         """Verifies monotonic sequence ordering sets interrupted first when seq(interrupted) < seq(marker)."""
@@ -2267,7 +2484,9 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
         f_plan, f_art_store, f_store = self._setupRunEnvironment("run-e2")
         f_sp = f_plan.scale_points[0]
         f_valid_handle = JobHandle("slurm", "job-100")
-        f_store.recordSubmissionRecorded(f_sp, "client", f_handle=f_valid_handle, f_ordinal=0)
+        f_store.recordSubmissionRecorded(
+            f_sp, "client", f_handle=f_valid_handle, f_ordinal=0
+        )
         f_fake_obs = SimpleNamespace(
             payload={"handle": {"invalid": 123}},
             created_at_utc="2026-08-20T12:00:00Z",
@@ -2332,14 +2551,18 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
             f_plan, f_art_store, f_store = self._setupRunEnvironment("run-f1-1")
             f_sp = f_plan.scale_points[0]
             f_valid_h = JobHandle("slurm", "job-200")
-            f_store.recordSubmissionRecorded(f_sp, "client", f_handle=f_valid_h, f_ordinal=0)
+            f_store.recordSubmissionRecorded(
+                f_sp, "client", f_handle=f_valid_h, f_ordinal=0
+            )
             f_fresh = {
                 "job-200": {
                     "handle": {"backend": "slurm", "job_id": "job-200"},
                     "state": "active",
                 }
             }
-            f_rv = StateReconciler.reconcile(f_plan, f_store, f_scheduler_observations=f_fresh)
+            f_rv = StateReconciler.reconcile(
+                f_plan, f_store, f_scheduler_observations=f_fresh
+            )
             self.assertEqual(f_rv.point_states[0].state, PointRunState.RUNNING)
 
         # Subtest 2: corrupt dict handle
@@ -2347,14 +2570,18 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
             f_plan, f_art_store, f_store = self._setupRunEnvironment("run-f1-2")
             f_sp = f_plan.scale_points[0]
             f_valid_h = JobHandle("slurm", "job-200")
-            f_store.recordSubmissionRecorded(f_sp, "client", f_handle=f_valid_h, f_ordinal=0)
+            f_store.recordSubmissionRecorded(
+                f_sp, "client", f_handle=f_valid_h, f_ordinal=0
+            )
             f_fresh = {
                 "job-200": {
                     "handle": {"invalid": 123},
                     "state": "active",
                 }
             }
-            f_rv = StateReconciler.reconcile(f_plan, f_store, f_scheduler_observations=f_fresh)
+            f_rv = StateReconciler.reconcile(
+                f_plan, f_store, f_scheduler_observations=f_fresh
+            )
             self.assertEqual(f_rv.point_states[0].state, PointRunState.INDETERMINATE)
 
     def testReconcileWorkerEventsCorruptionError(self) -> None:
@@ -2378,7 +2605,9 @@ class StateReconcilerExecutionContractTest(unittest.TestCase):
 
     def testReconcileRankResultCorruptionError(self) -> None:
         """Verifies readRankResult corruption in LSMIO mode sets INDETERMINATE with diagnostics."""
-        f_plan, f_art_store, f_store = self._setupRunEnvironment("run-h1", f_target="lsmio")
+        f_plan, f_art_store, f_store = self._setupRunEnvironment(
+            "run-h1", f_target="lsmio"
+        )
         f_sp = f_plan.scale_points[0]
         f_store.recordSubmissionRequested(f_sp, "client", f_ordinal=0)
         with patch.object(
@@ -2401,24 +2630,36 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
 
     def testIsResultFailure(self) -> None:
         """Verifies _isResultFailure identifies failure payloads accurately."""
-        self.assertTrue(StateReconciler._isResultFailure({"status": "failed", "exit_code": 1}))
-        self.assertFalse(StateReconciler._isResultFailure({"status": "success", "exit_code": 0}))
+        self.assertTrue(
+            StateReconciler._isResultFailure({"status": "failed", "exit_code": 1})
+        )
+        self.assertFalse(
+            StateReconciler._isResultFailure({"status": "success", "exit_code": 0})
+        )
 
     def testLookupSchedulerObservationByHandleOrJobId(self) -> None:
         """Verifies _lookupSchedulerObservation matches by JobHandle object or job_id string."""
         f_sp = ScalePoint(1, 1, 1)
         f_h = JobHandle("slurm", "job-100")
-        f_res1 = StateReconciler._lookupSchedulerObservation(f_sp, 0, "pt-0", f_h, {f_h: "succeeded"})
+        f_res1 = StateReconciler._lookupSchedulerObservation(
+            f_sp, 0, "pt-0", f_h, {f_h: "succeeded"}
+        )
         self.assertEqual(f_res1, {"state": SchedulerJobState.SUCCEEDED})
-        f_res2 = StateReconciler._lookupSchedulerObservation(f_sp, 0, "pt-0", f_h, {"job-100": "succeeded"})
+        f_res2 = StateReconciler._lookupSchedulerObservation(
+            f_sp, 0, "pt-0", f_h, {"job-100": "succeeded"}
+        )
         self.assertEqual(f_res2, {"state": SchedulerJobState.SUCCEEDED})
 
     def testLookupSchedulerObservationStringInvalidEnum(self) -> None:
         """Verifies string observation with invalid enum value returns UNKNOWN with raw field."""
         f_sp = ScalePoint(1, 1, 1)
         f_h = JobHandle("slurm", "job-100")
-        f_res = StateReconciler._lookupSchedulerObservation(f_sp, 0, "pt-0", f_h, {"pt-0": "bogus_state"})
-        self.assertEqual(f_res, {"state": SchedulerJobState.UNKNOWN, "raw": "bogus_state"})
+        f_res = StateReconciler._lookupSchedulerObservation(
+            f_sp, 0, "pt-0", f_h, {"pt-0": "bogus_state"}
+        )
+        self.assertEqual(
+            f_res, {"state": SchedulerJobState.UNKNOWN, "raw": "bogus_state"}
+        )
 
     def testLookupSchedulerObservationDictVariations(self) -> None:
         """Verifies dictionary observations handling missing state, enum state, and invalid str state."""
@@ -2426,7 +2667,9 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
         f_h = JobHandle("slurm", "job-100")
 
         # Missing state key
-        f_d1 = StateReconciler._lookupSchedulerObservation(f_sp, 0, "pt-0", f_h, {"pt-0": {"foo": "bar"}})
+        f_d1 = StateReconciler._lookupSchedulerObservation(
+            f_sp, 0, "pt-0", f_h, {"pt-0": {"foo": "bar"}}
+        )
         self.assertEqual(f_d1, {"foo": "bar"})
 
         # Enum state
@@ -2448,7 +2691,11 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
 
         # Object with enum state and handle
         f_o1 = StateReconciler._lookupSchedulerObservation(
-            f_sp, 0, "pt-0", f_h, {"pt-0": SimpleNamespace(state=SchedulerJobState.ACTIVE, handle=f_h)}
+            f_sp,
+            0,
+            "pt-0",
+            f_h,
+            {"pt-0": SimpleNamespace(state=SchedulerJobState.ACTIVE, handle=f_h)},
         )
         self.assertEqual(f_o1, {"state": SchedulerJobState.ACTIVE, "handle": f_h})
 
@@ -2474,7 +2721,9 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
         """Verifies fallback when observation is neither dict nor has .state attribute."""
         f_sp = ScalePoint(1, 1, 1)
         f_h = JobHandle("slurm", "job-100")
-        f_res = StateReconciler._lookupSchedulerObservation(f_sp, 0, "pt-0", f_h, {"pt-0": 99999})
+        f_res = StateReconciler._lookupSchedulerObservation(
+            f_sp, 0, "pt-0", f_h, {"pt-0": 99999}
+        )
         self.assertEqual(f_res, {"state": SchedulerJobState.UNKNOWN})
 
     def testDerivePointStateCancellationFollowedByTerminalFailure(self) -> None:
@@ -2547,7 +2796,9 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
         )
         self.assertEqual(f_st, PointRunState.RUNNING)
 
-    def testDerivePointStateCancelRequestedTerminalCompletionIndeterminate(self) -> None:
+    def testDerivePointStateCancelRequestedTerminalCompletionIndeterminate(
+        self,
+    ) -> None:
         """Verifies Rule 3: terminal scheduler completion with cancel requested and no failure is INDETERMINATE."""
         f_cancel_rec = EvidenceRecord(
             WriterKind.CONTROL,
@@ -2582,7 +2833,10 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
         )
         self.assertEqual(f_st, PointRunState.INDETERMINATE)
         self.assertTrue(
-            any("Terminal completion while cancellation was requested" in d for d in f_diag)
+            any(
+                "Terminal completion while cancellation was requested" in d
+                for d in f_diag
+            )
         )
 
     def testDerivePointStateCancelRequestedActiveRunning(self) -> None:
@@ -2725,7 +2979,8 @@ class StateReconcilerDerivationContractTest(unittest.TestCase):
         )
         self.assertEqual(f_st, OverallRunState.INDETERMINATE)
         self.assertTrue(
-            any("Overall INDETERMINATE due to corrupt control stream" in d for d in f_diag)
+            any(
+                "Overall INDETERMINATE due to corrupt control stream" in d
+                for d in f_diag
+            )
         )
-
-

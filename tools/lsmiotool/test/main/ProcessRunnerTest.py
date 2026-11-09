@@ -449,7 +449,9 @@ class ProcessRunnerTest(unittest.TestCase):
 
     def testProcessRunnerUnexpectedPopenException(self) -> None:
         """Validates unexpected (non-OSError) exception in subprocess.Popen raises ProcessSpawnError with cause."""
-        with patch("subprocess.Popen", side_effect=RuntimeError("Subprocess memory error")):
+        with patch(
+            "subprocess.Popen", side_effect=RuntimeError("Subprocess memory error")
+        ):
             with self.assertRaises(ProcessSpawnError) as f_cm:
                 self.m_runner.run(["/bin/echo", "test"])
             self.assertIn(
@@ -530,8 +532,10 @@ class ProcessRunnerTest(unittest.TestCase):
     def testProcessRunnerMirrorStdoutEmptyStreams(self) -> None:
         """Validates branches 518->521 (empty stdout) and 521->528 (empty stderr) during console mirroring."""
         with self.subTest(stream="stderr_only"):
-            with patch("sys.stdout", new_callable=io.StringIO) as f_mock_stdout, \
-                 patch("sys.stderr", new_callable=io.StringIO) as f_mock_stderr:
+            with (
+                patch("sys.stdout", new_callable=io.StringIO) as f_mock_stdout,
+                patch("sys.stderr", new_callable=io.StringIO) as f_mock_stderr,
+            ):
                 f_res = self.m_runner.run(
                     [sys.executable, "-c", "import sys; sys.stderr.write('err\\n')"],
                     f_mirror_stdout=True,
@@ -542,8 +546,10 @@ class ProcessRunnerTest(unittest.TestCase):
                 self.assertEqual(f_mock_stderr.getvalue(), "err\n")
 
         with self.subTest(stream="stdout_only"):
-            with patch("sys.stdout", new_callable=io.StringIO) as f_mock_stdout, \
-                 patch("sys.stderr", new_callable=io.StringIO) as f_mock_stderr:
+            with (
+                patch("sys.stdout", new_callable=io.StringIO) as f_mock_stdout,
+                patch("sys.stderr", new_callable=io.StringIO) as f_mock_stderr,
+            ):
                 f_res = self.m_runner.run(
                     [sys.executable, "-c", "import sys; sys.stdout.write('out\\n')"],
                     f_mirror_stdout=True,

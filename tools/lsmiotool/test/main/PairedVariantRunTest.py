@@ -72,12 +72,8 @@ class PairedVariantRunTest(unittest.TestCase):
         self.assertEqual(pair.variant, "footer")
         self.assertEqual(pair.collision, 1)
         self.assertEqual(pair.display_label, "footer-1")
-        self.assertEqual(
-            pair.run_dir, "/tmp/archive/outputs-native-footer:run-1"
-        )
-        self.assertEqual(
-            pair.base_dir, "/tmp/archive/outputs-native-footer:base-1"
-        )
+        self.assertEqual(pair.run_dir, "/tmp/archive/outputs-native-footer:run-1")
+        self.assertEqual(pair.base_dir, "/tmp/archive/outputs-native-footer:base-1")
 
         # toDict serialization
         d = pair.toDict()
@@ -85,12 +81,8 @@ class PairedVariantRunTest(unittest.TestCase):
         self.assertEqual(d["variant"], "footer")
         self.assertEqual(d["collision"], 1)
         self.assertEqual(d["display_label"], "footer-1")
-        self.assertEqual(
-            d["run_dir"], "/tmp/archive/outputs-native-footer:run-1"
-        )
-        self.assertEqual(
-            d["base_dir"], "/tmp/archive/outputs-native-footer:base-1"
-        )
+        self.assertEqual(d["run_dir"], "/tmp/archive/outputs-native-footer:run-1")
+        self.assertEqual(d["base_dir"], "/tmp/archive/outputs-native-footer:base-1")
 
         # fromDict deserialization
         restored = PairedVariantRun.fromDict(d)
@@ -125,12 +117,8 @@ class PairedVariantRunTest(unittest.TestCase):
         self.assertEqual(paired[0].backend, "native")
         self.assertEqual(paired[0].variant, "footer")
         self.assertEqual(paired[0].collision, 1)
-        self.assertEqual(
-            paired[0].run_dir, "/path/to/outputs-native-footer:run-1"
-        )
-        self.assertEqual(
-            paired[0].base_dir, "/path/to/outputs-native-footer:base-1"
-        )
+        self.assertEqual(paired[0].run_dir, "/path/to/outputs-native-footer:run-1")
+        self.assertEqual(paired[0].base_dir, "/path/to/outputs-native-footer:base-1")
 
     def testPairDirectoriesFallbackToStandaloneBase(self) -> None:
         """Asserts pairDirectories matches :run with standalone baseline if twin :base is absent."""
@@ -158,9 +146,7 @@ class PairedVariantRunTest(unittest.TestCase):
 
         paired = pairDirectories(valid_runs)
         self.assertEqual(len(paired), 1)
-        self.assertEqual(
-            paired[0].run_dir, "/path/to/outputs-native-footer:run"
-        )
+        self.assertEqual(paired[0].run_dir, "/path/to/outputs-native-footer:run")
         self.assertEqual(paired[0].base_dir, "/path/to/outputs-native")
 
     def testPairDirectoriesOrphanedRunOmitted(self) -> None:
@@ -180,9 +166,7 @@ class PairedVariantRunTest(unittest.TestCase):
             paired = pairDirectories(valid_runs)
             self.assertEqual(len(paired), 0)
             mock_warn.assert_called_once()
-            self.assertIn(
-                "Orphaned variant run omitted", mock_warn.call_args[0][0]
-            )
+            self.assertIn("Orphaned variant run omitted", mock_warn.call_args[0][0])
 
     def testPercentChange(self) -> None:
         """Asserts percentChange relative delta, non-positive bases, and NaN handling."""

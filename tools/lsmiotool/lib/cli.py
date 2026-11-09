@@ -356,8 +356,6 @@ class LatexCliParseError(CliParseError):
     pass
 
 
-
-
 class RunCliParser:
     """Pure standard-library parser for 'lsmiotool run' CLI arguments.
 
@@ -2032,9 +2030,7 @@ class CompareCliParser:
             f_seen_n = set()
             for f_i in f_items:
                 if not _INT_RE.match(f_i) or int(f_i) <= 0:
-                    raise CompareCliParseError(
-                        f"--nodes: invalid node count {f_i!r}"
-                    )
+                    raise CompareCliParseError(f"--nodes: invalid node count {f_i!r}")
                 f_n = int(f_i)
                 if f_n in f_seen_n:
                     raise CompareCliParseError(f"--nodes: repeated item {f_i!r}")
@@ -2164,7 +2160,9 @@ class LatexCliParser:
                 f"Unknown latex mode: {f_mode!r}. Must be one of: {', '.join(cls.VALID_MODES)}"
             )
         if len(f_tokens) < 3 or f_tokens[2].startswith("-"):
-            raise LatexCliParseError(f"Latex {f_mode}: needs the path of a sources.yaml")
+            raise LatexCliParseError(
+                f"Latex {f_mode}: needs the path of a sources.yaml"
+            )
         f_sources_path = f_tokens[2].strip()
         if not f_sources_path:
             raise LatexCliParseError("The sources.yaml path cannot be empty.")
@@ -2174,8 +2172,12 @@ class LatexCliParser:
             f_tok = f_tokens[f_idx]
             if f_tok not in cls.MODE_OPTIONS[f_mode]:
                 if f_tok.startswith("-"):
-                    raise LatexCliParseError(f"Unknown option for latex {f_mode}: {f_tok!r}")
-                raise LatexCliParseError(f"Unexpected extra positional argument: {f_tok!r}")
+                    raise LatexCliParseError(
+                        f"Unknown option for latex {f_mode}: {f_tok!r}"
+                    )
+                raise LatexCliParseError(
+                    f"Unexpected extra positional argument: {f_tok!r}"
+                )
             if f_tok in f_values:
                 raise LatexCliParseError(f"Duplicate {f_tok!r} option specified.")
             if f_idx + 1 >= len(f_tokens):

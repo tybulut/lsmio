@@ -301,7 +301,9 @@ class FigureSpec:
 class PaperSources:
     """A parsed sources.yaml."""
 
-    def __init__(self, f_datasets: Sequence[DatasetSpec], f_figures: Sequence[FigureSpec]) -> None:
+    def __init__(
+        self, f_datasets: Sequence[DatasetSpec], f_figures: Sequence[FigureSpec]
+    ) -> None:
         self.datasets: List[DatasetSpec] = list(f_datasets)
         self.figures: List[FigureSpec] = list(f_figures)
 
@@ -317,7 +319,9 @@ def _checkRelative(f_path: str, f_where: str) -> None:
     """A path under the output or data dir must stay inside it."""
     f_parts = f_path.replace("\\", "/").split("/")
     if os.path.isabs(f_path) or ".." in f_parts:
-        raise PaperDataError(f"{f_where}: '{f_path}' must be a relative path without '..'")
+        raise PaperDataError(
+            f"{f_where}: '{f_path}' must be a relative path without '..'"
+        )
 
 
 def _intList(f_value: Any, f_where: str) -> Optional[List[int]]:
@@ -333,7 +337,9 @@ def _intList(f_value: Any, f_where: str) -> Optional[List[int]]:
 def _strList(f_value: Any, f_where: str) -> Optional[List[str]]:
     if f_value is None:
         return None
-    if not isinstance(f_value, list) or not all(isinstance(f_item, str) for f_item in f_value):
+    if not isinstance(f_value, list) or not all(
+        isinstance(f_item, str) for f_item in f_value
+    ):
         raise PaperDataError(f"{f_where} must be a list of strings")
     return list(f_value)
 
@@ -346,7 +352,9 @@ def _checkFields(f_obj: Dict[Any, Any], f_allowed: Sequence[str], f_where: str) 
         raise PaperDataError(f"{f_where}: unknown field(s) {', '.join(f_unknown)}")
 
 
-def _parseSelection(f_obj: Dict[str, Any], f_where: str, f_extra: Sequence[str]) -> Selection:
+def _parseSelection(
+    f_obj: Dict[str, Any], f_where: str, f_extra: Sequence[str]
+) -> Selection:
     """The selectors of f_obj; f_extra names the other fields the object may carry."""
     _checkFields(f_obj, tuple(_SELECTORS) + tuple(f_extra), f_where)
     return Selection(
@@ -427,7 +435,9 @@ def _parseDataset(f_obj: Any, f_index: int, f_default_grid: Selection) -> Datase
     ]
     f_fill = f_obj.get("fill", FILL_NAN)
     if f_fill not in (FILL_NAN, FILL_ZERO):
-        raise PaperDataError(f"{f_where}: fill {f_fill!r} must be '{FILL_NAN}' or '{FILL_ZERO}'")
+        raise PaperDataError(
+            f"{f_where}: fill {f_fill!r} must be '{FILL_NAN}' or '{FILL_ZERO}'"
+        )
     if f_placeholders and f_kind != "ior":
         raise PaperDataError(f"{f_where}: placeholders apply to ior datasets only")
     if f_placeholders and f_fill != FILL_ZERO:
@@ -442,12 +452,22 @@ def _parseDataset(f_obj: Any, f_index: int, f_default_grid: Selection) -> Datase
             f"'{CUT_SHORT_REBUILD}'"
         )
     if f_cut_short == CUT_SHORT_REBUILD and f_kind != "ior":
-        raise PaperDataError(f"{f_where}: cut_short '{CUT_SHORT_REBUILD}' applies to ior datasets only")
+        raise PaperDataError(
+            f"{f_where}: cut_short '{CUT_SHORT_REBUILD}' applies to ior datasets only"
+        )
     f_grid = f_default_grid
     if "grid" in f_obj:
         f_grid = _parseGrid(f_obj["grid"], f"{f_where}.grid")
     return DatasetSpec(
-        f_output, f_kind, f_source, f_stitch, f_missing, f_placeholders, f_grid, f_fill, f_cut_short
+        f_output,
+        f_kind,
+        f_source,
+        f_stitch,
+        f_missing,
+        f_placeholders,
+        f_grid,
+        f_fill,
+        f_cut_short,
     )
 
 
@@ -484,7 +504,9 @@ def _parseFigure(f_obj: Any, f_index: int, f_outputs: Sequence[str]) -> FigureSp
             raise PaperDataError(f"{f_where_series} must be an object")
         _checkFields(f_item, _SERIES_FIELDS, f_where_series)
         f_dataset = _requireString(f_item, "dataset", f_where_series)
-        if os.path.normpath(f_dataset) not in [os.path.normpath(f_out) for f_out in f_outputs]:
+        if os.path.normpath(f_dataset) not in [
+            os.path.normpath(f_out) for f_out in f_outputs
+        ]:
             raise PaperDataError(
                 f"{f_where_series}: dataset '{f_dataset}' is not the output of any dataset"
             )
@@ -493,7 +515,9 @@ def _parseFigure(f_obj: Any, f_index: int, f_outputs: Sequence[str]) -> FigureSp
             raise PaperDataError(f"{f_where_series}: stripes must be an integer")
         f_op = _requireString(f_item, "op", f_where_series)
         if f_op not in ("read", "write"):
-            raise PaperDataError(f"{f_where_series}: op '{f_op}' must be 'read' or 'write'")
+            raise PaperDataError(
+                f"{f_where_series}: op '{f_op}' must be 'read' or 'write'"
+            )
         f_series.append(
             SeriesSpec(
                 _requireString(f_item, "label", f_where_series),
@@ -567,7 +591,9 @@ def loadSources(f_path: str) -> PaperSources:
     _checkFields(f_doc, _TOP_FIELDS, f_path)
     f_schema = f_doc.get("schema")
     if type(f_schema) is not int or f_schema != SCHEMA_VERSION:
-        raise PaperDataError(f"{f_path}: schema must be {SCHEMA_VERSION}, found {f_schema!r}")
+        raise PaperDataError(
+            f"{f_path}: schema must be {SCHEMA_VERSION}, found {f_schema!r}"
+        )
     f_default_grid = Selection()
     if "grid" in f_doc:
         f_default_grid = _parseGrid(f_doc["grid"], "grid")
@@ -575,7 +601,8 @@ def loadSources(f_path: str) -> PaperSources:
     if not isinstance(f_dataset_objs, list) or not f_dataset_objs:
         raise PaperDataError(f"{f_path}: datasets must be a non-empty list")
     f_datasets = [
-        _parseDataset(f_obj, f_pos, f_default_grid) for f_pos, f_obj in enumerate(f_dataset_objs)
+        _parseDataset(f_obj, f_pos, f_default_grid)
+        for f_pos, f_obj in enumerate(f_dataset_objs)
     ]
     f_outputs = [f_dataset.output for f_dataset in f_datasets]
     # 'a.tsv' and './a.tsv' are one file, and so are 'a.tsv' and 'A.tsv' on a file system
@@ -602,7 +629,10 @@ def loadSources(f_path: str) -> PaperSources:
     f_figure_objs = f_doc.get("figures", [])
     if not isinstance(f_figure_objs, list):
         raise PaperDataError(f"{f_path}: figures must be a list")
-    f_figures = [_parseFigure(f_obj, f_pos, f_outputs) for f_pos, f_obj in enumerate(f_figure_objs)]
+    f_figures = [
+        _parseFigure(f_obj, f_pos, f_outputs)
+        for f_pos, f_obj in enumerate(f_figure_objs)
+    ]
     f_files = [os.path.normpath(f_figure.file).lower() for f_figure in f_figures]
     if len(set(f_files)) != len(f_files):
         raise PaperDataError(
@@ -676,7 +706,9 @@ def _unusedValues(f_selection: Selection, f_keys: Sequence[RowKey]) -> str:
         f_values = getattr(f_selection, f_name)
         if f_values is None:
             continue
-        f_unused = [f_v for f_v in f_values if not any(f_k[f_pos] == f_v for f_k in f_keys)]
+        f_unused = [
+            f_v for f_v in f_values if not any(f_k[f_pos] == f_v for f_k in f_keys)
+        ]
         if f_unused:
             f_parts.append(f"{f_name} {', '.join(str(f_v) for f_v in f_unused)}")
     return "; ".join(f_parts)
@@ -725,9 +757,15 @@ def formatRow(f_kind: str, f_row: Sequence[str]) -> List[str]:
         try:
             f_out.append(_formatCell(f_kind_spec, f_col, f_row[f_col].strip()))
         except PaperDataError as f_err:
-            f_name = f_kind_spec["header"][f_col] if f_col < len(f_kind_spec["header"]) else f_col
+            f_name = (
+                f_kind_spec["header"][f_col]
+                if f_col < len(f_kind_spec["header"])
+                else f_col
+            )
             f_key = (int(f_row[0]), int(f_row[1]), f_out[2], f_out[3])
-            raise PaperDataError(f"{f_err} in column '{f_name}' of the row for {_describe(f_key)}")
+            raise PaperDataError(
+                f"{f_err} in column '{f_name}' of the row for {_describe(f_key)}"
+            )
     f_out += [""] * (len(f_kind_spec["header"]) - len(f_out))
     return f_out
 
@@ -753,7 +791,9 @@ def _placeholderRow(
     if f_fill == FILL_NAN:
         # only the measurements are nan; settings such as LSMIO's Iterations are NA
         f_m_first, f_m_last = KINDS[f_kind]["measured"]
-        f_base = [str(f_node), str(f_stripes), f_block_size, f_op] + ["NA"] * (f_width - 4)
+        f_base = [str(f_node), str(f_stripes), f_block_size, f_op] + ["NA"] * (
+            f_width - 4
+        )
         for f_col in range(f_m_first, f_m_last + 1):
             f_base[f_col] = "nan"
         return f_base
@@ -764,7 +804,9 @@ def _placeholderRow(
                 f_from = f_rule.copy_from_node
                 break
         if f_from is None:
-            f_before = [f_k[0] for f_k in f_rows if f_k[1:] == f_key[1:] and f_k[0] < f_node]
+            f_before = [
+                f_k[0] for f_k in f_rows if f_k[1:] == f_key[1:] and f_k[0] < f_node
+            ]
             if not f_before:
                 raise PaperDataError(
                     f"no earlier node count to copy the placeholder for {_describe(f_key)} from"
@@ -778,7 +820,9 @@ def _placeholderRow(
             )
         f_base = formatRow(f_kind, f_rows[f_source_key])
     else:
-        f_base = [str(f_node), str(f_stripes), f_block_size, f_op] + ["0.00"] * (f_width - 4)
+        f_base = [str(f_node), str(f_stripes), f_block_size, f_op] + ["0.00"] * (
+            f_width - 4
+        )
     f_base[0] = str(f_node)
     for f_col in range(f_first, f_last + 1):
         f_base[f_col] = "0.00"
@@ -838,7 +882,9 @@ def _rebuildCutShort(
     try:
         f_dates = sorted(os.listdir(f_node_dir))
     except OSError as f_err:
-        raise PaperDataError(f"cannot list {f_node_dir} to rebuild {_describe(f_key)}: {f_err}")
+        raise PaperDataError(
+            f"cannot list {f_node_dir} to rebuild {_describe(f_key)}: {f_err}"
+        )
     for f_date in f_dates:
         f_dir = os.path.join(f_node_dir, f_date)
         if not os.path.isdir(f_dir):
@@ -846,7 +892,9 @@ def _rebuildCutShort(
         try:
             f_names = sorted(os.listdir(f_dir))
         except OSError as f_err:
-            raise PaperDataError(f"cannot list {f_dir} to rebuild {_describe(f_key)}: {f_err}")
+            raise PaperDataError(
+                f"cannot list {f_dir} to rebuild {_describe(f_key)}: {f_err}"
+            )
         for f_name in f_names:
             f_path = os.path.join(f_dir, f_name)
             if _iorOutputCombination(f_name) != (f_stripes, f_block_size):
@@ -869,7 +917,9 @@ def _rebuildCutShort(
     f_path, f_lines = f_found[0]
     f_iterations = [f_l.split() for f_l in f_lines if f_l.split()[:1] == [f_op]]
     f_reported = list(f_row[3:])
-    while f_reported and not f_reported[-1]:  # the line's trailing space, as an empty cell
+    while (
+        f_reported and not f_reported[-1]
+    ):  # the line's trailing space, as an empty cell
         f_reported.pop()
     if not f_iterations or f_iterations[-1] != f_reported:
         raise PaperDataError(
@@ -893,11 +943,15 @@ def _rebuildCutShort(
         f_bandwidths.append(Decimal(f_fields[1]))
     f_mean = sum(f_bandwidths) / len(f_bandwidths)
     f_out = [str(f_node), str(f_stripes), f_block_size, f_op]
-    f_out += [_twoDecimals(str(f_v)) for f_v in (max(f_bandwidths), min(f_bandwidths), f_mean)]
+    f_out += [
+        _twoDecimals(str(f_v)) for f_v in (max(f_bandwidths), min(f_bandwidths), f_mean)
+    ]
     f_out += ["NA"] * (len(IOR_HEADER) - len(f_out))
     f_out[IOR_HEADER.index("reps")] = str(len(f_bandwidths))
     f_whole = any("." not in f_fields[1] for f_fields in f_iterations)
-    return f_out, RebuiltRun(f_key, len(f_bandwidths), f_repetitions[0], f_path, f_whole)
+    return f_out, RebuiltRun(
+        f_key, len(f_bandwidths), f_repetitions[0], f_path, f_whole
+    )
 
 
 class DatasetResult:
@@ -935,12 +989,16 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
     f_report = f_kind_spec["report"]
     f_rows = readReport(os.path.join(f_data_dir, f_spec.source, f_report))
     f_origin: Dict[RowKey, str] = {f_key: f_spec.source for f_key in f_rows}
-    f_stitched: Dict[RowKey, str] = {}  # the runs a stitch rule has taken, by rule source
+    f_stitched: Dict[
+        RowKey, str
+    ] = {}  # the runs a stitch rule has taken, by rule source
     for f_rule in f_spec.stitch:
         f_rule_rows = readReport(os.path.join(f_data_dir, f_rule.source, f_report))
         f_taken = [f_key for f_key in f_rule_rows if f_rule.selection.selects(f_key)]
         if not f_taken:
-            raise PaperDataError(f"{f_spec.output}: stitch from {f_rule.source} selects no row")
+            raise PaperDataError(
+                f"{f_spec.output}: stitch from {f_rule.source} selects no row"
+            )
         f_unused = _unusedValues(f_rule.selection, f_taken)
         if f_unused:
             raise PaperDataError(
@@ -956,13 +1014,19 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
             f_rows[f_key] = f_rule_rows[f_key]
             f_origin[f_key] = f_rule.source
     f_grid = f_spec.grid
-    f_nodes = sorted(set(f_grid.nodes if f_grid.nodes is not None else (k[0] for k in f_rows)))
+    f_nodes = sorted(
+        set(f_grid.nodes if f_grid.nodes is not None else (k[0] for k in f_rows))
+    )
     if f_grid.stripes is None and f_grid.block_sizes is None and f_grid.ops is None:
         f_combos = sorted({f_key[1:] for f_key in f_rows})
     else:
-        f_stripe_values = f_grid.stripes if f_grid.stripes is not None else {k[1] for k in f_rows}
+        f_stripe_values = (
+            f_grid.stripes if f_grid.stripes is not None else {k[1] for k in f_rows}
+        )
         f_size_values = (
-            f_grid.block_sizes if f_grid.block_sizes is not None else {k[2] for k in f_rows}
+            f_grid.block_sizes
+            if f_grid.block_sizes is not None
+            else {k[2] for k in f_rows}
         )
         f_op_values = f_grid.ops if f_grid.ops is not None else {k[3] for k in f_rows}
         f_combos = sorted(
@@ -975,7 +1039,9 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
         )
     f_combo_set = set(f_combos)
     f_outside = sorted(
-        f_key for f_key in f_rows if f_key[0] not in f_nodes or f_key[1:] not in f_combo_set
+        f_key
+        for f_key in f_rows
+        if f_key[0] not in f_nodes or f_key[1:] not in f_combo_set
     )
     if f_outside:
         raise PaperDataError(
@@ -998,7 +1064,9 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
                 f"{f_spec.output}: the run for {_describe(f_key)} has only some of its measurements"
             )
         if f_spec.missing == MISSING_ERROR:
-            raise PaperDataError(f"{f_spec.output}: the run for {_describe(f_key)} has no data")
+            raise PaperDataError(
+                f"{f_spec.output}: the run for {_describe(f_key)} has no data"
+            )
         f_empty.append(f_key)
     f_placeholders: List[RowKey] = []
     for f_combo in f_combos:
@@ -1010,7 +1078,9 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
                 raise PaperDataError(f"{f_spec.output}: no run for {_describe(f_key)}")
             f_placeholders.append(f_key)
     for f_pos, f_rule in enumerate(f_spec.placeholders):
-        f_matched = [f_key for f_key in f_placeholders if f_rule.selection.selects(f_key)]
+        f_matched = [
+            f_key for f_key in f_placeholders if f_rule.selection.selects(f_key)
+        ]
         if not f_matched:
             raise PaperDataError(
                 f"{f_spec.output}: placeholder rule {f_pos} applies to no missing run; "
@@ -1023,21 +1093,27 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
                 f"{f_unused}; remove those values if the runs now exist"
             )
     f_header_width = len(f_kind_spec["header"])
-    f_padded = sorted(f_key for f_key, f_row in f_rows.items() if len(f_row) < f_header_width)
+    f_padded = sorted(
+        f_key for f_key, f_row in f_rows.items() if len(f_row) < f_header_width
+    )
     f_rebuilt: List[RebuiltRun] = []
     try:
         f_out_rows: Dict[RowKey, List[str]] = {
             f_key: formatRow(f_spec.kind, f_row)
             for f_key, f_row in f_rows.items()
             if not (
-                f_spec.cut_short == CUT_SHORT_REBUILD and f_key in f_padded and f_key not in f_empty
+                f_spec.cut_short == CUT_SHORT_REBUILD
+                and f_key in f_padded
+                and f_key not in f_empty
             )
         }
         if f_spec.cut_short == CUT_SHORT_REBUILD:
             # a short row without measurements is a failed run, written as fill says
             for f_key in (f_k for f_k in f_padded if f_k not in f_empty):
                 f_run_dir = os.path.join(f_data_dir, f_origin[f_key])
-                f_out_rows[f_key], f_run = _rebuildCutShort(f_key, f_rows[f_key], f_run_dir)
+                f_out_rows[f_key], f_run = _rebuildCutShort(
+                    f_key, f_rows[f_key], f_run_dir
+                )
                 f_rebuilt.append(f_run)
             f_padded = []
         for f_key in f_placeholders:
@@ -1059,9 +1135,17 @@ def buildDataset(f_spec: DatasetSpec, f_data_dir: str) -> DatasetResult:
     f_counts: Dict[str, int] = {}
     for f_key in f_order:
         f_counts[f_origin[f_key]] = f_counts.get(f_origin[f_key], 0) + 1
-    f_provenance = [f"{f_source}: {f_count} rows" for f_source, f_count in f_counts.items()]
+    f_provenance = [
+        f"{f_source}: {f_count} rows" for f_source, f_count in f_counts.items()
+    ]
     return DatasetResult(
-        f_spec, f_lines, f_provenance, sorted(f_placeholders), f_padded, f_empty, f_rebuilt
+        f_spec,
+        f_lines,
+        f_provenance,
+        sorted(f_placeholders),
+        f_padded,
+        f_empty,
+        f_rebuilt,
     )
 
 
@@ -1073,7 +1157,9 @@ def writeLines(f_path: str, f_lines: Sequence[str]) -> None:
             f_file.write(f_line + LINE_END)
 
 
-def generate(f_sources: PaperSources, f_data_dir: str, f_output_dir: str) -> List[DatasetResult]:
+def generate(
+    f_sources: PaperSources, f_data_dir: str, f_output_dir: str
+) -> List[DatasetResult]:
     """Rebuild every dataset's TSV under f_output_dir. Runs without data (placeholders and
     failed runs, written as nan or zeros as the dataset's fill says) and rows padded to the
     header's width are logged as warnings; the caller reports the written files from the

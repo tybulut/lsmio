@@ -195,9 +195,11 @@ class LegacyEnvModuleTest(unittest.TestCase):
             for f_key, f_value in f_vars.items():
                 if f_value is not None:
                     os.environ[f_key] = f_value
-            with patch("socket.gethostname", return_value=f_gethostname), patch.object(
-                Console, "error"
-            ) as f_error, patch("sys.stdin", io.StringIO()) as f_stdin:
+            with (
+                patch("socket.gethostname", return_value=f_gethostname),
+                patch.object(Console, "error") as f_error,
+                patch("sys.stdin", io.StringIO()) as f_stdin,
+            ):
                 f_patches = []
                 if f_hostname is not None:
                     f_patches.append(patch("platform.node", return_value=f_hostname))
@@ -405,7 +407,9 @@ class LegacyEnvModuleTest(unittest.TestCase):
                 self.assertEqual(
                     f_run.environ["ADIOS2_PLUGIN_PATH"], f_root + "/usr/lib"
                 )
-                self.assertTrue(f_run.environ["PATH"].endswith(":" + f_root + "/usr/bin"))
+                self.assertTrue(
+                    f_run.environ["PATH"].endswith(":" + f_root + "/usr/bin")
+                )
 
     def testSchedulerNodeIdentity(self) -> None:
         """Node name, unique id and task count come from the scheduler variables."""
@@ -418,8 +422,20 @@ class LegacyEnvModuleTest(unittest.TestCase):
         f_rows = (
             (f_slurm, "testhost", "node042", "node042-3", 4),
             # Observation O1: unset Slurm variables leave None and a literal ${...}.
-            ({"LSMIO_ENV": "VIKING"}, "testhost", None, "${SLURMD_NODENAME}-${SLURM_LOCALID}", 1),
-            ({"LSMIO_ENV": "ISAMBARD", "ALPS_APP_PE": "7"}, "nid001", "nid001", "nid001-7", 1),
+            (
+                {"LSMIO_ENV": "VIKING"},
+                "testhost",
+                None,
+                "${SLURMD_NODENAME}-${SLURM_LOCALID}",
+                1,
+            ),
+            (
+                {"LSMIO_ENV": "ISAMBARD", "ALPS_APP_PE": "7"},
+                "nid001",
+                "nid001",
+                "nid001-7",
+                1,
+            ),
             ({"LSMIO_ENV": "ISAMBARD"}, "nid001", "nid001", "nid001-${ALPS_APP_PE}", 1),
             ({"LSMIO_ENV": "DEV"}, "testhost", "testhost", None, 1),
         )

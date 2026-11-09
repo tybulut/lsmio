@@ -49,11 +49,17 @@ except ImportError:
     _HAVE_YAML = False
 
 
-def lsmReportLine(f_node: int, f_stripes: int, f_block_size: str, f_op: str, f_max: str) -> str:
-    return f"{f_node},{f_stripes},{f_block_size},{f_op},{f_max},50,75,2559.96,40960,10\n"
+def lsmReportLine(
+    f_node: int, f_stripes: int, f_block_size: str, f_op: str, f_max: str
+) -> str:
+    return (
+        f"{f_node},{f_stripes},{f_block_size},{f_op},{f_max},50,75,2559.96,40960,10\n"
+    )
 
 
-@unittest.skipUnless(_HAVE_YAML, "PyYAML is not installed (only 'lsmiotool latex' needs it)")
+@unittest.skipUnless(
+    _HAVE_YAML, "PyYAML is not installed (only 'lsmiotool latex' needs it)"
+)
 class LatexMainTest(unittest.TestCase):
     """LatexDataMain and LatexMain run against a small sources.yaml and report."""
 
@@ -65,8 +71,12 @@ class LatexMainTest(unittest.TestCase):
         os.makedirs(os.path.join(self.m_data, "run"))
         with open(os.path.join(self.m_data, "run", "lsm-report.csv"), "w") as f_file:
             for f_node in (1, 2, 4):
-                f_file.write(lsmReportLine(f_node, 4, "64K", "write", str(f_node * 1024)))
-                f_file.write(lsmReportLine(f_node, 4, "64K", "read", str(f_node * 2048)))
+                f_file.write(
+                    lsmReportLine(f_node, 4, "64K", "write", str(f_node * 1024))
+                )
+                f_file.write(
+                    lsmReportLine(f_node, 4, "64K", "read", str(f_node * 2048))
+                )
         self.m_sources: str = os.path.join(self.m_root, "sources.yaml")
         self.writeSources(self.doc())
         self.m_out: str = os.path.join(self.m_root, "out")
@@ -106,10 +116,14 @@ class LatexMainTest(unittest.TestCase):
             json.dump(f_doc, f_file)  # JSON is YAML
 
     def dataRequest(self) -> LatexRequest:
-        return LatexRequest("data", self.m_sources, f_data_dir=self.m_data, f_output_dir=self.m_out)
+        return LatexRequest(
+            "data", self.m_sources, f_data_dir=self.m_data, f_output_dir=self.m_out
+        )
 
     def plotsRequest(self, f_pdf_dir: str) -> LatexRequest:
-        return LatexRequest("plots", self.m_sources, f_tsv_dir=self.m_out, f_output_dir=f_pdf_dir)
+        return LatexRequest(
+            "plots", self.m_sources, f_tsv_dir=self.m_out, f_output_dir=f_pdf_dir
+        )
 
     def testDataWritesTheTsvsAndReturnsZero(self) -> None:
         """latex data builds each TSV from its report and exits 0."""
@@ -119,12 +133,18 @@ class LatexMainTest(unittest.TestCase):
         self.assertEqual(f_lines[0].decode(), "\t".join(paperdata.LSMIO_HEADER))
         self.assertEqual(len(f_lines), 8)
         self.assertEqual(f_lines[7], b"")
-        self.assertEqual(f_lines[1].decode().split("\t")[:5], ["1", "4", "64K", "read", "2048.00"])
-        self.assertEqual(f_lines[6].decode().split("\t")[:5], ["4", "4", "64K", "write", "4096.00"])
+        self.assertEqual(
+            f_lines[1].decode().split("\t")[:5], ["1", "4", "64K", "read", "2048.00"]
+        )
+        self.assertEqual(
+            f_lines[6].decode().split("\t")[:5], ["4", "4", "64K", "write", "4096.00"]
+        )
 
     def testDataExpandsTheHomeDirectory(self) -> None:
         """A '~' in --data-dir and --output-dir is the home directory."""
-        f_req = LatexRequest("data", self.m_sources, f_data_dir="~/d", f_output_dir="~/o")
+        f_req = LatexRequest(
+            "data", self.m_sources, f_data_dir="~/d", f_output_dir="~/o"
+        )
         with patch.dict(os.environ, {"HOME": self.m_root}):
             os.rename(self.m_data, os.path.join(self.m_root, "d"))
             self.assertEqual(LatexDataMain(f_req).run(), 0)
@@ -250,7 +270,10 @@ class LatexMainTest(unittest.TestCase):
                 with patch.object(plot.MultiPlot, "plot", side_effect=f_err):
                     with patch("lsmiotool.lib.main.log.Console.error") as f_error:
                         self.assertEqual(
-                            LatexMain(self.plotsRequest(os.path.join(self.m_root, "pdf"))).run(), 1
+                            LatexMain(
+                                self.plotsRequest(os.path.join(self.m_root, "pdf"))
+                            ).run(),
+                            1,
                         )
                 self.assertIn(str(f_err), f_error.call_args[0][0])
 
@@ -279,14 +302,18 @@ class LatexMainTest(unittest.TestCase):
             with patch("sys.stdout", new_callable=io.StringIO) as f_stdout:
                 self.assertEqual(LatexMain(self.plotsRequest(f_pdf_dir)).run(), 0)
         self.assertEqual(
-            f_stdout.getvalue(), f"Image generated: {os.path.join(f_pdf_dir, 'fig.pdf')}\n"
+            f_stdout.getvalue(),
+            f"Image generated: {os.path.join(f_pdf_dir, 'fig.pdf')}\n",
         )
 
     def testSourcesPathExpandsTheHomeDirectory(self) -> None:
         """A '~' in the sources.yaml path is the home directory, as for the directories."""
         with patch.dict(os.environ, {"HOME": self.m_root}):
             f_data = LatexRequest(
-                "data", "~/sources.yaml", f_data_dir=self.m_data, f_output_dir=self.m_out
+                "data",
+                "~/sources.yaml",
+                f_data_dir=self.m_data,
+                f_output_dir=self.m_out,
             )
             self.assertEqual(LatexDataMain(f_data).run(), 0)
             f_plots = LatexRequest("plots", "~/sources.yaml", f_tsv_dir=self.m_out)

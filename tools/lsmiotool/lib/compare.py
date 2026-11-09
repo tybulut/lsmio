@@ -130,7 +130,9 @@ def paletteColour(f_index: int) -> str:
         f_h, sv_cands = next(_PALETTE_GEN)
         for s_cand, v_cand in sv_cands:
             f_r, f_g, f_b = colorsys.hsv_to_rgb(f_h, s_cand, v_cand)
-            f_hex = f"#{round(f_r * 255):02x}{round(f_g * 255):02x}{round(f_b * 255):02x}"
+            f_hex = (
+                f"#{round(f_r * 255):02x}{round(f_g * 255):02x}{round(f_b * 255):02x}"
+            )
             f_rf = int(f_hex[1:3], 16) / 255.0
             f_gf = int(f_hex[3:5], 16) / 255.0
             f_bf = int(f_hex[5:7], 16) / 255.0

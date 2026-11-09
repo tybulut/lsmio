@@ -1029,7 +1029,9 @@ class LauncherContractTest(unittest.TestCase):
             with self.subTest(bad_ppn=f_bad_ppn):
                 with self.assertRaises(LauncherError) as f_ctx:
                     Launcher._extractPoint((8, f_bad_ppn, 1))
-                self.assertIn("Scale point ppn must be a positive integer", str(f_ctx.exception))
+                self.assertIn(
+                    "Scale point ppn must be a positive integer", str(f_ctx.exception)
+                )
 
         # Invalid nodes (line 1349, arc [1348, 1349])
         # Note: must use tuple or object because dict.get("nodes") or ... replaces falsy 0 with None
@@ -1037,7 +1039,9 @@ class LauncherContractTest(unittest.TestCase):
             with self.subTest(bad_nodes=f_bad_nodes):
                 with self.assertRaises(LauncherError) as f_ctx:
                     Launcher._extractPoint((8, 1, f_bad_nodes))
-                self.assertIn("Scale point nodes must be a positive integer", str(f_ctx.exception))
+                self.assertIn(
+                    "Scale point nodes must be a positive integer", str(f_ctx.exception)
+                )
 
     def testResolveSrunMpiEdgeCases(self) -> None:
         """Validates profile srun_mpi resolution fallback paths and error translation."""
@@ -1130,21 +1134,31 @@ class LauncherContractTest(unittest.TestCase):
         """Validates attribute-based scheduler extraction and fallback error handling."""
         # Lines 1482-1489, arcs [1480, 1482], [1482, 1483], [1482, 1505], [1484, 1485], [1484, 1486], [1486, 1487], [1486, 1488], [1488, 1489], [1488, 1505]
         self.assertEqual(
-            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="srun")),
+            Launcher._resolveSchedulerAndPartition(
+                types.SimpleNamespace(scheduler="srun")
+            ),
             (SchedulerKind.SLURM, None),
         )
         self.assertEqual(
-            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="aprun")),
+            Launcher._resolveSchedulerAndPartition(
+                types.SimpleNamespace(scheduler="aprun")
+            ),
             (SchedulerKind.PBS, None),
         )
         self.assertEqual(
-            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="direct")),
+            Launcher._resolveSchedulerAndPartition(
+                types.SimpleNamespace(scheduler="direct")
+            ),
             (SchedulerKind.FAKE, None),
         )
         with self.assertRaises(LauncherError):
-            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler="invalid"))
+            Launcher._resolveSchedulerAndPartition(
+                types.SimpleNamespace(scheduler="invalid")
+            )
         with self.assertRaises(LauncherError):
-            Launcher._resolveSchedulerAndPartition(types.SimpleNamespace(scheduler=12345))
+            Launcher._resolveSchedulerAndPartition(
+                types.SimpleNamespace(scheduler=12345)
+            )
 
     def testResolveSchedulerAndPartitionDictContainers(self) -> None:
         """Validates dictionary profile scheduler extraction and error paths."""
@@ -1196,16 +1210,22 @@ class LauncherContractTest(unittest.TestCase):
 
         # Dict profile with non-dict/None resources triggers arc [1536, 1543]
         self.assertEqual(
-            Launcher._resolveSchedulerAndPartition({"scheduler": "slurm", "resources": None}),
+            Launcher._resolveSchedulerAndPartition(
+                {"scheduler": "slurm", "resources": None}
+            ),
             (SchedulerKind.SLURM, None),
         )
         self.assertEqual(
-            Launcher._resolveSchedulerAndPartition({"scheduler": "slurm", "resources": {}}),
+            Launcher._resolveSchedulerAndPartition(
+                {"scheduler": "slurm", "resources": {}}
+            ),
             (SchedulerKind.SLURM, None),
         )
 
         # 3. Line 1548, arc [1543, 1548]: object with .partition
-        f_prof_part_attr = types.SimpleNamespace(scheduler="slurm", partition="custom_part")
+        f_prof_part_attr = types.SimpleNamespace(
+            scheduler="slurm", partition="custom_part"
+        )
         self.assertEqual(
             Launcher._resolveSchedulerAndPartition(f_prof_part_attr),
             (SchedulerKind.SLURM, "custom_part"),
@@ -1239,7 +1259,9 @@ class LauncherContractTest(unittest.TestCase):
             with self.subTest(bad_cmd=f_bad_cmd):
                 with self.assertRaises(LauncherError) as f_ctx:
                     Launcher._extractCommandArgv(f_bad_cmd)
-                self.assertIn("Unsupported command container type", str(f_ctx.exception))
+                self.assertIn(
+                    "Unsupported command container type", str(f_ctx.exception)
+                )
 
         # 4. Line 1610, arc [1609, 1610]: truthy container yielding zero items
         f_truthy_empty = types.SimpleNamespace(argv=FauxList())
@@ -1274,7 +1296,9 @@ class LauncherContractTest(unittest.TestCase):
 
     def testBuildArgvUnsupportedScheduler(self) -> None:
         """Validates unsupported scheduler fallthrough in buildSharedArgv and buildRankWorkerArgv."""
-        with patch.object(Launcher, "_resolveSchedulerAndPartition", return_value=("CUSTOM", None)):
+        with patch.object(
+            Launcher, "_resolveSchedulerAndPartition", return_value=("CUSTOM", None)
+        ):
             # Line 1740, arc [1736, 1740]
             with self.assertRaises(LauncherError) as f_ctx:
                 Launcher.buildSharedArgv(None, (8, 1, 8), ["ior"])
@@ -1292,14 +1316,14 @@ class LauncherContractTest(unittest.TestCase):
         f_mock_runner = MockProcessRunner(f_returncode=0)
 
         # 1. launchShared runner kwargs fallback (line 1879, arc [1878, 1879])
-        f_res1 = Launcher.launchShared(
-            "fake", (8, 1, 8), ["ior"], runner=f_mock_runner
-        )
+        f_res1 = Launcher.launchShared("fake", (8, 1, 8), ["ior"], runner=f_mock_runner)
         self.assertEqual(f_res1.returncode, 0)
         self.assertEqual(len(f_mock_runner.m_invoked_argv), 1)
 
         # 2. launchShared default ProcessRunner instantiation (line 1881, arc [1880, 1881])
-        with patch.object(ProcessRunner, "run", return_value=ProcessResult(0)) as f_mock_run:
+        with patch.object(
+            ProcessRunner, "run", return_value=ProcessResult(0)
+        ) as f_mock_run:
             f_res2 = Launcher.launchShared("fake", (8, 1, 8), ["ior"])
             self.assertEqual(f_res2.returncode, 0)
             f_mock_run.assert_called_once()
@@ -1307,7 +1331,11 @@ class LauncherContractTest(unittest.TestCase):
         # 3. launchShared with caller env (arc [1894, 1900])
         f_mock_runner_env = MockProcessRunner(f_returncode=0)
         f_res3 = Launcher.launchShared(
-            "fake", (8, 1, 8), ["ior"], f_runner=f_mock_runner_env, f_env={"MY_CUSTOM_VAR": "val"}
+            "fake",
+            (8, 1, 8),
+            ["ior"],
+            f_runner=f_mock_runner_env,
+            f_env={"MY_CUSTOM_VAR": "val"},
         )
         self.assertEqual(f_res3.returncode, 0)
         self.assertEqual(
@@ -1338,7 +1366,9 @@ class LauncherContractTest(unittest.TestCase):
         self.assertEqual(len(f_mock_rank_runner.m_invoked_argv), 1)
 
         # 6. launchRankWorkers default ProcessRunner instantiation (line 1971, arc [1970, 1971])
-        with patch.object(ProcessRunner, "run", return_value=ProcessResult(0)) as f_mock_run_rank:
+        with patch.object(
+            ProcessRunner, "run", return_value=ProcessResult(0)
+        ) as f_mock_run_rank:
             f_res5 = Launcher.launchRankWorkers(
                 "fake", (8, 1, 8), "/bin/worker", "/tmp/m.json", "p0", "c16_b8M"
             )
@@ -1356,7 +1386,9 @@ class LauncherContractTest(unittest.TestCase):
                 "c16_b8M",
                 f_runner=f_crash_runner,
             )
-        self.assertIn("Unexpected error executing rank worker launch", str(f_ctx.exception))
+        self.assertIn(
+            "Unexpected error executing rank worker launch", str(f_ctx.exception)
+        )
         self.assertIsInstance(f_ctx.exception.__cause__, RuntimeError)
 
 

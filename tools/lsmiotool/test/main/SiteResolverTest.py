@@ -916,7 +916,8 @@ class SiteResolverTest(unittest.TestCase):
         f_rows.append(
             (
                 lambda: ResourcePolicy(
-                    f_scheduler=SchedulerKind.SLURM, f_mail_mode=5  # type: ignore[arg-type]
+                    f_scheduler=SchedulerKind.SLURM,
+                    f_mail_mode=5,  # type: ignore[arg-type]
                 ),
                 TypeError,
                 "mail_mode must be SlurmMailMode, PbsMailMode, or None, got: int",
@@ -967,7 +968,9 @@ class SiteResolverTest(unittest.TestCase):
                 f_before = f_obj.toDict()
                 with self.assertRaises(AttributeError) as f_cm:
                     setattr(f_obj, f_slot, "x")
-                self.assertEqual(str(f_cm.exception), f"Cannot modify immutable {f_name}")
+                self.assertEqual(
+                    str(f_cm.exception), f"Cannot modify immutable {f_name}"
+                )
                 with self.assertRaises(AttributeError) as f_cm:
                     delattr(f_obj, f_slot)
                 self.assertEqual(
@@ -1076,7 +1079,8 @@ class SiteResolverTest(unittest.TestCase):
             "mail_mode=<SlurmMailMode.END_FAIL: 'END,FAIL'>, pmem=None, pvmem=None)",
         )
         self.assertEqual(
-            repr(ExecutableRegistry(f_other_exec)), f"ExecutableRegistry({f_other_exec!r})"
+            repr(ExecutableRegistry(f_other_exec)),
+            f"ExecutableRegistry({f_other_exec!r})",
         )
 
     def testResourcePolicySchedulerScope(self) -> None:
@@ -1203,7 +1207,11 @@ class SiteResolverTest(unittest.TestCase):
         f_rows: List[Tuple[str, Any, str]] = [
             ("f_name", "", "Site name must be a non-empty string, got: ''"),
             ("f_name", None, "Site name must be a non-empty string, got: None"),
-            ("f_scheduler", "slurm", "Scheduler must be a SchedulerKind enum, got: 'slurm'"),
+            (
+                "f_scheduler",
+                "slurm",
+                "Scheduler must be a SchedulerKind enum, got: 'slurm'",
+            ),
             ("f_launcher", "srun", "Launcher must be a LauncherPolicy, got: 'srun'"),
             (
                 "f_certification",
@@ -1217,8 +1225,16 @@ class SiteResolverTest(unittest.TestCase):
                 "opt/lsmio",
                 "install_prefix must be an absolute path, got: 'opt/lsmio'",
             ),
-            ("f_install_prefix", None, "install_prefix must be an absolute path, got: None"),
-            ("f_install_prefix", "", "install_prefix must be an absolute path, got: ''"),
+            (
+                "f_install_prefix",
+                None,
+                "install_prefix must be an absolute path, got: None",
+            ),
+            (
+                "f_install_prefix",
+                "",
+                "install_prefix must be an absolute path, got: ''",
+            ),
             (
                 "f_executables",
                 f_ex,
