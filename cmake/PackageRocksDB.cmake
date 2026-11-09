@@ -35,6 +35,56 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
 
   # rocksdb
   block()
+    # Compression codecs: mirror doc/dependencies/23-build-rocksdb.sh so source builds have a
+    # supported codec (Snappy, LZ4, Zstd). Include $HOME/src/usr and (on macOS) the Homebrew prefix
+    # in CMAKE_PREFIX_PATH so find_package locates codecs installed there.
+    if(DEFINED ENV{HOME} AND EXISTS "$ENV{HOME}/src/usr")
+      list(PREPEND CMAKE_PREFIX_PATH "$ENV{HOME}/src/usr")
+    endif()
+    if(APPLE)
+      find_program(_BREW_EXECUTABLE brew)
+      if(_BREW_EXECUTABLE)
+        execute_process(
+          COMMAND "${_BREW_EXECUTABLE}" --prefix
+          OUTPUT_VARIABLE _BREW_PREFIX
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          ERROR_QUIET
+        )
+        if(_BREW_PREFIX)
+          list(PREPEND CMAKE_PREFIX_PATH "${_BREW_PREFIX}")
+        endif()
+      endif()
+    endif()
+
+    # Snappy is guaranteed by PackageLevelDB.cmake (system package or FetchContent target `snappy`).
+    # When Snappy came from FetchContent rather than a system install, pre-populate the variables
+    # RocksDB's FindSnappy.cmake checks and add `snappy` to RocksDBTargets so RocksDB's
+    # install(EXPORT RocksDBTargets) succeeds.
+    if(TARGET snappy AND NOT Snappy_FOUND)
+      set(Snappy_INCLUDE_DIR "${snappy_SOURCE_DIR}" CACHE PATH "Snappy include dir")
+      set(Snappy_LIBRARIES snappy CACHE STRING "Snappy libraries")
+      install(TARGETS snappy EXPORT RocksDBTargets)
+    endif()
+    set(WITH_SNAPPY YES CACHE BOOL "with snappy")
+
+    # Enable LZ4 and Zstd when their headers and libraries are available on the host (RocksDB's
+    # CMakeLists.txt calls find_package(lz4 REQUIRED) and find_package(zstd REQUIRED)).
+    find_path(lz4_INCLUDE_DIRS NAMES lz4.h)
+    find_library(lz4_LIBRARIES NAMES lz4)
+    if(lz4_INCLUDE_DIRS AND lz4_LIBRARIES)
+      set(WITH_LZ4 YES CACHE BOOL "with lz4")
+    else()
+      set(WITH_LZ4 NO CACHE BOOL "with lz4")
+    endif()
+
+    find_path(ZSTD_INCLUDE_DIRS NAMES zstd.h)
+    find_library(ZSTD_LIBRARIES NAMES zstd)
+    if(ZSTD_INCLUDE_DIRS AND ZSTD_LIBRARIES)
+      set(WITH_ZSTD YES CACHE BOOL "with zstd")
+    else()
+      set(WITH_ZSTD NO CACHE BOOL "with zstd")
+    endif()
+
     set(FAIL_ON_WARNINGS NO CACHE BOOL "fail on warnings")
     set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "-fPIC")
     # Features
