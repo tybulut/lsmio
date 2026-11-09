@@ -306,8 +306,8 @@ TEST_P(LSMIORocksDBOptionsTest, OpensAndRoundTrips) {
     // Compression on makes the store choose a codec the linked RocksDB supports (Snappy, LZ4 or
     // Zstd), so it is not kNoCompression when at least one codec is supported
     const std::vector<rocksdb::CompressionType>& supported = rocksdb::GetSupportedCompressions();
-    const bool codec_supported = std::any_of(
-        supported.begin(), supported.end(), [](rocksdb::CompressionType c) {
+    const bool codec_supported =
+        std::any_of(supported.begin(), supported.end(), [](rocksdb::CompressionType c) {
             return c == rocksdb::kSnappyCompression || c == rocksdb::kLZ4Compression ||
                    c == rocksdb::kZSTD;
         });

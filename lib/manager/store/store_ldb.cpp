@@ -39,7 +39,9 @@
 namespace {
 struct BatchClearGuard {
     leveldb::WriteBatch& target;
-    ~BatchClearGuard() { target.Clear(); }
+    ~BatchClearGuard() {
+        target.Clear();
+    }
 };
 }  // namespace
 

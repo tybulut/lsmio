@@ -178,8 +178,8 @@ std::string Benchmark::formatIterations(const std::string& name) {
         bw = bytes / duration / 1.024 / 1.024;
         if (bw < 0.0) bw = 0.00;
 
-        std::string row = name + ":" + fmt::format("{:.2f}", bw) + ":" +
-                          fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bw) + ":" +
+        std::string row = name + ":" + fmt::format("{:.2f}", bw) + ":" + fmt::format("{:.2f}", bw) +
+                          ":" + fmt::format("{:.2f}", bw) + ":" +
                           fmt::format("{:.2f}", bytes / 1024 / 1024) + ":" +
                           fmt::format("{:.0f}", ops) + ":" + "1\n";
         row = std::regex_replace(row, std::regex(","), "");

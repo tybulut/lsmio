@@ -346,7 +346,7 @@ TEST(lsmioBenchmark, NonFiniteBytesAndOpsRejected) {
     d.addIteration("test", 1000, 1024, inf);
     e.addIteration("test", 1000, -inf, 1);
 
-    auto checkRejected = [](lsmio::Benchmark& bm) {
+    auto checkRejected = [](lsmio::Benchmark &bm) {
         EXPECT_EQ(bm.formatSummary("test"), "test, FAILED");
         EXPECT_EQ(bm.failedIterations("test"), 1);
 

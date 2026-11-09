@@ -50,19 +50,21 @@
 #include <vector>
 
 #if defined(__linux__)
-#  if defined(__has_feature)
-#    if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
-#      define LSMIO_TEST_RLIMIT_AS 0
-#    endif
-#  endif
-#  if !defined(LSMIO_TEST_RLIMIT_AS) && (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
-#    define LSMIO_TEST_RLIMIT_AS 0
-#  endif
-#  if !defined(LSMIO_TEST_RLIMIT_AS)
-#    define LSMIO_TEST_RLIMIT_AS 1
-#  endif
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define LSMIO_TEST_RLIMIT_AS 0
+#endif
+#endif
+#if !defined(LSMIO_TEST_RLIMIT_AS) && \
+    (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
+#define LSMIO_TEST_RLIMIT_AS 0
+#endif
+#if !defined(LSMIO_TEST_RLIMIT_AS)
+#define LSMIO_TEST_RLIMIT_AS 1
+#endif
 #else
-#  define LSMIO_TEST_RLIMIT_AS 0
+#define LSMIO_TEST_RLIMIT_AS 0
 #endif
 
 using namespace lsmio;
@@ -1220,15 +1222,16 @@ enum class ReadMode {
 
 // Crafted tables whose index (footer or sequential scan) points get() at a record it must refuse.
 enum class BadLayout {
-    OffsetFar,            // footer entry "k1" at offset 2^64 - 16
-    OffsetInMagic,        // footer entry "k1" at the last 4 bytes (the magic)
-    OffsetInLastTwo,      // footer entry "k1" at the last 2 bytes
-    KeyLenMismatch,       // footer entry "kkk" at the record of "k1"
-    KeyBytesDiffer,       // footer entry "k2" at the record of "k1"
-    ValLenOverLimit,      // footer entry "big" at a record whose val_len is 0xFFFFFFFF
-    KeyPastEnd5,          // footer entry (5 bytes) at the trailer; 4 bytes remain after its key
-    KeyPastEnd9,          // footer entry (9 bytes) at the trailer; only 8 bytes remain for its key
-    ValueTruncated,       // footer lists "k" at 0; record "k" declares 100 value bytes, the file holds 41
+    OffsetFar,        // footer entry "k1" at offset 2^64 - 16
+    OffsetInMagic,    // footer entry "k1" at the last 4 bytes (the magic)
+    OffsetInLastTwo,  // footer entry "k1" at the last 2 bytes
+    KeyLenMismatch,   // footer entry "kkk" at the record of "k1"
+    KeyBytesDiffer,   // footer entry "k2" at the record of "k1"
+    ValLenOverLimit,  // footer entry "big" at a record whose val_len is 0xFFFFFFFF
+    KeyPastEnd5,      // footer entry (5 bytes) at the trailer; 4 bytes remain after its key
+    KeyPastEnd9,      // footer entry (9 bytes) at the trailer; only 8 bytes remain for its key
+    ValueTruncated,   // footer lists "k" at 0; record "k" declares 100 value bytes, the file holds
+                      // 41
     FileRemovedAfterOpen  // valid footer; the file is deleted after recovery
 };
 
@@ -1394,20 +1397,19 @@ TEST_P(LSMIOSSTableRecordPastEndTest, IsRefusedBeforeAllocation) {
     EXPECT_EQ(m_mgr->getPreadSlowPathCount(), 0u);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    PastEnd, LSMIOSSTableRecordPastEndTest,
-    ::testing::Values(ReadMode::Mmap, ReadMode::Pread, ReadMode::Stream),
-    [](const ::testing::TestParamInfo<ReadMode>& f_info) {
-        switch (f_info.param) {
-            case ReadMode::Mmap:
-                return "mmap";
-            case ReadMode::Pread:
-                return "pread";
-            case ReadMode::Stream:
-                return "stream";
-        }
-        return "unknown";
-    });
+INSTANTIATE_TEST_SUITE_P(PastEnd, LSMIOSSTableRecordPastEndTest,
+                         ::testing::Values(ReadMode::Mmap, ReadMode::Pread, ReadMode::Stream),
+                         [](const ::testing::TestParamInfo<ReadMode>& f_info) {
+                             switch (f_info.param) {
+                                 case ReadMode::Mmap:
+                                     return "mmap";
+                                 case ReadMode::Pread:
+                                     return "pread";
+                                 case ReadMode::Stream:
+                                     return "stream";
+                             }
+                             return "unknown";
+                         });
 
 class LSMIOSSTableAllocationDeathTest : public LSMIOSSTableCraftedTest {};
 
@@ -1556,9 +1558,8 @@ struct StreamRestartParam {
     bool footer_index;
 };
 
-class LSMIOSSTableStreamRestartTest
-    : public LSMIOSSTableCraftedTest,
-      public ::testing::WithParamInterface<StreamRestartParam> {};
+class LSMIOSSTableStreamRestartTest : public LSMIOSSTableCraftedTest,
+                                      public ::testing::WithParamInterface<StreamRestartParam> {};
 
 TEST_P(LSMIOSSTableStreamRestartTest, ReadsBackBeforeAndAfterRestart) {
     const auto& param = GetParam();
@@ -1623,15 +1624,13 @@ TEST_P(LSMIOSSTableStreamRestartTest, ReadsBackBeforeAndAfterRestart) {
     EXPECT_TRUE(deleted.empty());
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Layouts, LSMIOSSTableStreamRestartTest,
-    ::testing::Values(
-        StreamRestartParam{"footer_manual", true, true},
-        StreamRestartParam{"footerless_manual", true, false},
-        StreamRestartParam{"footerless_tellp", false, false}),
-    [](const ::testing::TestParamInfo<StreamRestartParam>& info) {
-        return info.param.name;
-    });
+INSTANTIATE_TEST_SUITE_P(Layouts, LSMIOSSTableStreamRestartTest,
+                         ::testing::Values(StreamRestartParam{"footer_manual", true, true},
+                                           StreamRestartParam{"footerless_manual", true, false},
+                                           StreamRestartParam{"footerless_tellp", false, false}),
+                         [](const ::testing::TestParamInfo<StreamRestartParam>& info) {
+                             return info.param.name;
+                         });
 
 enum class FooterRegionLayout {
     EndsAtEof,
@@ -1645,9 +1644,8 @@ struct FooterRegionParam {
     FooterRegionLayout layout;
 };
 
-class LSMIOSSTableFooterRegionTest
-    : public LSMIOSSTableCraftedTest,
-      public ::testing::WithParamInterface<FooterRegionParam> {};
+class LSMIOSSTableFooterRegionTest : public LSMIOSSTableCraftedTest,
+                                     public ::testing::WithParamInterface<FooterRegionParam> {};
 
 TEST_P(LSMIOSSTableFooterRegionTest, ReadMatchesFileLength) {
     const auto& param = GetParam();
@@ -1674,7 +1672,8 @@ TEST_P(LSMIOSSTableFooterRegionTest, ReadMatchesFileLength) {
         test_key = std::string("\x01", 1);
         table.addRecord("x", "1");
         table.addFooter({{std::string("\x01", 1), 10}});
-        ASSERT_EQ(table.bytes().substr(10, 9), std::string("\x01\x00\x00\x00\x01\x00\x00\x00\x01", 9));
+        ASSERT_EQ(table.bytes().substr(10, 9),
+                  std::string("\x01\x00\x00\x00\x01\x00\x00\x00\x01", 9));
     }
     table.writeTo(tablePath(1));
 
@@ -1717,11 +1716,11 @@ INSTANTIATE_TEST_SUITE_P(
         FooterRegionParam{"one_past_eof_pread", ReadMode::Pread, FooterRegionLayout::OnePastEof},
         FooterRegionParam{"one_past_eof_stream", ReadMode::Stream, FooterRegionLayout::OnePastEof},
         FooterRegionParam{"huge_in_footer_mmap", ReadMode::Mmap, FooterRegionLayout::HugeInFooter},
-        FooterRegionParam{"huge_in_footer_pread", ReadMode::Pread, FooterRegionLayout::HugeInFooter},
-        FooterRegionParam{"huge_in_footer_stream", ReadMode::Stream, FooterRegionLayout::HugeInFooter}),
-    [](const ::testing::TestParamInfo<FooterRegionParam>& info) {
-        return info.param.name;
-    });
+        FooterRegionParam{"huge_in_footer_pread", ReadMode::Pread,
+                          FooterRegionLayout::HugeInFooter},
+        FooterRegionParam{"huge_in_footer_stream", ReadMode::Stream,
+                          FooterRegionLayout::HugeInFooter}),
+    [](const ::testing::TestParamInfo<FooterRegionParam>& info) { return info.param.name; });
 
 }  // namespace
 
@@ -1776,7 +1775,8 @@ TEST_F(LSMIOSSTableCraftedTest, StreamGrownAfterOpenRefusesRecordPastStoredLengt
 }
 
 // Out-of-contract: a table grown after open breaks AI-5's premise. Verifies AI-15's pread
-// slow-path check refuses a record past the stored length before the slow-path counter; not a supported use.
+// slow-path check refuses a record past the stored length before the slow-path counter; not a
+// supported use.
 TEST_F(LSMIOSSTableCraftedTest, PreadGrownAfterOpenRefusesSlowPathPastStoredLength) {
     CraftedSSTable table;
     table.addRecord("x", "1");
@@ -1800,4 +1800,3 @@ TEST_F(LSMIOSSTableCraftedTest, PreadGrownAfterOpenRefusesSlowPathPastStoredLeng
     EXPECT_EQ(value, "1");
     EXPECT_EQ(m_mgr->getPreadSlowPathCount(), 0u);
 }
-

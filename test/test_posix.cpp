@@ -247,7 +247,7 @@ TEST_F(LSMIOPosixStreamTest, UninitializedOperationsThrow) {
     EXPECT_THROW(lsmio::LSMIOStream::writeBarrier(), std::invalid_argument);
     try {
         lsmio::LSMIOStream::writeBarrier();
-    } catch (const std::invalid_argument& e) {
+    } catch (const std::invalid_argument &e) {
         EXPECT_NE(std::string(e.what()).find("LSMIOStream::writeBarrier"), std::string::npos);
     }
     EXPECT_EQ(ls.tellp(), 0);
@@ -338,7 +338,7 @@ TEST_F(LSMIOPosixStreamTest, ReadOfUnwrittenOffsetThrowsNotFound) {
     EXPECT_EQ(buf[1], 'y');
     try {
         ls.read(buf, 2);
-    } catch (const std::ios_base::failure& e) {
+    } catch (const std::ios_base::failure &e) {
         EXPECT_NE(std::string(e.what()).find("psx-never-written"), std::string::npos);
     }
 }

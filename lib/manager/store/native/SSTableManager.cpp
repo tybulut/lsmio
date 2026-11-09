@@ -221,8 +221,8 @@ void SSTableManager::IndexNode::initReader(bool f_enable_mmap, bool f_enable_pre
         int fd = ::open(index.path.c_str(), O_RDONLY);
         if (fd >= 0) {
             if (f_enable_mmap) {
-                void* ptr = ::mmap(nullptr, static_cast<size_t>(m_file_len), PROT_READ, MAP_SHARED,
-                                   fd, 0);
+                void* ptr =
+                    ::mmap(nullptr, static_cast<size_t>(m_file_len), PROT_READ, MAP_SHARED, fd, 0);
                 if (ptr != MAP_FAILED) {
                     m_mmap_ptr = static_cast<char*>(ptr);
                     m_mmap_len = static_cast<size_t>(m_file_len);
@@ -530,9 +530,8 @@ bool SSTableManager::readValueAt(const IndexNode& f_node, uint64_t f_offset,
     }
 }
 
-bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_file_len,
-                                 uint64_t f_offset, const std::string& f_key,
-                                 std::string& f_out_value) {
+bool SSTableManager::readValueAt(const std::string& f_path, uint64_t f_file_len, uint64_t f_offset,
+                                 const std::string& f_key, std::string& f_out_value) {
     std::ifstream sst_file(f_path, std::ios::binary);
     if (!sst_file) {
         std::cerr << "ERROR: Failed to open SSTable for read: " << f_path << std::endl;

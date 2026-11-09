@@ -442,7 +442,8 @@ TEST(LSMIOManagerHelperTest, VectorTupleDeserializeAppends) {
 }
 
 TEST(LSMIOManagerHelperTest, VectorTupleRoundTripsDelimitersAndNul) {
-    const KeyValues input = {{"a|b", "v"}, {"k", "line1\nline2"}, {std::string("n\0l", 3), std::string(1, '\0')}};
+    const KeyValues input = {
+        {"a|b", "v"}, {"k", "line1\nline2"}, {std::string("n\0l", 3), std::string(1, '\0')}};
     std::string serialized;
     lsmio::vectorTupleSerialize(input, serialized);
     EXPECT_EQ(serialized, entryBytes("a|b", "v") + entryBytes("k", "line1\nline2") +

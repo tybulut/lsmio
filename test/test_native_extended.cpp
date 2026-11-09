@@ -803,7 +803,8 @@ TEST_F(LSMIOStoreNativeTest, StalledFlushKeepsInFlightAndQueuedMemtablesReadable
     EXPECT_FALSE(store.get("e0", &out));
 }
 
-// NT-2: getPrefix merges an active memtable over an SSTable oldest to newest, respecting tombstones.
+// NT-2: getPrefix merges an active memtable over an SSTable oldest to newest, respecting
+// tombstones.
 TEST_F(LSMIOStoreNativeTest, GetPrefixMergesMemtableOverSSTable) {
     LSMIOStoreNative store(m_db_path, true);
     EXPECT_TRUE(store.put("p/x", "sst-x"));
@@ -817,8 +818,7 @@ TEST_F(LSMIOStoreNativeTest, GetPrefixMergesMemtableOverSSTable) {
 
     std::vector<std::tuple<std::string, std::string>> values;
     EXPECT_TRUE(store.getPrefix("p/", &values));
-    std::vector<std::tuple<std::string, std::string>> expected = {
-        {"p/y", "sst-y"}, {"p/z", "2"}};
+    std::vector<std::tuple<std::string, std::string>> expected = {{"p/y", "sst-y"}, {"p/z", "2"}};
     EXPECT_EQ(values, expected);
 
     std::string out;

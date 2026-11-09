@@ -29,6 +29,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <sys/resource.h>
 
 #include <algorithm>
 #include <atomic>
@@ -43,7 +44,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <sys/resource.h>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -586,65 +586,65 @@ TEST_F(LSMIOLevelDBConfigTest, SuccessfulBatchWriteIsNotResent) {
 TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedBatchWriteFailsWriteBarrier) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     const std::string path = dbPath("fail-batch-write-wb");
-    EXPECT_EXIT(
-        runDeathChild(path, [](auto& store, auto& saved) {
-            auto fail = [&](int rc) {
-                setrlimit(RLIMIT_FSIZE, &saved);
-                store.reset();
-                std::exit(rc);
-            };
-            if (!store->put("k", std::string("v"), false)) fail(20);
-            if (store->writeBarrier()) fail(21);
-            if (store->readBarrier()) fail(22);
-            setrlimit(RLIMIT_FSIZE, &saved);
-            if (store->writeBarrier()) fail(23);
-            if (!store->put("k2", std::string("v2"), false)) fail(24);
-            if (store->writeBarrier()) fail(25);
-            std::string val;
-            if (!store->get("k2", &val) || val != "v2") fail(26);
-            if (store->get("k", &val)) fail(27);
-        }),
-        ::testing::ExitedWithCode(0), "");
+    EXPECT_EXIT(runDeathChild(path,
+                              [](auto& store, auto& saved) {
+                                  auto fail = [&](int rc) {
+                                      setrlimit(RLIMIT_FSIZE, &saved);
+                                      store.reset();
+                                      std::exit(rc);
+                                  };
+                                  if (!store->put("k", std::string("v"), false)) fail(20);
+                                  if (store->writeBarrier()) fail(21);
+                                  if (store->readBarrier()) fail(22);
+                                  setrlimit(RLIMIT_FSIZE, &saved);
+                                  if (store->writeBarrier()) fail(23);
+                                  if (!store->put("k2", std::string("v2"), false)) fail(24);
+                                  if (store->writeBarrier()) fail(25);
+                                  std::string val;
+                                  if (!store->get("k2", &val) || val != "v2") fail(26);
+                                  if (store->get("k", &val)) fail(27);
+                              }),
+                ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedBatchWriteFailsReadBarrier) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     const std::string path = dbPath("fail-batch-write-rb");
-    EXPECT_EXIT(
-        runDeathChild(path, [](auto& store, auto& saved) {
-            auto fail = [&](int rc) {
-                setrlimit(RLIMIT_FSIZE, &saved);
-                store.reset();
-                std::exit(rc);
-            };
-            if (!store->put("k", std::string("v"), false)) fail(20);
-            if (store->readBarrier()) fail(21);
-            setrlimit(RLIMIT_FSIZE, &saved);
-            if (store->writeBarrier()) fail(22);
-        }),
-        ::testing::ExitedWithCode(0), "");
+    EXPECT_EXIT(runDeathChild(path,
+                              [](auto& store, auto& saved) {
+                                  auto fail = [&](int rc) {
+                                      setrlimit(RLIMIT_FSIZE, &saved);
+                                      store.reset();
+                                      std::exit(rc);
+                                  };
+                                  if (!store->put("k", std::string("v"), false)) fail(20);
+                                  if (store->readBarrier()) fail(21);
+                                  setrlimit(RLIMIT_FSIZE, &saved);
+                                  if (store->writeBarrier()) fail(22);
+                              }),
+                ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedBatchFullFlushFailsPut) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     lsmio::gConfigLSMIO.asyncBatchSize = 2;
     const std::string path = dbPath("fail-batch-full");
-    EXPECT_EXIT(
-        runDeathChild(path, [](auto& store, auto& saved) {
-            auto fail = [&](int rc) {
-                setrlimit(RLIMIT_FSIZE, &saved);
-                store.reset();
-                std::exit(rc);
-            };
-            if (!store->put("k1", std::string("1"), false)) fail(20);
-            if (store->put("k2", std::string("2"), false)) fail(21);
-            setrlimit(RLIMIT_FSIZE, &saved);
-            if (store->writeBarrier()) fail(22);
-            std::string val;
-            if (!store->get("k2", &val) || val != "2") fail(23);
-            if (store->get("k1", &val)) fail(24);
-        }),
-        ::testing::ExitedWithCode(0), "");
+    EXPECT_EXIT(runDeathChild(path,
+                              [](auto& store, auto& saved) {
+                                  auto fail = [&](int rc) {
+                                      setrlimit(RLIMIT_FSIZE, &saved);
+                                      store.reset();
+                                      std::exit(rc);
+                                  };
+                                  if (!store->put("k1", std::string("1"), false)) fail(20);
+                                  if (store->put("k2", std::string("2"), false)) fail(21);
+                                  setrlimit(RLIMIT_FSIZE, &saved);
+                                  if (store->writeBarrier()) fail(22);
+                                  std::string val;
+                                  if (!store->get("k2", &val) || val != "2") fail(23);
+                                  if (store->get("k1", &val)) fail(24);
+                              }),
+                ::testing::ExitedWithCode(0), "");
 }
 
 // Test-file comment for FailedFlushBeforeDirectPutIsSticky: the direct put's own write also fails
@@ -653,19 +653,19 @@ TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedBatchFullFlushFailsPut) {
 TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedFlushBeforeDirectPutIsSticky) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     const std::string path = dbPath("fail-flush-direct-sticky");
-    EXPECT_EXIT(
-        runDeathChild(path, [](auto& store, auto& saved) {
-            auto fail = [&](int rc) {
-                setrlimit(RLIMIT_FSIZE, &saved);
-                store.reset();
-                std::exit(rc);
-            };
-            if (!store->put("k", std::string("v"), false)) fail(20);
-            if (store->put("d", std::string("x"), true)) fail(21);
-            setrlimit(RLIMIT_FSIZE, &saved);
-            if (store->writeBarrier()) fail(22);
-        }),
-        ::testing::ExitedWithCode(0), "");
+    EXPECT_EXIT(runDeathChild(path,
+                              [](auto& store, auto& saved) {
+                                  auto fail = [&](int rc) {
+                                      setrlimit(RLIMIT_FSIZE, &saved);
+                                      store.reset();
+                                      std::exit(rc);
+                                  };
+                                  if (!store->put("k", std::string("v"), false)) fail(20);
+                                  if (store->put("d", std::string("x"), true)) fail(21);
+                                  setrlimit(RLIMIT_FSIZE, &saved);
+                                  if (store->writeBarrier()) fail(22);
+                              }),
+                ::testing::ExitedWithCode(0), "");
 }
 
 int main(int argc, char** argv) {
