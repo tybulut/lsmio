@@ -120,6 +120,7 @@ _SUBSEQUENT_MODULE_NAMES = (
     "lsmiotool.test.main.WorkerEntryTest",
     "lsmiotool.test.parse.ArchiveReportFormatTest",
     "lsmiotool.test.parse.LsmioAggOutputTest",
+    "lsmiotool.test.parse.PhaseReportTest",
     "lsmiotool.test.parse.RunParseTest",
 )
 
@@ -293,7 +294,7 @@ class LoaderTest(unittest.TestCase):
         self.assertIn("lsmiotool.test.parse.test_data", _PREEXISTING_MODULE_NAMES)
         self.assertEqual(len(preexisting_test_ids), 59)
         self.assertEqual(len(preexisting_test_ids), len(set(preexisting_test_ids)))
-        self.assertEqual(len(all_test_ids), 1435)
+        self.assertEqual(len(all_test_ids), 1510)
         self.assertEqual(len(all_test_ids), len(set(all_test_ids)))
         self.assertEqual(
             set(preexisting_test_ids),

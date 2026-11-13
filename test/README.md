@@ -33,6 +33,7 @@ graph TD
     D --> D1["test_mpi_base"]
     D --> D2["test_mpi_manager"]
     D --> D3["test_mpi_adios"]
+    D --> D4["test_mpi_bm_base / benchmarkMPI entries"]
 
     E --> E1["VariantCatalogueTest"]
     E --> E2["Run / Parse / Compare Tests"]
@@ -159,6 +160,21 @@ mount -o noatime,nodiratime /dev/sda2 /media/400GB
 | `test_mpi_base` | `test/test_mpi_base.cpp` | Multi-rank initialization, MPI barrier synchronization, collective vs. independent rank operations, and host grouping. |
 | `test_mpi_manager` | `test/test_mpi_manager.cpp` | Multi-rank storage manager orchestration, verifying per-rank aggregation directories and isolated SSTable partitions. |
 | `test_mpi_adios` | `test/test_mpi_adios.cpp` | Distributed multi-rank ADIOS2 I/O operations and plugin coordination across parallel MPI ranks. |
+| `test_mpi_bm_base` | `test/test_mpi_bm_base.cpp` | `BMBase` iteration orchestration and the read-shift exchange under MPI (2 ranks, suite `MPIBMBaseTest`), with a mock engine whose store is a file so a reader serves its source's data: no-shift and shifted runs, rank-local write and read failures, simulated and real node splits. Registered with `gtest_discover_tests` like the other MPI tests; run it with `./build.sh xtest '^MPIBMBaseTest\.'`. |
+
+### 3.4 Benchmark MPI Entries (`benchmarkMPI/`)
+
+The `benchmarkMPI/<name>` ctest entries launch the real benchmark executables (`bm_native`, `bm_rocksdb`, `bm_leveldb`, `bm_adios`, `bm_manager`) on **3 ranks of one host** through `cmake/BenchmarkMPITest.cmake`, and check the exit status and the output. They exist only when the benchmarks are built (`LSMIO_BUILD_BENCHMARKS`). Open MPI's `mpirun` cannot start 3 ranks on a host with fewer than 3 cores unless it is given `--oversubscribe`, so these entries (like the 3-rank plugin test) pass it whenever the launcher is Open MPI's `mpirun`; no other launcher gets it. Every rank gets the same arguments, so each entry passes `--per-rank-path` to give each rank its own store. Every entry has its own work directory under `build/test/benchmark-mpi/` (the combined output is saved there as `output.log`, which carries the `-tag-output` prefix on each line when the launcher is `mpirun`) so entries can run in parallel.
+
+| Entries | What they check |
+| :--- | :--- |
+| `benchmarkMPI/{native,rocksdb,leveldb,adios,adiosplugin}.ReadShiftSimulated` | `-m --per-rank-path --read-shift --read-shift-nodes 3`: the run succeeds, the header names `durability: engine` and `perRankPath: 1` (and `rocksdbVersion` or `leveldbVersion` where the engine prints one), every rank reads a peer (`rankShiftSelfRanks: 0`), the `Phases:` block holds the write and read rows of the last iteration, `iwrite,` and `iread,` rows are unchanged in number, and each rank's store exists. |
+| `benchmarkMPI/{native,rocksdb,leveldb,adios,adiosplugin}.ReadShiftUnsimulated` | The same without `--read-shift-nodes`: all 3 ranks share the real node, so each reads its own store (`rankShiftNodes: shared`, `rankShiftSelfRanks: 3`). |
+| `benchmarkMPI/native.ReadShiftSharedPathRefused` | `--read-shift` without `--per-rank-path`: every rank refuses (non-zero status, message about the same store path) and no store is created. |
+| `benchmarkMPI/native.ReadShiftNodesAboveWorldRefused` | `--read-shift-nodes 4` with 3 ranks is refused before any store is created. |
+| `benchmarkMPI/manager.ReadShiftNotSupportedRefused` | `bm_manager` does not support `--read-shift` and refuses it before any store is created. |
+
+For the RocksDB and plugin entries the file names in each rank's store are listed after the run, to show what a shifted read leaves in a peer's directory. Run them with `./build.sh xtest '^benchmarkMPI/'`.
 
 ---
 

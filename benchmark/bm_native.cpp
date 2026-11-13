@@ -61,19 +61,23 @@ class BMNative : public BMBase {
         return true;
     }
 
-    // writeCleanup(): Skipped as LSM stores support concurrent R/W open (unlike ADIOS2 baseline).
+    // The writer store is closed and deleted here, so the reader never meets an open writer (INV-9).
+    int writeCleanup() override {
+        delete _lc;
+        _lc = nullptr;
+        return 0;
+    }
 
-    // close/open() is not needed for LSM store, but put in-place for safety as below is not measured in benchmarking anyway.
     int readPrepare(bool opt) override {
-        if (_lc) {
-            delete _lc;
-            _lc = nullptr;
-        }
         _lc = new lsmio::LSMIOStoreNative(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
+            readDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
             false,
             lsmio::gConfigLSMIO.readOnly);
         return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
     }
 
     int readCleanup() override {

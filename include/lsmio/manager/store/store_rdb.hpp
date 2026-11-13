@@ -48,6 +48,7 @@ class LSMIOStoreRDB : public LSMIOStore {
     rocksdb::Options _options;
     rocksdb::DB *_db;
     rocksdb::WriteBatch *_batch;
+    bool m_read_only;
 
     /// start / stop batching
     /// @return bool success
@@ -66,7 +67,10 @@ class LSMIOStoreRDB : public LSMIOStore {
     bool dbCleanup() override;
 
   public:
-    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false);
+    /// @param f_read_only open the existing database read-only: mutations return false and
+    ///        writeBarrier()/close() flush nothing; cannot be combined with overWrite
+    LSMIOStoreRDB(const std::string dbPath, const bool overWrite = false,
+                  const bool f_read_only = false);
     ~LSMIOStoreRDB() override;
 
     void close() override;

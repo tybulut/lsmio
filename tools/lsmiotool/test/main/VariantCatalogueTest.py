@@ -38,6 +38,7 @@ from lsmiotool.lib.variants import (
     UnknownVariantError,
     VariantCatalogue,
     VariantRecord,
+    VariantReverseResolver,
 )
 
 
@@ -133,6 +134,24 @@ class VariantCatalogueTest(unittest.TestCase):
         "compress": ("compress", ("--lsmio-no-autotune", "--lsmio-compress")),
         "sync": ("sync", ("--lsmio-no-autotune", "--sync")),
         "autotune": ("autotune", ("--lsmio-autotune",)),
+    }
+
+    # Measurement-method arms (INV-24): supported, but not canonical
+    EXPECTED_MEASUREMENT_VARIANTS = {
+        "shift": ("shift", ("--lsmio-no-autotune", "--read-shift")),
+        "page-cache": (
+            "page-cache",
+            ("--lsmio-no-autotune", "--lsmio-durability", "page-cache"),
+        ),
+        "page-cache-shift": (
+            "page-cache-shift",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-durability",
+                "page-cache",
+                "--read-shift",
+            ),
+        ),
     }
 
     RETIRED_35_VARIANTS = (
@@ -242,14 +261,17 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertIsInstance(rec, VariantRecord)
 
     def testAllVariants(self) -> None:
-        """Assert 'allVariants' returns 'default' followed by all supported variants and equals mostVariants."""
+        """Assert 'allVariants' returns 'default' followed by every canonical variant and equals mostVariants (INV-24)."""
         all_vars = VariantCatalogue.allVariants()
         supported = VariantCatalogue.supportedVariants()
-        self.assertEqual(len(all_vars), len(supported) + 1)
+        self.assertEqual(all_vars, ("default",) + self.EXPECTED_CANONICAL_25_VARIANTS)
         self.assertEqual(len(all_vars), 26)
         self.assertEqual(all_vars, VariantCatalogue.mostVariants())
         self.assertEqual(all_vars[0], "default")
-        self.assertEqual(all_vars[1:], supported)
+        self.assertEqual(len(supported), 28)
+        for key in self.EXPECTED_MEASUREMENT_VARIANTS:
+            self.assertIn(key, supported)
+            self.assertNotIn(key, all_vars)
         for var in all_vars:
             self.assertTrue(VariantCatalogue.isValid(var))
             rec = VariantCatalogue.resolve(var)
@@ -258,16 +280,21 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertNotIn(retired, all_vars)
 
     def testAll25NonEmptyVariants(self) -> None:
-        """Assert all 25 non-empty keys match tokens and engine CLI flags and the 35 retired keys are rejected."""
+        """Assert the 28 supported non-empty keys (25 canonical, 3 measurement-method) match tokens and engine CLI flags and the 35 retired keys are rejected."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
-        self.assertEqual(len(supported), 25)
+        measurement = tuple(self.EXPECTED_MEASUREMENT_VARIANTS.keys())
+        self.assertEqual(len(supported), 28)
         self.assertEqual(len(self.EXPECTED_25_VARIANTS), 25)
         self.assertEqual(supported, all_keys)
-        self.assertEqual(supported, tuple(self.EXPECTED_25_VARIANTS.keys()))
-        self.assertEqual(supported, self.EXPECTED_CANONICAL_25_VARIANTS)
+        self.assertEqual(supported, tuple(self.EXPECTED_25_VARIANTS.keys()) + measurement)
+        self.assertEqual(
+            supported, self.EXPECTED_CANONICAL_25_VARIANTS + ("shift", "page-cache", "page-cache-shift")
+        )
+        self.assertEqual(supported[:25], self.EXPECTED_CANONICAL_25_VARIANTS)
 
-        for key, (expected_tokens, expected_flags) in self.EXPECTED_25_VARIANTS.items():
+        expected_all = {**self.EXPECTED_25_VARIANTS, **self.EXPECTED_MEASUREMENT_VARIANTS}
+        for key, (expected_tokens, expected_flags) in expected_all.items():
             rec = VariantCatalogue.resolve(key)
             self.assertEqual(rec.key, key)
             self.assertEqual(rec.tokens, expected_tokens)
@@ -287,6 +314,44 @@ class VariantCatalogueTest(unittest.TestCase):
                 VariantCatalogue.resolve(key)
             self.assertEqual(ctx.exception.variant, key)
             self.assertFalse(VariantCatalogue.isValid(f"native-{key}"))
+
+    def testMeasurementVariantsResolve(self) -> None:
+        """Assert the shift and page-cache arms resolve, stay non-canonical and round-trip through infix and archive names."""
+        canonical = VariantCatalogue.canonicalVariants()
+        for key, (tokens, flags) in self.EXPECTED_MEASUREMENT_VARIANTS.items():
+            rec = VariantCatalogue.resolve(key)
+            self.assertEqual(rec.key, key)
+            self.assertEqual(rec.tokens, tokens)
+            self.assertEqual(rec.flags, flags)
+            self.assertTrue(VariantCatalogue.isValid(key))
+            self.assertTrue(VariantCatalogue.isValid(f"rocksdb-{key}"))
+            self.assertNotIn(key, canonical)
+            self.assertNotIn(key, VariantCatalogue.mostVariants())
+            self.assertNotIn(key, VariantCatalogue.allVariants())
+            self.assertIn(key, VariantCatalogue.archivedVariantNames())
+        self.assertEqual(
+            VariantCatalogue.getInfix("ROCKSDB", "page-cache-shift"),
+            "rocksdb-page-cache-shift",
+        )
+        self.assertEqual(VariantCatalogue.getInfix("NATIVE", "shift"), "native-shift")
+
+        # Longest-first matching reads page-cache-shift whole, not as shift
+        for key, (tokens, flags) in self.EXPECTED_MEASUREMENT_VARIANTS.items():
+            rec = VariantCatalogue.resolve(f"version-main-abc123-{key}")
+            self.assertEqual(rec.tokens, f"version-main-abc123-{key}")
+            self.assertEqual(rec.flags, flags)
+
+        res = VariantReverseResolver.resolve("outputs-rocksdb-page-cache-shift:run")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.backend, "rocksdb")
+        self.assertEqual(res.variant, "page-cache-shift")
+        self.assertEqual(res.role, "run")
+        self.assertEqual(res.display_label, "rocksdb-page-cache-shift")
+        res = VariantReverseResolver.resolve("outputs-native-shift:base")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.backend, "native")
+        self.assertEqual(res.variant, "shift")
+        self.assertEqual(res.role, "base")
 
     def testMmapVariantsExcludePread(self) -> None:
         """Assert all mmap variants strictly include '--lsmio-no-pread' to avoid dual-handle contention."""
@@ -504,6 +569,72 @@ class VariantCatalogueTest(unittest.TestCase):
         self.assertEqual(hash(rec1), hash(rec2))
         self.assertIn("footer", repr(rec1))
         self.assertIn("--lsmio-footer-index", repr(rec1))
+
+    def testVariantRecordRejectsMistypedArguments(self) -> None:
+        """Assert each constructor argument is type-checked with a message naming the problem."""
+        cases = (
+            (1, "", (), "key must be a string"),
+            ("", 1, (), "tokens must be a string"),
+            ("", "", "x", "flags must be a sequence of strings"),
+            ("", "", (1,), "flag item must be a string"),
+        )
+        for f_key, f_tokens, f_flags, expected in cases:
+            with self.subTest(expected=expected):
+                with self.assertRaises(TypeError) as ctx:
+                    VariantRecord(f_key, f_tokens, f_flags)
+                self.assertIn(expected, str(ctx.exception))
+
+    def testStripBackendPrefixRejectsNonString(self) -> None:
+        """Assert a non-string key raises TypeError instead of being stripped."""
+        with self.assertRaises(TypeError) as ctx:
+            VariantCatalogue.stripBackendPrefix(None)  # type: ignore[arg-type]
+        self.assertIn("f_key must be a string", str(ctx.exception))
+
+    def testResolveRejectsNonStringKey(self) -> None:
+        """Assert a non-string, non-None key is an unknown variant that lists the supported keys."""
+        with self.assertRaises(UnknownVariantError) as ctx:
+            VariantCatalogue.resolve(5)  # type: ignore[arg-type]
+        self.assertIn("5", str(ctx.exception))
+        self.assertIn("shift", str(ctx.exception))
+
+    def testVersionKeyEndingInVariantNameWithoutBranchKeepsDefaultFlags(self) -> None:
+        """Assert 'version-<branch>-<variant>' without a hash is a plain version key.
+
+        The trailing name has no '-' before it in the payload prefix, so it is not read as a
+        variant: the key keeps the default flags and is its own tokens.
+        """
+        rec = VariantCatalogue.resolve("version-main-shift")
+        self.assertEqual(rec.key, "version-main-shift")
+        self.assertEqual(rec.tokens, "version-main-shift")
+        self.assertEqual(rec.flags, VariantCatalogue.resolve("default").flags)
+
+        self.assertEqual(
+            VariantReverseResolver.formatLabel("native", "version-main-shift"),
+            "main (shift)",
+        )
+
+    def testFormatLabelOfVersionWithoutHash(self) -> None:
+        """Assert a 'version-' payload without '-' is shown as it is."""
+        self.assertEqual(VariantReverseResolver.formatLabel("native", "version-abc"), "abc")
+        self.assertEqual(
+            VariantReverseResolver.formatLabel("rocksdb", "version-abc", "3"), "rocksdb-abc-3"
+        )
+
+    def testVersionVariantWithNumericCollisionKeepsCollision(self) -> None:
+        """Assert a numeric suffix on a 'version-' directory stays a collision.
+
+        Neither 'main-abc-7' nor 'x-pool-8' is '<branch>-<hash>-<archived variant>', so the
+        trailing number is not folded into the variant.
+        """
+        res = VariantReverseResolver.resolve("outputs-native-version-main-abc-7")
+        self.assertEqual(res.variant, "version-main-abc")
+        self.assertEqual(res.collision, "7")
+        self.assertEqual(res.display_label, "main (abc)-7")
+
+        res = VariantReverseResolver.resolve("outputs-native-version-x-pool-8")
+        self.assertEqual(res.variant, "version-x-pool")
+        self.assertEqual(res.collision, "8")
+        self.assertEqual(res.display_label, "x (pool)-8")
 
 
 if __name__ == "__main__":

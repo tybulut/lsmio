@@ -38,11 +38,15 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `-s, --segment-count` | `<int>` | `1024` | Segment count for key partitioning. |
 | `-v, --verbose` | None | `false` | Enable verbose informational logging to standard output. |
 | `-g, --debug` | None | `false` | Enable verbose debugging diagnostics. |
-| `-e, --sync` | None | `false` | Enforce synchronous I/O operations (`O_SYNC` / `fsync`) after writes. |
+| `-e, --sync` | None | `false` | Sets `useSync`. Only the LevelDB and RocksDB stores read it: it becomes `WriteOptions.sync` on their writes (RocksDB applies it only together with `--lsmio-wal`, and ignores it with a warning otherwise). It does not force `O_SYNC` or `fsync` for the other engines. See [Section 6](#6-durability-and-the-page-cache-mode). |
 | `-l, --loop-all` | None | `false` | Iterate across all built-in configuration option variations. |
-| `-m, --mpi-barrier` | None | `false` | Synchronize ranks via `MPI_Barrier` before starting and stopping benchmarks. |
+| `-m, --mpi-barrier` | None | `false` | Synchronize ranks via `MPI_Barrier` around every phase of an iteration: before and after the open, after the close and after the delete, on the write side and on the read side (see [Section 5.1](#51-phase-timeline)). |
 | `-c, --collective-io` | None | `false` | Enable MPI collective I/O operations across ranks. |
 | `-w, --mpi-io-world` | None | `false` | Use global `MPI_COMM_WORLD` for collective I/O rather than host-level rank groupings. |
+| `--per-rank-path` | None | `false` | Gives every MPI world rank its own store path: the `-o`/`-d` path with the suffix `.mpirank<w>` (`<w>` is the world rank). Refused without `-m`, and refused with `-c`. Needed by `--read-shift`, which wants one store per rank. |
+| `--read-shift` | None | `false` | Each rank reads the data of a peer rank on another node instead of its own (see [Section 7](#7-read-shift)). Needs `-m`, is refused with `-c`, and the executable must support it: `bm_native`, `bm_rocksdb`, `bm_leveldb` and `bm_adios` do, `bm_manager` does not (it refuses the run). |
+| `--read-shift-nodes` | `<n>` | unset | Test seam: pretend the world has `<n>` nodes (rank `r` is on node `r mod n`) when `--read-shift` maps peers. Needs `--read-shift`, `<n>` must be at least 1 and at most the MPI world size. `lsmiotool` never passes it. |
+| `--lsmio-durability` | `engine\|page-cache` | `engine` | Durability mode of the RocksDB and LevelDB stores (see [Section 6](#6-durability-and-the-page-cache-mode)). `page-cache` is refused with `-e/--sync` and on every library build that is not verified. |
 
 ### 2.2 Storage Backend Selection Flags
 
@@ -63,6 +67,9 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 
 > [!TIP]
 > Combining `--lsmio-footer-index` with either `--lsmio-mmap` or `--lsmio-pread` provides maximum read throughput on Lustre filesystems by bypassing file open/close metadata operations and stream positioning entirely.
+
+> [!NOTE]
+> **RocksDB and `--lsmio-mmap`.** With `bm_rocksdb`, `--lsmio-mmap` turns on RocksDB's `allow_mmap_reads` and `allow_mmap_writes`. RocksDB's mmap writer extends a file only through `fallocate`, so without it the first table file ends the process with `SIGBUS`. The store therefore sets `allow_fallocate` whenever `--lsmio-mmap` is given, as `--lsmio-prealloc` does, and logs one warning each time a RocksDB store is constructed while `--lsmio-prealloc` is not set (so for the writer and again for the reader of every iteration; the message reads "mmap writes need fallocate; enabling allow_fallocate (preAllocate not set)."). The benchmarks hide warnings unless `-v` is given, so the warning shows only in verbose runs. RocksDB keeps mmap writes only on a short list of filesystems (ext2/3/4, XFS and tmpfs, read from RocksDB's source and not run here) and switches them off elsewhere, for example on NFS, Lustre, GPFS and btrfs; there `--lsmio-mmap` still turns `allow_fallocate` on, so such a run behaves like `--lsmio-mmap --lsmio-prealloc` for ordinary writes, and the warning's wording does not fit. LevelDB has no mmap-writes option and ignores `--lsmio-mmap` for writes.
 
 ### 2.4 NativeStore Engine Tuning Parameters
 
@@ -188,3 +195,121 @@ Bench-READ: native
   $$\text{IOPS} = \frac{N_{\text{keys}}}{\text{Duration (seconds)}}$$
 - **Statistical Summaries**:
   When running multiple iterations (`-i > 1`), `BMBase` outputs minimum, maximum, and mean throughput across all iterations for write and read phases.
+
+The `Duration`, `Throughput` and `IOPS` rows above (and the `iwrite,` / `iread,` rows of each iteration) are the *legacy window*: from the moment the store is open (after the barrier that follows the open) until the exit of the barrier that follows the close. They are unchanged by the phase timeline below, so older archives stay comparable.
+
+### 5.1 Phase timeline
+
+Every iteration has a write side and a read side, and each side records five boundaries, in this order:
+
+| Boundary | Captured | Barrier before it (with `-m`) |
+| :--- | :--- | :--- |
+| `beforeOpen` | right after the barrier that precedes the store open | yes |
+| `afterOpen` | after the store is open (the legacy timer starts here) | yes |
+| `beforeClose` | after the last put or get, before the engine's finalize step (`doWriteFinalize` / `doReadFinalize`; for RocksDB the flush and the close) | no |
+| `afterClose` | after the finalize step (the legacy timer stops here) | yes |
+| `afterDelete` | after the engine's cleanup hook (`writeCleanup` / `readCleanup`) | yes |
+
+Without `-m` no barrier runs, and without MPI (as in `micro.sh`) nothing is reduced over ranks either (with `-c` and no `-m` the offsets are still reduced, without barriers); the rows are printed in every case. The `beforeClose` boundary has no barrier on purpose, so the close of the slowest rank is not hidden inside the window before it. LSM engines delete the previous iteration's store when the writer opens, so the `open` window of a write side includes that delete; ADIOS2 truncates instead (inferred, not read from the ADIOS2 sources).
+
+Each boundary is stored as an offset in microseconds from the writer's `beforeOpen` barrier exit of the same iteration (that offset is `0`), on a monotonic clock. Under MPI the offsets are reduced with `MAX` over all ranks once per iteration, after every capture of both sides, so every rank that prints results prints the same values, and the reduction sits inside no timed window.
+
+The results carry one `Phases:` block per benchmark suite (one per `-l` variation, named with the same prefix as its `Bench-WRITE:` and `Bench-READ:` blocks). The blocks come after all `Bench-READ:` blocks, are printed by the same ranks as the legacy results, and look like this (illustrative values):
+
+```text
+Phases: native
+phase,write,0,134217728,0,2210,81432,95310,97105
+phase,read,0,134217728,99020,99804,131550,133900,134020
+```
+
+The columns are `phase,<write|read>,<iteration>,<bytes>,<beforeOpen>,<afterOpen>,<beforeClose>,<afterClose>,<afterDelete>`. `<bytes>` is the world-total payload of one side (`keyCount x valueSize x` MPI world size) as an integer. A side that failed on any rank has no row, as it has no `iwrite,` or `iread,` row; a failed write skips the read side of that iteration, and the suite stops at its first failed iteration. A suite always prints its `Phases:` line, even with no rows.
+
+`lsmiotool` turns these rows into `lsm-phase-report.csv`; see the [Tools & Orchestration Guide](../tools/README.md#lsm-phase-reportcsv).
+
+### 5.2 Header lines
+
+The `BENCHMARK PARAMETERS:` block gained these lines:
+
+| Line | Printed | Meaning |
+| :--- | :--- | :--- |
+| `perRankPath` | always | `1` with `--per-rank-path`, else `0`. |
+| `durability` | always | `engine` or `page-cache`. |
+| `rankShift` | always | `1` with `--read-shift`, else `0`. |
+| `rankShiftNodes` | with `--read-shift` | `shared` (the real node split of the MPI job) or `simulated:<n>` (`--read-shift-nodes`). |
+| `rankShiftSource` | with `--read-shift` | The world rank whose store the printing rank reads. |
+| `rankShiftSelfRanks` | with `--read-shift` | How many world ranks read their own store (1-node runs, and see [Section 7](#7-read-shift)). |
+| `rankShiftSameHostRanks` | with `--read-shift` | How many world ranks read a store written on a host with the same processor name as theirs (a diagnostic; it is the world size when the nodes are simulated on one host). |
+| `rocksdbVersion` | `bm_rocksdb` | RocksDB `major.minor.patch` the benchmark was compiled against. |
+| `leveldbVersion` | `bm_leveldb` | LevelDB `major.minor` (its header has no patch level). |
+
+---
+
+## 6. Durability and the page-cache mode
+
+`--lsmio-durability` selects how the RocksDB and LevelDB stores treat durability. Native and ADIOS2 BP5 write without any sync call, so the engines are not on equal footing by default.
+
+- **`engine` (default).** The engine keeps its own behaviour, including the syncs it issues on flush, on WAL rotation, for its manifest and on close. All archived and future default runs use it, so they stay comparable.
+- **`page-cache`.** Every sync of the engine is removed: a wrapper file system (RocksDB) or wrapper `Env` (LevelDB) turns the file `Sync` and `Fsync` calls into plain flushes, and RocksDB's `RangeSync` and directory fsyncs into no-ops. Data reaches the operating system's page cache and is never forced to storage, as for native and BP5. It is refused together with `-e/--sync` (the benchmark refuses at argument parsing, and the store refuses too, so no other caller can combine them).
+
+Native and BP5 have no such mode: `--lsmio-durability page-cache` has no effect on them beyond the header line.
+
+> [!IMPORTANT]
+> **LevelDB's `page-cache` arm leaves part of the last memtable in the log.** LevelDB's close is unchanged: it does not flush the final memtable to a table file. Between none and all of the last memtable stays only in the write-ahead log, depending on which background table builds finished before the close. The reader's open builds the rest from the log, so a LevelDB `page-cache` read includes that recovery work in the read side's `open` window; the benchmark neither hides it nor times it separately. This follows from the human decision on LevelDB's close (option 1: leave it unchanged, with no flush at reopen).
+
+### 6.1 Verified-build gate
+
+`page-cache` runs only on library builds whose sync removal was verified:
+
+- A store asks the gate once, in its constructor, before it touches any file. An unverified build logs an `ERROR` that names the engine, the mode and the build, and throws `std::invalid_argument`. A refused store has deleted and created nothing. The benchmarks open their stores without a surrounding `try`, so the run ends at its first open on every rank (an uncaught exception).
+- A build is identified by engine, version and platform: RocksDB by `major.minor.patch`, LevelDB by `major.minor`, each with the platform the library was compiled for (for example `linux-x86_64`). When the library reports its version at run time (RocksDB does, LevelDB does not) and it differs from the compile-time version, the store refuses.
+- The RocksDB wrapper is compiled in only for RocksDB 9.11.2 and 10.6.2, the two versions whose headers were read against its interface. On every other RocksDB version the RocksDB store refuses `page-cache` whatever the table says. The wrapper was developed and tested against the packaged 9.11.2; 10.6.2 (the version the build fetches when no package is found) has been checked from its headers only, so its first build needs the site gate below before any campaign.
+- macOS has no entries, so macOS builds refuse `page-cache`.
+- The test suite runs `page-cache` stores on every build that has the wrapper through an admission seam that lives in a header under `lib/` and is reachable only from `test/`. No flag, environment variable, configuration field or CMake option opens it for a benchmark.
+- A distribution that patches a library without changing its number is not told apart by the gate. The site gate below covers it.
+
+A build enters the table (`verifiedBuildTable()` in `lib/manager/store/PageCacheGate.cpp`) only on recorded evidence and a human-approved code change. The evidence for an entry is: the `RocksDBPageCache` or `LevelDBPageCache` tests pass; a `strace` of those tests shows no `fsync`, `fdatasync` or `msync`, and `sync_file_range` only with flags 0; and a `strace` of the benchmark in page-cache mode (single process and three ranks, with `--lsmio-wal` and with `--lsmio-mmap`) shows the same while every iteration keeps its `iwrite,` and `iread,` rows.
+
+#### Verified page-cache builds
+
+| Engine | Library build | Platform | Evidence |
+| :--- | :--- | :--- | :--- |
+| RocksDB | 9.11.2 (`librocksdb9.11 9.11.2-1`) | linux-x86_64 | E2 test form 2026-11-12, branch `tybulut/benchmarkpp`, base `ae90360` (no lsmio commit hash yet): `strace -f -e trace=fsync,fdatasync,msync,sync_file_range` of `test_rocksdb --gtest_filter='RocksDBPageCache.*'`: `[  PASSED  ] 3 tests.`; 0 `fsync`, 0 `fdatasync`, 0 `msync`; 63 `sync_file_range`, all `(fd, 0, 0, 0)` (flags 0). E2b (benchmark form) 2026-11-13, same branch and base: `strace -f -e trace=fsync,fdatasync,msync,sync_file_range` of `bm_rocksdb -i 2 -k 4096 --lsmio-bs 1048576 --lsmio-ts 1048576 --lsmio-durability page-cache`, plain, with `--lsmio-wal`, with `--lsmio-mmap`, and a 3-rank `mpirun -np 3 --oversubscribe` run with `-m --per-rank-path --read-shift --read-shift-nodes 3`: every run exit 0 with its `iwrite` and `iread` rows for both iterations; 0 `fsync`, 0 `fdatasync`, 0 `msync`; 142 `sync_file_range` (24 plain, 28 WAL, 18 mmap, 72 three-rank), all flags 0 |
+| LevelDB | 1.23 (`libleveldb1d 1.23-6`) | linux-x86_64 | E2 test form 2026-11-12, branch `tybulut/benchmarkpp`, base `ae90360` (no lsmio commit hash yet): same `strace -f` of `test_leveldb --gtest_filter='LevelDBPageCache.*'`: `[  PASSED  ] 3 tests.`; 0 `fsync`, 0 `fdatasync`, 0 `msync`, 0 `sync_file_range`. E2b (benchmark form) 2026-11-13, same branch and base: the same `strace -f` of `bm_leveldb` with the same flags, plain, with `--lsmio-wal`, with `--lsmio-mmap` (accepted), and the 3-rank `mpirun` run: every run exit 0 with its `iwrite` and `iread` rows for both iterations; 0 `fsync`, 0 `fdatasync`, 0 `msync`, 0 `sync_file_range` |
+
+Each row records the date, the lsmio commit, the test names and their result lines, and the benchmark run's result (E2b, added after it passes).
+
+### 6.2 Site gate
+
+Before the first `page-cache` campaign on a site, check the site's library build:
+
+- If its version and platform are not in the table, the store refuses on that site, loudly, at the first open. Follow the admission order there: run the site's tests (`./build.sh xtest`), run the `strace` check of the `RocksDBPageCache` / `LevelDBPageCache` tests, add the entry (a human-approved change), then run the benchmark check.
+- If they are listed, run the benchmark check once on the site's build before the campaign. It is the only check of a patched build with a listed number.
+
+Shifted reads in `page-cache` mode on Lustre may include the writer node's write-back (inferred, not measured); say so wherever such results are reported.
+
+---
+
+## 7. Read shift
+
+Without `--read-shift`, every rank reads back the store it wrote, so a read can be served from the page cache of the node that wrote it. With `--read-shift` each rank reads the data of a peer on another node.
+
+- **The rule.** Ranks are grouped by node (the real node split, or `--read-shift-nodes`). A rank's node-local index is its position among the ranks of its node, in world-rank order. The ranks that share a node-local index form a ring ordered by node id; a rank reads the store written by its successor in that ring, the rank with the same node-local index on the next node, and the last node wraps to the first. Which rank reads which store does not depend on how the launcher placed ranks, only on the node ids.
+- **Own-store reads.** A node-local index held by one node only reads its own store. With one node, every rank does, and `rankShiftSelfRanks` equals the world size. With unequal numbers of ranks per node, the extra ranks on the fullest node read their own store too, even where a mapping with no own-store read might exist; the header counts them in `rankShiftSelfRanks`. Check that line before calling an arm a cross-node read.
+- **One store per rank.** `--read-shift` needs `--per-rank-path` (or any other way to give each rank a distinct store). Before the first iteration the ranks exchange store paths and processor names over MPI, and every rank refuses with exit status 1 when two ranks have the same store path, when the executable does not support the shift, or when `--read-shift-nodes` exceeds the world size.
+- **What a reader reads.** The key order of a reader is the key order of its source writer, so a reader looks up exactly what its source wrote. The write and read sides are ordered by barriers: every rank passes the `afterDelete` barrier of its write side before any rank opens a store to read.
+- **Directory side effects.** RocksDB readers open read-only (`--lsmio-read-only`, on by default) and write nothing into the peer's directory. LevelDB has no read-only open, so its reader may write bookkeeping files into the peer's directory; each store has exactly one reader per iteration, so no reader changes what another reader sees.
+- **Lustre.** With `page-cache` durability, a shifted read on Lustre may include the writer node's write-back (see Section 6.2).
+- **`bm_manager`** does not support the shift and refuses the run.
+
+---
+
+## 8. Reading arm names
+
+- A `-sync` arm of `lsmiotool run lsmio backends` (`rocksdb-sync`, `leveldb-sync`, `native-sync`, `adios-sync`, `plugin-sync`) runs its benchmark with `--lsmio-always-flush`. It is not `-e/--sync`, and it has nothing to do with `fsync`: it disables write batching so each record is accessible at once.
+- Which setups the durability variants are for: `page-cache` and `page-cache-shift` change behaviour only for the `ROCKSDB` and `LEVELDB` setups, and for `PLUGIN` and `MANAGER` when they run over RocksDB or LevelDB. On `NATIVE`, `ADIOS` and the plugin over native, `page-cache` repeats the base arm's I/O and `page-cache-shift` equals `shift`; `lsmiotool` still accepts them there, and the header records the mode. `shift` and `page-cache-shift` need an executable that supports `--read-shift`: not `MANAGER`.
+
+---
+
+## 9. Installation and compatibility
+
+The installed `LSMIOConfig` gained a `durability` field, and the installed `store_rdb.hpp` changed: `LSMIOStoreRDB`'s constructor gained a read-only parameter and the class gained a member, so the old two-argument constructor symbol is gone. Programs and libraries built against an earlier install must be rebuilt against the new headers.

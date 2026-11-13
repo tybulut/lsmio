@@ -28,8 +28,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <leveldb/db.h>
+
 #include <iostream>
 #include <lsmio/manager/store/store_ldb.hpp>
+#include <string>
 
 #include "bm_base.hpp"
 
@@ -57,17 +60,27 @@ class BMLeveldb : public BMBase {
         return true;
     }
 
-    // writeCleanup(): Skipped as LSM stores support concurrent R/W open (unlike ADIOS2 baseline).
-
-    // close/open() is not needed for LSM store, but put in-place for safety as below is not measured in benchmarking anyway.
-    int readPrepare(bool opt) override {
-        if (_lc) {
-            delete _lc;
-            _lc = nullptr;
-        }
-        _lc = new lsmio::LSMIOStoreLDB(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+    // The writer store is closed and deleted here, so the reader never meets an open writer (INV-9).
+    int writeCleanup() override {
+        delete _lc;
+        _lc = nullptr;
         return 0;
+    }
+
+    // LevelDB has no read-only open, so the reader opens read-write.
+    int readPrepare(bool opt) override {
+        _lc = new lsmio::LSMIOStoreLDB(
+            readDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+        return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
+    }
+
+    std::string engineHeaderLines() const override {
+        return std::string(" leveldbVersion: ") + std::to_string(leveldb::kMajorVersion) + "." +
+               std::to_string(leveldb::kMinorVersion) + "\n";
     }
 
     int readCleanup() override {

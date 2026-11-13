@@ -54,6 +54,9 @@ set(LIB_STORE_CPP_FILES
   ${LIB_SOURCE_DIR}/manager/store/store.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_ldb.cpp
   ${LIB_SOURCE_DIR}/manager/store/store_rdb.cpp
+  ${LIB_SOURCE_DIR}/manager/store/PageCacheGate.cpp
+  ${LIB_SOURCE_DIR}/manager/store/NoSyncLevelDBEnv.cpp
+  ${LIB_SOURCE_DIR}/manager/store/NoSyncRocksFileSystem.cpp
   ${LIB_SOURCE_DIR}/manager/store/native/StoreNative.cpp
   ${LIB_SOURCE_DIR}/manager/store/native/MemtableVectorNoSort.cpp
   ${LIB_SOURCE_DIR}/manager/store/native/MemtableVectorSort.cpp
