@@ -37,6 +37,7 @@ import stat
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from lsmiotool.lib import data
+from lsmiotool.lib import phasereport
 from lsmiotool.lib.log import Console
 from lsmiotool.lib.artifacts import (
     ArtifactError,
@@ -1360,6 +1361,43 @@ class IorLogExtractor:
 class LsmioLogExtractor:
     """Extractor for LSMIO benchmark per-rank logs and iteration metrics."""
 
+    @staticmethod
+    def _rankLogCandidates(
+        f_point: ResolvedPoint, f_combo: Combination, f_rank: int
+    ) -> List[str]:
+        """Paths where one rank's log may live, in search order."""
+        f_logs_dir = os.path.join(f_point.pointDir, "logs")
+        f_candidates = [
+            os.path.join(f_logs_dir, f_combo.name, f"rank_{f_rank}.log"),
+            os.path.join(f_logs_dir, f"{f_combo.name}_rank_{f_rank}.log"),
+            os.path.join(
+                f_point.pointDir, "ranks", str(f_rank), f_combo.name, "output.log"
+            ),
+            os.path.join(f_logs_dir, f"rank_{f_rank}.log"),
+        ]
+
+        f_rank_rec = f_point.getRankResult(f_rank, f_combo)
+        if f_rank_rec and f_rank_rec.payload and "stdout_path" in f_rank_rec.payload:
+            f_candidates.insert(0, str(f_rank_rec.payload["stdout_path"]))
+        if f_rank_rec and f_rank_rec.payload and "log_path" in f_rank_rec.payload:
+            f_candidates.insert(0, str(f_rank_rec.payload["log_path"]))
+        return f_candidates
+
+    @staticmethod
+    def _firstExisting(f_candidates: Sequence[str]) -> Optional[str]:
+        """The first candidate path that exists, else None."""
+        for f_cand in f_candidates:
+            if os.path.exists(f_cand):
+                return f_cand
+        return None
+
+    @classmethod
+    def findRankLog(
+        cls, f_point: ResolvedPoint, f_combo: Combination, f_rank: int
+    ) -> Optional[str]:
+        """Return the existing log file of one rank of a point/combination, or None."""
+        return cls._firstExisting(cls._rankLogCandidates(f_point, f_combo, f_rank))
+
     @classmethod
     def extractPointCombo(
         cls, f_point: ResolvedPoint, f_combo: Combination
@@ -1372,35 +1410,12 @@ class LsmioLogExtractor:
         f_first_w_line = ""
         f_first_r_line = ""
 
-        f_logs_dir = os.path.join(f_point.pointDir, "logs")
         # bmtool lsmio-parse.sh aggregate: summed 'write,'/'read,' lines across ranks
         f_bm_agg = data.LsmioBmtoolAggregate()
 
         for f_rank in range(f_tasks):
-            f_candidates = [
-                os.path.join(f_logs_dir, f_combo.name, f"rank_{f_rank}.log"),
-                os.path.join(f_logs_dir, f"{f_combo.name}_rank_{f_rank}.log"),
-                os.path.join(
-                    f_point.pointDir, "ranks", str(f_rank), f_combo.name, "output.log"
-                ),
-                os.path.join(f_logs_dir, f"rank_{f_rank}.log"),
-            ]
-
-            f_rank_rec = f_point.getRankResult(f_rank, f_combo)
-            if (
-                f_rank_rec
-                and f_rank_rec.payload
-                and "stdout_path" in f_rank_rec.payload
-            ):
-                f_candidates.insert(0, str(f_rank_rec.payload["stdout_path"]))
-            if f_rank_rec and f_rank_rec.payload and "log_path" in f_rank_rec.payload:
-                f_candidates.insert(0, str(f_rank_rec.payload["log_path"]))
-
-            f_log_path: Optional[str] = None
-            for f_cand in f_candidates:
-                if os.path.exists(f_cand):
-                    f_log_path = f_cand
-                    break
+            f_candidates = cls._rankLogCandidates(f_point, f_combo, f_rank)
+            f_log_path = cls._firstExisting(f_candidates)
 
             if f_log_path is None:
                 raise ExtractionError(
@@ -2001,6 +2016,8 @@ class LsmioReportGenerator(ReportGenerator):
         """
         f_res: Dict[str, str] = {}
         f_agg_files: Dict[str, List[str]] = {}
+        # (nodes, stripe, block, existing rank logs) of every set that gets an agg file
+        f_phase_sets: List[Tuple[str, str, str, List[str]]] = []
 
         # Stage 1: <nodes>/agg-<stripe_count>-<stripe_size>-report.csv for each point
         for f_pt in f_resolved_run.points:
@@ -2026,6 +2043,15 @@ class LsmioReportGenerator(ReportGenerator):
                 f_agg_files[f"{f_n_part}/{f_agg_name}"] = list(f_agg_lines)
                 f_res[f"agg-{f_n_part}-{f_s_count}-{f_s_size}"] = f_agg_file_path
 
+                # Missing rank logs are skipped here, never an error: the extracted
+                # data may not come from logs on disk
+                f_rank_logs: List[str] = []
+                for f_rank in range(f_pt.scalePoint.tasks):
+                    f_rank_log = LsmioLogExtractor.findRankLog(f_pt, f_combo, f_rank)
+                    if f_rank_log is not None:
+                        f_rank_logs.append(f_rank_log)
+                f_phase_sets.append((f_n_part, f_s_count, f_s_size, f_rank_logs))
+
         # Stage 2: master lsm-report.csv in bmtool's (shell glob) order
         f_master_rows: List[str] = []
         for f_rel in sorted(f_agg_files, key=data.bmtoolCollationKey):
@@ -2041,6 +2067,13 @@ class LsmioReportGenerator(ReportGenerator):
                 f"No LSMIO report rows for run '{f_resolved_run.runId}'; "
                 f"not writing {f_master_file}"
             )
+
+        # Stage 3: lsm-phase-report.csv, only when some rank log holds phase rows
+        f_phase_file = phasereport.writePhaseReport(
+            f_out_dir, f_phase_sets, f_resolved_run.runRoot
+        )
+        if f_phase_file:
+            f_res[phasereport.LSM_PHASE_REPORT_FILE] = f_phase_file
 
         if f_format.lower() == "json":
             f_json_file = os.path.join(f_out_dir, "lsm-report.json")

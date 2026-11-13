@@ -28,8 +28,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <rocksdb/version.h>
+
 #include <iostream>
 #include <lsmio/manager/store/store_rdb.hpp>
+#include <string>
 
 #include "bm_base.hpp"
 
@@ -57,17 +60,29 @@ class BMRocksdb : public BMBase {
         return true;
     }
 
-    // writeCleanup(): Skipped as LSM stores support concurrent R/W open (unlike ADIOS2 baseline).
-
-    // close/open() is not needed for LSM store, but put in-place for safety as below is not measured in benchmarking anyway.
-    int readPrepare(bool opt) override {
-        if (_lc) {
-            delete _lc;
-            _lc = nullptr;
-        }
-        _lc = new lsmio::LSMIOStoreRDB(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+    // The writer store is closed and deleted here, so the reader never meets an open writer (INV-9).
+    int writeCleanup() override {
+        delete _lc;
+        _lc = nullptr;
         return 0;
+    }
+
+    // Read-only by default (INV-18); --lsmio-no-read-only opens it read-write.
+    int readPrepare(bool opt) override {
+        _lc = new lsmio::LSMIOStoreRDB(
+            readDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
+            false,
+            lsmio::gConfigLSMIO.readOnly);
+        return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
+    }
+
+    std::string engineHeaderLines() const override {
+        return std::string(" rocksdbVersion: ") + std::to_string(ROCKSDB_MAJOR) + "." +
+               std::to_string(ROCKSDB_MINOR) + "." + std::to_string(ROCKSDB_PATCH) + "\n";
     }
 
     int readCleanup() override {

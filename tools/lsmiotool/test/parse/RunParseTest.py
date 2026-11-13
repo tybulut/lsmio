@@ -34,6 +34,7 @@ import math
 import os
 import shutil
 import tempfile
+from types import SimpleNamespace
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 import unittest
 from unittest.mock import patch
@@ -45,6 +46,8 @@ from lsmiotool.lib.evidence import (
     EvidenceStore,
     JobHandle,
 )
+from lsmiotool.lib import data, phasereport, runparse
+from lsmiotool.lib.phasereport import PHASE_REPORT_COLUMNS
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import (
     Combination,
@@ -79,6 +82,12 @@ from lsmiotool.lib.runparse import (
 )
 from lsmiotool.lib.site import EnvironmentResolver
 from lsmiotool.lib.state import OverallRunState, PointRunState
+from lsmiotool.test.parse.PhaseReportTest import (
+    ONE_MIB,
+    PREFIX,
+    rankLogLines,
+    sampleSuite,
+)
 
 
 class RunParseTest(unittest.TestCase):
@@ -1745,6 +1754,11 @@ class RunParseTest(unittest.TestCase):
             f_resolved_lsm, f_extracted_lsm, f_out_dir, f_format="csv"
         )
         self.assertIn("lsm-report.csv", f_lsm_files)
+        # No rank logs on disk (NB-R2-1): the phase hook skips them, writes no file
+        self.assertNotIn("lsm-phase-report.csv", f_lsm_files)
+        self.assertFalse(
+            os.path.exists(os.path.join(f_out_dir, "lsm-phase-report.csv"))
+        )
 
         # Verify Stage 1 files (agg-<stripe_count>-<stripe_size>-report.csv)
         for f_c in f_plan_lsm.combinations:
@@ -1796,6 +1810,206 @@ class RunParseTest(unittest.TestCase):
         for f_row in f_lmp_rows:
             f_cols = f_row.split(",")
             self.assertEqual(len(f_cols), 4, f"Expected 4 columns in LMP row: {f_row}")
+
+    @staticmethod
+    def _syntheticLsmioExtracted(
+        f_resolved: ResolvedRun, f_plan: RunPlan
+    ) -> Dict[str, Dict[str, Any]]:
+        """Extracted data with a bmtool aggregate for every point and combination."""
+        return {
+            f_pt.pointId: {
+                f_c.name: {
+                    "bmtool_agg": {
+                        "lines": [
+                            "access,max(MiB)/s,min(MiB/s),mean(MiB/s),total(MiB),total(Ops),iteration",
+                            "write,1300,1100,1200,2559.96,40960,10",
+                            "read,2500,2300,2400,2559.96,40960,10",
+                        ],
+                        "ranks": 1,
+                    },
+                }
+                for f_c in f_plan.combinations
+            }
+            for f_pt in f_resolved.points
+        }
+
+    @staticmethod
+    def _writePhaseLog(f_path: str, f_lines: List[str]) -> None:
+        os.makedirs(os.path.dirname(f_path), exist_ok=True)
+        with open(f_path, "w", encoding="utf-8") as f_f:
+            f_f.write("\n".join(f_lines) + "\n")
+
+    @staticmethod
+    def _readCsvRows(f_path: str) -> List[Dict[str, str]]:
+        with open(f_path, "r", newline="", encoding="utf-8") as f_f:
+            return list(csv.DictReader(f_f))
+
+    @staticmethod
+    def _readBytes(f_path: str) -> bytes:
+        with open(f_path, "rb") as f_f:
+            return f_f.read()
+
+    def testLsmioReportGeneratorWritesPhaseReportFromRankLogs(self) -> None:
+        """Real rank logs with phase rows give lsm-phase-report.csv and change no other report (INV-22)."""
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-lsm-phase-001", "lsmio", "local", "NATIVE"
+        )
+        f_resolved = RunRootResolver.resolve(f_run_root)
+        f_pt = f_resolved.points[0]
+        f_combos = list(f_plan.combinations)
+        for f_idx, f_combo in enumerate(f_combos):
+            self._writePhaseLog(
+                os.path.join(f_pt.pointDir, "logs", f_combo.name, "rank_0.log"),
+                rankLogLines([sampleSuite(f_bytes=(100 + f_idx) * ONE_MIB)]),
+            )
+        f_extracted = extractRun(f_resolved)
+
+        f_out_dir = os.path.join(self.m_temp_dir, "phase_reports")
+        with patch.object(phasereport.Console, "warning") as f_warn:
+            f_files = LsmioReportGenerator.generate(
+                f_resolved, f_extracted, f_out_dir, f_format="json"
+            )
+        f_warn.assert_not_called()
+
+        f_phase_path = os.path.join(f_out_dir, "lsm-phase-report.csv")
+        self.assertEqual(f_files["lsm-phase-report.csv"], f_phase_path)
+        with open(f_phase_path, "r", encoding="utf-8") as f_f:
+            self.assertEqual(f_f.readline().rstrip("\n"), ",".join(PHASE_REPORT_COLUMNS))
+        f_rows = self._readCsvRows(f_phase_path)
+        self.assertEqual(len(f_rows), 4 * len(f_combos))
+
+        f_block_size = {"64K": 64, "1M": 1024, "8M": 8192}
+        f_ordered = sorted(
+            enumerate(f_combos),
+            key=lambda f_item: (
+                int(f_item[1].stripe_count),
+                f_block_size[str(f_item[1].block_size)],
+            ),
+        )
+        for f_group, (f_idx, f_combo) in enumerate(f_ordered):
+            f_chunk = f_rows[4 * f_group : 4 * f_group + 4]
+            self.assertEqual(
+                [(f_r["iteration"], f_r["side"]) for f_r in f_chunk],
+                [("0", "write"), ("0", "read"), ("1", "write"), ("1", "read")],
+            )
+            for f_row in f_chunk:
+                self.assertEqual(f_row["nodes"], str(f_pt.scalePoint.nodes))
+                self.assertEqual(f_row["stripe"], str(f_combo.stripe_count))
+                self.assertEqual(f_row["block"], str(f_combo.block_size))
+                self.assertEqual(f_row["prefix"], PREFIX)
+                self.assertEqual(f_row["bytes"], str((100 + f_idx) * ONE_MIB))
+                self.assertEqual(f_row["legacy_check"], "ok")
+                self.assertEqual(f_row["durability"], "engine")
+                self.assertEqual(
+                    f_row["source_log"],
+                    os.path.relpath(
+                        os.path.join(
+                            f_pt.pointDir, "logs", f_combo.name, "rank_0.log"
+                        ),
+                        f_run_root,
+                    ),
+                )
+            f_first_write, f_first_read = f_chunk[0], f_chunk[1]
+            self.assertEqual(f_first_write["full_us"], "1552000")
+            self.assertEqual(f_first_write["open_us"], "2000")
+            self.assertEqual(f_first_write["data_us"], "1000000")
+            self.assertEqual(f_first_write["close_us"], "500000")
+            self.assertEqual(f_first_write["delete_us"], "50000")
+            self.assertEqual(f_first_write["legacy_us"], "1500000")
+            self.assertEqual(f_first_write["gap_us"], "")
+            self.assertEqual(f_first_read["gap_us"], "100000")
+        # The first combination moved 100 MiB: 100 MiB / 1.552 s
+        f_base_row = next(f_r for f_r in f_rows if f_r["bytes"] == str(100 * ONE_MIB))
+        self.assertEqual(f_base_row["full_mibs"], "64.43")
+
+        # Same extracted data, no rank logs left: no phase report, other reports unchanged
+        shutil.rmtree(os.path.join(f_pt.pointDir, "logs"))
+        f_out_plain = os.path.join(self.m_temp_dir, "phase_reports_plain")
+        f_files_plain = LsmioReportGenerator.generate(
+            f_resolved, f_extracted, f_out_plain, f_format="json"
+        )
+        self.assertNotIn("lsm-phase-report.csv", f_files_plain)
+        self.assertFalse(
+            os.path.exists(os.path.join(f_out_plain, "lsm-phase-report.csv"))
+        )
+        f_compared = ["lsm-report.csv", "lsm-report.json"] + sorted(
+            os.path.relpath(f_path, f_out_dir)
+            for f_path in f_files.values()
+            if os.path.basename(f_path).startswith("agg-")
+        )
+        self.assertEqual(len(f_compared), 2 + len(f_combos))
+        for f_name in f_compared:
+            self.assertEqual(
+                self._readBytes(os.path.join(f_out_dir, f_name)),
+                self._readBytes(os.path.join(f_out_plain, f_name)),
+                f_name,
+            )
+        self.assertEqual(
+            sorted(os.listdir(f_out_plain)),
+            sorted(set(os.listdir(f_out_dir)) - {"lsm-phase-report.csv"}),
+        )
+
+    def testLsmioReportGeneratorSkipsMissingRankLogs(self) -> None:
+        """A point whose rank logs are partly missing gives rows from the existing ones, never an error."""
+        f_run_root, f_plan, _ = self._setupSucceededRun(
+            "run-lsm-phase-002", "lsmio", "bake", "NATIVE"
+        )
+        f_resolved = RunRootResolver.resolve(f_run_root)
+        f_pt = f_resolved.getPoint(2)
+        self.assertEqual(f_pt.scalePoint.tasks, 4)
+        f_combo = f_plan.combinations[0]
+        f_logs = []
+        for f_rank in (1, 3):
+            f_log = os.path.join(f_pt.pointDir, "logs", f_combo.name, f"rank_{f_rank}.log")
+            self._writePhaseLog(f_log, rankLogLines([sampleSuite()]))
+            f_logs.append(f_log)
+        f_extracted = self._syntheticLsmioExtracted(f_resolved, f_plan)
+
+        f_out_dir = os.path.join(self.m_temp_dir, "phase_reports_partial")
+        with patch.object(phasereport.Console, "warning") as f_warn:
+            f_files = LsmioReportGenerator.generate(
+                f_resolved, f_extracted, f_out_dir, f_format="csv"
+            )
+        f_warn.assert_not_called()
+
+        f_rows = self._readCsvRows(f_files["lsm-phase-report.csv"])
+        self.assertEqual(len(f_rows), 4)
+        for f_row in f_rows:
+            self.assertEqual(f_row["nodes"], str(f_pt.scalePoint.nodes))
+            self.assertEqual(f_row["stripe"], str(f_combo.stripe_count))
+            self.assertEqual(f_row["block"], str(f_combo.block_size))
+            self.assertEqual(
+                f_row["source_log"], os.path.relpath(f_logs[0], f_run_root)
+            )
+        self.assertIn("lsm-report.csv", f_files)
+
+    def testFindRankLogSearchOrder(self) -> None:
+        """findRankLog prefers the recorded log_path, then stdout_path, then the default layout; else None."""
+        f_dir = os.path.join(self.m_temp_dir, "find-rank-log")
+        f_payload: Dict[str, Any] = {}
+        f_point = SimpleNamespace(
+            pointDir=f_dir,
+            pointId="p0",
+            getRankResult=lambda f_rank, f_combo: SimpleNamespace(payload=f_payload),
+        )
+        f_combo = SimpleNamespace(name="combo")
+        f_default = os.path.join(f_dir, "logs", "combo", "rank_0.log")
+        f_stdout = os.path.join(f_dir, "recorded.stdout")
+        f_log = os.path.join(f_dir, "recorded.log")
+
+        self.assertIsNone(LsmioLogExtractor.findRankLog(f_point, f_combo, 0))
+        f_payload.update({"stdout_path": f_stdout, "log_path": f_log})
+        self.assertIsNone(LsmioLogExtractor.findRankLog(f_point, f_combo, 0))
+
+        self._writePhaseLog(f_default, ["default"])
+        self.assertEqual(LsmioLogExtractor.findRankLog(f_point, f_combo, 0), f_default)
+        self._writePhaseLog(f_stdout, ["stdout"])
+        self.assertEqual(LsmioLogExtractor.findRankLog(f_point, f_combo, 0), f_stdout)
+        self._writePhaseLog(f_log, ["log"])
+        self.assertEqual(LsmioLogExtractor.findRankLog(f_point, f_combo, 0), f_log)
+        # A rank the point has no rank record for falls back to the default layout
+        f_point.getRankResult = lambda f_rank, f_combo: None
+        self.assertEqual(LsmioLogExtractor.findRankLog(f_point, f_combo, 0), f_default)
 
     def testReportGeneratorsJsonFormat(self) -> None:
         """Tests structured JSON report generation across all benchmarks."""
@@ -1991,6 +2205,321 @@ class RunParseTest(unittest.TestCase):
         ]
         f_var_row_cols = [c.strip() for c in f_var_lines[1].split("|")[1:-1]]
         self.assertEqual(f_var_row_cols[1], "footer-btree")
+
+
+IOR_SUMMARY_HEAD = (
+    "Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)"
+    "     StdDev    Mean(s) Stonewl(s) Stonewl(MiB) Test# #Tasks tPN reps fPP reord reordoff"
+    " reordrand seed segcnt blksiz    xsize aggs(MiB)   API RefNum"
+)
+IOR_SUMMARY_WRITE = (
+    "write        1234.50    1000.00    1100.25      50.12    1234.50    1000.00    1100.25"
+    "      50.12     1.500         NA           NA     0      1   1    1   0     0        1"
+    "         0    0      1 1048576  1048576       1.0 POSIX      0"
+)
+IOR_SUMMARY_READ = IOR_SUMMARY_WRITE.replace("write ", "read  ", 1)
+
+
+def _stubPoint(
+    f_dir: str,
+    f_ctrl_payload: Optional[Dict[str, Any]] = None,
+    f_tasks: int = 1,
+    f_state: PointRunState = PointRunState.SUCCEEDED,
+) -> SimpleNamespace:
+    """A resolved-point stand-in with the attributes the extractors read."""
+    f_ctrl = SimpleNamespace(payload=f_ctrl_payload) if f_ctrl_payload is not None else None
+    return SimpleNamespace(
+        pointDir=f_dir,
+        pointId="p0",
+        state=f_state,
+        scalePoint=SimpleNamespace(tasks=f_tasks, nodes=1, ppn=1),
+        getControllerResult=lambda f_combo: f_ctrl,
+        getRankResult=lambda f_rank, f_combo: None,
+    )
+
+
+def _stubRun(f_target: str, f_point: SimpleNamespace) -> SimpleNamespace:
+    """A resolved-run stand-in with one point and one combination."""
+    return SimpleNamespace(
+        target=f_target,
+        variant=None,
+        runId="run0",
+        points=[f_point],
+        plan=SimpleNamespace(
+            combinations=[SimpleNamespace(name="c", stripe_count=4, block_size="64K")]
+        ),
+    )
+
+
+class RunParseExtractorGapTest(unittest.TestCase):
+    """Log extractors, report generators and extraction helpers on unusual inputs."""
+
+    def setUp(self) -> None:
+        self.m_tmp = tempfile.TemporaryDirectory(prefix="lsmiotool-runparse-gap-")
+        self.addCleanup(self.m_tmp.cleanup)
+        self.m_dir = self.m_tmp.name
+        self.m_combo = SimpleNamespace(name="c", stripe_count=4, block_size="64K")
+
+    def _write(self, f_path: str, f_text: str) -> str:
+        os.makedirs(os.path.dirname(f_path), exist_ok=True)
+        with open(f_path, "w", encoding="utf-8") as f_f:
+            f_f.write(f_text)
+        return f_path
+
+    def _iorLog(self, f_extra_line: str = "") -> str:
+        return self._write(
+            os.path.join(self.m_dir, "logs", "ior_c.stdout"),
+            "Summary of all tests:\n"
+            + f_extra_line
+            + IOR_SUMMARY_HEAD
+            + "\n"
+            + IOR_SUMMARY_WRITE
+            + "\n"
+            + IOR_SUMMARY_READ
+            + "\n"
+            + "Finished: now\n",
+        )
+
+    def testFindLogPathPrefersTheRecordedOutputThenStdoutPath(self) -> None:
+        for f_extractor in (IorLogExtractor, LmpLogExtractor):
+            with self.subTest(f_extractor.__name__):
+                f_stdout = self._write(
+                    os.path.join(self.m_dir, f_extractor.__name__, "rec.stdout"), "x\n"
+                )
+                f_output = self._write(
+                    os.path.join(self.m_dir, f_extractor.__name__, "rec.out"), "x\n"
+                )
+                f_dir = os.path.join(self.m_dir, f_extractor.__name__)
+
+                f_only_stdout = _stubPoint(f_dir, {"stdout_path": f_stdout})
+                self.assertEqual(
+                    f_extractor.findLogPath(f_only_stdout, self.m_combo), f_stdout
+                )
+                f_both = _stubPoint(
+                    f_dir, {"stdout_path": f_stdout, "output_path": f_output}
+                )
+                self.assertEqual(
+                    f_extractor.findLogPath(f_both, self.m_combo), f_output
+                )
+
+    def testFindLogPathRejectsUnstatableAndNonRegularFiles(self) -> None:
+        for f_extractor in (IorLogExtractor, LmpLogExtractor):
+            f_dir = os.path.join(self.m_dir, f_extractor.__name__)
+            f_point = _stubPoint(f_dir)
+            with self.subTest(f"{f_extractor.__name__} non-regular"):
+                os.makedirs(os.path.join(f_dir, "output.log"))
+                with self.assertRaises(ExtractionError) as f_ctx:
+                    f_extractor.findLogPath(f_point, self.m_combo)
+                self.assertIn("must be a regular file", str(f_ctx.exception))
+            with self.subTest(f"{f_extractor.__name__} lstat failure"):
+                with patch("os.lstat", side_effect=OSError("denied")):
+                    with self.assertRaises(ExtractionError) as f_ctx:
+                        f_extractor.findLogPath(f_point, self.m_combo)
+                self.assertIn("Failed to access log file", str(f_ctx.exception))
+
+    def testIorExtractionSkipsNoiseLinesInsideTheSummary(self) -> None:
+        self._iorLog(f_extra_line="noise between the heading and the rows\n")
+        f_point = _stubPoint(self.m_dir)
+
+        f_res = IorLogExtractor.extractPointCombo(f_point, self.m_combo)
+
+        self.assertEqual(f_res["write"]["Max(MiB)"], 1234.50)
+        self.assertEqual(f_res["read"]["API"], "POSIX")
+
+    def testIorExtractionRejectsUnusableLogs(self) -> None:
+        f_point = _stubPoint(self.m_dir)
+        f_log = os.path.join(self.m_dir, "logs", "ior_c.stdout")
+
+        self._write(f_log, "")
+        with self.assertRaises(ExtractionError) as f_ctx:
+            IorLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertIn("Log file is empty", str(f_ctx.exception))
+
+        self._write(
+            f_log,
+            "Summary of all tests:\nOperation Max(MiB) Min(MiB)\nwrite 1 2\nread 3 4\n",
+        )
+        with self.assertRaises(ExtractionError) as f_ctx:
+            IorLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertIn("expected >= 20 columns", str(f_ctx.exception))
+
+        self._iorLog()
+        with patch("lsmiotool.lib.runparse.open", side_effect=OSError("denied"), create=True):
+            with self.assertRaises(ExtractionError) as f_ctx:
+                IorLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertIn("Failed to read log file", str(f_ctx.exception))
+
+        with patch.object(data, "readBmtoolLines", side_effect=OSError("denied")):
+            with self.assertRaises(ExtractionError) as f_ctx:
+                IorLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertIn("Failed to read log file", str(f_ctx.exception))
+
+    def testLsmioExtractionRejectsUnusableRankLogs(self) -> None:
+        f_log = os.path.join(self.m_dir, "logs", "c", "rank_0.log")
+        f_point = _stubPoint(self.m_dir)
+
+        def expect(f_message: str) -> None:
+            with self.assertRaises(ExtractionError) as f_ctx:
+                LsmioLogExtractor.extractPointCombo(f_point, self.m_combo)
+            self.assertIn(f_message, str(f_ctx.exception))
+
+        os.makedirs(f_log)
+        expect("Rank log must be a regular file")
+        os.rmdir(f_log)
+
+        self._write(f_log, "")
+        expect("Rank log is empty")
+
+        self._write(f_log, "write,1,2,3,4,5\n")
+        with patch("os.lstat", side_effect=OSError("denied")):
+            expect("Failed to access rank log")
+        with patch("lsmiotool.lib.runparse.open", side_effect=OSError("denied"), create=True):
+            expect("Failed to read rank log")
+        with patch.object(data, "readBmtoolLines", side_effect=OSError("denied")):
+            expect("Failed to read rank log")
+
+    def testLsmioExtractionTakesUnmarkedWriteAndReadLines(self) -> None:
+        self._write(
+            os.path.join(self.m_dir, "logs", "c", "rank_0.log"),
+            "write,12.5,3.0,1,2,3\nread,7.5,2.0,4,5,6\n",
+        )
+
+        f_res = LsmioLogExtractor.extractPointCombo(_stubPoint(self.m_dir), self.m_combo)
+
+        self.assertEqual(f_res["write"]["first_line"], "write,12.5,3.0,1,2,3")
+        self.assertEqual(f_res["write"]["bw"], 12.5)
+        self.assertEqual(f_res["write"]["iter"], 3)
+        self.assertEqual(f_res["read"]["first_line"], "read,7.5,2.0,4,5,6")
+        self.assertEqual(f_res["read"]["xfer_kib"], 5)
+
+    def testLsmioExtractionWithoutSummaryLinesUsesZeroLines(self) -> None:
+        self._write(os.path.join(self.m_dir, "logs", "c", "rank_0.log"), "nothing useful\n")
+
+        f_res = LsmioLogExtractor.extractPointCombo(_stubPoint(self.m_dir), self.m_combo)
+
+        self.assertEqual(f_res["write"]["first_line"], "write,0.0,0.0,0,0,0")
+        self.assertEqual(f_res["read"]["first_line"], "read,0.0,0.0,0,0,0")
+        self.assertEqual(f_res["write"]["bw"], 0.0)
+        self.assertEqual(f_res["write"]["iter"], 0)
+        self.assertEqual(f_res["read"]["iterations"], [])
+
+    def testLmpExtractionRejectsUnreadableAndEmptyLogs(self) -> None:
+        f_log = os.path.join(self.m_dir, "logs", "lmp_c.stdout")
+        f_point = _stubPoint(self.m_dir)
+
+        self._write(f_log, "")
+        with self.assertRaises(ExtractionError) as f_ctx:
+            LmpLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertIn("Log file is empty", str(f_ctx.exception))
+
+        self._write(f_log, "write: 1.0\n")
+        with patch.object(data, "readBmtoolLines", side_effect=OSError("denied")):
+            with self.assertRaises(ExtractionError) as f_ctx:
+                LmpLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertIn("Failed to read log file", str(f_ctx.exception))
+
+    def testLmpFallbackLinesKeepTheLastPositiveThroughput(self) -> None:
+        f_point = _stubPoint(self.m_dir)
+        f_log = os.path.join(self.m_dir, "logs", "lmp_c.stdout")
+
+        # Colon form with three fields reads the third; a later zero does not replace it
+        self._write(f_log, "write: 1.0: 2.5\nwrite:0\n")
+        f_res = LmpLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertEqual(f_res["write"]["throughput"], 2.5)
+        self.assertEqual(f_res["bmtool_field"], "write")
+
+        # Colon form with two fields reads the second
+        self._write(f_log, "write:3.5\n")
+        f_res = LmpLogExtractor.extractPointCombo(f_point, self.m_combo)
+        self.assertEqual(f_res["write"]["throughput"], 3.5)
+        self.assertEqual(f_res["write"]["bw(MiB/s)"], 3.5)
+
+    def testReportGeneratorExportCsvWritesStringsAndRowsOnly(self) -> None:
+        f_out = os.path.join(self.m_dir, "new-dir", "rows.csv")
+
+        ReportGenerator.exportCsv(["a,b  ", ("c", 2), ["d", None], 7], f_out)
+
+        with open(f_out, "r", encoding="utf-8", newline="") as f_f:
+            self.assertEqual(f_f.read(), "a,b\nc,2\r\nd,None\r\n")
+
+    def testBaseReportGeneratorHasNoGenerate(self) -> None:
+        with self.assertRaises(NotImplementedError):
+            ReportGenerator.generate(None, {}, self.m_dir)  # type: ignore[arg-type]
+
+    def testReportGeneratorsWithoutRowsWriteNothingAndWarn(self) -> None:
+        f_point = _stubPoint(self.m_dir)
+        for f_generator, f_target, f_name in (
+            (IorReportGenerator, "ior", "ior-report.csv"),
+            (LmpReportGenerator, "lmp", "lmp-report.csv"),
+        ):
+            with self.subTest(f_target):
+                with patch("lsmiotool.lib.runparse.Console.warning") as f_warning:
+                    f_res = f_generator.generate(
+                        _stubRun(f_target, f_point), {}, self.m_dir
+                    )
+                self.assertEqual(f_res, {})
+                self.assertFalse(os.path.exists(os.path.join(self.m_dir, f_name)))
+                f_warning.assert_called_once()
+                self.assertIn("run 'run0'", f_warning.call_args.args[0])
+
+    def testSummaryTableOfUnknownTargetHasNoRows(self) -> None:
+        f_run = _stubRun("other", _stubPoint(self.m_dir))
+
+        f_table = ConsoleSummaryFormatter.formatSummaryTable(f_run, {"p0": {"c": {}}})
+
+        f_lines = f_table.splitlines()
+        self.assertEqual(len(f_lines), 4)
+        self.assertIn("Throughput MB/s", f_lines[1])
+
+    def testUnsupportedTargetsAreRejected(self) -> None:
+        f_run = _stubRun("fortran", _stubPoint(self.m_dir))
+
+        with self.assertRaises(ExtractionError) as f_ctx:
+            extractRun(f_run)
+        self.assertIn("Unsupported benchmark target 'fortran'", str(f_ctx.exception))
+        with self.assertRaises(RunParseError) as f_ctx:
+            generateReports(f_run, {}, self.m_dir)
+        self.assertIn("Unsupported benchmark target 'fortran'", str(f_ctx.exception))
+
+    def testExtractRunRaisesWithoutSkipAndWarnsWithSkip(self) -> None:
+        f_run = _stubRun("ior", _stubPoint(self.m_dir))  # no log on disk
+
+        with self.assertRaises(ExtractionError) as f_ctx:
+            extractRun(f_run)
+        self.assertIn("Log file does not exist", str(f_ctx.exception))
+
+        f_warnings: List[str] = []
+        f_data = extractRun(f_run, f_skip_incomplete=True, f_warnings=f_warnings)
+        self.assertEqual(f_data, {"p0": {}})
+        self.assertEqual(len(f_warnings), 1)
+        self.assertIn("Skipping point 'p0' combination 'c'", f_warnings[0])
+
+    def testRecordSucceededReadsExitCodesThenStatus(self) -> None:
+        f_cases = (
+            (None, False),
+            (SimpleNamespace(payload=None), False),
+            (SimpleNamespace(payload={"exit_code": 0}), True),
+            (SimpleNamespace(payload={"exit_status": "3"}), False),
+            (SimpleNamespace(payload={"exit_code": "not-a-number"}), False),
+            (SimpleNamespace(payload={"status": " OK "}), True),
+            (SimpleNamespace(payload={"status": "failed"}), False),
+        )
+        for f_rec, f_expected in f_cases:
+            with self.subTest(payload=getattr(f_rec, "payload", None)):
+                self.assertIs(runparse._recordSucceeded(f_rec), f_expected)
+
+    def testIncompleteReasonOfNonLsmioPointNeedsControllerSuccess(self) -> None:
+        f_failed = PointRunState.FAILED
+        f_ok = _stubPoint(self.m_dir, {"exit_code": 0}, f_state=f_failed)
+        f_bad = _stubPoint(self.m_dir, {"exit_code": 2}, f_state=f_failed)
+        f_done = _stubPoint(self.m_dir, {"exit_code": 2})
+
+        self.assertIsNone(runparse.incompleteReason("ior", f_ok, self.m_combo))
+        self.assertEqual(
+            runparse.incompleteReason("lmp", f_bad, self.m_combo),
+            "no successful controller result",
+        )
+        self.assertIsNone(runparse.incompleteReason("ior", f_done, self.m_combo))
 
 
 if __name__ == "__main__":

@@ -1,2 +1,7 @@
 - Code coverage
 - Minor bug fixes
+- ABI change: `LSMIOConfig` gained a `durability` field (the class layout changed) and the two-argument `LSMIOStoreRDB` constructor is gone (it now takes a third, read-only parameter). Rebuild every consumer against the new headers.
+- New benchmark flags: `--lsmio-durability engine|page-cache` (RocksDB and LevelDB; `page-cache` runs only on verified library builds), `--read-shift`, `--read-shift-nodes` and `--per-rank-path`. `-m` now brackets every phase of an iteration with barriers, and the benchmarks print a `Phases:` timeline block.
+- RocksDB: `--lsmio-mmap` now also turns on fallocate (RocksDB's mmap writer needs it, and crashed with `SIGBUS` without it), with a warning in verbose runs when `--lsmio-prealloc` is not set.
+- Behaviour change: when `LSMIOStoreLDB` or `LSMIOStoreRDB` cannot open its database, or cannot remove it for `overWrite`, it now logs an error and throws `std::invalid_argument` as before, but no longer aborts the process first (it called `LOG(FATAL)`). A caller that does not catch the exception still terminates.
+- lsmiotool: new `lsm-phase-report.csv` next to `lsm-report.csv` with the derived phase windows, and the variants `shift`, `page-cache` and `page-cache-shift` (not part of `most` or `all`).

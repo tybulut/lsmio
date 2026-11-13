@@ -162,6 +162,7 @@ Repeated campaigns land in the same default folders. A second `variants` run is 
   - **Comma-separated list**: e.g., `btree,no-manoff,autotune`, executed sequentially in specified order.
   - **Keyword `most`**: Expands to the streamlined canonical sequence of 26 matrix variants (`default` followed by the 25 non-empty core variant keys).
   - **Keyword `all`**: The same 26 variants as `most`; the two keywords are synonyms.
+  - **Measurement-method variants** `shift`, `page-cache` and `page-cache-shift` (Section 6.3): accepted by name only, never part of `most` or `all`. Example: `lsmiotool run lsmio variants shift,page-cache,page-cache-shift --setup ROCKSDB`.
   *(Note: Non-lsmio benchmarks or non-baseline scales reject variant specifications atomically before execution.)*
 - `--versioned`: Enables versioned baseline comparison for `lsmio variants`. Benchmarks the active working branch against the golden reference binary (`$SB_BIN/bm_native:main`). Supports execution with or without specific variants (e.g. `lsmiotool run lsmio variants legacy --versioned`). Automatically activates paired delta archiving and dynamically scales walltime allocation based on the variant count.
 - `--ssd`: Selects SSD storage class root. Default storage class is HDD.
@@ -195,7 +196,7 @@ When one or more non-empty variants are specified:
 
 #### Benchmark Setups:
 - **IOR setups**: `BASE` (default), `HDF5`, `HDF5-C`, `COLLECTIVE`, `FSYNC`, `REVERSE`.
-- **LSMIO setups**: `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`. The backends' `-sync` arms use `ADIOS-SYNC`, `NATIVE-SYNC`, `PLUGIN-SYNC`, `ROCKSDB-SYNC` and `LEVELDB-SYNC` (each adds `--lsmio-always-flush`), which `--setup` does not accept. Every setup runs its binary with `-m -g`: `-m` runs it under MPI with barriers around the timed phases, `-g` installs a SIGSEGV handler. The former `-M` names (`NATIVE-M`, …) and the non-MPI setups were removed; old names are rejected.
+- **LSMIO setups**: `NATIVE` (default), `ADIOS`, `PLUGIN`, `ROCKSDB`, `LEVELDB`, `MANAGER`. The backends' `-sync` arms use `ADIOS-SYNC`, `NATIVE-SYNC`, `PLUGIN-SYNC`, `ROCKSDB-SYNC` and `LEVELDB-SYNC` (each adds `--lsmio-always-flush`), which `--setup` does not accept. The `-sync` in these names means `--lsmio-always-flush` (no write batching); it is not the benchmarks' `-e/--sync`, and it forces no `fsync`. Every setup runs its binary with `-m -g`: `-m` runs it under MPI with barriers around every phase of an iteration (before and after the open, after the close, after the delete, on the write side and on the read side; see the [benchmark guide](../benchmark/README.md#51-phase-timeline)), `-g` installs a SIGSEGV handler. The former `-M` names (`NATIVE-M`, …) and the non-MPI setups were removed; old names are rejected.
 - **LMP setups**: `LSMIO` (default), `LSMIO-MMAP`, `FS`.
 
 ---
@@ -494,6 +495,17 @@ lsmiotool parse epocpp backends <local|bake|small|large> [--output-dir <dir>]
   NodeCount,StripeCount,BlockSize,throughput
   ```
 
+#### `lsm-phase-report.csv`
+Next to every `lsm-report.csv` it writes, the LSMIO report generator also writes `lsm-phase-report.csv`: the derived windows of the benchmarks' phase timeline (see the [benchmark guide](../benchmark/README.md#51-phase-timeline)). Both LSMIO generators write it (the run-root parser, and the bmtool-layout aggregator that `run`'s archive step, `archive`, `parse <archive_dir>` and `parse lsmio backends` use), into the directory where `lsm-report.csv` goes. `agg-*-report.csv`, `lsm-report.csv` and `lsm-report.json` are unchanged by it.
+
+- **When it is written**: only when some rank log of the run holds `phase,` rows. Logs of older binaries have none: a run or archive of old logs only gets no `lsm-phase-report.csv`. A regeneration that finds no phase rows leaves an earlier `lsm-phase-report.csv` in place, as it does an earlier `lsm-report.csv` and the `lsm-report.csv` rows that come from older `agg-*` files.
+- **Sets**: one set of rank logs per (nodes, stripe, block) for which an `agg-<stripe>-<block>-report.csv` is written. The rows of a set come from its *source log*, the first log of the set that holds `phase,` rows; logs without rows are ignored, and when another log of the set holds different rows, one warning names both files and the source log's values stay. A missing rank log is skipped. The report carries no arm column: like `lsm-report.csv`, it belongs to the directory that names the arm. In a bmtool directory that holds stale `agg-*` files (from an earlier run or another scale), `lsm-report.csv` can list (nodes, stripe, block) rows that the phase report lacks, because the phase report covers only the sets of this run.
+- **Rank logs**: the campaign's rank logs, which carry no launcher prefix (inferred from how the existing parsers read them, not checked on a cluster). The `output.log` files of the `benchmarkMPI/*` ctest entries carry the `-tag-output` prefix on every line when the launcher is `mpirun`, so their phase rows would not be recognised if such a file were fed to the generators.
+- **Row key and order**: one row per (`nodes`, `stripe`, `block`, `prefix`, `iteration`, `side`). Rows are ordered by nodes, stripe and block size (numbers by value), then by `Phases:` block in log order, iteration, write before read.
+- **32 columns**: `nodes`, `stripe`, `block`, `prefix`, `iteration`, `side`, `bytes`, then the windows in microseconds `full_us`, `open_us`, `data_us`, `close_us`, `delete_us`, `legacy_us`, their rates `full_mibs`, `open_mibs`, `data_mibs`, `close_mibs`, `delete_mibs`, `legacy_mibs` (`bytes / us / 1.024 / 1.024`, two decimals, empty for a window of 0 or less), then `gap_us`, `legacy_row_us`, `legacy_check`, and the log's header values `durability`, `rank_shift`, `rank_shift_nodes`, `rank_shift_self_ranks`, `rank_shift_same_host_ranks`, `per_rank_path`, `rocksdb_version`, `leveldb_version`, `leveldb_close_flush`, and last `source_log` (the source log's path relative to the source root). `rank_shift_nodes`, `rank_shift_self_ranks` and `rank_shift_same_host_ranks` are empty unless `rank_shift` is not 0. `leveldb_close_flush` is always empty today.
+- **Windows**: `full` = afterDelete - beforeOpen, `open` = afterOpen - beforeOpen, `data` = beforeClose - afterOpen, `close` = afterClose - beforeClose, `delete` = afterDelete - afterClose, `legacy` = afterClose - afterOpen. `gap_us` (read rows only) = the read side's beforeOpen - the same iteration's write-side afterDelete.
+- **Legacy cross-check** (`legacy_check`): the `legacy` window is compared with the duration implied by the same log's `iwrite,` or `iread,` row (`legacy_row_us` = MiB x 10^6 / bw, rounded). It is `ok` when the window lies in the tolerance interval, `mismatch` otherwise (one warning per set; the values are never changed), `unpaired` when the log has a different number of legacy rows than phase records for that block and side, and `n/a` when the run had no barriers (`mpi-barrier: 1` absent and MPI not disabled) or the legacy row is unreadable. The tolerance interval, as implemented in `phasereport.py`, is `[lo - 1000, hi + 1000]` microseconds, where `[lo, hi]` is the exact range of durations consistent with the rounding of the two printed figures (each is printed with two decimals, so `lo = (MiB - 0.005) x 10^6 / (bw + 0.005)` and `hi = (MiB + 0.005) x 10^6 / (bw - 0.005)`, with `hi` unbounded when `bw <= 0.005`), widened by 1 ms each side for barrier-exit skew.
+
 ---
 
 ### 3.3 Console Summary Output
@@ -777,6 +789,24 @@ The canonical sequence evaluated by `most` (`lsmiotool run lsmio variants most`)
 > `default` and variants 1 through 24 explicitly pass `--lsmio-no-autotune` to ensure ablation study isolation without automatic parameter interference; `autotune` passes `--lsmio-autotune`.
 >
 > **Buffer Sizing Standard**: In accordance with experimental rigor, read-path variants (`no-pread`, `mmap`, `mmap-vsort`, `mmap-btree`, etc.) standardly use the 128MB write buffer size matching the ADIOS2 baseline. Variants combining 512MB write buffers with read optimizations are intentionally omitted to avoid confounding buffer capacity with read-path efficiency.
+
+### 6.3 Measurement-Method Variants (`shift`, `page-cache`, `page-cache-shift`)
+Three further keys change how a run is measured instead of how an engine is tuned. They are supported by `run`, `archive` and `compare`, but they are not in `most` or `all` (so `VariantCatalogue.supportedVariants()` has 28 keys, 25 canonical plus these 3), and each has to be named. They run as paired arms on the `variants` scale like any variant, and a campaign runs one engine per allocation.
+
+| Key | Engine CLI flags | What it measures |
+|:---|:---|:---|
+| `shift` | `--lsmio-no-autotune --read-shift` | Each rank reads a peer on another node (see the [benchmark guide](../benchmark/README.md#7-read-shift)). |
+| `page-cache` | `--lsmio-no-autotune --lsmio-durability page-cache` | RocksDB or LevelDB without sync calls (see the [benchmark guide](../benchmark/README.md#6-durability-and-the-page-cache-mode)). |
+| `page-cache-shift` | `--lsmio-no-autotune --lsmio-durability page-cache --read-shift` | Both. |
+
+```bash
+lsmiotool run lsmio variants shift,page-cache,page-cache-shift --setup ROCKSDB
+```
+
+- **Which setups they are for**: `page-cache` and `page-cache-shift` change behaviour only for the `ROCKSDB` and `LEVELDB` setups, and for `PLUGIN` and `MANAGER` when they run over RocksDB or LevelDB. On `NATIVE`, `ADIOS` and the plugin over native, `page-cache` repeats the base arm's I/O and `page-cache-shift` equals `shift`; `lsmiotool` still passes the flags there, and the benchmark header records the mode.
+- **`MANAGER`**: `bm_manager` does not support `--read-shift`, so `shift` and `page-cache-shift` with `--setup MANAGER` are accepted by `lsmiotool` and then refused by the benchmark when it starts.
+- **Page-cache needs a verified build**: on a library build that is not verified, the benchmark refuses at its first open and the arm produces no results (see the benchmark guide's verified-build gate and site gate).
+- **The `-sync` backend arms** (`rocksdb-sync`, ...) are unrelated: they mean `--lsmio-always-flush`.
 
 ---
 

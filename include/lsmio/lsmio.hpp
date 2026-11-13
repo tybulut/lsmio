@@ -99,6 +99,16 @@ enum class MemtableType {
 };
 
 /**
+ * Enum representing the durability mode of the RocksDB and LevelDB stores.
+ * Engine keeps the engine's own durability behaviour; PageCache replaces sync
+ * with flush, so data reaches the page cache but is not forced to storage.
+ */
+enum class Durability {
+    Engine,
+    PageCache
+};
+
+/**
  * Configuration class for LSMIO settings.
  */
 class LSMIOConfig {
@@ -167,6 +177,8 @@ class LSMIOConfig {
     int filePoolSize = 4;
     /// @brief Flag to enable auto-tuning of parameters based on the filesystem.
     bool autoTuneParameters = false;
+    /// @brief Durability mode of the RocksDB and LevelDB stores (engine, page-cache).
+    Durability durability = Durability::Engine;
 
     // NativeStore specific settings
     /// @brief Memtable implementation to use (vector-no-sort, vector-sort, map, btree)
@@ -236,10 +248,18 @@ std::string to_string(const StorageType v);
  */
 std::string to_string(const MemtableType v);
 
+/**
+ * Convert a Durability value to its string representation.
+ * @param v Durability value.
+ * @return String representation of v ("engine" or "page-cache").
+ */
+std::string to_string(const Durability v);
+
 /// Stream overloads for the lsmio enums (found by ADL); each writes to_string(v).
 std::ostream &operator<<(std::ostream &os, MPIAggType v);
 std::ostream &operator<<(std::ostream &os, StorageType v);
 std::ostream &operator<<(std::ostream &os, MemtableType v);
+std::ostream &operator<<(std::ostream &os, Durability v);
 
 }  // namespace lsmio
 

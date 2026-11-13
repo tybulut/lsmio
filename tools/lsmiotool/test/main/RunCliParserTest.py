@@ -499,8 +499,18 @@ class RunCliParserTest(unittest.TestCase):
         self.assertIsNone(f_req.variants[0])  # default/base variant
         self.assertEqual(f_req.variants[1], "vsort")
         self.assertEqual(f_req.variants[-1], "autotune")
+        for key in ("shift", "page-cache", "page-cache-shift"):
+            self.assertNotIn(key, f_req.variants)
         self.assertIsNone(f_req.variant)
         self.assertTrue(f_req.effective_archive)
+
+    def testVariantsScaleWithMeasurementVariants(self) -> None:
+        """Asserts the shift and page-cache arms are accepted by name on the variants scale (INV-24)."""
+        f_req = parseRunArguments(
+            ["lsmio", "variants", "shift,page-cache,page-cache-shift"]
+        )
+        self.assertEqual(f_req.scale, "variants")
+        self.assertEqual(f_req.variants, ("shift", "page-cache", "page-cache-shift"))
 
     def testArchiveOptionFlags(self) -> None:
         """Task 2.5.3: Asserts --archive and --no-archive flags, conflict detection, and duplicate detection."""

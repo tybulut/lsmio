@@ -40,6 +40,11 @@
 #include <filesystem>
 #include <iostream>
 #include <lsmio/manager/store/store_rdb.hpp>
+#include <stdexcept>
+#include <string>
+
+#include "NoSyncRocksFileSystem.hpp"
+#include "PageCacheGate.hpp"
 
 namespace lsmio {
 
@@ -51,8 +56,41 @@ static std::unordered_map<std::string, rocksdb::OptionTypeInfo> stringappend_mer
 };
 }
 
-LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
-    : LSMIOStore(dbPath, overWrite) {
+LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite,
+                             const bool f_read_only)
+    : LSMIOStore(dbPath, overWrite), m_read_only(f_read_only) {
+    if (overWrite && f_read_only) {
+        LOG(ERROR) << "LSMIOStoreRDB::LSMIOStoreRDB: overWrite and readOnly cannot be combined."
+                   << std::endl;
+        throw std::invalid_argument(
+            "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: overWrite and readOnly cannot be combined.");
+    }
+
+    // Page-cache durability (INV-17, INV-20): the checks come before any option is used, before
+    // dbCleanup() and before the open, so a refusal touches no file. Engine mode skips all of it
+    // (INV-2): the gate is not asked and _options.env stays unset.
+    if (gConfigLSMIO.durability == Durability::PageCache) {
+        if (gConfigLSMIO.useSync) {
+            LOG(ERROR) << "LSMIOStoreRDB::LSMIOStoreRDB: page-cache durability cannot be combined "
+                          "with useSync."
+                       << std::endl;
+            throw std::invalid_argument(
+                "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: --lsmio-durability page-cache cannot be "
+                "combined with useSync (--sync)");
+        }
+        if (!pageCacheAdmitted(StorageType::RocksDB)) {
+            const std::string build = describeRunningBuild(StorageType::RocksDB);
+            LOG(ERROR) << "LSMIOStoreRDB::LSMIOStoreRDB: page-cache durability refused, " << build
+                       << " is not a verified page-cache build." << std::endl;
+            throw std::invalid_argument(
+                "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: --lsmio-durability page-cache refused for " +
+                build + ": this build is not a verified page-cache build");
+        }
+#if LSMIO_ROCKSDB_NOSYNC_FS
+        _options.env = noSyncRocksEnv();
+#endif
+    }
+
     rocksdb::Status status;
     rocksdb::BlockBasedTableOptions tableOptions;
 
@@ -100,7 +138,15 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
 
     _options.allow_mmap_writes = gConfigLSMIO.enableMMAP;
     _options.allow_mmap_reads = gConfigLSMIO.enableMMAP;
-    _options.allow_fallocate = gConfigLSMIO.preAllocate;
+    // RocksDB's mmap writer extends a file only through fallocate, so mmap writes without it die
+    // with SIGBUS on the first table file. mmap therefore turns fallocate on, with a warning when
+    // preAllocate did not ask for it.
+    _options.allow_fallocate = gConfigLSMIO.preAllocate || gConfigLSMIO.enableMMAP;
+    if (gConfigLSMIO.enableMMAP && !gConfigLSMIO.preAllocate) {
+        LOG(WARNING) << "LSMIOStoreRDB::LSMIOStoreRDB: mmap writes need fallocate; enabling "
+                        "allow_fallocate (preAllocate not set)."
+                     << std::endl;
+    }
     // _options.unordered_write = true;  // false
 
     _options.max_successive_merges = 4096;
@@ -128,20 +174,19 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     }
 
     LOG(INFO) << "LSMIOStoreRDB::LSMIOStoreRDB: Creating the database: " << _dbPath << std::endl;
-    status = rocksdb::DB::Open(_options, _dbPath, &_db);
+    if (m_read_only) {
+        // error_if_wal_file_exists stays false: a WAL from --lsmio-wal is replayed in memory
+        status = rocksdb::DB::OpenForReadOnly(_options, _dbPath, &_db);
+    } else {
+        status = rocksdb::DB::Open(_options, _dbPath, &_db);
+    }
     if (status.ok()) {
         LOG(INFO) << "LSMIOStoreRDB::LSMIOStoreRDB: Successfully created the database."
                   << std::endl;
     } else {
-        LOG(FATAL) << status.ToString() << std::endl;
+        LOG(ERROR) << status.ToString() << std::endl;
         throw std::invalid_argument(
             "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: Failed to open database.");
-    }
-
-    if (_db == nullptr) {
-        LOG(FATAL) << "LSMIOStoreRDB::LSMIOStoreRDB: Failed to create the database." << std::endl;
-        throw std::invalid_argument(
-            "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: Failed to create database.");
     }
 }
 
@@ -200,6 +245,10 @@ bool LSMIOStoreRDB::_mutate(MutationType mType, const std::string& key, std::str
     rocksdb::Status s;
     bool retValue;
 
+    if (m_read_only) {
+        return false;
+    }
+
     const unsigned int futureSize = _batchSize + 1;
     const unsigned int futureBytes = _batchBytes + value.size();
 
@@ -243,7 +292,7 @@ bool LSMIOStoreRDB::dbCleanup() {
 
     s = rocksdb::DestroyDB(_dbPath, _options);
     if (!s.ok()) {
-        LOG(FATAL) << s.ToString() << std::endl;
+        LOG(ERROR) << s.ToString() << std::endl;
         throw std::invalid_argument("ERROR: LSMIOStoreRDB:::overWrite: Failed to remove database.");
     }
 
@@ -259,6 +308,10 @@ bool LSMIOStoreRDB::readBarrier() {
 bool LSMIOStoreRDB::writeBarrier() {
     rocksdb::Status s;
     rocksdb::FlushOptions fOptions;
+
+    if (m_read_only) {
+        return true;
+    }
 
     LOG(INFO) << "LSMIOStoreRDB::writeBarrier: " << std::endl;
     s = _db->Flush(fOptions);

@@ -187,6 +187,21 @@ std::string to_string(const MemtableType v) {
     return sVal;
 }
 
+std::string to_string(const Durability v) {
+    std::string sVal;
+
+    switch (v) {
+        case Durability::Engine:
+            sVal = "engine";
+            break;
+        case Durability::PageCache:
+            sVal = "page-cache";
+            break;
+    }
+
+    return sVal;
+}
+
 std::ostream &operator<<(std::ostream &os, MPIAggType v) {
     os << to_string(v);
     return os;
@@ -198,6 +213,11 @@ std::ostream &operator<<(std::ostream &os, StorageType v) {
 }
 
 std::ostream &operator<<(std::ostream &os, MemtableType v) {
+    os << to_string(v);
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, Durability v) {
     os << to_string(v);
     return os;
 }
