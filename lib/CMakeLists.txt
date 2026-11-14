@@ -64,6 +64,11 @@ set(LIB_STORE_CPP_FILES
   ${LIB_SOURCE_DIR}/manager/store/native/FilePool.cpp
   ${LIB_SOURCE_DIR}/manager/store/native/FileCloser.cpp
 )
+# LevelDB's own build uses -fno-rtti unless overridden (distribution packages included), so it
+# may have no typeinfo for its classes: the no-sync Env, which derives from leveldb::EnvWrapper
+# and leveldb::WritableFile, needs none and links either way
+set_source_files_properties(${LIB_SOURCE_DIR}/manager/store/NoSyncLevelDBEnv.cpp
+  PROPERTIES COMPILE_OPTIONS -fno-rtti)
 set(LIB_ADIOS_CPP_FILES
   ${LIB_SOURCE_DIR}/adios-plugin/lsmio_plugin.cpp
 )

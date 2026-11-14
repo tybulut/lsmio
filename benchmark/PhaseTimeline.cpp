@@ -30,7 +30,7 @@
 
 #include "PhaseTimeline.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 std::string formatPhaseRows(const IterationPhases &f_phases) {
     static const char *const side_names[2] = {"write", "read"};
