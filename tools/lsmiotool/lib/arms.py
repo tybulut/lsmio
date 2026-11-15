@@ -50,7 +50,8 @@ DEFAULT_VARIANT_TOKENS = (None, "", "default", "base")
 
 # Backend token -> (setup, arm ID), as in batch.in.sh's backends loop. Each backend also has a
 # -sync arm (lsmiotool only, not in bmtool): the same benchmark with --lsmio-always-flush (for
-# ADIOS2, Put with adios2::Mode::Sync); they run only when listed
+# ADIOS2, Put with adios2::Mode::Sync); they run only when listed. rocksdb-pc is RocksDB with
+# --lsmio-durability page-cache (no fsync; not a -sync arm), listed the same way
 BACKEND_ARMS: Dict[str, Tuple[str, str]] = {
     "adios2": ("ADIOS", "adios"),
     "adios": ("ADIOS", "adios"),
@@ -62,6 +63,7 @@ BACKEND_ARMS: Dict[str, Tuple[str, str]] = {
     "plugin-sync": ("PLUGIN-SYNC", "plugin-sync"),
     "rocksdb": ("ROCKSDB", "rocksdb"),
     "rocksdb-sync": ("ROCKSDB-SYNC", "rocksdb-sync"),
+    "rocksdb-pc": ("ROCKSDB-PC", "rocksdb-pc"),
     "leveldb": ("LEVELDB", "leveldb"),
     "leveldb-sync": ("LEVELDB-SYNC", "leveldb-sync"),
 }

@@ -893,6 +893,20 @@ class RunCliParserTest(unittest.TestCase):
                 ["run", "lsmio", "small"], f_environ={"BM_SETUP": "native-sync"}
             )
 
+    def testBackendsModeRocksdbPc(self) -> None:
+        """rocksdb-pc is listed like any backend; its setup is refused as a run's own setup."""
+        req = parseRunArguments(
+            ["lsmio", "backends", "bake", "rocksdb,rocksdb-pc"]
+        )
+        self.assertEqual(req.mode, "backends")
+        self.assertEqual(req.backends, ("rocksdb", "rocksdb-pc"))
+        with self.assertRaisesRegex(RunCliParseError, "backends arm"):
+            parseRunArguments(["lsmio", "variants", "btree", "--setup", "ROCKSDB-PC"])
+        with self.assertRaisesRegex(RunCliParseError, "backends arm"):
+            RunCliParser.parse(
+                ["run", "lsmio", "small"], f_environ={"BM_SETUP": "rocksdb-pc"}
+            )
+
     def testBackendsModeTrailingOptions(self) -> None:
         """Validates that trailing options like --ssd, --resume, --time, --out-dir are handled in backends mode."""
         req = parseRunArguments(

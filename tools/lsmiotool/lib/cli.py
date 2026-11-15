@@ -128,6 +128,8 @@ Arguments:
                 also leveldb). Each backend has a -sync arm (adios2-sync, native-sync,
                 plugin-sync, rocksdb-sync, leveldb-sync): the same benchmark with
                 --lsmio-always-flush (sync puts; for ADIOS2, Put with adios2::Mode::Sync).
+                rocksdb-pc is RocksDB with --lsmio-durability page-cache (no fsync; it needs
+                a verified page-cache RocksDB build).
                 Each scale point is one job running the backends one after another.
                 Only supported for 'lsmiotool run lsmio backends'.
   <ior setups>  Optional comma-separated list of IOR setups for an ior scaling run

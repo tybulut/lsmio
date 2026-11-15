@@ -3079,6 +3079,7 @@ class RunOrchestratorTest(unittest.TestCase):
                             "adios2-sync",
                             "native-sync",
                             "plugin-sync",
+                            "rocksdb-pc",
                         ),
                         f_out_dir=f_tmpdir,
                     ),
@@ -3089,7 +3090,7 @@ class RunOrchestratorTest(unittest.TestCase):
             f_runs = f_orch.groupRuns
             self.assertEqual(
                 [f_r["plan"].request.setup for f_r in f_runs],
-                ["ADIOS", "ADIOS-SYNC", "NATIVE-SYNC", "PLUGIN-SYNC"],
+                ["ADIOS", "ADIOS-SYNC", "NATIVE-SYNC", "PLUGIN-SYNC", "ROCKSDB-PC"],
             )
             f_points = f_runs[0]["plan"].scale_points
             self.assertEqual(len(f_fake_runner.m_submit_calls), len(f_points))
@@ -3100,7 +3101,13 @@ class RunOrchestratorTest(unittest.TestCase):
                 ),
                 sorted(
                     os.path.join(f"outputs-{f_a}", str(f_sp.nodes))
-                    for f_a in ("adios", "adios-sync", "native-sync", "plugin-sync")
+                    for f_a in (
+                        "adios",
+                        "adios-sync",
+                        "native-sync",
+                        "plugin-sync",
+                        "rocksdb-pc",
+                    )
                     for f_sp in f_points
                 ),
             )

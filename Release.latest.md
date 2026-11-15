@@ -5,3 +5,4 @@
 - RocksDB: `--lsmio-mmap` now also turns on fallocate (RocksDB's mmap writer needs it, and crashed with `SIGBUS` without it), with a warning in verbose runs when `--lsmio-prealloc` is not set.
 - Behaviour change: when `LSMIOStoreLDB` or `LSMIOStoreRDB` cannot open its database, or cannot remove it for `overWrite`, it now logs an error and throws `std::invalid_argument` as before, but no longer aborts the process first (it called `LOG(FATAL)`). A caller that does not catch the exception still terminates.
 - lsmiotool: new `lsm-phase-report.csv` next to `lsm-report.csv` with the derived phase windows, and the variants `shift`, `page-cache` and `page-cache-shift` (not part of `most` or `all`).
+- lsmiotool: new `rocksdb-pc` arm of `run lsmio backends` (RocksDB with `--lsmio-durability page-cache`, archived as `outputs-rocksdb-pc`); it runs only when listed and needs a verified page-cache RocksDB build.

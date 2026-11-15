@@ -97,7 +97,7 @@ class LsmioAdapterTest(unittest.TestCase):
         )
 
     def testExactSetupBlockMappings(self) -> None:
-        """Validate all 33 exact setup/block permutations (11 setups x 3 block sizes)."""
+        """Validate all 36 exact setup/block permutations (12 setups x 3 block sizes)."""
         f_setups = [
             "NATIVE",
             "ADIOS",
@@ -110,6 +110,7 @@ class LsmioAdapterTest(unittest.TestCase):
             "PLUGIN-SYNC",
             "ROCKSDB-SYNC",
             "LEVELDB-SYNC",
+            "ROCKSDB-PC",
         ]
         f_combos = [self.m_combo_64k, self.m_combo_1m, self.m_combo_8m]
         f_expected_executables = {
@@ -124,6 +125,7 @@ class LsmioAdapterTest(unittest.TestCase):
             "PLUGIN-SYNC": "bm_adios",
             "ROCKSDB-SYNC": "bm_rocksdb",
             "LEVELDB-SYNC": "bm_leveldb",
+            "ROCKSDB-PC": "bm_rocksdb",
         }
         f_setup_flags = {
             "PLUGIN": ["--lsmio-plugin"],
@@ -132,6 +134,7 @@ class LsmioAdapterTest(unittest.TestCase):
             "PLUGIN-SYNC": ["--lsmio-plugin", "--lsmio-always-flush"],
             "ROCKSDB-SYNC": ["--lsmio-always-flush"],
             "LEVELDB-SYNC": ["--lsmio-always-flush"],
+            "ROCKSDB-PC": ["--lsmio-durability", "page-cache"],
         }
         f_block_params = {
             "64K": ("65536", "32768"),
@@ -207,7 +210,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 self.assertTrue(f_bound.isRankLocal)
                 f_tested_count += 1
 
-        self.assertEqual(f_tested_count, 33)
+        self.assertEqual(f_tested_count, 36)
 
     def testTemplateUnbound(self) -> None:
         """Confirm template from createLaunchSpec is unbound and rank-local."""
@@ -584,6 +587,7 @@ class LsmioAdapterTest(unittest.TestCase):
                 "PLUGIN-SYNC",
                 "ROCKSDB-SYNC",
                 "LEVELDB-SYNC",
+                "ROCKSDB-PC",
             },
         )
         self.assertEqual(

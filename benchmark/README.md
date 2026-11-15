@@ -306,6 +306,7 @@ Without `--read-shift`, every rank reads back the store it wrote, so a read can 
 ## 8. Reading arm names
 
 - A `-sync` arm of `lsmiotool run lsmio backends` (`rocksdb-sync`, `leveldb-sync`, `native-sync`, `adios-sync`, `plugin-sync`) runs its benchmark with `--lsmio-always-flush`. It is not `-e/--sync`, and it has nothing to do with `fsync`: it disables write batching so each record is accessible at once.
+- The `rocksdb-pc` arm of `lsmiotool run lsmio backends` is not a `-sync` arm: it runs `bm_rocksdb` with `--lsmio-durability page-cache`, so RocksDB's writes are not fsynced (no read shift). It needs a verified page-cache build ([Verified page-cache builds](#verified-page-cache-builds) and [Site gate](#62-site-gate)); on any other build the benchmark refuses at its first open.
 - Which setups the durability variants are for: `page-cache` and `page-cache-shift` change behaviour only for the `ROCKSDB` and `LEVELDB` setups, and for `PLUGIN` and `MANAGER` when they run over RocksDB or LevelDB. On `NATIVE`, `ADIOS` and the plugin over native, `page-cache` repeats the base arm's I/O and `page-cache-shift` equals `shift`; `lsmiotool` still accepts them there, and the header records the mode. `shift` and `page-cache-shift` need an executable that supports `--read-shift`: not `MANAGER`.
 
 ---

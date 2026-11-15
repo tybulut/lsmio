@@ -195,6 +195,32 @@ class ArmResolutionTest(unittest.TestCase):
             with self.assertRaises(ArmError):
                 self._group(RunRequest("lsmio", "small"), f_setup)
 
+    def testRocksdbPcBackend(self) -> None:
+        """rocksdb-pc is a backends arm (ROCKSDB-PC, page-cache durability): it runs only when
+        listed, and its setup is refused as a run's own setup."""
+        f_group = self._group(
+            RunRequest(
+                "lsmio",
+                "small",
+                f_mode="backends",
+                f_backends=["rocksdb", "rocksdb-pc"],
+            )
+        )
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.arm_id) for f_a in f_group.arms],
+            [
+                ("rocksdb", "ROCKSDB", "rocksdb"),
+                ("rocksdb-pc", "ROCKSDB-PC", "rocksdb-pc"),
+            ],
+        )
+        self.assertNotIn("rocksdb-pc", DEFAULT_LSMIO_BACKENDS)
+        with self.assertRaises(ArmError):
+            self._group(
+                RunRequest("lsmio", "variants", f_variants=["btree"]), "ROCKSDB-PC"
+            )
+        with self.assertRaises(ArmError):
+            self._group(RunRequest("lsmio", "small"), "ROCKSDB-PC")
+
     def testIorSetupsAreBackendsArms(self) -> None:
         """An ior scaling run: one archived arm per IOR setup, outputs-ior[-<setup>]."""
         f_group = self._group(RunRequest("ior", "small", f_mode="backends"), "BASE")

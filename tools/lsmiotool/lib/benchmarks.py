@@ -982,14 +982,16 @@ class LsmioAdapter(BenchmarkAdapter):
 
     TARGET: str = "lsmio"
     DEFAULT_SETUP: str = "NATIVE"
-    # The setups of the backends' -sync arms ('run lsmio backends'), not for --setup: their
-    # names would collide with the 'sync' variant's archives (outputs-<setup>-<variant>)
+    # The setups of the backends' -sync arms and the rocksdb-pc arm ('run lsmio backends'), not
+    # for --setup: the -sync names would collide with the 'sync' variant's archives
+    # (outputs-<setup>-<variant>), and ROCKSDB-PC would read as ROCKSDB with a 'pc' variant
     ARM_ONLY_SETUPS: Tuple[str, ...] = (
         "ADIOS-SYNC",
         "NATIVE-SYNC",
         "PLUGIN-SYNC",
         "ROCKSDB-SYNC",
         "LEVELDB-SYNC",
+        "ROCKSDB-PC",
     )
     # The setups a run may name (--setup, BM_SETUP, archive --setup)
     RUN_SETUPS: Tuple[str, ...] = (
@@ -1017,10 +1019,12 @@ class LsmioAdapter(BenchmarkAdapter):
         "PLUGIN-SYNC": "bm_adios",
         "ROCKSDB-SYNC": "bm_rocksdb",
         "LEVELDB-SYNC": "bm_leveldb",
+        "ROCKSDB-PC": "bm_rocksdb",
     }
 
     # Flags a setup adds to its executable: the LSMIO ADIOS2 plugin, and for a -sync arm
-    # --lsmio-always-flush (sync puts; bm_adios puts with adios2::Mode::Sync)
+    # --lsmio-always-flush (sync puts; bm_adios puts with adios2::Mode::Sync); ROCKSDB-PC runs
+    # RocksDB with --lsmio-durability page-cache
     SETUP_FLAGS: Dict[str, Tuple[str, ...]] = {
         "PLUGIN": ("--lsmio-plugin",),
         "ADIOS-SYNC": ("--lsmio-always-flush",),
@@ -1028,6 +1032,7 @@ class LsmioAdapter(BenchmarkAdapter):
         "PLUGIN-SYNC": ("--lsmio-plugin", "--lsmio-always-flush"),
         "ROCKSDB-SYNC": ("--lsmio-always-flush",),
         "LEVELDB-SYNC": ("--lsmio-always-flush",),
+        "ROCKSDB-PC": ("--lsmio-durability", "page-cache"),
     }
 
     BLOCK_SIZE_MAP: Dict[str, Tuple[int, int]] = {

@@ -539,6 +539,8 @@ CANONICAL_BACKEND_LABELS: Dict[str, str] = {
     "plugin-sync": "plugin-sync",
     "outputs-rocksdb-sync": "rocksdb-sync",
     "rocksdb-sync": "rocksdb-sync",
+    "outputs-rocksdb-pc": "rocksdb-pc",
+    "rocksdb-pc": "rocksdb-pc",
     "outputs-leveldb-sync": "leveldb-sync",
     "leveldb-sync": "leveldb-sync",
     "outputs-rocksdb": "rocksdb",
@@ -557,8 +559,9 @@ CANONICAL_ORDER: Dict[str, int] = {
     "plugin-sync": 5,
     "rocksdb": 6,
     "rocksdb-sync": 7,
-    "leveldb": 8,
-    "leveldb-sync": 9,
+    "rocksdb-pc": 8,
+    "leveldb": 9,
+    "leveldb-sync": 10,
     # EPOCpp arms ('run epocpp backends'), by kind then backend
     "epocpp-baseline": 20,
     "epocpp-posix": 21,
@@ -570,12 +573,12 @@ CANONICAL_ORDER: Dict[str, int] = {
     "epocpp-plugin-bw": 27,
     "epocpp-native-bw": 28,
     # IOR arms archived by 'run ior' (outputs-ior[-<setup>]), charted after the backends
-    "ior": 10,
-    "ior-collective": 11,
-    "ior-hdf5": 12,
-    "ior-hdf5-collective": 13,
-    "ior-fsync": 14,
-    "ior-reverse": 15,
+    "ior": 11,
+    "ior-collective": 12,
+    "ior-hdf5": 13,
+    "ior-hdf5-collective": 14,
+    "ior-fsync": 15,
+    "ior-reverse": 16,
 }
 
 
@@ -587,9 +590,12 @@ def lsmioBaseLabel(f_entry: str) -> str:
     f_entry_lower = f_entry.lower()
     # A -sync arm (e.g. outputs-plugin-sync-1, collision-suffixed) is
     # labelled as its backend, then -sync
-    f_sync = re.search(r"-sync(-\d+)?$", f_entry_lower) is not None
-    if f_sync:
-        f_entry_lower = re.sub(r"-sync(-\d+)?$", "", f_entry_lower)
+    # and a -pc arm (page-cache durability, e.g. outputs-rocksdb-pc-1) as its backend, then -pc
+    f_arm_suffix = ""
+    f_arm_match = re.search(r"-(sync|pc)(-\d+)?$", f_entry_lower)
+    if f_arm_match is not None:
+        f_arm_suffix = "-" + f_arm_match.group(1)
+        f_entry_lower = f_entry_lower[: f_arm_match.start()]
     # "plugin" first: plugin runs are ADIOS2 too (e.g. "adios2-plugin")
     if "plugin" in f_entry_lower:
         f_legend = "plugin"
@@ -603,8 +609,8 @@ def lsmioBaseLabel(f_entry: str) -> str:
         f_legend = "leveldb"
     else:
         f_legend = f_entry
-    if f_sync and f_legend != f_entry:
-        f_legend += "-sync"
+    if f_arm_suffix and f_legend != f_entry:
+        f_legend += f_arm_suffix
     return f_legend
 
 

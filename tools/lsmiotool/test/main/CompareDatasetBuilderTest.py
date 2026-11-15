@@ -476,7 +476,20 @@ class CompareDatasetBuilderTest(unittest.TestCase):
         self.assertEqual(lsmioBaseLabel("outputs-weird"), "outputs-weird")
 
         self.assertEqual(seriesRank("adios2-sync"), 1)
-        self.assertEqual(seriesRank("ior-collective"), 11)
+        # rocksdb-pc keeps its own label, also when collision-suffixed, and never reads as
+        # the bare backend
+        self.assertEqual(lsmioBaseLabel("outputs-rocksdb-pc"), "rocksdb-pc")
+        self.assertEqual(lsmioBaseLabel("rocksdb-pc"), "rocksdb-pc")
+        self.assertEqual(lsmioBaseLabel("outputs-rocksdb-pc-1"), "rocksdb-pc")
+        # an unrecognised name keeps its full entry whatever its suffix
+        self.assertEqual(lsmioBaseLabel("outputs-weird-pc"), "outputs-weird-pc")
+        self.assertEqual(seriesRank("rocksdb-sync"), 7)
+        self.assertEqual(seriesRank("rocksdb-pc"), 8)
+        self.assertEqual(seriesRank("leveldb"), 9)
+        self.assertEqual(seriesRank("leveldb-sync"), 10)
+        self.assertEqual(seriesRank("ior"), 11)
+        self.assertEqual(seriesRank("ior-collective"), 12)
+        self.assertEqual(seriesRank("ior-reverse"), 16)
         self.assertEqual(seriesRank("epocpp-posix-bw"), 25)
         self.assertEqual(seriesRank("x"), 999)
 
@@ -2071,6 +2084,7 @@ class CompareDatasetBuilderTest(unittest.TestCase):
             "outputs-native",
             "outputs-rocksdb",
             "outputs-rocksdb-sync",
+            "outputs-rocksdb-pc",
             "outputs-leveldb",
             "outputs-plugin-sync",
             "outputs-native-sync",
@@ -2135,6 +2149,7 @@ class CompareDatasetBuilderTest(unittest.TestCase):
             "rocksdb",
             "rocksdb",
             "rocksdb-sync",
+            "rocksdb-pc",
             "leveldb",
             "leveldb-sync",
             "ior",
