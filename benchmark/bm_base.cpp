@@ -32,6 +32,7 @@
 
 #include <fmt/format.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include <CLI/CLI.hpp>
 #include <algorithm>
@@ -44,6 +45,7 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "KeyPermutation.hpp"
@@ -94,6 +96,10 @@ bool BMBase::supportsReadShift() const {
 
 std::string BMBase::engineHeaderLines() const {
     return "";
+}
+
+double effectiveReadShiftDelay(bool f_read_shift, bool f_given, double f_value) {
+    return (f_read_shift && !f_given) ? kDefaultReadShiftDelay : f_value;
 }
 
 std::string readShiftRefusal(bool f_supported, int f_nodes, int f_world_size) {
@@ -236,10 +242,41 @@ std::string BMBase::readShiftHeaderLines() const {
                             ? "simulated:" + std::to_string(gConfigBM.readShiftNodes)
                             : "shared";
     return " rankShiftNodes: " + nodes +
+           "\n rankShiftDelay: " + fmt::format("{}", gConfigBM.readShiftDelay) +
            "\n rankShiftSource: " + std::to_string(m_read_source.source_world_rank) +
            "\n rankShiftSelfRanks: " + std::to_string(m_read_source.self_ranks_world) +
            "\n rankShiftSameHostRanks: " + std::to_string(m_read_source.same_host_ranks_world) +
            "\n";
+}
+
+void BMBase::setupGlobalFlush() {
+    if (m_flush_leader_ready) return;
+    m_flush_leader_ready = true;
+    m_flush_leader = true;
+    if (!useMPI) return;
+    // Node-local rank 0 of the shared-memory split (independent of mpiAggType), built once.
+    MPI_Comm node_comm;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, mpiWorldRank, MPI_INFO_NULL,
+                        &node_comm);
+    int node_rank = 0;
+    MPI_Comm_rank(node_comm, &node_rank);
+    MPI_Comm_free(&node_comm);
+    m_flush_leader = (node_rank == 0);
+}
+
+void BMBase::globalFlush() {
+    // sync() may return before the data reaches storage on some filesystems.
+    if (m_flush_leader) sync();
+    if (useMPI) MPI_Barrier(MPI_COMM_WORLD);
+}
+
+void BMBase::shiftDelay(double f_seconds) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    const double start = MPI_Wtime();
+    for (double left = f_seconds; left > 0.0; left = f_seconds - (MPI_Wtime() - start)) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(std::min(left, 0.05)));
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void BMBase::beginPhaseTimeline() {
@@ -394,6 +431,11 @@ int BMBase::benchIteration(int iteration, bool opt) {
 
     // Fail-Fast Check: If write phase failed, skip read phase entirely
     if (globalWriteFail == 0) {
+        // Untimed steps between the sides: they sit in the gap, outside every window.
+        if (gConfigBM.globalFlush) globalFlush();
+        if (gConfigBM.readShift && gConfigBM.readShiftDelay > 0.0) {
+            shiftDelay(gConfigBM.readShiftDelay);
+        }
         // --- READ PHASE ---
         if (barrier) MPI_Barrier(MPI_COMM_WORLD);
         capturePhase(PhaseSide::Read, PhaseBoundary::BeforeOpen);
@@ -443,6 +485,7 @@ int BMBase::benchSuite(std::string bmPrefix, bool opt) {
 
     // Once per object, before the first iteration and before any store is opened (INV-14).
     setupReadSource();
+    if (gConfigBM.globalFlush) setupGlobalFlush();
 
     for (int iter = 0; iter < gConfigBM.iterations; iter++) {
         int iterStatus = benchIteration(iter, opt);
@@ -542,6 +585,7 @@ std::string genOptionsToString() {
               << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
               << "\n perRankPath: " << gConfigBM.perRankPath
               << "\n durability: " << lsmio::to_string(lsmio::gConfigLSMIO.durability)
+              << "\n globalFlush: " << gConfigBM.globalFlush
               << "\n rankShift: " << gConfigBM.readShift << "\n";
 
     return optStream.str();
@@ -659,6 +703,13 @@ int BMBase::beginMain(int argc, char **argv) {
         CLI::Option *read_shift_nodes_option = app.add_option(
             "--read-shift-nodes", gConfigBM.readShiftNodes,
             "simulate this many nodes when mapping peers (>= 1; needs --read-shift)");
+        CLI::Option *read_shift_delay_option = app.add_option(
+            "--read-shift-delay", gConfigBM.readShiftDelay,
+            "seconds to wait between the write and read sides, MPI timed, outside every timed "
+            "window (>= 0; needs --read-shift; default 10 with it, 0 disables)");
+        app.add_flag("--global-flush", gConfigBM.globalFlush,
+                     "call sync() once per node between the write and read sides, outside every "
+                     "timed window (sync() may return before the data reaches storage)");
         app.add_flag("--per-rank-path", gConfigBM.perRankPath,
                      "give every MPI rank its own store path, suffix .mpirank<N> (needs -m, "
                      "refused with -c)");
@@ -717,6 +768,14 @@ int BMBase::beginMain(int argc, char **argv) {
         if (read_shift_nodes_option->count() > 0 && gConfigBM.readShiftNodes < 1) {
             throw std::runtime_error("--read-shift-nodes must be >= 1.");
         }
+        if (read_shift_delay_option->count() > 0 && !gConfigBM.readShift) {
+            throw std::runtime_error("--read-shift-delay requires --read-shift.");
+        }
+        if (read_shift_delay_option->count() > 0 && gConfigBM.readShiftDelay < 0.0) {
+            throw std::runtime_error("--read-shift-delay must be >= 0.");
+        }
+        gConfigBM.readShiftDelay = effectiveReadShiftDelay(
+            gConfigBM.readShift, read_shift_delay_option->count() > 0, gConfigBM.readShiftDelay);
     } catch (const CLI::ParseError &e) {
         exit(app.exit(e));
     } catch (std::runtime_error &e) {

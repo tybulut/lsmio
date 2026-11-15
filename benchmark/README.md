@@ -46,6 +46,8 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `--per-rank-path` | None | `false` | Gives every MPI world rank its own store path: the `-o`/`-d` path with the suffix `.mpirank<w>` (`<w>` is the world rank). Refused without `-m`, and refused with `-c`. Needed by `--read-shift`, which wants one store per rank. |
 | `--read-shift` | None | `false` | Each rank reads the data of a peer rank on another node instead of its own (see [Section 7](#7-read-shift)). Needs `-m`, is refused with `-c`, and the executable must support it: `bm_native`, `bm_rocksdb`, `bm_leveldb` and `bm_adios` do, `bm_manager` does not (it refuses the run). |
 | `--read-shift-nodes` | `<n>` | unset | Test seam: pretend the world has `<n>` nodes (rank `r` is on node `r mod n`) when `--read-shift` maps peers. Needs `--read-shift`, `<n>` must be at least 1 and at most the MPI world size. `lsmiotool` never passes it. |
+| `--read-shift-delay` | `<s>` | `10` with `--read-shift` | Seconds to wait between the write side and the read side of every iteration, so the writer node's dirty pages have time to leave its page cache. Fractions are allowed (`0.2`), `0` turns the wait off. Refused without `--read-shift` (even `0`), and refused when negative. The wait is MPI timed and sits outside every timed window (see [Section 5.1](#51-phase-timeline)). |
+| `--global-flush` | None | `false` | Calls `sync()` once per node (the node-local rank 0) between the write side and the read side of every iteration, then a world barrier; without MPI the process calls `sync()` itself. Independent of `--read-shift` and of the durability mode. It makes no durability claim: `sync()` may return before the data reaches storage on some filesystems. It sits outside every timed window. |
 | `--lsmio-durability` | `engine\|page-cache` | `engine` | Durability mode of the RocksDB and LevelDB stores (see [Section 6](#6-durability-and-the-page-cache-mode)). `page-cache` is refused with `-e/--sync` and on every library build that is not verified. |
 
 ### 2.2 Storage Backend Selection Flags
@@ -214,6 +216,8 @@ Without `-m` no barrier runs, and without MPI (as in `micro.sh`) nothing is redu
 
 Each boundary is stored as an offset in microseconds from the writer's `beforeOpen` barrier exit of the same iteration (that offset is `0`), on a monotonic clock. Under MPI the offsets are reduced with `MAX` over all ranks once per iteration, after every capture of both sides, so every rank that prints results prints the same values, and the reduction sits inside no timed window.
 
+**The gap holds the flush and the delay.** After a write side that succeeded on every rank, and before the read side's opening barrier, an iteration runs `--global-flush` (if given) and then the `--read-shift-delay` wait (with `--read-shift`, if above 0). The delay is a world barrier, a wait until `MPI_Wtime()` has advanced by the delay on every rank (sleeping in steps of at most 50 ms), and another world barrier. Both steps are outside every timed window and fall inside the gap between the write side's `afterDelete` and the read side's `beforeOpen`, which `lsmiotool` reports as `gap_us`; nothing in the windows changes. With `--read-shift` at its default delay, a shifted point therefore adds 10 s per iteration to its run time (see the [Tools & Orchestration Guide](../tools/README.md) for the walltime, which `lsmiotool` does not adjust).
+
 The results carry one `Phases:` block per benchmark suite (one per `-l` variation, named with the same prefix as its `Bench-WRITE:` and `Bench-READ:` blocks). The blocks come after all `Bench-READ:` blocks, are printed by the same ranks as the legacy results, and look like this (illustrative values):
 
 ```text
@@ -236,6 +240,8 @@ The `BENCHMARK PARAMETERS:` block gained these lines:
 | `durability` | always | `engine` or `page-cache`. |
 | `rankShift` | always | `1` with `--read-shift`, else `0`. |
 | `rankShiftNodes` | with `--read-shift` | `shared` (the real node split of the MPI job) or `simulated:<n>` (`--read-shift-nodes`). |
+| `rankShiftDelay` | with `--read-shift` | The `--read-shift-delay` in seconds (`10`, `0.2`, `0`). |
+| `globalFlush` | always | `1` with `--global-flush`, else `0`. |
 | `rankShiftSource` | with `--read-shift` | The world rank whose store the printing rank reads. |
 | `rankShiftSelfRanks` | with `--read-shift` | How many world ranks read their own store (1-node runs, and see [Section 7](#7-read-shift)). |
 | `rankShiftSameHostRanks` | with `--read-shift` | How many world ranks read a store written on a host with the same processor name as theirs (a diagnostic; it is the world size when the nodes are simulated on one host). |
@@ -298,7 +304,8 @@ Without `--read-shift`, every rank reads back the store it wrote, so a read can 
 - **One store per rank.** `--read-shift` needs `--per-rank-path` (or any other way to give each rank a distinct store). Before the first iteration the ranks exchange store paths and processor names over MPI, and every rank refuses with exit status 1 when two ranks have the same store path, when the executable does not support the shift, or when `--read-shift-nodes` exceeds the world size.
 - **What a reader reads.** The key order of a reader is the key order of its source writer, so a reader looks up exactly what its source wrote. The write and read sides are ordered by barriers: every rank passes the `afterDelete` barrier of its write side before any rank opens a store to read.
 - **Directory side effects.** RocksDB readers open read-only (`--lsmio-read-only`, on by default) and write nothing into the peer's directory. LevelDB has no read-only open, so its reader may write bookkeeping files into the peer's directory; each store has exactly one reader per iteration, so no reader changes what another reader sees.
-- **Lustre.** With `page-cache` durability, a shifted read on Lustre may include the writer node's write-back (see Section 6.2).
+- **Lustre.** With `page-cache` durability, a shifted read on Lustre may include the writer node's write-back (see Section 6.2). `--read-shift-delay` (default 10 s) gives the dirty pages time to leave the writer's cache before the read side starts, and `--global-flush` asks each node to `sync()` first; neither is a guarantee (`sync()` may return before the data reaches storage on some filesystems), and both are recorded in the header (`rankShiftDelay`, `globalFlush`) and in `lsm-phase-report.csv`.
+- **Run time.** The delay costs 10 s per iteration of every shifted run by default (for example 10 iterations and 4 combinations add 400 s to a shifted point). `lsmiotool` does not change its walltime for it.
 - **`bm_manager`** does not support the shift and refuses the run.
 
 ---

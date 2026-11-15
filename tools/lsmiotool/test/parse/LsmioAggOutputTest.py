@@ -49,6 +49,8 @@ PHASE_HEADER = [
     " rankShiftNodes: shared",
     " rankShiftSelfRanks: 8",
     " rankShiftSameHostRanks: 8",
+    " rankShiftDelay: 10",
+    " globalFlush: 1",
     " perRankPath: 1",
 ]
 FOUR_PREFIXES = [
@@ -271,6 +273,8 @@ class LsmioAggOutputTest(unittest.TestCase):
                 self.assertEqual(f_row["rank_shift_nodes"], "shared")
                 self.assertEqual(f_row["rank_shift_self_ranks"], "8")
                 self.assertEqual(f_row["rank_shift_same_host_ranks"], "8")
+                self.assertEqual(f_row["rank_shift_delay_s"], "10")
+                self.assertEqual(f_row["global_flush"], "1")
                 self.assertEqual(f_row["per_rank_path"], "1")
                 self.assertEqual(f_row["full_us"], "1552000")
                 self.assertEqual(f_row["gap_us"], "100000" if f_row["side"] == "read" else "")

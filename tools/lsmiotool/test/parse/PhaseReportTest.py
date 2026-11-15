@@ -179,6 +179,8 @@ class PhaseReportTest(unittest.TestCase):
                 " rankShiftSource: 1",
                 " rankShiftSelfRanks: 0",
                 " rankShiftSameHostRanks: 1",
+                " rankShiftDelay: 10",
+                " globalFlush: 1",
                 " perRankPath: 1",
                 " rocksdbVersion: 9.11.2",
                 " leveldbVersion: 1.23",
@@ -195,6 +197,8 @@ class PhaseReportTest(unittest.TestCase):
                 "rankShiftNodes": "simulated:3",
                 "rankShiftSelfRanks": "0",
                 "rankShiftSameHostRanks": "1",
+                "rankShiftDelay": "10",
+                "globalFlush": "1",
                 "perRankPath": "1",
                 "rocksdbVersion": "9.11.2",
                 "leveldbVersion": "1.23",
@@ -583,6 +587,8 @@ class PhaseReportTest(unittest.TestCase):
             " rankShiftSource: 1",
             " rankShiftSelfRanks: 0",
             " rankShiftSameHostRanks: 2",
+            " rankShiftDelay: 0.2",
+            " globalFlush: 1",
             " perRankPath: 1",
             " rocksdbVersion: 9.11.2",
         ]
@@ -590,8 +596,25 @@ class PhaseReportTest(unittest.TestCase):
         f_row = f_rows[0]
         self.assertEqual(
             [f_row[f_c] for f_c in PHASE_REPORT_COLUMNS[22:]],
-            ["engine", "1", "simulated:3", "0", "2", "1", "9.11.2", "", "", "rank_0.log"],
+            ["engine", "1", "simulated:3", "0", "2", "1", "9.11.2", "", "", "0.2", "1", "rank_0.log"],
         )
+        # the two new columns sit after leveldb_close_flush and before source_log
+        self.assertEqual(
+            PHASE_REPORT_COLUMNS[-3:], ("rank_shift_delay_s", "global_flush", "source_log")
+        )
+        self.assertEqual(len(PHASE_REPORT_COLUMNS), 34)
+
+    def testDelayAndFlushColumnsEmptyWithoutTheLines(self) -> None:
+        # Shifted log without the delay line, and a log without either line: empty cells
+        f_header = BARRIER_HEADER[:2] + [" rankShift: 1", " rankShiftNodes: shared"]
+        f_rows, _ = self.setRows(rankLogLines([sampleSuite(f_iterations=1)], f_header))
+        self.assertEqual(f_rows[0]["rank_shift_delay_s"], "")
+        self.assertEqual(f_rows[0]["global_flush"], "")
+        # An unshifted log: the delay stays empty even if the line is there, the flush is kept
+        f_header = BARRIER_HEADER[:2] + [" rankShift: 0", " rankShiftDelay: 10", " globalFlush: 0"]
+        f_rows, _ = self.setRows(rankLogLines([sampleSuite(f_iterations=1)], f_header))
+        self.assertEqual(f_rows[0]["rank_shift_delay_s"], "")
+        self.assertEqual(f_rows[0]["global_flush"], "0")
         # rankShift 0 or absent: the three shift columns stay empty whatever the log says
         for f_shift in ([" rankShift: 0"], []):
             f_header = (
@@ -682,9 +705,9 @@ class PhaseReportTest(unittest.TestCase):
         self.assertTrue(f_raw.startswith(",".join(PHASE_REPORT_COLUMNS) + "\n"))
         self.assertNotIn("\r", f_raw)
         f_table = self.readReport(f_out)
-        self.assertEqual(len(f_table[0]), 32)
+        self.assertEqual(len(f_table[0]), 34)
         self.assertEqual(tuple(f_table[0]), PHASE_REPORT_COLUMNS)
-        self.assertTrue(all(len(f_r) == 32 for f_r in f_table))
+        self.assertTrue(all(len(f_r) == 34 for f_r in f_table))
         f_rows = [dict(zip(f_table[0], f_r)) for f_r in f_table[1:]]
         self.assertEqual(len(f_rows), len(f_sets) * 6)
         f_set_order = []
@@ -731,7 +754,7 @@ class PhaseReportTest(unittest.TestCase):
         f_keys = [tuple(f_r[:6]) for f_r in f_table[1:]]
         self.assertEqual(len(f_keys), 8)
         self.assertEqual(len(set(f_keys)), 8)
-        self.assertEqual({f_r[31] for f_r in f_table[1:]}, {"s4/rank_0.log", "s16/rank_0.log"})
+        self.assertEqual({f_r[33] for f_r in f_table[1:]}, {"s4/rank_0.log", "s16/rank_0.log"})
 
     def testWriterWritesNothingWithoutRowsAndKeepsAnExistingFile(self) -> None:
         f_old = self.writeLog("old/rank_0.log", [" mpi-barrier: 1", "BENCHMARK RESULTS: "])

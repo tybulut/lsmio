@@ -80,6 +80,8 @@ PHASE_REPORT_COLUMNS: Tuple[str, ...] = (
     "rocksdb_version",
     "leveldb_version",
     "leveldb_close_flush",
+    "rank_shift_delay_s",
+    "global_flush",
     "source_log",
 )
 
@@ -91,6 +93,8 @@ _HEADER_KEYS = frozenset(
         "rankShiftNodes",
         "rankShiftSelfRanks",
         "rankShiftSameHostRanks",
+        "rankShiftDelay",
+        "globalFlush",
         "perRankPath",
         "rocksdbVersion",
         "leveldbVersion",
@@ -325,6 +329,8 @@ def _logRows(
         "rocksdb_version": f_headers.get("rocksdbVersion", ""),
         "leveldb_version": f_headers.get("leveldbVersion", ""),
         "leveldb_close_flush": f_headers.get("leveldbCloseFlush", ""),
+        "rank_shift_delay_s": f_headers.get("rankShiftDelay", "") if f_shifted else "",
+        "global_flush": f_headers.get("globalFlush", ""),
         "source_log": f_source_log,
     }
     f_rows: List[Dict[str, str]] = []

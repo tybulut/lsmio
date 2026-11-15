@@ -135,6 +135,9 @@ class FileBackedBM : public BMBase {
     std::string shiftLines() const {
         return readShiftHeaderLines();
     }
+    bool flushLeader() const {
+        return m_flush_leader;
+    }
 
   private:
     std::map<std::string, std::string> m_written;
@@ -149,6 +152,26 @@ int countOf(const std::string &f_text, const std::string &f_needle) {
         count++;
     }
     return count;
+}
+
+// The microsecond offsets of the phase rows of one iteration, [side][boundary] with side 0 = write
+// and 1 = read and boundary order beforeOpen, afterOpen, beforeClose, afterClose, afterDelete.
+// Fields of a row: phase, side, iteration, bytes, then the five offsets.
+std::vector<std::vector<long long>> phaseOffsets(const std::string &f_text, int f_iteration) {
+    std::vector<std::vector<long long>> offsets(2);
+    std::istringstream lines(f_text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.rfind("phase,", 0) != 0) continue;
+        std::vector<std::string> fields;
+        std::istringstream row(line);
+        std::string field;
+        while (std::getline(row, field, ',')) fields.push_back(field);
+        if (fields.size() != 9 || std::stoi(fields[2]) != f_iteration) continue;
+        std::vector<long long> &side = offsets[fields[1] == "write" ? 0 : 1];
+        for (size_t i = 4; i < 9; i++) side.push_back(std::stoll(fields[i]));
+    }
+    return offsets;
 }
 
 bool endsWith(const std::string &f_text, const std::string &f_suffix) {
@@ -352,6 +375,94 @@ TEST_F(MPIBMBaseTest, ShiftSharedNodesUsesTheRealNodeSplit) {
     MPI_Allreduce(&is_self, &self_total, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     EXPECT_EQ(self_total, bm.readSource().self_ranks_world);
     expectSameOnAllRanks(bm.phaseText());
+}
+
+TEST_F(MPIBMBaseTest, ShiftDelayIsInTheGapAndOutsideTheTimedWindows) {
+    constexpr double kDelay = 0.4;
+    constexpr long long kDelayUs = 400000;
+    gConfigBM.iterations = 2;
+    gConfigBM.readShift = true;
+    gConfigBM.readShiftNodes = 2;
+    gConfigBM.readShiftDelay = kDelay;
+    FileBackedBM bm;
+    ASSERT_EQ(bm.run("Delay"), lsmio::BM_SUCCESS);
+
+    for (int iteration = 0; iteration < 2; iteration++) {
+        const auto offsets = phaseOffsets(bm.phaseText(), iteration);
+        ASSERT_EQ(offsets[0].size(), 5u);
+        ASSERT_EQ(offsets[1].size(), 5u);
+        // gap = read beforeOpen - write afterDelete holds the delay
+        EXPECT_GE(offsets[1][0] - offsets[0][4], kDelayUs);
+        // Neither side's window (beforeOpen to afterDelete) grows by it
+        EXPECT_LT(offsets[0][4] - offsets[0][0], kDelayUs);
+        EXPECT_LT(offsets[1][4] - offsets[1][0], kDelayUs);
+    }
+    EXPECT_NE(bm.shiftLines().find(" rankShiftDelay: 0.4\n"), std::string::npos);
+    expectSameOnAllRanks(bm.phaseText());
+}
+
+TEST_F(MPIBMBaseTest, ZeroShiftDelayAddsNoGap) {
+    constexpr long long kDelayUs = 400000;
+    gConfigBM.readShift = true;
+    gConfigBM.readShiftNodes = 2;
+    gConfigBM.readShiftDelay = 0.0;
+    FileBackedBM bm;
+    ASSERT_EQ(bm.run("NoDelay"), lsmio::BM_SUCCESS);
+    const auto offsets = phaseOffsets(bm.phaseText(), 0);
+    ASSERT_EQ(offsets[1].size(), 5u);
+    EXPECT_LT(offsets[1][0] - offsets[0][4], kDelayUs);
+    EXPECT_NE(bm.shiftLines().find(" rankShiftDelay: 0\n"), std::string::npos);
+}
+
+TEST_F(MPIBMBaseTest, ShiftDelayIsNotAppliedWithoutReadShift) {
+    constexpr long long kDelayUs = 400000;
+    gConfigBM.readShiftDelay = 0.4;
+    FileBackedBM bm;
+    ASSERT_EQ(bm.run("OwnDelay"), lsmio::BM_SUCCESS);
+    const auto offsets = phaseOffsets(bm.phaseText(), 0);
+    ASSERT_EQ(offsets[1].size(), 5u);
+    EXPECT_LT(offsets[1][0] - offsets[0][4], kDelayUs);
+    EXPECT_EQ(bm.shiftLines(), "");
+}
+
+TEST_F(MPIBMBaseTest, GlobalFlushRunsRecordsAndLeavesTheWindowsAlone) {
+    gConfigBM.iterations = 2;
+    gConfigBM.globalFlush = true;
+    FileBackedBM bm;
+    ASSERT_EQ(bm.run("Flush"), lsmio::BM_SUCCESS);
+    EXPECT_EQ(countOf(bm.phaseText(), "phase,"), 4);
+    expectSameOnAllRanks(bm.phaseText());
+
+    // Node-local rank 0 flushes: world rank 0 always leads its node, and every node has a leader.
+    if (m_rank == 0) EXPECT_TRUE(bm.flushLeader());
+    int leader = bm.flushLeader() ? 1 : 0;
+    int leaders = 0;
+    MPI_Allreduce(&leader, &leaders, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    EXPECT_GE(leaders, 1);
+
+    // A second suite on the same object does not decide the leader again (it keeps its value).
+    ASSERT_EQ(bm.run("FlushAgain"), lsmio::BM_SUCCESS);
+    EXPECT_EQ(bm.flushLeader(), leader == 1);
+
+    testing::internal::CaptureStdout();
+    bm.writeBenchmarkResults();
+    const std::string out = testing::internal::GetCapturedStdout();
+    if (m_rank == 0) EXPECT_NE(out.find(" globalFlush: 1\n"), std::string::npos);
+}
+
+TEST_F(MPIBMBaseTest, GlobalFlushWithShiftDelayKeepsBothInTheGap) {
+    constexpr long long kDelayUs = 300000;
+    gConfigBM.readShift = true;
+    gConfigBM.readShiftNodes = 2;
+    gConfigBM.readShiftDelay = 0.3;
+    gConfigBM.globalFlush = true;
+    FileBackedBM bm;
+    ASSERT_EQ(bm.run("FlushDelay"), lsmio::BM_SUCCESS);
+    const auto offsets = phaseOffsets(bm.phaseText(), 0);
+    ASSERT_EQ(offsets[1].size(), 5u);
+    EXPECT_GE(offsets[1][0] - offsets[0][4], kDelayUs);
+    EXPECT_LT(offsets[0][4] - offsets[0][0], kDelayUs);
+    EXPECT_LT(offsets[1][4] - offsets[1][0], kDelayUs);
 }
 
 TEST_F(MPIBMBaseTest, SetupRunsOncePerObjectAndEachObjectRunsItsOwn) {

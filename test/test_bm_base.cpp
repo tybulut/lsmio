@@ -428,6 +428,26 @@ TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {
     EXPECT_NE(optStr.find(" perRankPath: 0"), std::string::npos);
     EXPECT_NE(optStr.find(" durability: engine"), std::string::npos);
     EXPECT_NE(optStr.find(" rankShift: 0"), std::string::npos);
+    EXPECT_NE(optStr.find(" globalFlush: 0\n"), std::string::npos);
+    EXPECT_LT(optStr.find(" durability: engine"), optStr.find(" globalFlush: 0\n"));
+    gConfigBM.globalFlush = true;
+    EXPECT_NE(genOptionsToString().find(" globalFlush: 1\n"), std::string::npos);
+}
+
+TEST_F(BMBaseTest, GlobalFlushWithoutMpiSyncsInProcessAndRecordsTheFlag) {
+    // Without MPI the process calls sync() itself (it leads its own node).
+    gConfigBM.iterations = 2;
+    gConfigBM.globalFlush = true;
+    MockBM bm;
+    ASSERT_EQ(bm.benchSuite("MockFlush"), lsmio::BM_SUCCESS);
+    ASSERT_EQ(bm.benchSuite("MockFlushAgain"), lsmio::BM_SUCCESS);  // leader decided once
+    EXPECT_EQ(bm.readFailureCount, 0);
+    EXPECT_EQ(phaseRows(bm.getPhaseText()).size(), 8u);
+
+    testing::internal::CaptureStdout();
+    bm.writeBenchmarkResults();
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find(" globalFlush: 1\n"), std::string::npos);
 }
 
 TEST_F(BMBaseTest, NoShiftSetupKeepsSelfSourceAndPrintsNoShiftLines) {
@@ -453,9 +473,20 @@ TEST_F(BMBaseTest, ShiftHeaderLinesSharedAndSimulated) {
     {
         MockBM bm;  // the constructor's self source
         EXPECT_EQ(bm.shiftLines(),
-                  " rankShiftNodes: shared\n rankShiftSource: 0\n rankShiftSelfRanks: 0\n"
-                  " rankShiftSameHostRanks: 0\n");
+                  " rankShiftNodes: shared\n rankShiftDelay: 0\n rankShiftSource: 0\n"
+                  " rankShiftSelfRanks: 0\n rankShiftSameHostRanks: 0\n");
     }
+    gConfigBM.readShiftDelay = 10.0;
+    {
+        MockBM bm;
+        EXPECT_NE(bm.shiftLines().find("\n rankShiftDelay: 10\n"), std::string::npos);
+    }
+    gConfigBM.readShiftDelay = 0.2;
+    {
+        MockBM bm;
+        EXPECT_NE(bm.shiftLines().find("\n rankShiftDelay: 0.2\n"), std::string::npos);
+    }
+    gConfigBM.readShiftDelay = 0.0;
     gConfigBM.readShiftNodes = 3;
     {
         MockBM bm;
@@ -587,6 +618,22 @@ TEST(BMBaseCliTest, ReadShiftNodesBelowOneIsRefused) {
                 ::testing::ExitedWithCode(1), "--read-shift-nodes must be >= 1");
 }
 
+TEST(BMBaseCliTest, ReadShiftDelayWithoutReadShiftIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--read-shift-delay", "1"}),
+                ::testing::ExitedWithCode(1), "--read-shift-delay requires --read-shift");
+}
+
+TEST(BMBaseCliTest, ReadShiftDelayZeroWithoutReadShiftIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--read-shift-delay", "0"}),
+                ::testing::ExitedWithCode(1), "--read-shift-delay requires --read-shift");
+}
+
+TEST(BMBaseCliTest, NegativeReadShiftDelayIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "-m", "--read-shift",
+                              "--read-shift-delay", "-1"}),
+                ::testing::ExitedWithCode(1), "--read-shift-delay must be >= 0");
+}
+
 TEST(BMBaseCliTest, UnknownDurabilityModeExitsNonZero) {
     ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--lsmio-durability", "fsync"}),
                 exitedNonZero, "fsync");
@@ -603,6 +650,31 @@ void runAcceptedDurability(const std::string &f_value, lsmio::Durability f_expec
 }
 
 }  // namespace
+
+namespace {
+
+// Exits 0 when beginMain accepted --global-flush without --read-shift and left the delay at 0.
+// (An accepted --read-shift run needs -m and so MPI_Init, which a death-test child cannot do
+// outside mpirun; the delay default is tested through effectiveReadShiftDelay.)
+void runAcceptedGlobalFlush() {
+    google::ShutdownGoogleLogging();
+    runBeginMain({"test_bm_base", "-o", "x", "--global-flush"});
+    exit(gConfigBM.readShiftDelay == 0.0 && gConfigBM.globalFlush ? 0 : 3);
+}
+
+}  // namespace
+
+TEST(BMBaseCliTest, GlobalFlushIsIndependentOfReadShift) {
+    ASSERT_EXIT(runAcceptedGlobalFlush(), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(BMBaseCliTest, ReadShiftDelayDefaultsToTenSecondsOnlyWithReadShiftAndNoOption) {
+    EXPECT_EQ(kDefaultReadShiftDelay, 10.0);
+    EXPECT_EQ(effectiveReadShiftDelay(true, false, 0.0), 10.0);   // --read-shift alone
+    EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.2), 0.2);     // a fraction
+    EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.0), 0.0);     // 0 disables it
+    EXPECT_EQ(effectiveReadShiftDelay(false, false, 0.0), 0.0);   // no read shift: no delay
+}
 
 TEST(BMBaseCliTest, DurabilityPageCacheIsAccepted) {
     ASSERT_EXIT(runAcceptedDurability("page-cache", lsmio::Durability::PageCache),
