@@ -669,8 +669,8 @@ TEST(BMBaseCliTest, GlobalFlushIsIndependentOfReadShift) {
 }
 
 TEST(BMBaseCliTest, ReadShiftDelayDefaultsToTenSecondsOnlyWithReadShiftAndNoOption) {
-    EXPECT_EQ(kDefaultReadShiftDelay, 10.0);
-    EXPECT_EQ(effectiveReadShiftDelay(true, false, 0.0), 10.0);   // --read-shift alone
+    EXPECT_EQ(kDefaultReadShiftDelay, 60.0);
+    EXPECT_EQ(effectiveReadShiftDelay(true, false, 0.0), 60.0);   // --read-shift alone
     EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.2), 0.2);     // a fraction
     EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.0), 0.0);     // 0 disables it
     EXPECT_EQ(effectiveReadShiftDelay(false, false, 0.0), 0.0);   // no read shift: no delay

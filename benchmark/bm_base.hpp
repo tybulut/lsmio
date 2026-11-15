@@ -181,7 +181,7 @@ class BMConfig {
 std::string genOptionsToString();
 
 // The delay --read-shift applies when --read-shift-delay is not given (seconds).
-constexpr double kDefaultReadShiftDelay = 10.0;
+constexpr double kDefaultReadShiftDelay = 60.0;
 // The delay a run uses: the default with --read-shift and no --read-shift-delay, else the value.
 double effectiveReadShiftDelay(bool f_read_shift, bool f_given, double f_value);
 

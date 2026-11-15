@@ -706,7 +706,7 @@ int BMBase::beginMain(int argc, char **argv) {
         CLI::Option *read_shift_delay_option = app.add_option(
             "--read-shift-delay", gConfigBM.readShiftDelay,
             "seconds to wait between the write and read sides, MPI timed, outside every timed "
-            "window (>= 0; needs --read-shift; default 10 with it, 0 disables)");
+            "window (>= 0; needs --read-shift; default 60 with it, 0 disables)");
         app.add_flag("--global-flush", gConfigBM.globalFlush,
                      "call sync() once per node between the write and read sides, outside every "
                      "timed window (sync() may return before the data reaches storage)");

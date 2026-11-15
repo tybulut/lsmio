@@ -194,7 +194,7 @@ Options:
   --versioned   Execute versioned comparison run against reference baseline.
   --shift       Only for 'run lsmio backends': every arm (the default four, or the listed
                 ones, -sync arms and rocksdb-pc included) runs the shift variant (each rank
-                reads another node's data, after a 10 s delay per iteration that the
+                reads another node's data, after a 60 s delay per iteration that the
                 walltime does not budget) and archives as outputs-<arm>-shift/<nodes>,
                 next to the unshifted arm. A 1-node point reads its own store, so it
                 doubles as a check. Pass it again to --resume a shifted run.
