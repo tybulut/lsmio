@@ -83,7 +83,6 @@ LSMIOStoreNative::LSMIOStoreNative(const std::string& f_db_path, const bool f_ov
       m_max_value_len(gConfigLSMIO.getMaxValueLen()),
       m_active_memtable(createMemtable()),
       m_spare_memtable(createMemtable()),
-      m_flush_buffer(m_memtable_max_size_bytes),
       m_read_only(f_read_only) {
     if (m_max_value_len == 0)
         throw std::invalid_argument(
@@ -241,6 +240,19 @@ void LSMIOStoreNative::FlushMemtableToL0(const IMemtable& f_memtable) {
     }
 
     try {
+        // The stream buffer of the SSTable write. Sized at the first flush to the
+        // memtable (records add 8 bytes of length headers each), capped at
+        // writeBufferSize, and grown only: a zero-filled writeBufferSize vector made
+        // at construction cost every open ~20 ms (128 MiB) even when a store writes
+        // a few MiB or nothing. Only one thread flushes at a time (the flush thread,
+        // then close() after joining it), so no lock is needed.
+        const size_t wanted = std::min(m_memtable_max_size_bytes,
+                                       f_memtable.sizeBytes() + 8 * f_memtable.count());
+        if (m_flush_buffer.size() < wanted) {
+            m_flush_buffer.clear();
+            m_flush_buffer.shrink_to_fit();
+            m_flush_buffer.resize(wanted);
+        }
         if (!m_sstable_manager || !m_sstable_manager->flushMemtable(f_memtable, m_flush_buffer)) {
             m_bg_error.store(true, std::memory_order_release);
         }
