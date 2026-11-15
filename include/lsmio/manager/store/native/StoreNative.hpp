@@ -80,6 +80,7 @@ class LSMIOStoreNative : public LSMIOStore {
     std::unique_ptr<IMemtable> createMemtable() const;
 
     std::mutex m_state_mutex;
+    // Stream buffer of the SSTable writes; empty until the first flush (FlushMemtableToL0)
     std::vector<char> m_flush_buffer;
     std::thread m_flush_thread;
     std::condition_variable m_flush_cv;
