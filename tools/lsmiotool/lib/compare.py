@@ -588,6 +588,16 @@ def lsmioBaseLabel(f_entry: str) -> str:
     if f_legend is not None:
         return f_legend
     f_entry_lower = f_entry.lower()
+    # A shifted arm ('run lsmio backends --shift', e.g. outputs-adios-sync-shift or
+    # outputs-rocksdb-pc-shift-1) is labelled as the arm it shifts, then -shift; an
+    # unrecognised name keeps its full entry
+    f_shift_match = re.search(r"-shift(-\d+)?$", f_entry_lower)
+    if f_shift_match is not None:
+        f_shifted_from = f_entry[: f_shift_match.start()]
+        f_shifted_label = lsmioBaseLabel(f_shifted_from)
+        if f_shifted_label == f_shifted_from:
+            return f_entry
+        return f_shifted_label + "-shift"
     # A -sync arm (e.g. outputs-plugin-sync-1, collision-suffixed) is
     # labelled as its backend, then -sync
     # and a -pc arm (page-cache durability, e.g. outputs-rocksdb-pc-1) as its backend, then -pc
@@ -615,7 +625,11 @@ def lsmioBaseLabel(f_entry: str) -> str:
 
 
 def seriesRank(f_label: str) -> int:
-    """Canonical sort rank of an arm label."""
+    """Canonical sort rank of an arm label. A '-shift' label has the rank of the arm it
+    shifts; the chart sorts equal ranks by label, which puts '<label>-shift' right after
+    '<label>' and before the next arm."""
+    if f_label.endswith("-shift"):
+        f_label = f_label[: -len("-shift")]
     return CANONICAL_ORDER.get(f_label, 999)
 
 

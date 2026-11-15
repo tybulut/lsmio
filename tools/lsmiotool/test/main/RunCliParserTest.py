@@ -708,6 +708,43 @@ class RunCliParserTest(unittest.TestCase):
         self.assertIn("--out-dir", RUN_HELP_TEXT)
         self.assertIn("--time", RUN_HELP_TEXT)
         self.assertIn("--fast", RUN_HELP_TEXT)
+        self.assertIn(
+            "lsmiotool run lsmio backends <scale> [<backends>] [--shift]",
+            RUN_HELP_TEXT,
+        )
+        self.assertIn("outputs-<arm>-shift/<nodes>", RUN_HELP_TEXT)
+
+    def testShiftOption(self) -> None:
+        """--shift is a flag of 'run lsmio backends' only: accepted there (with or without
+        a backend list, anywhere among the options), refused for every other run form, when
+        repeated and with a value."""
+        self.assertFalse(parseRunArguments(["lsmio", "backends", "bake"]).shift)
+        req = parseRunArguments(["lsmio", "backends", "bake", "--shift"])
+        self.assertTrue(req.shift)
+        self.assertEqual(req.backends, ("adios2", "native", "plugin", "rocksdb"))
+        self.assertTrue(req.toDict()["shift"])
+        req = parseRunArguments(
+            ["lsmio", "backends", "bake", "native,adios2-sync", "--shift", "--fast"]
+        )
+        self.assertEqual((req.shift, req.fast), (True, True))
+        self.assertEqual(req.backends, ("native", "adios2-sync"))
+
+        for f_argv in (
+            ["lsmio", "small", "--shift"],
+            ["lsmio", "variants", "btree", "--shift"],
+            ["ior", "bake", "--shift"],
+            ["epocpp", "backends", "bake", "--shift"],
+            ["lmp", "local", "--shift"],
+        ):
+            with self.subTest(argv=f_argv):
+                with self.assertRaisesRegex(
+                    RunCliParseError, "--shift is supported only for 'lsmio backends'"
+                ):
+                    parseRunArguments(f_argv)
+        with self.assertRaisesRegex(RunCliParseError, "Duplicate '--shift'"):
+            parseRunArguments(["lsmio", "backends", "bake", "--shift", "--shift"])
+        with self.assertRaisesRegex(RunCliParseError, "is not supported"):
+            parseRunArguments(["lsmio", "backends", "bake", "--shift=true"])
 
     def testFastOptionParsing(self) -> None:
         """Asserts --fast option parses correctly, defaults to False, and sets fast / is_fast."""

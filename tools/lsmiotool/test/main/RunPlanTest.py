@@ -1463,6 +1463,14 @@ class RunRequestContractTest(unittest.TestCase):
             RunRequest("lsmio", "small", f_fast=1)
         self.assertIn("fast must be a boolean", str(f_ctx.exception))
 
+        # 10. shift boolean guard
+        with self.assertRaises(PlanValidationError) as f_ctx:
+            RunRequest("lsmio", "small", f_mode="backends", f_shift=1)
+        self.assertIn("shift must be a boolean", str(f_ctx.exception))
+        self.assertTrue(
+            RunRequest("lsmio", "small", f_mode="backends", f_shift=True).shift
+        )
+
     def testRunRequestImmutabilityAndSlotMutation(self) -> None:
         """Validates frozen immutability and unfrozen slot mutation/deletion via __new__."""
         f_req = RunRequest("lsmio", "small")

@@ -221,6 +221,58 @@ class ArmResolutionTest(unittest.TestCase):
         with self.assertRaises(ArmError):
             self._group(RunRequest("lsmio", "small"), "ROCKSDB-PC")
 
+    def testShiftBackends(self) -> None:
+        """--shift: every backends arm (the default four, or the listed ones, -sync arms and
+        rocksdb-pc included) runs the shift variant and archives as <arm>-shift; without
+        it the arms keep no variant."""
+        f_default = self._group(
+            RunRequest("lsmio", "bake", f_mode="backends", f_shift=True)
+        )
+        self.assertEqual(f_default.kind, "backends")
+        self.assertTrue(f_default.archive)
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.variant, f_a.arm_id) for f_a in f_default.arms],
+            [
+                ("adios2", "ADIOS", "shift", "adios-shift"),
+                ("native", "NATIVE", "shift", "native-shift"),
+                ("plugin", "PLUGIN", "shift", "plugin-shift"),
+                ("rocksdb", "ROCKSDB", "shift", "rocksdb-shift"),
+            ],
+        )
+        f_listed = self._group(
+            RunRequest(
+                "lsmio",
+                "bake",
+                f_mode="backends",
+                f_backends=["adios2-sync", "rocksdb-pc", "leveldb"],
+                f_shift=True,
+            )
+        )
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.arm_id, f_a.role) for f_a in f_listed.arms],
+            [
+                ("adios2-sync", "ADIOS-SYNC", "adios-sync-shift", None),
+                ("rocksdb-pc", "ROCKSDB-PC", "rocksdb-pc-shift", None),
+                ("leveldb", "LEVELDB", "leveldb-shift", None),
+            ],
+        )
+        f_plain = self._group(RunRequest("lsmio", "bake", f_mode="backends"))
+        self.assertEqual({f_a.variant for f_a in f_plain.arms}, {None})
+        self.assertEqual(
+            [f_a.arm_id for f_a in f_plain.arms],
+            ["adios", "native", "plugin", "rocksdb"],
+        )
+
+    def testShiftIsRefusedOutsideLsmioBackends(self) -> None:
+        for f_request in (
+            RunRequest("lsmio", "small", f_shift=True),
+            RunRequest("ior", "small", f_mode="backends", f_shift=True),
+            RunRequest("epocpp", "small", f_mode="backends", f_shift=True),
+        ):
+            with self.subTest(request=f_request):
+                with self.assertRaisesRegex(ArmError, "only for 'lsmio backends'"):
+                    self._group(f_request, "BASE" if f_request.target == "ior" else "NATIVE")
+
     def testIorSetupsAreBackendsArms(self) -> None:
         """An ior scaling run: one archived arm per IOR setup, outputs-ior[-<setup>]."""
         f_group = self._group(RunRequest("ior", "small", f_mode="backends"), "BASE")

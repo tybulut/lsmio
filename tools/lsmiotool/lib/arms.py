@@ -243,6 +243,11 @@ def resolveArmGroup(
             f"Invalid setup: {f_setup!r}. Must be one of: {list(LsmioAdapter.RUN_SETUPS)}"
         )
 
+    if getattr(f_request, "shift", False) and (
+        f_target != "lsmio" or f_mode != "backends"
+    ):
+        raise ArmError("shift is supported only for 'lsmio backends'")
+
     if f_target == "ior" and f_mode == "backends":
         f_ior_arms: List[RunArm] = []
         f_seen: Set[str] = set()
@@ -275,7 +280,20 @@ def resolveArmGroup(
                     f"Unsupported backend for backends scaling: [{f_backend}]"
                 )
             f_b_setup, f_b_arm = BACKEND_ARMS[f_backend]
-            f_arms.append(RunArm(f_backend, f_b_setup, None, f_b_arm, None))
+            if getattr(f_request, "shift", False):
+                # --shift: the arm runs the shift variant and archives as
+                # outputs-<arm>-shift, next to (never over) the unshifted arm
+                f_arms.append(
+                    RunArm(
+                        f_backend,
+                        f_b_setup,
+                        "shift",
+                        ArchiveEngine.resolveArmId(f_b_setup, "shift"),
+                        None,
+                    )
+                )
+            else:
+                f_arms.append(RunArm(f_backend, f_b_setup, None, f_b_arm, None))
         if not f_arms:
             raise ArmError("Backends mode requires at least one backend")
         # batch.in.sh archives every backend run that completed

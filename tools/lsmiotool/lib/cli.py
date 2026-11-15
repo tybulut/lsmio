@@ -54,7 +54,7 @@ common cmds:
   parse <target> [--output-dir <dir>] [--format <csv|json>]
   parse ior <local|bake|small|large> [--output-dir <dir>]
   run <ior|lsmio|lmp> <local|bake|small|large|variants> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--versioned] [--fast] [--foreground]
-  run lsmio backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
+  run lsmio backends <local|bake|small|large> [<backends>] [--shift] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <dir>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
 
@@ -116,7 +116,7 @@ Source (default): <benchmark_root> is the site profile's benchmark root. The lat
 
 RUN_HELP_TEXT = """Usage:
   lsmiotool run <benchmark> <scale> [<variants>] [--ssd] [--setup <name>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--versioned] [--fast] [--foreground]
-  lsmiotool run lsmio backends <scale> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
+  lsmiotool run lsmio backends <scale> [<backends>] [--shift] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   lsmiotool run ior <local|bake|small|large> [<ior setups>] [--ssd] [--setup <IOR setup>] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--nodes <list>] [--fast] [--foreground]
   lsmiotool run epocpp backends <local|bake|small|large> [<backends>] [--ssd] [--archive|--no-archive] [--resume] [--out-dir <path>] [--time <hours>] [--repeats <n>] [--nodes <list>] [--fast] [--foreground]
 
@@ -192,7 +192,13 @@ Options:
                 and is archived like a full run's: without --resume its <nodes>
                 archive is replaced.
   --versioned   Execute versioned comparison run against reference baseline.
-  --fast        Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
+  --shift       Only for 'run lsmio backends': every arm (the default four, or the listed
+                ones, -sync arms and rocksdb-pc included) runs the shift variant (each rank
+                reads another node's data, after a 10 s delay per iteration that the
+                walltime does not budget) and archives as outputs-<arm>-shift/<nodes>,
+                next to the unshifted arm. A 1-node point reads its own store, so it
+                doubles as a check. Pass it again to --resume a shifted run.
+  --fast       Halve calculated walltime and cap at 23 hours to stay within qos=standard (<= 24h) on ARCHER2.
   --foreground  Stay attached to the terminal. By default a run started from a terminal
                 detaches once its run roots exist: it goes on in the background with its
                 output in <run root>/control/console.log, which is followed on screen until
@@ -655,6 +661,7 @@ class RunCliParser:
         f_walltime: Optional[str] = None
         f_versioned: bool = False
         f_fast: bool = False
+        f_shift: bool = False
         f_repeats: Optional[int] = None
         f_nodes: Optional[List[int]] = None
 
@@ -676,6 +683,11 @@ class RunCliParser:
                 if f_fast:
                     raise RunCliParseError("Duplicate '--fast' option specified.")
                 f_fast = True
+                f_idx += 1
+            elif f_tok == "--shift":
+                if f_shift:
+                    raise RunCliParseError("Duplicate '--shift' option specified.")
+                f_shift = True
                 f_idx += 1
             elif f_tok == "--setup":
                 if f_setup_name is not None:
@@ -817,6 +829,7 @@ class RunCliParser:
                     "--wallhour=",
                     "--versioned=",
                     "--fast=",
+                    "--shift=",
                     "--repeats=",
                     "--nodes=",
                 )
@@ -863,6 +876,9 @@ class RunCliParser:
                     "or resumed "
                     "(set BM_WALLHOUR to change the walltime)."
                 )
+
+        if f_shift and (f_benchmark != "lsmio" or f_mode != "backends"):
+            raise RunCliParseError("--shift is supported only for 'lsmio backends'.")
 
         # --repeats is the runs of each epocpp arm per combination; an epocpp run's
         # arms come from its backend list, not --setup
@@ -949,6 +965,7 @@ class RunCliParser:
             f_fast=f_fast,
             f_repeats=f_repeats,
             f_nodes=f_nodes,
+            f_shift=f_shift,
         )
 
 
