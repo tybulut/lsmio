@@ -253,7 +253,7 @@ class EpocppPlanTest(unittest.TestCase):
         f_expected = {
             "local": [(1, 1, 1)],
             "bake": [(1, 1, 1), (2, 1, 2), (4, 1, 4), (8, 1, 8)],
-            "small": [(f_n, 1, f_n) for f_n in (2, 4, 8, 16, 24, 32, 40, 48)],
+            "small": [(f_n, 1, f_n) for f_n in (1, 2, 4, 8, 16, 24, 32, 40, 48)],
             "large": [(4 * f_n, 4, f_n) for f_n in (8, 16, 32, 48, 64)],
         }
         for f_scale, f_points in f_expected.items():
@@ -274,14 +274,22 @@ class EpocppPlanTest(unittest.TestCase):
         def _hours(f_plan) -> List[str]:
             return [f_p.walltime for f_p in f_plan.scheduled_points]
 
-        self.assertEqual(_hours(self._plan("small")), ["12:00:00"] * 8)
+        # A 1-node small-deck point runs about twice as long as 2 nodes: 22 hours
+        self.assertEqual(
+            _hours(self._plan("small")), ["22:00:00"] + ["12:00:00"] * 8
+        )
+        # The test scales keep 12 hours at 1 node too
         self.assertEqual(_hours(self._plan("bake")), ["12:00:00"] * 4)
+        self.assertEqual(_hours(self._plan("local")), ["12:00:00"])
+        self.assertEqual(_hours(self._plan("bake", f_fast=True)), ["06:00:00"] * 4)
         self.assertEqual(
             _hours(self._plan("large")),
             ["12:00:00", "12:00:00", "16:00:00", "20:00:00", "36:00:00"],
         )
         # --fast halves them
-        self.assertEqual(_hours(self._plan("small", f_fast=True)), ["06:00:00"] * 8)
+        self.assertEqual(
+            _hours(self._plan("small", f_fast=True)), ["11:00:00"] + ["06:00:00"] * 8
+        )
         self.assertEqual(
             _hours(self._plan("large", f_fast=True)),
             ["06:00:00", "06:00:00", "08:00:00", "10:00:00", "18:00:00"],
@@ -328,6 +336,8 @@ class EpocppPlanTest(unittest.TestCase):
             {f_q for _, _, f_q in _qos("large", f_fast=True)}, {"standard"}
         )
         self.assertEqual({f_q for _, _, f_q in _qos("small")}, {"standard"})
+        # The small 1-node point's 22 hours stay clear of 'standard''s 24
+        self.assertEqual(_qos("small")[0], (1, "22:00:00", "standard"))
 
     def testFixedWalltimeSite(self) -> None:
         # ISAMBARD's PBS template walltime is per arm: 9 arms x 6 h, capped at 48 h
@@ -386,14 +396,20 @@ class EpocppPlanTest(unittest.TestCase):
         self.assertEqual(f_plan.request.nodes, (8, 64))
         self.assertIsNone(self._plan("small").request.nodes)
         self.assertEqual(
-            _nodes(self._plan("small", f_nodes=[48, 40, 32, 24, 16, 8, 4, 2])),
+            _nodes(self._plan("small", f_nodes=[48, 40, 32, 24, 16, 8, 4, 2, 1])),
             _nodes(self._plan("small")),
+        )
+        # The 1-node point alone keeps its 22 hours
+        f_plan = self._plan("small", f_nodes=[1])
+        self.assertEqual(_nodes(f_plan), [1])
+        self.assertEqual(
+            [f_p.walltime for f_p in f_plan.scheduled_points], ["22:00:00"]
         )
         # Nodes the scale does not run, and bad values
         with self.assertRaisesRegex(
-            PlanValidationError, r"\[1\] are not in the 'small'"
+            PlanValidationError, r"\[3\] are not in the 'small'"
         ):
-            self._plan("small", f_nodes=[1])
+            self._plan("small", f_nodes=[3])
         with self.assertRaisesRegex(
             PlanValidationError, r"\[12\] are not in the 'large'"
         ):
@@ -649,6 +665,7 @@ class EpocppOrchestrationTest(unittest.TestCase):
         self.assertEqual(len(f_points), 4)
         f_scripts = self._submittedScripts(self.m_runner)
         self.assertEqual(len(f_scripts), len(f_points))
+        # bake is a test scale: 12 hours at every point, 1 node included
         for f_script in f_scripts:
             self.assertIn("#SBATCH --time=12:00:00", f_script)
             f_tail = f_script.strip().splitlines()[-1]

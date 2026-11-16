@@ -145,7 +145,7 @@ Arguments:
                 wall-time arm (epocpp-<backend>) and its bandwidth arm
                 (epocpp-<backend>-bw, epocpp --io-benchmark -m), each over the 6 Lustre
                 combinations with --repeats runs. The scales run the recommended 2D
-                two-stream decks: small (128x128) for local, bake and small (2-48
+                two-stream decks: small (128x128) for local, bake and small (1-48
                 nodes),
                 large (1024x1024) for large (8-64 nodes). Archived to
                 <benchmark_root>/lsmio-archive/epocpp/<scale>/outputs-<arm>/<nodes>.
@@ -179,9 +179,12 @@ Options:
                 (arms: backends or IOR setups). Ignored on a site with a fixed walltime (PBS
                 job templates, e.g. isambard), which gives each job that walltime once per arm,
                 capped at 48 hours.
-                An epocpp point gets 12 hours on the small deck, and on the large deck
+                An epocpp point gets 12 hours on the small deck (22 at the small
+                scale's 1 node, which runs about twice as long as 2 nodes; local and
+                bake keep 12), and on the large deck
                 12 hours at 8 and 16 nodes, 16 at 32, 20 at 48 and 36 at 64 (over 24
-                hours: QoS 'long' on ARCHER2), for the default 10 repeats.
+                hours: QoS 'long' on ARCHER2), for the default 10 repeats. A --time
+                given by hand applies to every point, the slowest 1-node point too.
   --repeats <n> Runs of each epocpp arm per combination (default 10); the reports take
                 the Max() of bandwidth and the Min() of EPOCpp's Runtime over them.
   --nodes <list> Only these node counts of the scale, comma-separated (e.g. 32 or
