@@ -382,6 +382,14 @@ sys.exit(0)
             self.assertIn("--lsmio-ts", f_argv)
             self.assertIn("--lsmio-bs", f_argv)
             self.assertIn("--key-count", f_argv)
+            # One record (key + value) is one block, and key count x record is 2 GiB
+            self.assertNotIn("--value-size", f_argv)
+            f_record_size = int(f_argv[f_argv.index("--record-size") + 1])
+            f_key_count = int(f_argv[f_argv.index("--key-count") + 1])
+            self.assertEqual(
+                f_record_size, int(f_argv[f_argv.index("--lsmio-bs") + 1])
+            )
+            self.assertEqual(f_key_count * f_record_size, 2 * 1024**3)
             f_result_paths.append(f_rank_res_path)
 
             # e) Output database was written to the combination's data dir (argv)

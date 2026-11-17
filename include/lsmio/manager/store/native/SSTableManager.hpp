@@ -49,9 +49,11 @@ class SSTableManager {
     static constexpr uint32_t FOOTER_MAGIC = 0x4C534D49;
 
     // Size of the speculative single-pass pread buffer in readValueAt(). Sized
-    // with headroom over the current benchmark default (8 + 16-byte key +
-    // 65535-byte value = 65559 B) so the common case never falls back to a
-    // second pread (BUG-3). It is a fixed constant, not a config-derived
+    // with headroom over the benchmark's default 64 KiB record (8 bytes of
+    // framing + 65536-byte key and value = 65544 B) so that record size never
+    // falls back to a second pread (BUG-3). Records of 1 MiB and 8 MiB
+    // (`lsmiotool run lsmio` at those block sizes) always take the two-pread
+    // path. It is a fixed constant, not a config-derived
     // value: LSMIOConfig::getMaxValueLen() is a write-buffer capacity ceiling
     // (~127 MB by default), not a record-size estimate, and would be
     // actively wrong to use here. Any record whose framing + key + value

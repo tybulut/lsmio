@@ -33,8 +33,8 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `-o, --output-file` | `<path>` | *Required* | Output file path for database storage and benchmark files. |
 | `-d, --output-dir` | `<path>` | `""` | Base directory for storing benchmark artifacts and SSTables. |
 | `-i, --iterations` | `<int>` | `1` | Number of write and read iterations to execute. |
-| `-k, --key-count` | `<int>` | `1024` | Total number of keys per benchmark iteration. |
-| `-z, --value-size` | `<int>` | `64K` (65536) | Size in bytes for each key's payload value. |
+| `-k, --key-count` | `<int>` | `4096` | Total number of keys per benchmark iteration. |
+| `-z, --record-size` | `<int>` | `65536` | Size in bytes of one record: a key and its value. Each value gets the bytes its key leaves, so every record is exactly this size, and the reported bandwidth is this size times the key count. The minimum is the longest key plus the longest value header (20 bytes for 16 keys). `lsmiotool run lsmio` sets it to the block size. |
 | `-s, --segment-count` | `<int>` | `1024` | Segment count for key partitioning. |
 | `-v, --verbose` | None | `false` | Enable verbose informational logging to standard output. |
 | `-g, --debug` | None | `false` | Enable verbose debugging diagnostics. |
@@ -98,7 +98,7 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 - **Weak Scaling**:
   - The workload per process/rank remains constant (e.g., $N$ keys per process), while total ranks scale from 1 to 256.
   - Total data size increases linearly with the rank count:
-    $$\text{Data}_{\text{total}} = N_{\text{ranks}} \times N_{\text{keys}} \times \text{Size}_{\text{value}}$$
+    $$\text{Data}_{\text{total}} = N_{\text{ranks}} \times N_{\text{keys}} \times \text{Size}_{\text{record}}$$
   - Weak scaling evaluates how effectively the parallel filesystem (e.g., Lustre Object Storage Targets / OSTs) and LSMIO's per-rank aggregation directory structures accommodate aggregate I/O bandwidth without metadata bottlenecks.
 - **Strong Scaling**:
   - The total dataset size is fixed (e.g., 100 GiB total across all ranks), and the rank count increases.
@@ -162,7 +162,7 @@ BENCHMARK PARAMETERS:
   fileName: /tmp/lsmio-native.db
   iterations: 5
   keyCount: 2048
-  valueSize: 65536
+  recordSize: 65536
   enableMMAP: true
   enablePread: false
   footerIndex: true
@@ -181,7 +181,8 @@ Bench-READ: native
 
 ### Calculation Formulas
 - **Data Transferred (Bytes)**:
-  $$\text{Bytes} = N_{\text{keys}} \times \text{Size}_{\text{value}} \times (\text{MPI Size if enabled})$$
+  $$\text{Bytes} = N_{\text{keys}} \times \text{Size}_{\text{record}} \times (\text{MPI Size if enabled})$$
+  where $\text{Size}_{\text{record}}$ is `--record-size`, the bytes of one key and its value.
 - **Throughput (MB/s)**:
   $$\text{Throughput} = \frac{\text{Bytes}}{\text{Duration (seconds)} \times 10^6}$$
 - **IOPS (Operations/sec)**:

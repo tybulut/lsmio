@@ -76,7 +76,7 @@ class LsmioAdapterTest(unittest.TestCase):
             f_block_size="8M",
             f_stripe_count=16,
             f_block_bytes=8388608,
-            f_key_count=1024,
+            f_key_count=256,
             f_segment_count=128,
         )
         self.m_combo_1m = Combination(
@@ -84,7 +84,7 @@ class LsmioAdapterTest(unittest.TestCase):
             f_block_size="1M",
             f_stripe_count=16,
             f_block_bytes=1048576,
-            f_key_count=4096,
+            f_key_count=2048,
             f_segment_count=1024,
         )
         self.m_combo_64k = Combination(
@@ -135,8 +135,8 @@ class LsmioAdapterTest(unittest.TestCase):
         }
         f_block_params = {
             "64K": ("65536", "32768"),
-            "1M": ("1048576", "4096"),
-            "8M": ("8388608", "1024"),
+            "1M": ("1048576", "2048"),
+            "8M": ("8388608", "256"),
         }
 
         f_tested_count = 0
@@ -191,6 +191,8 @@ class LsmioAdapterTest(unittest.TestCase):
                         f_bsb,
                         "--key-count",
                         f_sg,
+                        "--record-size",
+                        f_bsb,
                     ]
                 )
 
@@ -597,8 +599,13 @@ class LsmioAdapterTest(unittest.TestCase):
             RunPlanner.ALLOWED_SETUPS["lsmio"], set(LsmioAdapter.ALLOWED_SETUPS)
         )
         self.assertEqual(LsmioAdapter.getBlockParameters("64K"), (65536, 32768))
-        self.assertEqual(LsmioAdapter.getBlockParameters("1M"), (1048576, 4096))
-        self.assertEqual(LsmioAdapter.getBlockParameters("8M"), (8388608, 1024))
+        self.assertEqual(LsmioAdapter.getBlockParameters("1M"), (1048576, 2048))
+        self.assertEqual(LsmioAdapter.getBlockParameters("8M"), (8388608, 256))
+        for f_block_bytes, f_key_count in LsmioAdapter.BLOCK_SIZE_MAP.values():
+            self.assertEqual(
+                f_block_bytes * f_key_count, LsmioAdapter.PAYLOAD_BYTES_PER_RANK
+            )
+        self.assertEqual(LsmioAdapter.PAYLOAD_BYTES_PER_RANK, 2 * 1024**3)
         self.assertEqual(LsmioAdapter.getExecutableName("NATIVE"), "bm_native")
         self.assertEqual(LsmioAdapter.getExecutableName("ADIOS"), "bm_adios")
         self.assertEqual(LsmioAdapter.getExecutableName("PLUGIN"), "bm_adios")
@@ -960,7 +967,9 @@ class LsmioAdapterTest(unittest.TestCase):
                     "--lsmio-bs",
                     "8388608",
                     "--key-count",
-                    "1024",
+                    "256",
+                    "--record-size",
+                    "8388608",
                 ),
             )
 
@@ -988,7 +997,9 @@ class LsmioAdapterTest(unittest.TestCase):
                     "--lsmio-bs",
                     "8388608",
                     "--key-count",
-                    "1024",
+                    "256",
+                    "--record-size",
+                    "8388608",
                 ),
             )
 

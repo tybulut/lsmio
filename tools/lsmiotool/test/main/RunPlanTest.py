@@ -36,6 +36,7 @@ import unittest
 from unittest.mock import patch
 
 from lsmiotool.lib.arms import DEFAULT_LSMIO_BACKENDS
+from lsmiotool.lib.benchmarks import LsmioAdapter
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.run import (
     Combination,
@@ -83,12 +84,12 @@ class RunPlanTest(unittest.TestCase):
     def testAllValidCombinationsAndScalePoints(self) -> None:
         """Assert the exact 6 combinations in bmtool order (rf 4 16; bs 1M 64K 8M) and 4 scale matrices."""
         f_expected_combos = (
-            (4, "1M", 4, 1048576, 4096, 1024),
+            (4, "1M", 4, 1048576, 2048, 1024),
             (4, "64K", 4, 65536, 32768, 16384),
-            (4, "8M", 4, 8388608, 1024, 128),
-            (16, "1M", 16, 1048576, 4096, 1024),
+            (4, "8M", 4, 8388608, 256, 128),
+            (16, "1M", 16, 1048576, 2048, 1024),
             (16, "64K", 16, 65536, 32768, 16384),
-            (16, "8M", 16, 8388608, 1024, 128),
+            (16, "8M", 16, 8388608, 256, 128),
         )
 
         self.assertEqual(len(RunPlanner.ORDERED_COMBINATIONS), 6)
@@ -100,6 +101,13 @@ class RunPlanTest(unittest.TestCase):
             self.assertEqual(f_c.block_bytes, f_expected[3])
             self.assertEqual(f_c.key_count, f_expected[4])
             self.assertEqual(f_c.segment_count, f_expected[5])
+            # The LSMIO record size is the block size: every combination is 2 GiB per rank,
+            # and the plan agrees with the table the command line is built from.
+            self.assertEqual(f_c.block_bytes * f_c.key_count, 2 * 1024**3)
+            self.assertEqual(
+                LsmioAdapter.getBlockParameters(f_c.block_size),
+                (f_c.block_bytes, f_c.key_count),
+            )
 
         # Scale matrix for local
         self.assertEqual(

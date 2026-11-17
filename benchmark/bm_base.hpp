@@ -49,7 +49,9 @@ enum BMExitStatus : int {
 
 class BMBase {
   protected:
-    const std::string _keyPrefix = "benchmark:";
+    inline static const std::string _keyPrefix = "benchmark:";
+    /// Keys are the prefix and the key index, zero-padded to this many digits.
+    static constexpr int KEY_INDEX_MIN_DIGITS = 6;
 
     std::string _lsmioBMPath = "";
 
@@ -66,6 +68,12 @@ class BMBase {
     static int mpiRank;
 
     std::string genDBPath(bool opt1, bool opt2);
+
+    /// The key of the record with this key index.
+    static std::string makeKey(int keyIndex);
+    /// The value of the count-th record: its header ("<count>::") and filler, sized so that
+    /// the key (keyLen bytes) and the value together are gConfigBM.recordSize bytes.
+    static std::string makeValue(int count, size_t keyLen);
 
     int benchRead(long long *duration);
     int benchWrite(long long *duration);
@@ -94,6 +102,10 @@ class BMBase {
 
     static int beginMain(int argc, char **argv);
     static int endMain();
+
+    /// The smallest record size that holds the longest key and value header of keyCount
+    /// records.
+    static int minRecordSize(int keyCount);
 };
 
 class BMConfig {
@@ -113,7 +125,8 @@ class BMConfig {
     int segmentCount = 1024;  // TODO
 
     int keyCount = 4096;
-    int valueSize = 65535;
+    /// Bytes of one record: a key and its value. The value takes what the key leaves.
+    int recordSize = 65536;
 };
 
 std::string genOptionsToString();

@@ -1451,7 +1451,7 @@ class RunPlanner:
             f_block_size="1M",
             f_stripe_count=4,
             f_block_bytes=1048576,
-            f_key_count=4096,
+            f_key_count=2048,
             f_segment_count=1024,
         ),
         Combination(
@@ -1467,7 +1467,7 @@ class RunPlanner:
             f_block_size="8M",
             f_stripe_count=4,
             f_block_bytes=8388608,
-            f_key_count=1024,
+            f_key_count=256,
             f_segment_count=128,
         ),
         Combination(
@@ -1475,7 +1475,7 @@ class RunPlanner:
             f_block_size="1M",
             f_stripe_count=16,
             f_block_bytes=1048576,
-            f_key_count=4096,
+            f_key_count=2048,
             f_segment_count=1024,
         ),
         Combination(
@@ -1491,7 +1491,7 @@ class RunPlanner:
             f_block_size="8M",
             f_stripe_count=16,
             f_block_bytes=8388608,
-            f_key_count=1024,
+            f_key_count=256,
             f_segment_count=128,
         ),
     )
