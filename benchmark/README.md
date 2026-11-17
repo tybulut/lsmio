@@ -40,9 +40,10 @@ Benchmark executables share a common CLI foundation based on `CLI11` via `BMBase
 | `-g, --debug` | None | `false` | Enable verbose debugging diagnostics. |
 | `-e, --sync` | None | `false` | Enforce synchronous I/O operations (`O_SYNC` / `fsync`) after writes. |
 | `-l, --loop-all` | None | `false` | Iterate across all built-in configuration option variations. |
-| `-m, --mpi-barrier` | None | `false` | Synchronize ranks via `MPI_Barrier` before starting and stopping benchmarks. |
+| `-m, --mpi-barrier` | None | `false` | Synchronize ranks via `MPI_Barrier` around every phase of an iteration: before and after the open, after the close and after the delete, on the write side and on the read side (see [Section 5.1](#51-phase-timeline)). |
 | `-c, --collective-io` | None | `false` | Enable MPI collective I/O operations across ranks. |
 | `-w, --mpi-io-world` | None | `false` | Use global `MPI_COMM_WORLD` for collective I/O rather than host-level rank groupings. |
+| `--per-rank-path` | None | `false` | Gives every MPI world rank its own store path: the `-o`/`-d` path with the suffix `.mpirank<w>` (`<w>` is the world rank). Refused without `-m`, and refused with `-c`. Needed by `--read-shift`, which wants one store per rank. |
 
 ### 2.2 Storage Backend Selection Flags
 
@@ -189,3 +190,49 @@ Bench-READ: native
   $$\text{IOPS} = \frac{N_{\text{keys}}}{\text{Duration (seconds)}}$$
 - **Statistical Summaries**:
   When running multiple iterations (`-i > 1`), `BMBase` outputs minimum, maximum, and mean throughput across all iterations for write and read phases.
+
+The `Duration`, `Throughput` and `IOPS` rows above (and the `iwrite,` / `iread,` rows of each iteration) are the *legacy window*: from the moment the store is open (after the barrier that follows the open) until the exit of the barrier that follows the close. They are unchanged by the phase timeline below, so older archives stay comparable.
+
+### 5.1 Phase timeline
+
+Every iteration has a write side and a read side, and each side records five boundaries, in this order:
+
+| Boundary | Captured | Barrier before it (with `-m`) |
+| :--- | :--- | :--- |
+| `beforeOpen` | right after the barrier that precedes the store open | yes |
+| `afterOpen` | after the store is open (the legacy timer starts here) | yes |
+| `beforeClose` | after the last put or get, before the engine's finalize step (`doWriteFinalize` / `doReadFinalize`; for RocksDB the flush and the close) | no |
+| `afterClose` | after the finalize step (the legacy timer stops here) | yes |
+| `afterDelete` | after the engine's cleanup hook (`writeCleanup` / `readCleanup`) | yes |
+
+Without `-m` no barrier runs, and without MPI (as in `micro.sh`) nothing is reduced over ranks either (with `-c` and no `-m` the offsets are still reduced, without barriers); the rows are printed in every case. The `beforeClose` boundary has no barrier on purpose, so the close of the slowest rank is not hidden inside the window before it. LSM engines delete the previous iteration's store when the writer opens, so the `open` window of a write side includes that delete; ADIOS2 truncates instead (inferred, not read from the ADIOS2 sources).
+
+Each boundary is stored as an offset in microseconds from the writer's `beforeOpen` barrier exit of the same iteration (that offset is `0`), on a monotonic clock. Under MPI the offsets are reduced with `MAX` over all ranks once per iteration, after every capture of both sides, so every rank that prints results prints the same values, and the reduction sits inside no timed window.
+
+The results carry one `Phases:` block per benchmark suite (one per `-l` variation, named with the same prefix as its `Bench-WRITE:` and `Bench-READ:` blocks). The blocks come after all `Bench-READ:` blocks, are printed by the same ranks as the legacy results, and look like this (illustrative values):
+
+```text
+Phases: native
+phase,write,0,134217728,0,2210,81432,95310,97105
+phase,read,0,134217728,99020,99804,131550,133900,134020
+```
+
+The columns are `phase,<write|read>,<iteration>,<bytes>,<beforeOpen>,<afterOpen>,<beforeClose>,<afterClose>,<afterDelete>`. `<bytes>` is the world-total payload of one side (`keyCount x recordSize x` MPI world size) as an integer. A side that failed on any rank has no row, as it has no `iwrite,` or `iread,` row; a failed write skips the read side of that iteration, and the suite stops at its first failed iteration. A suite always prints its `Phases:` line, even with no rows.
+
+`lsmiotool` turns these rows into `lsm-phase-report.csv`; see the [Tools & Orchestration Guide](../tools/README.md#lsm-phase-reportcsv).
+
+### 5.2 Header lines
+
+The `BENCHMARK PARAMETERS:` block gained these lines:
+
+| Line | Printed | Meaning |
+| :--- | :--- | :--- |
+| `perRankPath` | always | `1` with `--per-rank-path`, else `0`. |
+| `rocksdbVersion` | `bm_rocksdb` | RocksDB `major.minor.patch` the benchmark was compiled against. |
+| `leveldbVersion` | `bm_leveldb` | LevelDB `major.minor` (its header has no patch level). |
+
+---
+
+## 8. Reading arm names
+
+- A `-sync` arm of `lsmiotool run lsmio backends` (`rocksdb-sync`, `leveldb-sync`, `native-sync`, `adios-sync`, `plugin-sync`) runs its benchmark with `--lsmio-always-flush`. It is not `-e/--sync`, and it has nothing to do with `fsync`: it disables write batching so each record is accessible at once.

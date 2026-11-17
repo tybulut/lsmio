@@ -35,6 +35,8 @@
 #include <filesystem>
 #include <iostream>
 #include <lsmio/manager/store/store_ldb.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace {
 struct BatchClearGuard {
@@ -106,15 +108,9 @@ LSMIOStoreLDB::LSMIOStoreLDB(const std::string& dbPath, const bool overWrite)
         LOG(INFO) << "LSMIOStoreLDB::LSMIOStoreLDB: Successfully created the database."
                   << std::endl;
     } else {
-        LOG(FATAL) << status.ToString() << std::endl;
+        LOG(ERROR) << status.ToString() << std::endl;
         throw std::invalid_argument(
             "ERROR: LSMIOStoreLDB::LSMIOStoreLDB:  Failed to open database.");
-    }
-
-    if (_db == nullptr) {
-        LOG(FATAL) << "LSMIOStoreLDB::LSMIOStoreLDB: Failed to create the database." << std::endl;
-        throw std::invalid_argument(
-            "ERROR: LSMIOStoreLDB::LSMIOStoreLDB: Failed to create database.");
     }
 }
 
@@ -188,6 +184,11 @@ bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::str
 
         return flushed && s.ok();
     } else {
+        // Reject before any counter, pending write or batch state changes (as the direct path does)
+        if (mType != MutationType::Put && mType != MutationType::Del) {
+            throw std::invalid_argument("ERROR: LSMIOStoreLDB:::_batchMutation: Unknown mutation.");
+        }
+
         std::lock_guard<std::mutex> lg(_batchMutex);
 
         const unsigned int futureSize = _batchSize + 1;
@@ -209,7 +210,7 @@ bool LSMIOStoreLDB::_mutate(MutationType mType, const std::string& key, std::str
                   << std::endl;
         if (mType == MutationType::Put) {
             _batch.Put(key, leveldb::Slice(value.data(), value.size()));
-        } else if (mType == MutationType::Del) {
+        } else {  // Del, the only other type accepted above
             _batch.Delete(key);
         }
 
@@ -261,7 +262,7 @@ bool LSMIOStoreLDB::dbCleanup() {
 
     s = leveldb::DestroyDB(_dbPath, _options);
     if (!s.ok()) {
-        LOG(FATAL) << s.ToString() << std::endl;
+        LOG(ERROR) << s.ToString() << std::endl;
         throw std::invalid_argument("ERROR: LSMIOStoreLDB:::overWrite: Failed to remove database.");
     }
 

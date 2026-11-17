@@ -6,7 +6,8 @@ cd $HOME/src/packages/23-rocksdb
 git clone https://github.com/facebook/rocksdb.git
 
 cd rocksdb
-git checkout v10.6.2
+# 9.11.2 is pinned to match the packaged RocksDB build (librocksdb9.11 9.11.2-1)
+git checkout v9.11.2 || exit 1
 git submodule update --init
 cd ..
 

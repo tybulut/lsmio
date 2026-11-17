@@ -1,2 +1,1 @@
-- Code coverage
 - Minor bug fixes

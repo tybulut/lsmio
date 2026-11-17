@@ -40,6 +40,8 @@
 #include <filesystem>
 #include <iostream>
 #include <lsmio/manager/store/store_rdb.hpp>
+#include <stdexcept>
+#include <string>
 
 namespace lsmio {
 
@@ -51,8 +53,16 @@ static std::unordered_map<std::string, rocksdb::OptionTypeInfo> stringappend_mer
 };
 }
 
-LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
-    : LSMIOStore(dbPath, overWrite) {
+LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite,
+                             const bool f_read_only)
+    : LSMIOStore(dbPath, overWrite), m_read_only(f_read_only) {
+    if (overWrite && f_read_only) {
+        LOG(ERROR) << "LSMIOStoreRDB::LSMIOStoreRDB: overWrite and readOnly cannot be combined."
+                   << std::endl;
+        throw std::invalid_argument(
+            "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: overWrite and readOnly cannot be combined.");
+    }
+
     rocksdb::Status status;
     rocksdb::BlockBasedTableOptions tableOptions;
 
@@ -128,20 +138,19 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite)
     }
 
     LOG(INFO) << "LSMIOStoreRDB::LSMIOStoreRDB: Creating the database: " << _dbPath << std::endl;
-    status = rocksdb::DB::Open(_options, _dbPath, &_db);
+    if (m_read_only) {
+        // error_if_wal_file_exists stays false: a WAL from --lsmio-wal is replayed in memory
+        status = rocksdb::DB::OpenForReadOnly(_options, _dbPath, &_db);
+    } else {
+        status = rocksdb::DB::Open(_options, _dbPath, &_db);
+    }
     if (status.ok()) {
         LOG(INFO) << "LSMIOStoreRDB::LSMIOStoreRDB: Successfully created the database."
                   << std::endl;
     } else {
-        LOG(FATAL) << status.ToString() << std::endl;
+        LOG(ERROR) << status.ToString() << std::endl;
         throw std::invalid_argument(
             "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: Failed to open database.");
-    }
-
-    if (_db == nullptr) {
-        LOG(FATAL) << "LSMIOStoreRDB::LSMIOStoreRDB: Failed to create the database." << std::endl;
-        throw std::invalid_argument(
-            "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: Failed to create database.");
     }
 }
 
@@ -200,6 +209,10 @@ bool LSMIOStoreRDB::_mutate(MutationType mType, const std::string& key, std::str
     rocksdb::Status s;
     bool retValue;
 
+    if (m_read_only) {
+        return false;
+    }
+
     const unsigned int futureSize = _batchSize + 1;
     const unsigned int futureBytes = _batchBytes + value.size();
 
@@ -243,7 +256,7 @@ bool LSMIOStoreRDB::dbCleanup() {
 
     s = rocksdb::DestroyDB(_dbPath, _options);
     if (!s.ok()) {
-        LOG(FATAL) << s.ToString() << std::endl;
+        LOG(ERROR) << s.ToString() << std::endl;
         throw std::invalid_argument("ERROR: LSMIOStoreRDB:::overWrite: Failed to remove database.");
     }
 
@@ -259,6 +272,10 @@ bool LSMIOStoreRDB::readBarrier() {
 bool LSMIOStoreRDB::writeBarrier() {
     rocksdb::Status s;
     rocksdb::FlushOptions fOptions;
+
+    if (m_read_only) {
+        return true;
+    }
 
     LOG(INFO) << "LSMIOStoreRDB::writeBarrier: " << std::endl;
     s = _db->Flush(fOptions);

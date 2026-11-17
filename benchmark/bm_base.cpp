@@ -40,10 +40,11 @@
 #include <iostream>
 #include <lsmio/Version.hpp>
 #include <lsmio/lsmio.hpp>
-#include <numeric>
-#include <random>
 #include <stdexcept>
 #include <vector>
+
+#include "KeyPermutation.hpp"
+#include "PhaseTimeline.hpp"
 
 BMConfig gConfigBM;
 
@@ -58,6 +59,9 @@ BMBase::BMBase() {
         _lsmioBMPath = gConfigBM.fileName;
     } else {
         _lsmioBMPath = gConfigBM.dirName + "/" + gConfigBM.fileName;
+    }
+    if (gConfigBM.perRankPath) {
+        _lsmioBMPath += ".mpirank" + std::to_string(mpiWorldRank);
     }
 
     LOG(WARNING) << "BMBase _lsmioBMPath: " << _lsmioBMPath
@@ -78,6 +82,23 @@ int BMBase::minRecordSize(int keyCount) {
 
 std::string BMBase::genDBPath(bool opt1, bool opt2) {
     return _lsmioBMPath + ":" + std::to_string(opt1) + ":" + std::to_string(opt2);
+}
+
+std::string BMBase::engineHeaderLines() const {
+    return "";
+}
+
+void BMBase::beginPhaseTimeline() {
+    m_phase_origin = std::chrono::steady_clock::now();
+    m_phases.offset_us[static_cast<int>(PhaseSide::Write)]
+                      [static_cast<int>(PhaseBoundary::BeforeOpen)] = 0;
+}
+
+void BMBase::capturePhase(PhaseSide f_side, PhaseBoundary f_boundary) {
+    m_phases.offset_us[static_cast<int>(f_side)][static_cast<int>(f_boundary)] =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                              m_phase_origin)
+            .count();
 }
 
 bool BMBase::doReadFinalize() {
@@ -103,6 +124,8 @@ int BMBase::benchWrite(long long *duration) {
         MPI_Barrier(MPI_COMM_WORLD);
     }
     _bm.start();
+    capturePhase(PhaseSide::Write, PhaseBoundary::AfterOpen);
+    pRandomKeyIndex = m_put_keys.data();
 
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
@@ -114,11 +137,13 @@ int BMBase::benchWrite(long long *duration) {
             break;
         }
     }
+    capturePhase(PhaseSide::Write, PhaseBoundary::BeforeClose);
     doWriteFinalize();
 
     if (gConfigBM.useMPIBarrier) {
         MPI_Barrier(MPI_COMM_WORLD);
     }
+    capturePhase(PhaseSide::Write, PhaseBoundary::AfterClose);
     _bm.stop();
 
     *duration = _bm.duration();
@@ -133,6 +158,8 @@ int BMBase::benchRead(long long *duration) {
         MPI_Barrier(MPI_COMM_WORLD);
     }
     _bm.start();
+    capturePhase(PhaseSide::Read, PhaseBoundary::AfterOpen);
+    pRandomKeyIndex = m_get_keys.data();
 
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
@@ -145,11 +172,13 @@ int BMBase::benchRead(long long *duration) {
             break;
         }
     }
+    capturePhase(PhaseSide::Read, PhaseBoundary::BeforeClose);
     doReadFinalize();
 
     if (gConfigBM.useMPIBarrier) {
         MPI_Barrier(MPI_COMM_WORLD);
     }
+    capturePhase(PhaseSide::Read, PhaseBoundary::AfterClose);
     _bm.stop();
 
     *duration = _bm.duration();
@@ -160,22 +189,37 @@ int BMBase::benchIteration(int iteration, bool opt) {
     int exitCode = lsmio::BM_SUCCESS;
     long long duration = 0;
 
-    // RAII Permutation Container: eliminates heap leak
-    std::vector<int> randomKeyIndices(gConfigBM.keyCount);
-    std::iota(randomKeyIndices.begin(), randomKeyIndices.end(), 0);
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(randomKeyIndices.begin(), randomKeyIndices.end(), g);
-    pRandomKeyIndex = randomKeyIndices.data();
+    const bool barrier = gConfigBM.useMPIBarrier;
+    constexpr int kWrite = static_cast<int>(PhaseSide::Write);
+    constexpr int kRead = static_cast<int>(PhaseSide::Read);
+
+    // Untimed setup before any window: the timeline record and both key orders (INV-13). The
+    // writer's order is its own; the reader's is its source writer's (itself without read shift).
+    m_phases = IterationPhases();
+    m_phases.iteration = iteration;
+    // Promote to double before the product: keyCount * recordSize * ranks overflows int (NB-R-P3).
+    m_phases.bytes = static_cast<double>(gConfigBM.keyCount) * gConfigBM.recordSize *
+                     (useMPI ? static_cast<double>(mpiWorldSize) : 1.0);
+    m_put_keys = keyPermutation(useMPI ? mpiWorldRank : 0, iteration, gConfigBM.keyCount);
+    m_get_keys = keyPermutation(useMPI ? mpiWorldRank : 0, iteration, gConfigBM.keyCount);
+
+    // The filler is built before the write phase.
     _filler = makeFiller();
 
-    // Every record is exactly recordSize bytes of key and value
+    // The legacy rows keep their bytes (times mpiSize); a record is exactly recordSize bytes of
+    // key and value.
     double bytes = (double)gConfigBM.keyCount * gConfigBM.recordSize;
     if (useMPI) bytes *= mpiSize;
 
     // --- WRITE PHASE ---
+    if (barrier) MPI_Barrier(MPI_COMM_WORLD);
+    beginPhaseTimeline();
     writePrepare(opt);
     int writeStatus = benchWrite(&duration);
+    writeCleanup();
+    if (barrier) MPI_Barrier(MPI_COMM_WORLD);
+    capturePhase(PhaseSide::Write, PhaseBoundary::AfterDelete);
+
     int localWriteFail = (writeStatus != 0) ? 1 : 0;
     int globalWriteFail = 0;
 
@@ -193,36 +237,49 @@ int BMBase::benchIteration(int iteration, bool opt) {
         // Tier 1 suppression: DO NOT call _bm.addIteration("iwrite")!
     } else {
         _bm.addIteration("iwrite", duration, bytes, gConfigBM.keyCount);
+        m_phases.side_recorded[kWrite] = true;
     }
-    writeCleanup();
 
     // Fail-Fast Check: If write phase failed, skip read phase entirely
-    if (globalWriteFail != 0) {
-        pRandomKeyIndex = nullptr;
-        return exitCode;
+    if (globalWriteFail == 0) {
+        // --- READ PHASE ---
+        if (barrier) MPI_Barrier(MPI_COMM_WORLD);
+        capturePhase(PhaseSide::Read, PhaseBoundary::BeforeOpen);
+        readPrepare(opt);
+        int readStatus = benchRead(&duration);
+        readCleanup();
+        if (barrier) MPI_Barrier(MPI_COMM_WORLD);
+        capturePhase(PhaseSide::Read, PhaseBoundary::AfterDelete);
+
+        int localReadFail = (readStatus != 0) ? 1 : 0;
+        int globalReadFail = 0;
+
+        if (useMPI) {
+            MPI_Allreduce(&localReadFail, &globalReadFail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        } else {
+            globalReadFail = localReadFail;
+        }
+
+        if (globalReadFail != 0) {
+            LOG(ERROR)
+                << "BMBase::benchIteration: benchRead failed on one or more ranks (localStatus: "
+                << readStatus << ")." << std::endl;
+            exitCode |= lsmio::BM_ERR_READ;
+            // Tier 1 suppression: DO NOT call _bm.addIteration("iread")!
+        } else {
+            _bm.addIteration("iread", duration, bytes, gConfigBM.keyCount);
+            m_phases.side_recorded[kRead] = true;
+        }
     }
 
-    // --- READ PHASE ---
-    readPrepare(opt);
-    int readStatus = benchRead(&duration);
-    int localReadFail = (readStatus != 0) ? 1 : 0;
-    int globalReadFail = 0;
-
+    // One reduction per iteration, failed ones included, after the last failure reduction and never
+    // between two captures of a side (INV-5). side_recorded derives from the reduced failure flags,
+    // so it is the same on every rank.
     if (useMPI) {
-        MPI_Allreduce(&localReadFail, &globalReadFail, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
-    } else {
-        globalReadFail = localReadFail;
+        MPI_Allreduce(MPI_IN_PLACE, &m_phases.offset_us[0][0], 10, MPI_INT64_T, MPI_MAX,
+                      MPI_COMM_WORLD);
     }
-
-    if (globalReadFail != 0) {
-        LOG(ERROR) << "BMBase::benchIteration: benchRead failed on one or more ranks (localStatus: "
-                   << readStatus << ")." << std::endl;
-        exitCode |= lsmio::BM_ERR_READ;
-        // Tier 1 suppression: DO NOT call _bm.addIteration("iread")!
-    } else {
-        _bm.addIteration("iread", duration, bytes, gConfigBM.keyCount);
-    }
-    readCleanup();
+    m_suite_phase_rows += formatPhaseRows(m_phases);
 
     pRandomKeyIndex = nullptr;
     return exitCode;
@@ -253,6 +310,10 @@ int BMBase::benchSuite(std::string bmPrefix, bool opt) {
     _benchResultsRead += "\nBench-READ: " + bmPrefix + "\n" + _bm.formatSummary("");
     _benchResultsRead += _bm.formatSummary("iread", "read");
 
+    // One phase block per suite, even without rows; it is printed after all READ blocks.
+    m_bench_results_phases += "\nPhases: " + bmPrefix + "\n" + m_suite_phase_rows;
+    m_suite_phase_rows.clear();
+
     _bm.clearIterations();
 
     return exitCode;
@@ -268,11 +329,11 @@ void BMBase::writeBenchmarkResults() {
     std::cout << "BENCHMARK PARAMETERS: \n\n"
               << (useMPI ? " MPI: Enabled\n" : "MPI: Disabled\n") << (useMPI ? " MPI Rank: " : "")
               << (useMPI ? std::to_string(mpiRank) : "") << (useMPI ? "\n" : "")
-              << genOptionsToString() << "\n"
+              << genOptionsToString() << engineHeaderLines() << "\n"
               << "BENCHMARK RESULTS: \n"
               << _benchResultsWrite << "\n"
               << _benchResultsRead << "\n"
-              << std::endl;
+              << m_bench_results_phases << std::endl;
 }
 
 std::string genOptionsToString() {
@@ -323,7 +384,8 @@ std::string genOptionsToString() {
               << "\n writeBufferNumber: " << lsmio::gConfigLSMIO.writeBufferNumber
               << "\n autoTuneParameters: "
               << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
-              << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false") << "\n";
+              << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
+              << "\n perRankPath: " << gConfigBM.perRankPath << "\n";
 
     return optStream.str();
 }
@@ -342,7 +404,8 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_flag("-v,--verbose", gConfigBM.verbose, "verbose mode (default: not-verbose)");
         app.add_flag("-g,--debug", gConfigBM.debug, "debug mode (default: no)");
         app.add_flag("-m,--mpi-barrier", gConfigBM.useMPIBarrier,
-                     "use mpi-barrier to start and stop the benchmark");
+                     "use mpi-barrier around every phase (before and after open, after close, "
+                     "after delete) of the write and read sides");
         app.add_flag("-c,--collective-io", gConfigBM.enableCollectiveIO,
                      "use collective-io while benchmarking");
         bool flag_mpi_io_world = false;
@@ -434,6 +497,10 @@ int BMBase::beginMain(int argc, char **argv) {
             lsmio::gConfigLSMIO.readOnly,
             "open store in read-only mode during read operations (default: true)");
 
+        app.add_flag("--per-rank-path", gConfigBM.perRankPath,
+                     "give every MPI rank its own store path, suffix .mpirank<N> (needs -m, "
+                     "refused with -c)");
+
         app.parse(argc, argv);
 
         lsmio::gConfigLSMIO.mpiAggType =
@@ -461,6 +528,13 @@ int BMBase::beginMain(int argc, char **argv) {
             throw std::runtime_error(
                 "ERROR: --lsmio-wbuffer is too small: it must exceed --lsmio-max-key plus 1M of "
                 "record overhead.");
+        }
+        // Argv-only refusals: every rank refuses identically before MPI starts.
+        if (gConfigBM.perRankPath && !gConfigBM.useMPIBarrier) {
+            throw std::runtime_error("--per-rank-path requires -m/--mpi-barrier.");
+        }
+        if (gConfigBM.perRankPath && gConfigBM.enableCollectiveIO) {
+            throw std::runtime_error("--per-rank-path cannot be combined with -c/--collective-io.");
         }
     } catch (const CLI::ParseError &e) {
         exit(app.exit(e));

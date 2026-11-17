@@ -125,6 +125,15 @@ When running extensive regression testing on a dedicated local HDD, update mount
 mount -o noatime,nodiratime /dev/sda2 /media/400GB
 ```
 
+### 2.6 Known Flaky Tests
+
+These tests can fail for reasons of the test host, not of the code under test. Rerun one alone with `./build.sh itest '^<name>$'` before treating its failure as a regression.
+
+| Test | Symptom | Cause |
+| :--- | :--- | :--- |
+| `LSMIOStoreNativeTest.StalledFlushKeepsInFlightAndQueuedMemtablesReadable` | Fails on every run with `filesystem error: cannot remove: Directory not empty` when the build tree is on NFS (seen on Viking2, where `/users` is NFS) | The test deletes the store directory (`std::filesystem::remove_all`) while the store still holds its one pooled file open. NFS keeps an open file that is deleted as a hidden `.nfsXXXX` file in the same directory until it is closed, so the directory cannot be removed. A build tree on a local disk or Lustre avoids it. |
+| `lsmioTest/pluginMPITests.ThreeRanks` | Times out (120 s) in a full `xtest` or `test` run, passes when run alone | Three MPI ranks (`--oversubscribe`) starved of CPU on a busy host, such as an HPC login node running the whole suite in parallel. |
+
 ---
 
 ## 3. Test Suite Breakdown & Fixtures

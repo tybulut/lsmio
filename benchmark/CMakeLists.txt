@@ -13,6 +13,10 @@ include(PackageGoogleLog)
 set(BASE_SOURCE_FILES
   bm_base.cpp
   bm_base.hpp
+  PhaseTimeline.cpp
+  PhaseTimeline.hpp
+  KeyPermutation.cpp
+  KeyPermutation.hpp
 )
 
 # Set up such that XCode organizes the files correctly

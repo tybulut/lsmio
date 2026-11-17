@@ -31,12 +31,18 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <lsmio/lsmio.hpp>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
+#include "KeyPermutation.hpp"
+#include "PhaseTimeline.hpp"
 #include "bm_base.hpp"
 
 class MockBM : public BMBase {
@@ -128,6 +134,23 @@ class MockBM : public BMBase {
     using BMBase::makeFiller;
     using BMBase::makeKey;
     using BMBase::makeValue;
+    const std::string &getBMPath() const {
+        return _lsmioBMPath;
+    }
+    std::string path(bool f_opt1, bool f_opt2) {
+        return genDBPath(f_opt1, f_opt2);
+    }
+    static void setWorldRank(int f_rank) {
+        mpiWorldRank = f_rank;
+    }
+    const std::string &getPhaseText() const {
+        return m_bench_results_phases;
+    }
+
+    std::string headerLines;  // returned by the engineHeaderLines hook
+    std::string engineHeaderLines() const override {
+        return headerLines;
+    }
 };
 
 class BMBaseTest : public ::testing::Test {
@@ -140,7 +163,33 @@ class BMBaseTest : public ::testing::Test {
         gConfigBM.fileName = "mock_test_db";
         gConfigBM.dirName = "";
     }
+
+    void TearDown() override {
+        gConfigBM = BMConfig();
+        MockBM::setWorldRank(0);
+    }
 };
+
+TEST_F(BMBaseTest, PerRankPathSuffix) {
+    MockBM::setWorldRank(5);
+    gConfigBM.perRankPath = true;
+    {
+        MockBM bm;
+        EXPECT_EQ(bm.getBMPath(), "mock_test_db.mpirank5");
+        EXPECT_EQ(bm.path(false, true), "mock_test_db.mpirank5:0:1");
+    }
+    gConfigBM.dirName = "some_dir";
+    {
+        MockBM bm;
+        EXPECT_EQ(bm.getBMPath(), "some_dir/mock_test_db.mpirank5");
+        EXPECT_EQ(bm.path(true, false), "some_dir/mock_test_db.mpirank5:1:0");
+    }
+    gConfigBM.perRankPath = false;
+    {
+        MockBM bm;
+        EXPECT_EQ(bm.getBMPath(), "some_dir/mock_test_db");
+    }
+}
 
 TEST_F(BMBaseTest, HappyPathSuccess) {
     MockBM bm;
@@ -349,6 +398,143 @@ TEST(BMBaseRecordSizeTest, ParameterHeaderPrintsRecordSize) {
     EXPECT_EQ(optStr.find("valueSize"), std::string::npos);
 }
 
+namespace {
+
+// The "phase," rows of a phase text as comma-split fields:
+// phase,<side>,<iteration>,<bytes>,<beforeOpen>,<afterOpen>,<beforeClose>,<afterClose>,<afterDelete>
+std::vector<std::vector<std::string>> phaseRows(const std::string &f_text) {
+    std::vector<std::vector<std::string>> rows;
+    std::istringstream lines(f_text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.rfind("phase,", 0) != 0) continue;
+        std::vector<std::string> fields;
+        std::istringstream cells(line);
+        std::string cell;
+        while (std::getline(cells, cell, ',')) fields.push_back(cell);
+        rows.push_back(fields);
+    }
+    return rows;
+}
+
+}  // namespace
+
+TEST_F(BMBaseTest, PhaseRowsOnSuccess) {
+    gConfigBM.iterations = 3;
+    MockBM bm;
+    ASSERT_EQ(bm.benchSuite("MockSuccess"), lsmio::BM_SUCCESS);
+
+    const std::string &text = bm.getPhaseText();
+    EXPECT_NE(text.find("Phases: MockSuccess\n"), std::string::npos);
+    std::vector<std::vector<std::string>> rows = phaseRows(text);
+    ASSERT_EQ(rows.size(), 6u);  // per iteration, write then read
+    for (int iter = 0; iter < 3; iter++) {
+        const std::vector<std::string> &w = rows[2 * iter];
+        const std::vector<std::string> &r = rows[2 * iter + 1];
+        ASSERT_EQ(w.size(), 9u);
+        ASSERT_EQ(r.size(), 9u);
+        EXPECT_EQ(w[1], "write");
+        EXPECT_EQ(r[1], "read");
+        EXPECT_EQ(w[2], std::to_string(iter));
+        EXPECT_EQ(r[2], std::to_string(iter));
+        EXPECT_EQ(w[3], std::to_string(16 * 64));  // keyCount * recordSize, no MPI
+        EXPECT_EQ(r[3], std::to_string(16 * 64));
+        long long wo[5], ro[5];
+        for (int b = 0; b < 5; b++) {
+            wo[b] = std::stoll(w[4 + b]);
+            ro[b] = std::stoll(r[4 + b]);
+        }
+        EXPECT_EQ(wo[0], 0);
+        for (int b = 1; b < 5; b++) {
+            EXPECT_LE(wo[b - 1], wo[b]);
+            EXPECT_LE(ro[b - 1], ro[b]);
+        }
+        EXPECT_GE(ro[0], wo[4]);
+    }
+}
+
+TEST_F(BMBaseTest, WriteFailureSuppressesBothPhaseRows) {
+    gConfigBM.iterations = 3;
+    MockBM bm;
+    bm.failWrite = true;
+    EXPECT_EQ(bm.benchSuite("MockWriteFail"), lsmio::BM_ERR_WRITE);
+
+    EXPECT_NE(bm.getPhaseText().find("Phases: MockWriteFail\n"), std::string::npos);
+    EXPECT_EQ(bm.getPhaseText().find("phase,write"), std::string::npos);
+    EXPECT_EQ(bm.getPhaseText().find("phase,read"), std::string::npos);
+    EXPECT_TRUE(phaseRows(bm.getPhaseText()).empty());
+    // The legacy write row is suppressed in the same way.
+    EXPECT_EQ(bm.getBenchResultsWrite().find("iwrite,"), std::string::npos);
+    EXPECT_EQ(bm.getRandomKeyIndex(), nullptr);
+}
+
+TEST_F(BMBaseTest, ReadFailureSuppressesReadPhaseRow) {
+    gConfigBM.iterations = 3;
+    MockBM bm;
+    bm.failRead = true;
+    EXPECT_EQ(bm.benchSuite("MockReadFail"), lsmio::BM_ERR_READ);
+
+    // The suite halts at the first failed iteration: one write row, no read row.
+    std::vector<std::vector<std::string>> rows = phaseRows(bm.getPhaseText());
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0][1], "write");
+    EXPECT_EQ(rows[0][2], "0");
+    EXPECT_EQ(bm.getPhaseText().find("phase,read"), std::string::npos);
+    // The legacy rows agree: the iwrite row exists, the iread row does not.
+    EXPECT_NE(bm.getBenchResultsWrite().find("iwrite"), std::string::npos);
+    EXPECT_EQ(bm.getBenchResultsRead().find("iread"), std::string::npos);
+    EXPECT_EQ(bm.getRandomKeyIndex(), nullptr);
+}
+
+TEST_F(BMBaseTest, TwoSuitesTwoPhaseBlocks) {
+    MockBM bm;
+    ASSERT_EQ(bm.benchSuite("First Suite"), lsmio::BM_SUCCESS);
+    ASSERT_EQ(bm.benchSuite("Second Suite"), lsmio::BM_SUCCESS);
+
+    const std::string &text = bm.getPhaseText();
+    size_t first = text.find("Phases: First Suite\n");
+    size_t second = text.find("Phases: Second Suite\n");
+    ASSERT_NE(first, std::string::npos);
+    ASSERT_NE(second, std::string::npos);
+    EXPECT_LT(first, second);
+    EXPECT_EQ(text.find("Phases: First Suite\n", first + 1), std::string::npos);
+    // Each block holds its own suite's rows only (1 iteration: a write and a read row each).
+    EXPECT_EQ(phaseRows(text.substr(first, second - first)).size(), 2u);
+    EXPECT_EQ(phaseRows(text.substr(second)).size(), 2u);
+}
+
+TEST_F(BMBaseTest, ReadsOwnPermutation) {
+    // Without read shift the reader's source is itself, so every iteration reads back the values
+    // its own permutation wrote (INV-13).
+    gConfigBM.iterations = 3;
+    MockBM bm;
+    EXPECT_EQ(bm.benchSuite("MockOwn"), lsmio::BM_SUCCESS);
+    EXPECT_EQ(bm.readFailureCount, 0);
+    EXPECT_EQ(phaseRows(bm.getPhaseText()).size(), 6u);
+    EXPECT_EQ(bm.getBenchResultsRead().find("read, FAILED"), std::string::npos);
+}
+
+TEST_F(BMBaseTest, ResultsPrintEngineHeaderLinesAndPhaseBlocks) {
+    MockBM bm;
+    bm.headerLines = " mockEngine: 7\n";
+    ASSERT_EQ(bm.benchSuite("MockPrint"), lsmio::BM_SUCCESS);
+
+    testing::internal::CaptureStdout();
+    bm.writeBenchmarkResults();
+    std::string out = testing::internal::GetCapturedStdout();
+
+    size_t header = out.find(" mockEngine: 7\n");
+    size_t results = out.find("BENCHMARK RESULTS: \n");
+    size_t readBlock = out.find("Iteration-READ: MockPrint");
+    size_t phases = out.find("Phases: MockPrint\n");
+    ASSERT_NE(header, std::string::npos);
+    ASSERT_NE(results, std::string::npos);
+    ASSERT_NE(readBlock, std::string::npos);
+    ASSERT_NE(phases, std::string::npos);
+    EXPECT_LT(header, results);                    // before the results
+    EXPECT_LT(readBlock, phases);                  // phases after every READ block
+}
+
 TEST(BMBaseVersionTest, CleanExitOnVersionFlag) {
     char *argv[] = {(char *)"test_bm_base", (char *)"--version", nullptr};
     int argc = 2;
@@ -379,6 +565,142 @@ TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {
     EXPECT_NE(optStr.find("gitBranch: "), std::string::npos);
     EXPECT_NE(optStr.find("gitCommit: "), std::string::npos);
     EXPECT_NE(optStr.find("readOnly: true"), std::string::npos);
+    EXPECT_NE(optStr.find(" perRankPath: 0"), std::string::npos);
+}
+
+namespace {
+
+// Runs beginMain on the given arguments in a death-test child and returns only if it did
+// not exit; the refusals and CLI11 errors exit the child.
+void runBeginMain(std::vector<std::string> f_args) {
+    std::vector<char *> argv;
+    for (std::string &arg : f_args) {
+        argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+    BMBase::beginMain(static_cast<int>(f_args.size()), argv.data());
+}
+
+}  // namespace
+
+TEST(BMBaseCliTest, PerRankPathWithoutMpiBarrierIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--per-rank-path"}),
+                ::testing::ExitedWithCode(1), "--per-rank-path requires -m/--mpi-barrier");
+}
+
+TEST(BMBaseCliTest, PerRankPathWithCollectiveIoIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "-m", "-c", "--per-rank-path"}),
+                ::testing::ExitedWithCode(1),
+                "--per-rank-path cannot be combined with -c/--collective-io");
+}
+
+TEST(BMBasePhaseTest, BothSidesRecordedGiveTwoExactLines) {
+    IterationPhases phases{};
+    phases.iteration = 3;
+    phases.bytes = 1048576.0;
+    phases.side_recorded[static_cast<int>(PhaseSide::Write)] = true;
+    phases.side_recorded[static_cast<int>(PhaseSide::Read)] = true;
+    int64_t value = 10;
+    for (int side = 0; side < 2; side++) {
+        for (int boundary = 0; boundary < 5; boundary++) {
+            phases.offset_us[side][boundary] = value;
+            value += 10;
+        }
+    }
+    EXPECT_EQ(formatPhaseRows(phases),
+              "phase,write,3,1048576,10,20,30,40,50\n"
+              "phase,read,3,1048576,60,70,80,90,100\n");
+}
+
+TEST(BMBasePhaseTest, OnlyWriteRecordedGivesOneWriteLine) {
+    IterationPhases phases{};
+    phases.iteration = 0;
+    phases.bytes = 4096.0;
+    phases.side_recorded[static_cast<int>(PhaseSide::Write)] = true;
+    phases.offset_us[static_cast<int>(PhaseSide::Write)][static_cast<int>(PhaseBoundary::AfterDelete)] = 7;
+    // The read offsets are set but the side is not recorded: no read row.
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::AfterOpen)] = 99;
+    EXPECT_EQ(formatPhaseRows(phases), "phase,write,0,4096,0,0,0,0,7\n");
+}
+
+TEST(BMBasePhaseTest, OnlyReadRecordedGivesOneReadLine) {
+    IterationPhases phases{};
+    phases.iteration = 1;
+    phases.bytes = 8.0;
+    phases.side_recorded[static_cast<int>(PhaseSide::Read)] = true;
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::BeforeOpen)] = 5;
+    EXPECT_EQ(formatPhaseRows(phases), "phase,read,1,8,5,0,0,0,0\n");
+}
+
+TEST(BMBasePhaseTest, NeitherSideRecordedGivesEmptyString) {
+    IterationPhases phases{};
+    phases.iteration = 2;
+    phases.bytes = 100.0;
+    phases.offset_us[0][0] = 5;
+    EXPECT_EQ(formatPhaseRows(phases), "");
+}
+
+TEST(BMBasePhaseTest, BytesPrintAsIntegerWithoutDecimalPoint) {
+    IterationPhases phases{};
+    phases.bytes = 2147352576.0;
+    phases.side_recorded[static_cast<int>(PhaseSide::Write)] = true;
+    EXPECT_EQ(formatPhaseRows(phases), "phase,write,0,2147352576,0,0,0,0,0\n");
+    // Above the 32-bit range the value still prints in full.
+    phases.bytes = 4294967296.0 * 4.0;
+    EXPECT_EQ(formatPhaseRows(phases), "phase,write,0,17179869184,0,0,0,0,0\n");
+}
+
+TEST(BMBasePhaseTest, OffsetsPrintAsIntegers) {
+    IterationPhases phases{};
+    phases.iteration = 4;
+    phases.bytes = 1.0;
+    phases.side_recorded[static_cast<int>(PhaseSide::Read)] = true;
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::BeforeOpen)] = 0;
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::AfterOpen)] = 1;
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::BeforeClose)] =
+        3000000000LL;
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::AfterClose)] =
+        9007199254740993LL;
+    phases.offset_us[static_cast<int>(PhaseSide::Read)][static_cast<int>(PhaseBoundary::AfterDelete)] = -1;
+    EXPECT_EQ(formatPhaseRows(phases), "phase,read,4,1,0,1,3000000000,9007199254740993,-1\n");
+}
+
+TEST(BMBaseKeyPermutationTest, ResultIsAPermutationOfZeroToCountMinusOne) {
+    const int ranks[] = {0, 1, 7, 63};
+    const int iterations[] = {0, 1, 9};
+    const int counts[] = {1, 2, 16, 1000};
+    for (int rank : ranks) {
+        for (int iteration : iterations) {
+            for (int count : counts) {
+                std::vector<int> keys = keyPermutation(rank, iteration, count);
+                ASSERT_EQ(keys.size(), static_cast<size_t>(count));
+                std::vector<int> sorted = keys;
+                std::sort(sorted.begin(), sorted.end());
+                for (int i = 0; i < count; i++) {
+                    ASSERT_EQ(sorted[i], i) << "rank " << rank << " iteration " << iteration << " count " << count;
+                }
+            }
+        }
+    }
+}
+
+TEST(BMBaseKeyPermutationTest, SameArgumentsGiveEqualResults) {
+    EXPECT_EQ(keyPermutation(3, 2, 64), keyPermutation(3, 2, 64));
+    EXPECT_EQ(keyPermutation(0, 0, 1000), keyPermutation(0, 0, 1000));
+}
+
+TEST(BMBaseKeyPermutationTest, DifferentRanksOrIterationsGiveDifferentResults) {
+    EXPECT_NE(keyPermutation(0, 0, 16), keyPermutation(1, 0, 16));
+    EXPECT_NE(keyPermutation(0, 0, 16), keyPermutation(0, 1, 16));
+}
+
+TEST(BMBaseKeyPermutationTest, ZeroCountGivesEmptyVector) {
+    EXPECT_TRUE(keyPermutation(2, 5, 0).empty());
+}
+
+TEST(BMBaseKeyPermutationTest, NegativeCountThrowsInvalidArgument) {
+    EXPECT_THROW(keyPermutation(0, 0, -1), std::invalid_argument);
 }
 
 int main(int argc, char **argv) {

@@ -129,7 +129,10 @@ add_lsmio_base_test(test_version)
 add_lsmio_base_test(test_lsmio)
 
 # GTest: BMBase Regression Harness
-add_executable(test_bm_base test_bm_base.cpp "${CMAKE_SOURCE_DIR}/benchmark/bm_base.cpp")
+add_executable(test_bm_base test_bm_base.cpp
+  "${CMAKE_SOURCE_DIR}/benchmark/bm_base.cpp"
+  "${CMAKE_SOURCE_DIR}/benchmark/PhaseTimeline.cpp"
+  "${CMAKE_SOURCE_DIR}/benchmark/KeyPermutation.cpp")
 target_include_directories(test_bm_base PRIVATE ${LSMIO_INCLUDE_DIR} "${CMAKE_SOURCE_DIR}/benchmark")
 target_link_libraries(test_bm_base
   PUBLIC GTest::GTest GTest::Main

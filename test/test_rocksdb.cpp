@@ -36,10 +36,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iostream>
 #include <lsmio/manager/manager.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
+#include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -419,6 +423,267 @@ TEST_F(LSMIORocksDBConfigTest, ReadBarrierAndUnbatchedDeferredWrites) {
     EXPECT_TRUE(lc.readBarrier());
     EXPECT_TRUE(lc.writeBarrier());
     EXPECT_FALSE(lc.get("k", &value));
+}
+
+// Read-only store (INV-18, GT6). The suite name starts with RocksDB (plan 0.4 naming rule).
+namespace {
+
+struct RdbFileState {
+    std::uintmax_t size;
+    std::filesystem::file_time_type mtime;
+    bool operator==(const RdbFileState& other) const {
+        return size == other.size && mtime == other.mtime;
+    }
+};
+using RdbDirSnapshot = std::map<std::string, RdbFileState>;
+
+RdbDirSnapshot snapshotRdbDir(const std::string& f_path) {
+    RdbDirSnapshot snap;
+    for (const auto& entry : std::filesystem::directory_iterator(f_path)) {
+        snap[entry.path().filename().string()] = {entry.file_size(), entry.last_write_time()};
+    }
+    return snap;
+}
+
+class RocksDBReadOnlyTest : public LSMIORocksDBConfigTest {
+  protected:
+    static constexpr int kKeys = 50;
+
+    static std::string keyOf(int f_index) {
+        return "key" + std::to_string(f_index);
+    }
+
+    static std::string valueOf(int f_index) {
+        return "value" + std::to_string(f_index);
+    }
+
+    // Writer (overWrite) puts kKeys keys and closes.
+    void writeStore(const std::string& f_path) {
+        lsmio::LSMIOStoreRDB writer(f_path, true);
+        for (int i = 0; i < kKeys; i++) {
+            ASSERT_TRUE(writer.put(keyOf(i), valueOf(i)));
+        }
+        writer.close();
+    }
+
+    void expectAllKeys(lsmio::LSMIOStoreRDB& f_store) {
+        for (int i = 0; i < kKeys; i++) {
+            std::string value;
+            EXPECT_TRUE(f_store.get(keyOf(i), &value)) << keyOf(i);
+            EXPECT_EQ(value, valueOf(i));
+        }
+    }
+};
+
+}  // namespace
+
+TEST_F(RocksDBReadOnlyTest, ReadsWhatWriterWrote) {
+    const std::string path = dbPath("ro-reads");
+    writeStore(path);
+
+    lsmio::LSMIOStoreRDB reader(path, false, true);
+    expectAllKeys(reader);
+    std::string value;
+    EXPECT_FALSE(reader.get("absent", &value));
+}
+
+TEST_F(RocksDBReadOnlyTest, BarrierAndCloseDoNotFlush) {
+    const std::string path = dbPath("ro-barrier");
+    writeStore(path);
+    const RdbDirSnapshot before = snapshotRdbDir(path);
+
+    lsmio::LSMIOStoreRDB reader(path, false, true);
+    EXPECT_TRUE(reader.writeBarrier());
+    EXPECT_TRUE(reader.readBarrier());
+    expectAllKeys(reader);
+    reader.close();
+
+    EXPECT_TRUE(snapshotRdbDir(path) == before);
+}
+
+TEST_F(RocksDBReadOnlyTest, MutationsReturnFalse) {
+    const std::string path = dbPath("ro-mutations");
+    writeStore(path);
+    const RdbDirSnapshot before = snapshotRdbDir(path);
+
+    {
+        lsmio::LSMIOStoreRDB reader(path, false, true);
+        EXPECT_FALSE(reader.put("new-put", std::string("v")));
+        EXPECT_FALSE(reader.put("new-put-moved", std::string("v"), false));
+        EXPECT_FALSE(reader.putBytes("new-bytes", std::string_view("v")));
+        EXPECT_FALSE(reader.metaPut("new-meta", std::string("v")));
+        EXPECT_FALSE(reader.del(keyOf(0)));
+
+        std::string value;
+        EXPECT_FALSE(reader.get("new-put", &value));
+        EXPECT_FALSE(reader.get("new-bytes", &value));
+        EXPECT_TRUE(reader.get(keyOf(0), &value));
+        EXPECT_EQ(value, valueOf(0));
+    }
+    EXPECT_TRUE(snapshotRdbDir(path) == before);
+
+    lsmio::LSMIOStoreRDB writer(path);
+    std::string value;
+    EXPECT_FALSE(writer.get("new-put", &value));
+    EXPECT_FALSE(writer.get("new-put-moved", &value));
+    EXPECT_FALSE(writer.get("new-bytes", &value));
+    EXPECT_FALSE(writer.metaGet("new-meta", &value));
+    expectAllKeys(writer);
+}
+
+TEST_F(RocksDBReadOnlyTest, OverWriteWithReadOnlyRefused) {
+    const std::string path = dbPath("ro-overwrite");
+    writeStore(path);
+    const RdbDirSnapshot before = snapshotRdbDir(path);
+
+    try {
+        lsmio::LSMIOStoreRDB refused(path, true, true);
+        FAIL() << "overWrite with readOnly must throw";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("overWrite and readOnly"), std::string::npos);
+    }
+    EXPECT_TRUE(snapshotRdbDir(path) == before);
+
+    lsmio::LSMIOStoreRDB reader(path, false, true);
+    expectAllKeys(reader);
+}
+
+TEST_F(RocksDBReadOnlyTest, WalWrittenStoreReadsBack) {
+    lsmio::gConfigLSMIO.enableWAL = true;
+    const std::string path = dbPath("ro-wal");
+
+    const std::string crash_image = dbPath("ro-wal-image");
+
+    lsmio::LSMIOStoreRDB writer(path, true);
+    for (int i = 0; i < kKeys; i++) {
+        ASSERT_TRUE(writer.put(keyOf(i), valueOf(i)));
+    }
+    // The writer has not flushed, so the keys are only in its write-ahead log. A copy of the
+    // directory taken now is a crash image with no writer attached: it holds the log and no table,
+    // so a read-only open of it can read the keys only by replaying the log. No store is opened
+    // read-only while the writer is open (rocksdb/db.h: undefined for the read-only instance).
+    ASSERT_GT(walBytes(path), 0u);
+    std::filesystem::copy(path, crash_image, std::filesystem::copy_options::recursive);
+    ASSERT_GT(walBytes(crash_image), 0u);
+    writer.close();
+
+    {
+        lsmio::LSMIOStoreRDB image_reader(crash_image, false, true);
+        expectAllKeys(image_reader);
+    }
+
+    // The plan's order: after the writer closed (flushed), a read-only store reads every key.
+    lsmio::LSMIOStoreRDB reader(path, false, true);
+    expectAllKeys(reader);
+}
+
+namespace {
+
+// Opens the protected batch entry points of the store, which are private in LSMIOStoreRDB
+class RdbBatchAccess : public lsmio::LSMIOStoreRDB {
+  public:
+    using lsmio::LSMIOStoreRDB::LSMIOStoreRDB;
+    using lsmio::LSMIOStore::_batchMutation;
+    using lsmio::LSMIOStore::startBatch;
+    using lsmio::LSMIOStore::stopBatch;
+};
+
+const lsmio::MutationType kRdbUnknownMutation = static_cast<lsmio::MutationType>(99);
+
+class RocksDBStoreFailure : public LSMIORocksDBConfigTest {
+  protected:
+    static std::string failureMessage(const std::function<void()>& f_body) {
+        try {
+            f_body();
+        } catch (const std::invalid_argument& e) {
+            return e.what();
+        }
+        return "";
+    }
+};
+
+}  // namespace
+
+TEST_F(RocksDBStoreFailure, ReadOnlyOpenOfMissingDatabaseThrowsAndCreatesNothing) {
+    const std::string path = dbPath("fail-ro-missing");
+
+    const std::string message =
+        failureMessage([&] { lsmio::LSMIOStoreRDB store(path, false, true); });
+    EXPECT_NE(message.find("Failed to open database"), std::string::npos) << message;
+    // RocksDB may leave an empty directory for its info log, but no database
+    EXPECT_FALSE(std::filesystem::exists(path + "/CURRENT"));
+}
+
+TEST_F(RocksDBStoreFailure, ReadWriteOpenUnderRegularFileThrowsAndLeavesItUntouched) {
+    const std::string blocker = dbPath("fail-rw-blocker");
+    {
+        std::ofstream out(blocker);
+        out << "not a directory";
+    }
+    const std::string path = blocker + "/db";
+
+    const std::string message = failureMessage([&] { lsmio::LSMIOStoreRDB store(path); });
+    EXPECT_NE(message.find("Failed to open database"), std::string::npos) << message;
+
+    EXPECT_TRUE(std::filesystem::is_regular_file(blocker));
+    EXPECT_EQ(std::filesystem::file_size(blocker), std::string("not a directory").size());
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST_F(RocksDBStoreFailure, OverWriteOfOpenStoreFailsAndKeepsTheLiveStore) {
+    const std::string path = dbPath("fail-destroy-held");
+    lsmio::LSMIOStoreRDB live(path);
+    ASSERT_TRUE(live.put("held", std::string("value")));
+    ASSERT_TRUE(live.writeBarrier());
+
+    // This process already holds the database LOCK, so DestroyDB cannot take it
+    const std::string message = failureMessage([&] { lsmio::LSMIOStoreRDB again(path, true); });
+    EXPECT_NE(message.find("Failed to remove database"), std::string::npos) << message;
+
+    std::string value;
+    EXPECT_TRUE(live.get("held", &value));
+    EXPECT_EQ(value, "value");
+    EXPECT_TRUE(live.put("after", std::string("still-writable")));
+    EXPECT_TRUE(live.get("after", &value));
+    EXPECT_EQ(value, "still-writable");
+}
+
+TEST_F(RocksDBStoreFailure, StartAndStopBatchAreNoOpsThatSucceed) {
+    RdbBatchAccess store(dbPath("fail-batch-access"));
+
+    EXPECT_TRUE(store.startBatch());
+    EXPECT_TRUE(store.put("direct", std::string("v"), false));  // writes at once
+    EXPECT_TRUE(store.stopBatch());
+
+    std::string value;
+    EXPECT_TRUE(store.get("direct", &value));
+    EXPECT_EQ(value, "v");
+}
+
+TEST_F(RocksDBStoreFailure, UnknownMutationThrowsAndLeavesTheStoreUsable) {
+    RdbBatchAccess store(dbPath("fail-unknown"));
+    ASSERT_TRUE(store.put("k", std::string("v")));
+
+    const std::string message = failureMessage(
+        [&] { store._batchMutation(kRdbUnknownMutation, "k", std::string("x"), true); });
+    EXPECT_NE(message.find("Mutation not implemented"), std::string::npos) << message;
+
+    std::string value;
+    EXPECT_TRUE(store.get("k", &value));
+    EXPECT_EQ(value, "v");
+}
+
+TEST_F(RocksDBStoreFailure, UnknownMutationOnDeferredPathThrowsAndLeavesTheStoreUsable) {
+    RdbBatchAccess store(dbPath("fail-unknown-deferred"));
+    ASSERT_TRUE(store.put("k", std::string("v")));
+
+    const std::string message = failureMessage(
+        [&] { store._batchMutation(kRdbUnknownMutation, "k", std::string("x"), false); });
+    EXPECT_NE(message.find("Mutation not implemented"), std::string::npos) << message;
+
+    std::string value;
+    EXPECT_TRUE(store.get("k", &value));
+    EXPECT_EQ(value, "v");
 }
 
 int main(int argc, char** argv) {

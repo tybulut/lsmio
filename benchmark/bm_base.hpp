@@ -34,9 +34,13 @@
 #include <fmt/format.h>
 #include <mpi.h>
 
+#include <chrono>
 #include <iostream>
 #include <lsmio/benchmark.hpp>
 #include <string>
+#include <vector>
+
+#include "PhaseTimeline.hpp"
 
 namespace lsmio {
 
@@ -65,6 +69,18 @@ class BMBase {
     /// Filler of every value, built before the benchmark starts.
     std::string _filler;
 
+    // C1/C2: the phase text of every suite (printed after the READ blocks) and the rows of the
+    // suite in progress.
+    std::string m_bench_results_phases = "";
+    std::string m_suite_phase_rows = "";
+    // The current iteration's timeline and its reference point (INV-4).
+    IterationPhases m_phases = {};
+    std::chrono::steady_clock::time_point m_phase_origin = {};
+    // The key orders of the current iteration: this rank's writes and the reads of its source
+    // (INV-13).
+    std::vector<int> m_put_keys;
+    std::vector<int> m_get_keys;
+
     static bool useMPI;
     static int mpiWorldSize;
     static int mpiWorldRank;
@@ -92,6 +108,11 @@ class BMBase {
         return value;
     }
 
+    // Phase timeline helpers: the origin is the write side's beforeOpen (offset 0); every other
+    // capture is the microseconds since it (INV-4).
+    void beginPhaseTimeline();
+    void capturePhase(PhaseSide f_side, PhaseBoundary f_boundary);
+
     int benchRead(long long *duration);
     int benchWrite(long long *duration);
     int benchIteration(int iteration, bool opt = false);
@@ -110,6 +131,9 @@ class BMBase {
 
     virtual int writePrepare(bool opt = false) = 0;
     virtual int writeCleanup();
+
+    // C5 hooks: an engine opts in to read shift, and adds its header lines (each " key: value\n").
+    virtual std::string engineHeaderLines() const;
 
   public:
     BMBase();
@@ -137,6 +161,8 @@ class BMConfig {
 
     bool useMPIBarrier = false;
     bool enableCollectiveIO = false;
+
+    bool perRankPath = false;     // one store path per MPI rank (--per-rank-path)
 
     int iterations = 1;       // TODO
     int segmentCount = 1024;  // TODO

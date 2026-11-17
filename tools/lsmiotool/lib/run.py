@@ -1532,12 +1532,13 @@ class RunPlanner:
     }
 
     # EPOCpp runs real simulations, so fewer points (BENCHMARKS.md, 2026-10-18): small
-    # without 1 node, large from 8 nodes (32 tasks), where a large-deck particle array
-    # per rank stays under LSMIO's record limit; local and bake are test scales
+    # at every small point (1 node added 2026-11-15), large from 8 nodes (32 tasks),
+    # where a large-deck particle array per rank stays under LSMIO's record limit;
+    # local and bake are test scales
     EPOCPP_SCALE_MATRICES: Dict[str, Tuple[ScalePoint, ...]] = {
         "local": SCALE_MATRICES["local"],
         "bake": SCALE_MATRICES["bake"],
-        "small": tuple(f_sp for f_sp in SCALE_MATRICES["small"] if f_sp.nodes >= 2),
+        "small": SCALE_MATRICES["small"],
         "large": tuple(f_sp for f_sp in SCALE_MATRICES["large"] if f_sp.nodes >= 8),
     }
     # Runs of each epocpp arm per combination (Max()/Min() over them when parsing)
@@ -1547,6 +1548,11 @@ class RunPlanner:
     # (runs and cleanup x 10 repeats, +20%, at least 12). Over 24 hours a 'standard'
     # Slurm QoS becomes 'long' (ARCHER2)
     EPOCPP_SMALL_DECK_HOURS = 12
+    # The small scale's 1-node point (strong scaling) runs about twice as long as 2 nodes,
+    # the slowest point the 12 hours were sized for (estimated 1.8 h, BENCHMARKS.md),
+    # so it gets about twice their headroom: 22 hours, clear of the 24-hour limit of
+    # some queues (ARCHER2's 'standard' QoS)
+    EPOCPP_SMALL_DECK_ONE_NODE_HOURS = 22
     EPOCPP_LARGE_DECK_HOURS: Dict[int, int] = {8: 12, 16: 12, 32: 16, 48: 20, 64: 36}
 
     DEFAULT_SETUPS: Dict[str, str] = {
@@ -1625,6 +1631,10 @@ class RunPlanner:
     def epocppPointHours(cls, f_scale: str, f_sp: ScalePoint) -> int:
         """An epocpp point's walltime in hours when --time is not given."""
         if f_scale != "large":
+            # Only the small scale's; the test scales (local, bake) keep 12 hours, so
+            # their jobs do not queue longer
+            if f_scale == "small" and f_sp.nodes == 1:
+                return cls.EPOCPP_SMALL_DECK_ONE_NODE_HOURS
             return cls.EPOCPP_SMALL_DECK_HOURS
         # A node count off the table gets the longest
         return cls.EPOCPP_LARGE_DECK_HOURS.get(

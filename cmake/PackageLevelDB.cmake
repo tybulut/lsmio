@@ -9,7 +9,7 @@ if (NOT Snappy_FOUND AND NOT TARGET snappy)
   FetchContent_Declare(
     snappy
     GIT_REPOSITORY https://github.com/google/snappy.git
-    GIT_TAG        1.2.1
+    GIT_TAG        1.3.1
     GIT_SUBMODULES ""
     GIT_PROGRESS   TRUE
   )
@@ -25,6 +25,15 @@ if (NOT Snappy_FOUND AND NOT TARGET snappy)
 elseif (TARGET Snappy::snappy AND NOT TARGET snappy)
   # An installed LevelDB links the bare name `snappy` (a -lsnappy, found only through
   # LIBRARY_PATH); this target makes that name resolve to the library found above.
+  add_library(snappy INTERFACE IMPORTED GLOBAL)
+  target_link_libraries(snappy INTERFACE Snappy::snappy)
+endif()
+# An installed LevelDB built with Snappy exports the bare name `snappy` in its link interface,
+# which CMake would pass as -lsnappy with no search path. A global `snappy` target that stands
+# for the found Snappy package makes that name resolve to the library's full path in every
+# directory that links LevelDB (lib, test, benchmark).
+if (Snappy_FOUND AND NOT TARGET snappy)
+  set_target_properties(Snappy::snappy PROPERTIES IMPORTED_GLOBAL TRUE)
   add_library(snappy INTERFACE IMPORTED GLOBAL)
   target_link_libraries(snappy INTERFACE Snappy::snappy)
 endif()
@@ -52,6 +61,11 @@ if (NOT leveldb_FOUND AND NOT TARGET leveldb)
   )
 
   FetchContent_MakeAvailable(leveldb)
+  # LevelDB appends -fno-rtti to CMAKE_CXX_FLAGS; target options come later on the compile
+  # line, so -frtti wins (LevelDB's classes then have typeinfo for code that derives from them)
+  if (NOT MSVC)
+    target_compile_options(leveldb PRIVATE -frtti)
+  endif()
   add_library(leveldb::leveldb ALIAS leveldb)
 endif()
 

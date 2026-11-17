@@ -42,6 +42,7 @@
 #include <iterator>
 #include <lsmio/manager/store/store_ldb.hpp>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -666,6 +667,125 @@ TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedFlushBeforeDirectPutIsSticky) {
                                   if (store->writeBarrier()) fail(22);
                               }),
                 ::testing::ExitedWithCode(0), "");
+}
+
+namespace {
+
+// Opens the protected batch entry points of the store, which are private in LSMIOStoreLDB and have
+// no caller outside the store
+class LdbBatchAccess : public lsmio::LSMIOStoreLDB {
+  public:
+    using lsmio::LSMIOStoreLDB::LSMIOStoreLDB;
+    using lsmio::LSMIOStore::_batchMutation;
+    using lsmio::LSMIOStore::startBatch;
+    using lsmio::LSMIOStore::stopBatch;
+    unsigned int pendingBatchSize() {
+        return _batchSize;
+    }
+    unsigned int pendingBatchBytes() {
+        return _batchBytes;
+    }
+};
+
+const lsmio::MutationType kUnknownMutation = static_cast<lsmio::MutationType>(99);
+
+class LevelDBStoreFailure : public LSMIOLevelDBConfigTest {};
+
+std::string failureMessage(const std::function<void()>& f_body) {
+    try {
+        f_body();
+    } catch (const std::invalid_argument& e) {
+        return e.what();
+    }
+    return "";
+}
+
+}  // namespace
+
+TEST_F(LevelDBStoreFailure, OpenFailureThrowsAndCreatesNothing) {
+    const std::string blocker = dbPath("open-blocker");
+    {
+        std::ofstream out(blocker);
+        out << "not a directory";
+    }
+    const std::string path = blocker + "/db";
+
+    const std::string message = failureMessage([&] { lsmio::LSMIOStoreLDB store(path); });
+    EXPECT_NE(message.find("Failed to open database"), std::string::npos) << message;
+
+    EXPECT_TRUE(std::filesystem::is_regular_file(blocker));
+    EXPECT_EQ(std::filesystem::file_size(blocker), std::string("not a directory").size());
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST_F(LevelDBStoreFailure, OverWriteOfOpenStoreFailsAndKeepsTheLiveStore) {
+    const std::string path = dbPath("destroy-held");
+    lsmio::LSMIOStoreLDB live(path);
+    ASSERT_TRUE(live.put("held", std::string("value")));
+    ASSERT_TRUE(live.writeBarrier());
+
+    // This process already holds the database LOCK, so DestroyDB cannot take it
+    const std::string message = failureMessage([&] { lsmio::LSMIOStoreLDB again(path, true); });
+    EXPECT_NE(message.find("Failed to remove database"), std::string::npos) << message;
+
+    std::string value;
+    EXPECT_TRUE(live.get("held", &value));
+    EXPECT_EQ(value, "value");
+    EXPECT_TRUE(live.put("after", std::string("still-writable")));
+    EXPECT_TRUE(live.get("after", &value));
+    EXPECT_EQ(value, "still-writable");
+}
+
+TEST_F(LevelDBStoreFailure, StartAndStopBatchTrackThePendingBatch) {
+    LdbBatchAccess store(dbPath("batch-access"));
+
+    EXPECT_TRUE(store.startBatch());  // nothing pending
+    EXPECT_EQ(store.pendingBatchSize(), 0u);
+
+    EXPECT_TRUE(store.put("pending", std::string("v"), false));
+    EXPECT_EQ(store.pendingBatchSize(), 1u);
+    EXPECT_FALSE(store.startBatch());  // one write is pending
+    std::string value;
+    EXPECT_FALSE(store.get("pending", &value));  // not written yet
+
+    EXPECT_TRUE(store.stopBatch());
+    EXPECT_EQ(store.pendingBatchSize(), 0u);
+    EXPECT_TRUE(store.startBatch());
+    EXPECT_TRUE(store.get("pending", &value));
+    EXPECT_EQ(value, "v");
+}
+
+TEST_F(LevelDBStoreFailure, UnknownMutationThrowsOnDirectPathAndLeavesTheStoreUsable) {
+    LdbBatchAccess store(dbPath("unknown-direct"));
+    ASSERT_TRUE(store.put("k", std::string("v")));
+
+    const std::string message = failureMessage(
+        [&] { store._batchMutation(kUnknownMutation, "k", std::string("x"), true); });
+    EXPECT_NE(message.find("Unknown mutation"), std::string::npos) << message;
+
+    std::string value;
+    EXPECT_TRUE(store.get("k", &value));
+    EXPECT_EQ(value, "v");
+}
+
+TEST_F(LevelDBStoreFailure, UnknownMutationOnBatchPathThrowsAndLeavesTheBatchUnchanged) {
+    LdbBatchAccess store(dbPath("unknown-batch"));
+    ASSERT_TRUE(store._batchMutation(lsmio::MutationType::Put, "pending", std::string("v"), false));
+    ASSERT_EQ(store.pendingBatchSize(), 1u);
+    const unsigned int bytesBefore = store.pendingBatchBytes();
+
+    const std::string message = failureMessage(
+        [&] { store._batchMutation(kUnknownMutation, "ghost", std::string("xxxx"), false); });
+    EXPECT_NE(message.find("Unknown mutation"), std::string::npos) << message;
+
+    EXPECT_EQ(store.pendingBatchSize(), 1u);
+    EXPECT_EQ(store.pendingBatchBytes(), bytesBefore);
+    EXPECT_TRUE(store.stopBatch());
+
+    std::string value;
+    EXPECT_FALSE(store.get("ghost", &value));
+    EXPECT_TRUE(store.get("pending", &value));
+    EXPECT_EQ(value, "v");
 }
 
 int main(int argc, char** argv) {

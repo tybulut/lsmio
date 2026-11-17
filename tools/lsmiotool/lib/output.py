@@ -39,6 +39,7 @@ from lsmiotool.lib.compat import TypedDict, Final
 from lsmiotool.lib.debuggable import DebuggableObject
 from lsmiotool.lib.log import Console
 from lsmiotool.lib import data
+from lsmiotool.lib import phasereport
 
 
 class MissingDataError(Exception):
@@ -610,6 +611,9 @@ class LsmioAggOutput(IorAggOutput):
         source_dir = self.m_out_dir
         target_dir = f_out_dir or self.m_out_dir
 
+        # (nodes, stripe, block, rank logs) of every set that gets an agg file
+        phase_sets: List[Tuple[str, str, str, List[str]]] = []
+
         # Stage 1: N/agg-<rf>-<bs>-report.csv (generate_aggregates)
         for n_count in self._reportNodeCounts():
             node_dir = os.path.join(source_dir, n_count)
@@ -645,11 +649,17 @@ class LsmioAggOutput(IorAggOutput):
                         ),
                         agg.aggLines(),
                     )
+                    phase_sets.append((n_count, s_count, s_size, rank_files))
 
         # Stage 2: lsm-report.csv (generate_report)
         master_file = data.writeBmtoolMasterReport(target_dir)
         if master_file:
             Console.debug(f"Generated LSMIO master report: {master_file}")
+
+        # Stage 3: lsm-phase-report.csv (only when some rank log holds phase rows)
+        phase_file = phasereport.writePhaseReport(target_dir, phase_sets, source_dir)
+        if phase_file:
+            Console.debug(f"Generated LSMIO phase report: {phase_file}")
 
     def _reportNodeCounts(self) -> List[str]:
         """Node counts generate_aggregates visits: the scale's list, else those present."""
