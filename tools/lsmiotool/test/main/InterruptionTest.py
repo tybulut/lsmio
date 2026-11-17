@@ -35,6 +35,7 @@ import signal
 import tempfile
 from typing import Any, Dict, List, Optional, Sequence, Set
 import unittest
+from unittest.mock import patch
 
 from lsmiotool.lib.artifacts import (
     ArtifactLayout,
@@ -1248,6 +1249,110 @@ class InterruptionTest(unittest.TestCase):
         )
         f_rec_view_b = StateReconciler.reconcile(f_orch_b.last_plan, f_store_b)
         self.assertEqual(f_rec_view_b.state, OverallRunState.SUCCEEDED)
+
+
+class SignalCoordinatorLifecycleTest(unittest.TestCase):
+    """SignalCoordinator's own state machine: names, exit codes, latching, handler
+    installation and restoration, with the process's real handlers restored afterwards."""
+
+    def setUp(self) -> None:
+        self.m_saved = {
+            f_sig: signal.getsignal(f_sig) for f_sig in (signal.SIGINT, signal.SIGTERM)
+        }
+
+    def tearDown(self) -> None:
+        for f_sig, f_handler in self.m_saved.items():
+            signal.signal(f_sig, f_handler)
+
+    def testSignalNameAndExitCodeForEachSignal(self) -> None:
+        """No signal gives no name; SIGINT/SIGTERM/other signals give their codes."""
+        f_none = SignalCoordinator()
+        self.assertIsNone(f_none.signalName)
+        self.assertIsNone(f_none.signal_name)
+        self.assertIsNone(f_none.exit_code)
+        self.assertFalse(f_none.is_interrupted)
+        for f_signum, f_name, f_code in (
+            (signal.SIGINT, "SIGINT", 130),
+            (signal.SIGTERM, "SIGTERM", 143),
+            (signal.SIGUSR1, f"SIG{int(signal.SIGUSR1)}", 128 + int(signal.SIGUSR1)),
+        ):
+            with self.subTest(signal=f_name):
+                f_coord = SignalCoordinator()
+                f_coord.trigger(f_signum)
+                self.assertTrue(f_coord.isInterrupted)
+                self.assertEqual(f_coord.interrupted_signal, f_signum)
+                self.assertEqual(f_coord.signalName, f_name)
+                self.assertEqual(f_coord.exitCode, f_code)
+
+    def testHandlerLatchesTheFirstSignalAndResetClears(self) -> None:
+        """The installed handler latches like trigger; a later signal changes nothing; reset clears."""
+        f_coord = SignalCoordinator()
+        f_coord._handleSignal(signal.SIGTERM, None)
+        f_coord._handleSignal(signal.SIGINT, None)
+        self.assertEqual(f_coord.interruptedSignal, signal.SIGTERM)
+        self.assertEqual(f_coord.exitCode, 143)
+        f_coord.reset()
+        self.assertFalse(f_coord.isInterrupted)
+        self.assertIsNone(f_coord.interruptedSignal)
+        self.assertIsNone(f_coord.exitCode)
+        f_coord.trigger(signal.SIGINT)
+        self.assertEqual(f_coord.exitCode, 130)
+
+    def testInstallIsIdempotentAndUninstallRestores(self) -> None:
+        """A second install returns the same object and keeps the first handlers saved."""
+        f_coord = SignalCoordinator()
+        self.assertIs(f_coord.install(), f_coord)
+        self.assertTrue(f_coord.m_installed)
+        f_saved_after_first = dict(f_coord.m_old_handlers)
+        self.assertEqual(f_saved_after_first, self.m_saved)
+        self.assertIs(f_coord.install(), f_coord)
+        self.assertEqual(f_coord.m_old_handlers, f_saved_after_first)
+        self.assertEqual(signal.getsignal(signal.SIGINT), f_coord._handleSignal)
+        f_coord.uninstall()
+        self.assertFalse(f_coord.m_installed)
+        self.assertEqual(f_coord.m_old_handlers, {})
+        for f_sig, f_handler in self.m_saved.items():
+            self.assertEqual(signal.getsignal(f_sig), f_handler)
+
+    def testInstallOffTheMainThreadLeavesNothingInstalled(self) -> None:
+        """Python refuses signal handlers outside the main thread; install does not raise."""
+        import threading
+
+        f_coord = SignalCoordinator()
+        f_result: List[Any] = []
+
+        def worker() -> None:
+            f_result.append(f_coord.install())
+
+        f_thread = threading.Thread(target=worker)
+        f_thread.start()
+        f_thread.join()
+        self.assertEqual(f_result, [f_coord])
+        self.assertFalse(f_coord.m_installed)
+        for f_sig, f_handler in self.m_saved.items():
+            self.assertEqual(signal.getsignal(f_sig), f_handler)
+
+    def testUninstallWithoutInstallChangesNothing(self) -> None:
+        """Uninstalling a coordinator that never installed leaves the handlers alone."""
+        f_coord = SignalCoordinator()
+        f_coord.uninstall()
+        self.assertFalse(f_coord.m_installed)
+        for f_sig, f_handler in self.m_saved.items():
+            self.assertEqual(signal.getsignal(f_sig), f_handler)
+
+    def testUninstallClearsStateWhenRestoringFails(self) -> None:
+        """A handler that cannot be restored (ValueError) is skipped; the state still clears."""
+        f_coord = SignalCoordinator().install()
+        with patch.object(signal, "signal", side_effect=ValueError("not main thread")):
+            f_coord.uninstall()
+        self.assertFalse(f_coord.m_installed)
+        self.assertEqual(f_coord.m_old_handlers, {})
+
+    def testContextManagerInstallsAndRestores(self) -> None:
+        with SignalCoordinator() as f_coord:
+            self.assertEqual(signal.getsignal(signal.SIGTERM), f_coord._handleSignal)
+        for f_sig, f_handler in self.m_saved.items():
+            self.assertEqual(signal.getsignal(f_sig), f_handler)
 
 
 if __name__ == "__main__":

@@ -28,17 +28,23 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+import contextlib
+import errno
 import io
 import json
 import os
 import shutil
 import signal
+import socket
 import tempfile
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 import unittest
 from unittest.mock import MagicMock, call, patch
+from lsmiotool.lib.archive import ArchiveEngine, ArchiveError
 from lsmiotool.lib.artifacts import (
+    ArtifactError,
     ArtifactLayout,
     ArtifactStore,
     ControlLock,
@@ -53,8 +59,11 @@ from lsmiotool.lib.evidence import (
 )
 from lsmiotool.lib.profile import ProfileLoader
 from lsmiotool.lib.resources import ExecutionMode, RuntimeLayout
+from lsmiotool.lib.relocate import RelocationError
 from lsmiotool.lib.run import (
+    ORCHESTRATOR_PID_FILE,
     OrchestrationError,
+    PlanValidationError,
     PreflightError,
     RunOrchestrator,
     RunPlan,
@@ -63,6 +72,9 @@ from lsmiotool.lib.run import (
     RunRequest,
     ScalePoint,
     SignalCoordinator,
+    orchestratorPidPath,
+    readOrchestratorPid,
+    validateBenchmarkExecutable,
 )
 from lsmiotool.lib.scheduler import (
     JobResult,
@@ -4111,3 +4123,2963 @@ class RunOrchestratorTest(unittest.TestCase):
         self.assertEqual(len(f_fake_runner.m_submit_calls), 1)
         self.assertEqual(len(f_orch.views), 3)
         self.assertNotEqual(f_orch.exitCode, 0)
+
+    # ------------------------------------------------------------------
+    # execute() preflight, profile resolution and allocation
+    # ------------------------------------------------------------------
+
+    def _profileAt(
+        self,
+        f_label: str,
+        f_ssd_root: Optional[str] = None,
+        f_executables: Optional[ExecutableRegistry] = None,
+    ) -> SiteProfile:
+        """The Viking test profile under its own install prefix (and optionally its
+        own ssd root and executables), so a resolver's choice shows in the worker path
+        it yields."""
+        f_base = self.m_viking_profile
+        return SiteProfile(
+            f_name=f_base.name,
+            f_scheduler=f_base.scheduler,
+            f_launcher=f_base.launcher,
+            f_certification=f_base.certification,
+            f_test_only=True,
+            f_benchmark_roots={
+                "hdd": self.m_viking_root_hdd,
+                "ssd": self.m_viking_root_ssd if f_ssd_root is None else f_ssd_root,
+            },
+            f_install_prefix=self._prefixOf(f_label),
+            f_executables=(
+                f_executables if f_executables is not None else self.m_executables
+            ),
+            f_modules=f_base.modules,
+            f_resources=f_base.resources,
+            f_rank_identity=f_base.rank_identity,
+            f_cancellation=f_base.cancellation,
+            f_lustre_pools=f_base.lustre_pools,
+        )
+
+    def _prefixOf(self, f_label: str) -> str:
+        return os.path.join(self.m_temp_dir, f"prefix-{f_label}")
+
+    def _assertNothingAllocated(self, f_profile: Optional[SiteProfile] = None) -> None:
+        """No run root under any benchmark root and nothing submitted (preflight failed)."""
+        f_prof = f_profile if f_profile is not None else self.m_viking_profile
+        for f_root in f_prof.benchmark_roots.values():
+            self.assertEqual(os.listdir(f_root), [], f"{f_root} was mutated")
+        self.assertEqual(self.m_fake_runner.m_submit_calls, [])
+
+    def _probeResolution(
+        self, f_resolver: Any, f_site: Any, f_test_mode: bool = True
+    ) -> Any:
+        """Run execute() with a worker validator that stops the run right after profile
+        resolution. Returns (install prefix of the resolved profile, None) when
+        resolution succeeded, or (None, error text) when it failed."""
+        f_seen: List[str] = []
+
+        def validator(f_path: str) -> str:
+            f_seen.append(f_path)
+            raise RuntimeError("stop after resolution")
+
+        f_orch = RunOrchestrator(
+            f_profile_resolver=f_resolver,
+            f_worker_validator=validator,
+            f_command_runner=self.m_fake_runner,
+        )
+        with self.assertRaises(PreflightError) as f_ctx:
+            f_orch.execute(
+                RunRequest("ior", "local"),
+                f_site=f_site,
+                f_user=self.m_test_user,
+                f_home=self.m_test_home,
+                f_test_mode=f_test_mode,
+            )
+        self._assertNothingAllocated()
+        if f_seen:
+            self.assertEqual(len(f_seen), 1)
+            self.assertEqual(
+                str(f_ctx.exception),
+                f"Worker executable validation failed for '{f_seen[0]}': "
+                "stop after resolution",
+            )
+            return os.path.dirname(os.path.dirname(f_seen[0])), None
+        return None, str(f_ctx.exception)
+
+    def _executePreflight(
+        self,
+        f_request: Any,
+        f_site: Optional[SiteProfile] = None,
+        f_worker_validator: Any = None,
+        f_planner: Any = None,
+        **f_kwargs: Any,
+    ) -> str:
+        """execute() that must fail preflight: returns the PreflightError text."""
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_worker_validator=f_worker_validator,
+            f_planner=f_planner,
+        )
+        f_kwargs.setdefault("f_worker_executable", self.m_worker_path)
+        with self.assertRaises(PreflightError) as f_ctx:
+            f_orch.execute(
+                f_request,
+                f_site=f_site if f_site is not None else self.m_viking_profile,
+                **f_kwargs,
+            )
+        return str(f_ctx.exception)
+
+    # ------------------------------------------------------------------ C1
+
+    def testExecuteRejectsANonRequest(self) -> None:
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry, f_command_runner=self.m_fake_runner
+        )
+        with self.assertRaises(PreflightError) as f_ctx:
+            f_orch.execute("not a request", f_site=self.m_viking_profile)
+        self.assertEqual(str(f_ctx.exception), "f_request must be RunRequest, got: str")
+        self._assertNothingAllocated()
+
+    def testExplicitSiteNameResolverShapes(self) -> None:
+        f_calls: List[Any] = []
+
+        def resolve_no_env_file(
+            f_name: str, f_user: Optional[str] = None, f_home: Optional[str] = None
+        ) -> SiteProfile:
+            f_calls.append(("resolveProfile", f_name, f_user, f_home))
+            return self._profileAt("a")
+
+        def resolve_with_env_file(
+            f_name: str,
+            f_user: Optional[str] = None,
+            f_home: Optional[str] = None,
+            f_env_file: Optional[str] = None,
+        ) -> SiteProfile:
+            f_calls.append(("resolveProfile", f_name, f_user, f_home, f_env_file))
+            return self._profileAt("b")
+
+        def get_profile(f_name: str) -> SiteProfile:
+            f_calls.append(("getProfile", f_name))
+            return self._profileAt("c")
+
+        def call_resolver(f_name: str) -> SiteProfile:
+            f_calls.append(("call", f_name))
+            return self._profileAt("d")
+
+        f_home = self.m_test_home
+        f_rows = [
+            (
+                "resolveProfile that does not take f_env_file is retried without it",
+                SimpleNamespace(resolveProfile=resolve_no_env_file),
+                "a",
+                [("resolveProfile", "VIKING", "alice", f_home)],
+            ),
+            (
+                "resolveProfile that takes f_env_file gets None without a layout",
+                SimpleNamespace(resolveProfile=resolve_with_env_file),
+                "b",
+                [("resolveProfile", "VIKING", "alice", f_home, None)],
+            ),
+            (
+                "getProfile only",
+                SimpleNamespace(getProfile=get_profile),
+                "c",
+                [("getProfile", "VIKING")],
+            ),
+            ("a plain callable", call_resolver, "d", [("call", "VIKING")]),
+        ]
+        for f_label, f_resolver, f_expected, f_expected_calls in f_rows:
+            with self.subTest(f_label):
+                f_calls.clear()
+                f_prefix, f_error = self._probeResolution(f_resolver, "VIKING")
+                self.assertIsNone(f_error)
+                self.assertEqual(f_prefix, self._prefixOf(f_expected))
+                self.assertEqual(f_calls, f_expected_calls)
+
+    def testExplicitSiteNameResolutionFailures(self) -> None:
+        def raising_get_profile(f_name: str) -> SiteProfile:
+            raise SiteResolutionError(f"no such site {f_name}")
+
+        f_rows = [
+            (
+                "an object that is no resolver",
+                SimpleNamespace(),
+                "VIKING",
+                "Failed to resolve site profile 'VIKING': Unsupported profile resolver",
+            ),
+            (
+                "a resolver that raises",
+                SimpleNamespace(getProfile=raising_get_profile),
+                "VIKING",
+                "Failed to resolve site profile 'VIKING': no such site VIKING",
+            ),
+            (
+                "a callable that yields nothing",
+                lambda f_name: None,
+                "VIKING",
+                "Resolved profile is not a SiteProfile, got: None",
+            ),
+            (
+                "a callable that yields a name",
+                lambda f_name: "VIKING",
+                "VIKING",
+                "Resolved profile is not a SiteProfile, got: str",
+            ),
+            (
+                "no resolver and an unknown name",
+                None,
+                "NOSUCHSITE",
+                "Failed to resolve site profile 'NOSUCHSITE'",
+            ),
+        ]
+        for f_label, f_resolver, f_site, f_fragment in f_rows:
+            with self.subTest(f_label):
+                f_prefix, f_error = self._probeResolution(f_resolver, f_site)
+                self.assertIsNone(f_prefix)
+                self.assertIn(f_fragment, f_error)
+
+        with self.subTest("a site that is neither a name nor a profile"):
+            f_prefix, f_error = self._probeResolution(None, 42)
+            self.assertIsNone(f_prefix)
+            self.assertEqual(f_error, "Invalid f_site argument: 42")
+
+    def testDetectedSiteResolverShapes(self) -> None:
+        f_calls: List[Any] = []
+        f_home = self.m_test_home
+
+        def detect_profile(f_test_mode: bool = False) -> SiteProfile:
+            f_calls.append(("detect", f_test_mode))
+            return self._profileAt("a")
+
+        def detect_name(f_test_mode: bool = False) -> str:
+            f_calls.append(("detect", f_test_mode))
+            return "SITE9"
+
+        def resolve_no_env_file(
+            f_name: str, f_user: Optional[str] = None, f_home: Optional[str] = None
+        ) -> SiteProfile:
+            f_calls.append(("resolveProfile", f_name, f_user, f_home))
+            return self._profileAt("b")
+
+        def get_profile(f_name: str) -> SiteProfile:
+            f_calls.append(("getProfile", f_name))
+            return self._profileAt("c")
+
+        class DetectingCallable:
+            """A resolver that detects and is also callable."""
+
+            def __init__(self, f_profile: SiteProfile) -> None:
+                self.m_profile = f_profile
+
+            def detect(self, f_test_mode: bool = False) -> str:
+                f_calls.append(("detect", f_test_mode))
+                return "SITE9"
+
+            def __call__(self, f_name: str) -> SiteProfile:
+                f_calls.append(("call", f_name))
+                return self.m_profile
+
+        def profile_callable(f_name: Optional[str]) -> SiteProfile:
+            f_calls.append(("call", f_name))
+            return self._profileAt("f")
+
+        def name_then_profile_callable(f_name: Optional[str]) -> Any:
+            f_calls.append(("call", f_name))
+            return "SITE9" if f_name is None else self._profileAt("e")
+
+        f_rows = [
+            (
+                "detect yields a profile, used as it is",
+                SimpleNamespace(detect=detect_profile),
+                "a",
+                [("detect", True)],
+            ),
+            (
+                "detect yields a name, resolveProfile without f_env_file",
+                SimpleNamespace(detect=detect_name, resolveProfile=resolve_no_env_file),
+                "b",
+                [("detect", True), ("resolveProfile", "SITE9", "alice", f_home)],
+            ),
+            (
+                "detect yields a name, getProfile",
+                SimpleNamespace(detect=detect_name, getProfile=get_profile),
+                "c",
+                [("detect", True), ("getProfile", "SITE9")],
+            ),
+            (
+                "detect yields a name, the resolver is also a callable",
+                DetectingCallable(self._profileAt("d")),
+                "d",
+                [("detect", True), ("call", "SITE9")],
+            ),
+            (
+                "a callable yields a profile",
+                profile_callable,
+                "f",
+                [("call", None)],
+            ),
+            (
+                "a callable yields a name that the callable then resolves",
+                name_then_profile_callable,
+                "e",
+                [("call", None), ("call", "SITE9")],
+            ),
+        ]
+        for f_label, f_resolver, f_expected, f_expected_calls in f_rows:
+            with self.subTest(f_label):
+                f_calls.clear()
+                f_prefix, f_error = self._probeResolution(f_resolver, None)
+                self.assertIsNone(f_error)
+                self.assertEqual(f_prefix, self._prefixOf(f_expected))
+                self.assertEqual(f_calls, f_expected_calls)
+
+    def testDetectionFallsBackToTheEnvironmentResolver(self) -> None:
+        f_calls: List[Any] = []
+
+        # A resolver with resolveProfile only: the detection is the environment's, with
+        # the test mode passed through, and the name goes to the resolver
+        def resolve(
+            f_name: str, f_user: Optional[str] = None, f_home: Optional[str] = None
+        ) -> SiteProfile:
+            f_calls.append(("resolveProfile", f_name))
+            return self._profileAt("a")
+
+        for f_mode in (True, False):
+            with self.subTest(f"resolveProfile-only resolver, test mode {f_mode}"):
+                f_calls.clear()
+                with patch.object(
+                    EnvironmentResolver, "detect", return_value="SITE9"
+                ) as f_detect:
+                    f_prefix, f_error = self._probeResolution(
+                        SimpleNamespace(resolveProfile=resolve),
+                        None,
+                        f_test_mode=f_mode,
+                    )
+                self.assertIsNone(f_error)
+                self.assertEqual(f_prefix, self._prefixOf("a"))
+                f_detect.assert_called_once_with(f_test_mode=f_mode)
+                self.assertEqual(f_calls, [("resolveProfile", "SITE9")])
+
+        # A resolver that only detects: the name goes to the environment resolver, with
+        # the user, the home and the profile file authority (none here)
+        with self.subTest("detect-only resolver"):
+            with patch.object(
+                EnvironmentResolver,
+                "resolveProfile",
+                return_value=self._profileAt("b"),
+            ) as f_resolve:
+                f_prefix, f_error = self._probeResolution(
+                    SimpleNamespace(detect=lambda f_test_mode=False: "SITE9"), None
+                )
+            self.assertIsNone(f_error)
+            self.assertEqual(f_prefix, self._prefixOf("b"))
+            f_resolve.assert_called_once_with(
+                "SITE9",
+                f_user=self.m_test_user,
+                f_home=self.m_test_home,
+                f_env_file=None,
+            )
+
+        with self.subTest("the environment resolver yields nothing"):
+            with patch.object(EnvironmentResolver, "resolveProfile", return_value=None):
+                f_prefix, f_error = self._probeResolution(
+                    SimpleNamespace(detect=lambda f_test_mode=False: "SITE9"), None
+                )
+            self.assertIsNone(f_prefix)
+            self.assertEqual(f_error, "Resolved profile is not a SiteProfile, got: None")
+
+    def testDetectionFailures(self) -> None:
+        def detect_raises(f_test_mode: bool = False) -> str:
+            raise SiteResolutionError("no site here")
+
+        def get_raises(f_name: str) -> SiteProfile:
+            raise SiteResolutionError(f"cannot load {f_name}")
+
+        f_rows = [
+            (
+                "detect yields another type",
+                SimpleNamespace(detect=lambda f_test_mode=False: 42),
+                "Failed to detect site profile: Resolver detect returned unexpected type: int",
+            ),
+            (
+                "a callable yields another type",
+                lambda f_name: 42,
+                "Failed to detect site profile: Resolver callable returned unexpected type: int",
+            ),
+            (
+                "an object that is no resolver",
+                SimpleNamespace(),
+                "Failed to detect site profile: Unsupported profile resolver",
+            ),
+            (
+                "detect raises",
+                SimpleNamespace(detect=detect_raises),
+                "Failed to detect site profile: no site here",
+            ),
+            (
+                "the detected name cannot be resolved",
+                SimpleNamespace(
+                    detect=lambda f_test_mode=False: "SITE9", getProfile=get_raises
+                ),
+                "Failed to resolve detected site profile 'SITE9': cannot load SITE9",
+            ),
+        ]
+        for f_label, f_resolver, f_fragment in f_rows:
+            with self.subTest(f_label):
+                f_prefix, f_error = self._probeResolution(f_resolver, None)
+                self.assertIsNone(f_prefix)
+                self.assertIn(f_fragment, f_error)
+
+    # ------------------------------------------------------------------ C2
+
+    def testNonSlurmSitesRunWithoutAnyCredentials(self) -> None:
+        """The credential stage cannot fail a PBS or fake-scheduler site: with
+        SB_ACCOUNT and SB_EMAIL unset the real validateCredentials(None, None) returns,
+        and execute() allocates a run and submits a script with no Slurm credentials."""
+        f_base_dev = self.m_registry.getProfile("DEV")
+        f_dev_root = os.path.join(self.m_temp_dir, "dev_root")
+        os.makedirs(f_dev_root, exist_ok=True)
+        f_dev_profile = SiteProfile(
+            f_name=f_base_dev.name,
+            f_scheduler=f_base_dev.scheduler,
+            f_launcher=f_base_dev.launcher,
+            f_certification=f_base_dev.certification,
+            f_test_only=True,
+            f_benchmark_roots={"hdd": f_dev_root, "ssd": f_dev_root},
+            f_install_prefix=self.m_temp_dir,
+            f_executables=self.m_executables,
+            f_modules=f_base_dev.modules,
+            f_resources=f_base_dev.resources,
+            f_rank_identity=f_base_dev.rank_identity,
+            f_cancellation=f_base_dev.cancellation,
+            f_lustre_pools=f_base_dev.lustre_pools,
+        )
+        self.assertEqual(f_dev_profile.scheduler, SchedulerKind.FAKE)
+        for f_profile in (self.m_isambard_profile, f_dev_profile):
+            with self.subTest(site=f_profile.name):
+                self.assertNotEqual(f_profile.scheduler, SchedulerKind.SLURM)
+                # The real check returns for no credentials at all
+                self.assertIsNone(f_profile.validateCredentials(None, None))
+                f_runner = FakeSchedulerCommandRunner()
+                f_orch = RunOrchestrator(
+                    f_profile_resolver=self.m_registry,
+                    f_command_runner=f_runner,
+                    f_poll_interval=0.01,
+                    f_environ={},
+                )
+
+                def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
+                    self._mockWritePointResults(
+                        f_orch.last_evidence_store,
+                        f_orch.last_plan.scale_points[0],
+                        f_orch.last_plan,
+                        f_ordinal=0,
+                    )
+
+                f_runner.m_on_submit_callback = on_submit
+                f_view = f_orch.execute(
+                    RunRequest("ior", "local"),
+                    f_site=f_profile,
+                    f_worker_executable=self.m_worker_path,
+                    f_environ={},
+                )
+                self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+                f_layout = f_orch.last_artifact_store.layout
+                self.assertTrue(os.path.isdir(f_layout.runRoot))
+                f_script = os.path.join(
+                    f_layout.pointSchedulerDir(f_orch.last_plan.scale_points[0], 0),
+                    "job.sh",
+                )
+                with open(f_script, "r", encoding="utf-8") as f_f:
+                    f_text = f_f.read()
+                for f_forbidden in ("#SBATCH", "--account", "--mail-user"):
+                    self.assertNotIn(f_forbidden, f_text)
+
+    def testLsmioEnvSetupIsRejected(self) -> None:
+        f_error = self._executePreflight(RunRequest("lsmio", "small", f_setup="ENV"))
+        self.assertEqual(
+            f_error,
+            "LSMIO setup 'ENV' is a diagnostic mode and cannot be used as a run "
+            "benchmark setup",
+        )
+        self._assertNothingAllocated()
+
+    def testRelocationFailureIsAPreflightError(self) -> None:
+        with patch(
+            "lsmiotool.lib.relocate.relocateForSite",
+            side_effect=RelocationError("work root is under a home prefix"),
+        ) as f_relocate:
+            f_error = self._executePreflight(RunRequest("ior", "local"))
+        self.assertEqual(f_error, "work root is under a home prefix")
+        f_relocate.assert_called_once()
+        f_args = f_relocate.call_args[0]
+        self.assertIs(f_args[0], self.m_viking_profile)
+        self.assertEqual(f_args[1], self.m_worker_path)
+        self._assertNothingAllocated()
+
+    def testWorkerValidatorThatIsNoValidatorIsRejected(self) -> None:
+        f_validator = SimpleNamespace(marker=1)
+        f_error = self._executePreflight(
+            RunRequest("ior", "local"), f_worker_validator=f_validator
+        )
+        self.assertEqual(
+            f_error,
+            f"Worker executable validation failed for '{self.m_worker_path}': "
+            f"Unsupported worker validator: {f_validator!r}",
+        )
+        self._assertNothingAllocated()
+
+    def testBenchmarkExecutableWithALoneSurrogateIsAPreflightError(self) -> None:
+        """A benchmark path holding a lone surrogate (an environments.json "\\ud800"
+        escape gives one, and ExecutableRegistry accepts it as absolute) makes os.lstat
+        raise UnicodeEncodeError, which validateBenchmarkExecutable does not catch. This
+        pins that current behaviour: the function leaks the UnicodeEncodeError, and
+        execute() turns it into a PreflightError that keeps it as the cause."""
+        f_bad_path = "/opt/\ud800/bm_native"
+        f_executables = ExecutableRegistry(
+            {
+                "ior": f_bad_path,
+                "lmp": self.m_lmp_path,
+                "bm_native": self.m_bm_paths["bm_native"],
+                "bm_adios": self.m_bm_paths["bm_adios"],
+                "bm_rocksdb": self.m_bm_paths["bm_rocksdb"],
+                "bm_leveldb": self.m_bm_paths["bm_leveldb"],
+                "bm_manager": self.m_bm_paths["bm_manager"],
+            }
+        )
+        f_profile = self._profileAt("a", f_executables=f_executables)
+        self.assertEqual(f_profile.executables.ior, f_bad_path)
+
+        # The function itself: not a PreflightError
+        with self.assertRaises(UnicodeEncodeError) as f_direct:
+            validateBenchmarkExecutable(f_bad_path)
+        self.assertNotIsInstance(f_direct.exception, PreflightError)
+
+        # Its caller: a PreflightError that chains the real error, with nothing mutated
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry, f_command_runner=self.m_fake_runner
+        )
+        with self.assertRaises(PreflightError) as f_ctx:
+            f_orch.execute(
+                RunRequest("ior", "local"),
+                f_site=f_profile,
+                f_worker_executable=self.m_worker_path,
+            )
+        self.assertIsInstance(f_ctx.exception.__cause__, UnicodeEncodeError)
+        self.assertEqual(
+            str(f_ctx.exception),
+            f"Benchmark executable validation failed for '{f_bad_path}': "
+            f"{f_ctx.exception.__cause__}",
+        )
+        self._assertNothingAllocated(f_profile)
+
+    # ------------------------------------------------------------------ C3
+
+    def testLmpAssetRootComesFromTheRuntimeLayout(self) -> None:
+        f_layout_assets = os.path.join(self.m_temp_dir, "layout-assets")
+        f_layout = RuntimeLayout(
+            f_execution_mode=ExecutionMode.SOURCE,
+            f_package_root=os.path.join(self.m_temp_dir, "pkg"),
+            f_profile_file=self.m_default_profile_path,
+            f_asset_root=f_layout_assets,
+            f_worker_executable=self.m_worker_path,
+            f_version_file=os.path.join(self.m_temp_dir, "VERSION"),
+        )
+        # The profile's own asset root exists and is complete; the layout's does not
+        self.assertTrue(os.path.isdir(self.m_lmp_assets_dir))
+        f_error = self._executePreflight(
+            RunRequest("lmp", "small", f_setup="LSMIO"),
+            f_runtime_layout=f_layout,
+        )
+        self.assertIn(
+            f"LMP asset validation failed for asset root '{f_layout_assets}'", f_error
+        )
+        self._assertNothingAllocated()
+
+    def testArmErrorIsAPreflightError(self) -> None:
+        f_error = self._executePreflight(
+            RunRequest("ior", "local", f_mode="backends", f_backends=["base", "ior"])
+        )
+        self.assertEqual(f_error, "IOR setup listed twice: [ior]")
+        self._assertNothingAllocated()
+
+    def testResourcesPlanFailures(self) -> None:
+        f_rows = [
+            (
+                "a plan validation error keeps its text",
+                PlanValidationError("walltime does not fit"),
+                "walltime does not fit",
+            ),
+            (
+                "any other error is wrapped",
+                ValueError("planner broke"),
+                "Plan creation failed: planner broke",
+            ),
+        ]
+        for f_label, f_raised, f_expected in f_rows:
+            with self.subTest(f_label):
+                f_planner = _FailingPlanner(1, f_raised)
+                f_error = self._executePreflight(
+                    RunRequest("ior", "local"), f_planner=f_planner
+                )
+                self.assertEqual(f_error, f_expected)
+                self.assertEqual(f_planner.m_calls, 1)
+                self._assertNothingAllocated()
+
+    # ------------------------------------------------------------------ C4
+
+    def testArmPlanFailureAfterTheResourcesPlan(self) -> None:
+        f_rows = [
+            (
+                "a plan validation error keeps its text",
+                PlanValidationError("arm does not fit"),
+                "arm does not fit",
+            ),
+            (
+                "any other error is wrapped",
+                ValueError("arm planner broke"),
+                "Plan creation failed: arm planner broke",
+            ),
+        ]
+        for f_label, f_raised, f_expected in f_rows:
+            with self.subTest(f_label):
+                f_planner = _FailingPlanner(2, f_raised)
+                f_error = self._executePreflight(
+                    RunRequest("ior", "local"), f_planner=f_planner
+                )
+                self.assertEqual(f_error, f_expected)
+                # The resources plan was made, then the arm's plan failed
+                self.assertEqual(f_planner.m_calls, 2)
+                self._assertNothingAllocated()
+
+    def testControlLockFailuresAfterAllocation(self) -> None:
+        f_rows = [
+            (
+                "another orchestrator holds the lock",
+                LockContentionError("held by pid 77"),
+                "Control lock contention on run 'run-lock-1': held by pid 77",
+            ),
+            (
+                "the lock cannot be opened",
+                ArtifactError("cannot open the lock file"),
+                "Failed to acquire control lock on run 'run-lock-1': "
+                "cannot open the lock file",
+            ),
+        ]
+        for f_label, f_raised, f_expected in f_rows:
+            with self.subTest(f_label):
+                f_lock = _FailingLock(f_raised)
+                f_reporter = _IdentityFailingReporter()
+                f_orch = RunOrchestrator(
+                    f_profile_resolver=self.m_registry,
+                    f_command_runner=self.m_fake_runner,
+                    f_run_id_source=lambda: "run-lock-1",
+                    f_artifact_store_factory=lambda f_root, f_rid: _LockFailingStore(
+                        f_root, f_rid, f_lock
+                    ),
+                    f_reporter=f_reporter,
+                )
+                with self.assertRaises(OrchestrationError) as f_ctx:
+                    f_orch.execute(
+                        RunRequest("ior", "local"),
+                        f_site=self.m_viking_profile,
+                        f_worker_executable=self.m_worker_path,
+                    )
+                self.assertNotIsInstance(f_ctx.exception, PreflightError)
+                self.assertEqual(str(f_ctx.exception), f_expected)
+                self.assertEqual(f_lock.m_acquires, 1)
+                f_store = f_orch.last_artifact_store
+                # The run root was allocated, and the failing identity report did not
+                # stop the run before the lock was taken
+                self.assertTrue(os.path.isdir(f_store.layout.runRoot))
+                self.assertEqual(
+                    f_reporter.m_identity_calls,
+                    [("run-lock-1", f_store.layout.runRoot)],
+                )
+                self.assertEqual(self.m_fake_runner.m_submit_calls, [])
+                shutil.rmtree(f_store.layout.runRoot)
+
+    def testSecondArmAllocationFailureReleasesTheFirstArmsLock(self) -> None:
+        f_rows = [
+            ("the first lock releases cleanly", None),
+            ("the first lock's release raises", RuntimeError("release failed")),
+        ]
+        for f_label, f_release_error in f_rows:
+            with self.subTest(f_label):
+                f_stores: List[Any] = []
+                f_events: List[str] = []
+                f_real_locks: List[Any] = []
+
+                def factory(f_root: str, f_rid: str) -> Any:
+                    if not f_stores:
+                        f_store: Any = _ArmStore(
+                            f_root, f_rid, f_events, f_real_locks, f_release_error
+                        )
+                    else:
+                        f_store = _ArmStore(
+                            f_root,
+                            f_rid,
+                            f_events,
+                            f_real_locks,
+                            None,
+                            f_allocate_error=ArtifactError("disk full"),
+                        )
+                    f_stores.append(f_store)
+                    return f_store
+
+                f_orch = RunOrchestrator(
+                    f_profile_resolver=self.m_registry,
+                    f_command_runner=self.m_fake_runner,
+                    f_artifact_store_factory=factory,
+                )
+                with self.assertRaises(OrchestrationError) as f_ctx:
+                    f_orch.execute(
+                        RunRequest(
+                            "lsmio",
+                            "baseline",
+                            f_variants=["no-footer", "no-manoff"],
+                            f_archive=False,
+                        ),
+                        f_site=self.m_viking_profile,
+                        f_worker_executable=self.m_worker_path,
+                    )
+                self.assertEqual(
+                    str(f_ctx.exception), "Failed to allocate run: disk full"
+                )
+                self.assertEqual(len(f_stores), 2)
+                # Only the first arm held a lock: it was taken and then released, and the
+                # real lock is no longer held
+                self.assertEqual(f_events, ["acquire", "release"])
+                self.assertEqual(len(f_real_locks), 1)
+                self.assertFalse(f_real_locks[0].is_locked)
+                self.assertTrue(os.path.isdir(f_stores[0].layout.runRoot))
+                self.assertEqual(self.m_fake_runner.m_submit_calls, [])
+                for f_store in f_stores:
+                    shutil.rmtree(f_store.layout.runRoot, ignore_errors=True)
+
+    def testUnwritableArmMarkerIsReportedAndTheRunGoesOn(self) -> None:
+        f_lines: List[str] = []
+        f_sig = SignalCoordinator()
+        f_sig.trigger(signal.SIGINT)
+        f_stores: List[Any] = []
+
+        def factory(f_root: str, f_rid: str) -> Any:
+            f_store = _MarkerBlockingStore(f_root, f_rid)
+            f_stores.append(f_store)
+            return f_store
+
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_artifact_store_factory=factory,
+            f_signal_coordinator=f_sig,
+            f_reporter=RunReporter(f_callback=f_lines.append),
+        )
+        f_view = f_orch.execute(
+            RunRequest(
+                "lsmio",
+                "baseline",
+                f_variants=["no-footer", "no-manoff"],
+                f_archive=False,
+            ),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+        # The run went on to its (latched) interruption: no arm started
+        self.assertEqual(f_view.state, OverallRunState.NOT_STARTED)
+        self.assertEqual(
+            [f_v.state for f_v in f_orch.views], [OverallRunState.NOT_STARTED] * 3
+        )
+        self.assertEqual(f_orch.exitCode, 130)
+        self.assertEqual(self.m_fake_runner.m_submit_calls, [])
+        self.assertEqual(len(f_stores), 3)
+        for f_store in f_stores:
+            f_run_id = f_store.layout.runId
+            f_warnings = [
+                f_l
+                for f_l in f_lines
+                if f_l.startswith(
+                    f"WARNING: cannot write the arm marker of {f_run_id}:"
+                )
+            ]
+            self.assertEqual(len(f_warnings), 1, f_lines)
+            # The blocked marker path is still the directory that blocked it
+            self.assertTrue(
+                os.path.isdir(
+                    os.path.join(f_store.layout.runRoot, ".lsmiotool-arm.json")
+                )
+            )
+
+    def testEveryArmNamesThisProcessAndHostWhileTheRunIsLive(self) -> None:
+        """While a multi-arm run is live, each arm's control dir holds a pid file naming
+        this process and this host; the files are gone when the run ends."""
+        f_seen: List[Any] = []
+
+        def on_ready(f_roots: List[str]) -> None:
+            f_seen.append(
+                [
+                    (
+                        f_root,
+                        readOrchestratorPid(f_root),
+                        os.listdir(os.path.join(f_root, "control")),
+                    )
+                    for f_root in f_roots
+                ]
+            )
+
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest(
+                "lsmio",
+                "baseline",
+                f_variants=["no-footer", "no-manoff"],
+                f_archive=False,
+            ),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+            f_on_ready=on_ready,
+        )
+        self.assertEqual(len(f_seen), 1)
+        self.assertEqual(len(f_seen[0]), 3)
+        f_roots = [f_r["store"].layout.runRoot for f_r in f_orch.groupRuns]
+        self.assertEqual([f_s[0] for f_s in f_seen[0]], f_roots)
+        for f_root, f_doc, f_names in f_seen[0]:
+            self.assertEqual(f_doc["pid"], os.getpid(), f_root)
+            self.assertEqual(f_doc["host"], socket.gethostname(), f_root)
+            self.assertIn(ORCHESTRATOR_PID_FILE, f_names)
+        for f_root in f_roots:
+            self.assertIsNone(readOrchestratorPid(f_root))
+            self.assertFalse(os.path.exists(orchestratorPidPath(f_root)))
+
+    # ------------------------------------------------------------------ D1/D2/D3
+    # The single-run loop, the arm-group loop and the archive step
+
+    def _hookedFactory(self, f_adapters: List[Any], **f_hooks: Any) -> Any:
+        """A scheduler adapter factory (the injection contract of D3) whose adapters are
+        a real Slurm adapter behind _HookedAdapter; f_adapters collects them."""
+
+        def factory(
+            f_profile: Any, f_evidence: Any, f_validator: Any, f_runner: Any
+        ) -> Any:
+            f_adapter = _HookedAdapter(
+                SlurmSchedulerAdapter(
+                    f_evidence_store=f_evidence,
+                    f_worker_validator=f_validator,
+                    f_command_runner=f_runner,
+                ),
+                **f_hooks,
+            )
+            f_adapters.append(f_adapter)
+            return f_adapter
+
+        return factory
+
+    def _resultsOnSubmit(self, f_orch: RunOrchestrator, f_runner: Any) -> None:
+        """Make each submitted job of a single run write its point's results (the worker)."""
+
+        def on_submit(f_jid: str, f_cwd: Optional[str]) -> None:
+            f_idx = len(f_runner.m_submit_calls) - 1
+            self._mockWritePointResults(
+                f_orch.last_evidence_store,
+                f_orch.last_plan.scale_points[f_idx],
+                f_orch.last_plan,
+                f_ordinal=f_idx,
+            )
+
+        f_runner.m_on_submit_callback = on_submit
+
+    def _executeSingle(
+        self, f_orch: RunOrchestrator, f_request: Any = None, **f_kwargs: Any
+    ) -> Any:
+        return f_orch.execute(
+            f_request if f_request is not None else RunRequest("ior", "local"),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+            **f_kwargs,
+        )
+
+    def _installPluginAndReference(self) -> None:
+        """What backends and versioned arms need at preflight: the ADIOS2 plugin library
+        and the bm_native:main reference executable."""
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+        f_main = os.path.join(self.m_bin_dir, "bm_native:main")
+        with open(f_main, "w") as f_f:
+            f_f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(f_main, 0o755)
+
+    def _controlKinds(self, f_orch: RunOrchestrator) -> List[Any]:
+        return [
+            f_e.evidence_kind
+            for f_e in f_orch.last_evidence_store.readControlEvents("control")
+        ]
+
+    def testSingleRunUsesTheInjectedAdapterFactory(self) -> None:
+        f_adapters: List[Any] = []
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+            f_scheduler_adapter_factory=self._hookedFactory(f_adapters),
+        )
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        f_view = self._executeSingle(f_orch)
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        # The loop got its adapter from the factory, built on the run's own evidence
+        # store, and submitted through it
+        self.assertEqual(len(f_adapters), 1)
+        f_inner = f_adapters[0].m_inner
+        self.assertIs(f_inner.m_evidence_store, f_orch.last_evidence_store)
+        self.assertIs(f_inner.m_command_runner, self.m_fake_runner)
+        self.assertEqual(f_adapters[0].m_dispatches, 1)
+        self.assertEqual(len(self.m_fake_runner.m_submit_calls), 1)
+
+    def testInterruptionBeforeTheLoopSurvivesAFailingCompletionReport(self) -> None:
+        f_sig = SignalCoordinator()
+        f_sig.trigger(signal.SIGINT)
+        f_reporter = _HookReporter(f_failing=("reportCompletion",))
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_signal_coordinator=f_sig,
+            f_reporter=f_reporter,
+        )
+        f_view = self._executeSingle(f_orch)
+        self.assertEqual(f_view.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch.exitCode, 130)
+        self.assertEqual(self.m_fake_runner.m_submit_calls, [])
+        # The report was attempted, with the interrupted state, and its failure ignored
+        self.assertEqual(
+            [f_c[0] for f_c in f_reporter.m_calls if f_c[0] == "reportCompletion"],
+            ["reportCompletion"],
+        )
+        self.assertEqual(
+            self._controlKinds(f_orch), [EvidenceKind.INTERRUPTED]
+        )
+
+    def testInterruptionAtTheTopOfTheSecondPointKeepsTheFirst(self) -> None:
+        f_sig = _InterruptedAfterReads(self.m_fake_runner, 4)
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+            f_signal_coordinator=f_sig,
+        )
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        # A signal that arrives after the first point's last check and before the
+        # second point's first one: no hook runs between those two reads (D5), so the
+        # coordinator turns interrupted on the read that counts
+        f_view = self._executeSingle(f_orch, RunRequest("ior", "bake"))
+        self.assertEqual(f_view.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch.exitCode, 130)
+        self.assertEqual(len(self.m_fake_runner.m_submit_calls), 1)
+        self.assertEqual(
+            [f_p.state for f_p in f_view.point_states],
+            [
+                PointRunState.SUCCEEDED,
+                PointRunState.NOT_STARTED,
+                PointRunState.NOT_STARTED,
+                PointRunState.NOT_STARTED,
+            ],
+        )
+        self.assertEqual(self._controlKinds(f_orch), [EvidenceKind.INTERRUPTED])
+
+    def testInterruptionBetweenTheSpecAndTheDispatchSubmitsNothing(self) -> None:
+        f_sig = SignalCoordinator()
+        f_adapters: List[Any] = []
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_signal_coordinator=f_sig,
+            f_scheduler_adapter_factory=self._hookedFactory(
+                f_adapters, f_on_render=lambda: f_sig.trigger(signal.SIGINT)
+            ),
+        )
+        f_view = self._executeSingle(f_orch)
+        self.assertEqual(f_view.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch.exitCode, 130)
+        # The script was rendered, then the run stopped before the dispatch
+        self.assertEqual(f_adapters[0].m_renders, 1)
+        self.assertEqual(f_adapters[0].m_dispatches, 0)
+        self.assertEqual(self.m_fake_runner.m_submit_calls, [])
+        self.assertEqual(self._controlKinds(f_orch), [EvidenceKind.INTERRUPTED])
+
+    def testFailingSubmissionReportDoesNotStopASingleRun(self) -> None:
+        f_reporter = _HookReporter(f_failing=("reportPointSubmission",))
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+            f_reporter=f_reporter,
+        )
+        self.m_fake_runner.m_submit_job_ids = ["9301"]
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        f_view = self._executeSingle(f_orch)
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        f_submissions = [f_c for f_c in f_reporter.m_calls if f_c[0] == "reportPointSubmission"]
+        self.assertEqual(len(f_submissions), 1)
+        self.assertEqual(f_submissions[0][1][2], "9301")
+        self.assertEqual(f_orch.exitCode, 0)
+
+    def _interruptedInDispatch(
+        self,
+        f_on_dispatch: Any,
+        f_runner: Optional[FakeSchedulerCommandRunner] = None,
+        f_reporter: Optional[RunReporter] = None,
+        f_hidden: Sequence[str] = (),
+        f_sig: Optional[SignalCoordinator] = None,
+        f_token: Optional[str] = None,
+    ) -> Any:
+        """Single run whose dispatch (a hook on a real Slurm adapter) is where the
+        interruption arrives. Returns (orchestrator, view, runner)."""
+        f_signal = f_sig if f_sig is not None else SignalCoordinator()
+        f_runner_used = f_runner if f_runner is not None else self.m_fake_runner
+        f_hook = (
+            None
+            if f_on_dispatch is None
+            else lambda f_inner, f_kw: f_on_dispatch(f_signal, f_inner, f_kw)
+        )
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner_used,
+            f_poll_interval=0.01,
+            f_signal_coordinator=f_signal,
+            f_reporter=f_reporter,
+            f_token_source=(lambda: f_token) if f_token else None,
+            f_scheduler_adapter_factory=self._hookedFactory(
+                [], f_on_dispatch=f_hook, f_hidden=f_hidden
+            ),
+        )
+        f_view = self._executeSingle(f_orch)
+        return f_orch, f_view, f_runner_used
+
+    def testInterruptedDispatchWithoutAJobHandleCancelsNothing(self) -> None:
+        def lost(f_sig: Any, f_inner: Any, f_kw: Any) -> Any:
+            f_sig.trigger(signal.SIGINT)
+            # A result that carries no handle: nothing to report and nothing to cancel
+            return SimpleNamespace(job_handle=None)
+
+        f_orch, f_view, f_runner = self._interruptedInDispatch(lost)
+        self.assertEqual(f_view.state, OverallRunState.INTERRUPTED)
+        self.assertEqual(f_orch.exitCode, 130)
+        self.assertEqual(f_runner.m_submit_calls, [])
+        self.assertEqual(f_runner.m_cancel_calls, [])
+        self.assertEqual(self._controlKinds(f_orch), [EvidenceKind.INTERRUPTED])
+
+    def testInterruptedFailedDispatchRecoversTheJobHandleFromTheEvidence(self) -> None:
+        def raise_after(f_sig: Any, f_inner: Any, f_kw: Any) -> Any:
+            f_sig.trigger(signal.SIGINT)
+            raise SubmissionDispatchError("reply lost")
+
+        def submit_then_raise(f_sig: Any, f_inner: Any, f_kw: Any) -> Any:
+            f_inner.dispatchSubmission(**f_kw)
+            return raise_after(f_sig, f_inner, f_kw)
+
+        def record_without_handle(f_sig: Any, f_inner: Any, f_kw: Any) -> Any:
+            f_ev = f_inner.m_evidence_store
+            f_ev.recordRecord(
+                os.path.join(
+                    f_ev.m_layout.pointSchedulerDir(
+                        f_kw["f_point"], f_kw["f_ordinal"]
+                    ),
+                    "submission_recorded.json",
+                ),
+                EvidenceRecord(
+                    f_writer_kind=WriterKind.CONTROL,
+                    f_writer_id="control",
+                    f_sequence_number=3,
+                    f_evidence_kind=EvidenceKind.SUBMISSION_RECORDED,
+                    f_payload={"note": "no handle"},
+                    f_run_id=f_ev.m_layout.runId,
+                    f_point_id=f_ev.m_layout.pointDirName(
+                        f_kw["f_point"], f_kw["f_ordinal"]
+                    ),
+                ),
+            )
+            return raise_after(f_sig, f_inner, f_kw)
+
+        def corrupt_the_record(f_sig: Any, f_inner: Any, f_kw: Any) -> Any:
+            f_ev = f_inner.m_evidence_store
+            f_path = os.path.join(
+                f_ev.m_layout.pointSchedulerDir(f_kw["f_point"], f_kw["f_ordinal"]),
+                "submission_recorded.json",
+            )
+            with open(f_path, "w", encoding="utf-8") as f_f:
+                f_f.write("{ torn write")
+            return raise_after(f_sig, f_inner, f_kw)
+
+        # Rows: (label, dispatch hook, hidden adapter attributes, expected cancel ids)
+        f_rows = [
+            ("nothing recorded: no job to cancel", raise_after, (), []),
+            (
+                "a recorded handle is rebuilt and cancelled",
+                submit_then_raise,
+                (),
+                ["9101"],
+            ),
+            ("a record without a handle dict", record_without_handle, (), []),
+            ("a record that cannot be read", corrupt_the_record, (), []),
+        ]
+        for f_label, f_hook, f_hidden, f_cancelled in f_rows:
+            with self.subTest(f_label):
+                f_runner = FakeSchedulerCommandRunner()
+                f_runner.m_submit_job_ids = ["9101"]
+                f_orch, f_view, _ = self._interruptedInDispatch(
+                    f_hook, f_runner=f_runner, f_hidden=f_hidden
+                )
+                self.assertEqual(f_orch.exitCode, 130)
+                self.assertEqual(
+                    [f_c[-1] for f_c in f_runner.m_cancel_calls], f_cancelled
+                )
+                self.assertEqual(
+                    [os.path.basename(f_c[0]) for f_c in f_runner.m_cancel_calls],
+                    ["scancel"] * len(f_cancelled),
+                )
+
+    def testInterruptedAfterAnUnansweredSubmitRecoversTheJobByItsToken(self) -> None:
+        f_token = "lm-0123456789abcdef01234567"
+
+        class LostReplyRunner(FakeSchedulerCommandRunner):
+            """sbatch is interrupted after the scheduler took the job: it exits non-zero."""
+
+            def __init__(self, f_sig: SignalCoordinator) -> None:
+                super().__init__()
+                self.m_sig = f_sig
+
+            def run(self, f_argv: Sequence[str], *f_args: Any, **f_kw: Any) -> Any:
+                if os.path.basename(f_argv[0]) == "sbatch":
+                    self.m_calls.append(list(f_argv))
+                    self.m_sig.trigger(signal.SIGINT)
+                    return ProcessResult(130, "", "sbatch: interrupted\n", 0.01)
+                return super().run(f_argv, *f_args, **f_kw)
+
+        # (label, scheduler job ids found under the token, reporter, hidden attributes)
+        f_rows = [
+            ("recovered and reported", ["9202"], _HookReporter(), ()),
+            (
+                "the report of the recovered job fails",
+                ["9202"],
+                _HookReporter(f_failing=("reportPointSubmission",)),
+                (),
+            ),
+            ("recovered with no reporter", ["9202"], None, ()),
+            ("the scheduler knows no such job", [], _HookReporter(), ()),
+            (
+                "an adapter that cannot recover",
+                ["9202"],
+                _HookReporter(),
+                ("recoverJobHandle",),
+            ),
+        ]
+        for f_label, f_ids, f_reporter, f_hidden in f_rows:
+            with self.subTest(f_label):
+                f_sig = SignalCoordinator()
+                f_runner = LostReplyRunner(f_sig)
+                f_runner.m_recovery_candidates[f_token] = list(f_ids)
+                f_orch, f_view, _ = self._interruptedInDispatch(
+                    None,
+                    f_runner=f_runner,
+                    f_reporter=f_reporter,
+                    f_hidden=f_hidden,
+                    f_sig=f_sig,
+                    f_token=f_token,
+                )
+                self.assertEqual(f_orch.exitCode, 130)
+                f_ev = f_orch.last_evidence_store
+                f_sp = f_orch.last_plan.scale_points[0]
+                f_records = f_ev.readSubmissionRecords(f_sp, f_ordinal=0)
+                self.assertIsNotNone(f_records["submission_dispatched"])
+                f_recovered = bool(f_ids) and "recoverJobHandle" not in f_hidden
+                if f_recovered:
+                    f_payload = f_records["submission_recorded"].payload
+                    self.assertTrue(f_payload["recovered"])
+                    self.assertEqual(f_payload["handle"]["job_id"], "9202")
+                    self.assertEqual(
+                        [f_c[-1] for f_c in f_runner.m_cancel_calls], ["9202"]
+                    )
+                else:
+                    self.assertIsNone(f_records["submission_recorded"])
+                    self.assertEqual(f_runner.m_cancel_calls, [])
+                if f_reporter is not None:
+                    f_reported = [
+                        f_c for f_c in f_reporter.m_calls
+                        if f_c[0] == "reportPointSubmission"
+                    ]
+                    self.assertEqual(
+                        [f_c[1][2] for f_c in f_reported],
+                        ["9202"] if f_recovered else [],
+                    )
+
+    def testObservationsContinueAfterTheOnesAlreadyOnDisk(self) -> None:
+        def seed_one_observation(f_inner: Any, f_kw: Any) -> Any:
+            f_result = f_inner.dispatchSubmission(**f_kw)
+            f_inner.m_evidence_store.recordSchedulerObservation(
+                f_point=f_kw["f_point"],
+                f_writer_id="control",
+                f_sequence=1,
+                f_payload={
+                    "handle": f_result.job_handle.toDict(),
+                    "state": "queued",
+                    "status": "queued",
+                    "exit_code": None,
+                },
+                f_ordinal=f_kw["f_ordinal"],
+            )
+            return f_result
+
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+            f_scheduler_adapter_factory=self._hookedFactory(
+                [], f_on_dispatch=seed_one_observation
+            ),
+        )
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        f_view = self._executeSingle(f_orch)
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        f_obs = f_orch.last_evidence_store.readSchedulerObservations(
+            f_orch.last_plan.scale_points[0], "control", f_ordinal=0
+        )
+        # The seeded observation is first; the loop's own continue at the next number
+        self.assertEqual([f_o.sequence_number for f_o in f_obs][:2], [1, 2])
+        self.assertEqual(f_obs[0].payload["state"], "queued")
+        self.assertNotEqual(f_obs[1].payload["state"], "queued")
+
+    def testAnEarlierInterruptionEventKeepsTheWholeRunSuccessUnrecorded(self) -> None:
+        def seed_interruption(f_inner: Any, f_kw: Any) -> Any:
+            f_result = f_inner.dispatchSubmission(**f_kw)
+            f_inner.m_evidence_store.recordInterruption(
+                f_writer_id="control",
+                f_sequence=1,
+                f_payload={"signal": 2, "signal_name": "SIGINT", "exit_code": 130},
+            )
+            return f_result
+
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+            f_scheduler_adapter_factory=self._hookedFactory(
+                [], f_on_dispatch=seed_interruption
+            ),
+        )
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        self._executeSingle(f_orch)
+        # The coordinator itself was never interrupted, yet the evidence holds an
+        # interruption, so the run is not recorded as a success
+        self.assertFalse(f_orch.isInterrupted)
+        self.assertNotIn(
+            EvidenceKind.WHOLE_RUN_SUCCEEDED, self._controlKinds(f_orch)
+        )
+
+    def testFailedWholeRunRecordIsReconciledAnyway(self) -> None:
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+        )
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        # The disk fills up while the whole-run record is written (a real OSError)
+        with patch.object(
+            EvidenceStore,
+            "recordWholeRunSucceeded",
+            side_effect=OSError(errno.ENOSPC, "No space left on device"),
+        ) as f_record:
+            f_view = self._executeSingle(f_orch)
+        f_record.assert_called_once()
+        self.assertNotIn(
+            EvidenceKind.WHOLE_RUN_SUCCEEDED, self._controlKinds(f_orch)
+        )
+        self.assertEqual(
+            [f_p.state for f_p in f_view.point_states], [PointRunState.SUCCEEDED]
+        )
+        self.assertIs(f_view, f_orch.last_view)
+
+    def testFailingCompletionReportDoesNotChangeTheOutcome(self) -> None:
+        f_reporter = _HookReporter(f_failing=("reportCompletion",))
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=self.m_fake_runner,
+            f_poll_interval=0.01,
+            f_reporter=f_reporter,
+        )
+        self._resultsOnSubmit(f_orch, self.m_fake_runner)
+        f_view = self._executeSingle(f_orch)
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        self.assertEqual(f_orch.exitCode, 0)
+        f_calls = [f_c for f_c in f_reporter.m_calls if f_c[0] == "reportCompletion"]
+        self.assertEqual(len(f_calls), 1)
+        self.assertEqual(f_calls[0][1][0], OverallRunState.SUCCEEDED)
+
+    # ------------------------------------------------------------------ D2
+
+    def _groupOrch(
+        self,
+        f_reporter: Optional[RunReporter] = None,
+        f_fail_labels: Sequence[str] = (),
+        **f_kwargs: Any,
+    ) -> RunOrchestrator:
+        """An orchestrator whose submitted jobs write results for every arm (the worker)."""
+        f_runner = f_kwargs.pop("f_command_runner", self.m_fake_runner)
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+            f_reporter=f_reporter,
+            **f_kwargs,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(
+            f_orch, f_fail_labels=f_fail_labels
+        )
+        return f_orch
+
+    @staticmethod
+    def _pairedRequest(**f_kwargs: Any) -> RunRequest:
+        f_kwargs.setdefault("f_archive", False)
+        return RunRequest("lsmio", "baseline", f_variants=["no-footer"], **f_kwargs)
+
+    def testArmGroupSubmissionFailuresAreReportedAndStopTheGroup(self) -> None:
+        def no_handle(f_inner: Any, f_kw: Any) -> Any:
+            # A dispatch result that carries no job handle
+            return SimpleNamespace(job_handle=None)
+
+        # Rows: (label, adapter factory hook or None, scheduler refuses, reason)
+        f_rows = [
+            (
+                "a dispatch without a handle",
+                no_handle,
+                False,
+                "Submission returned no job handle",
+            ),
+            (
+                "the scheduler refuses the submission",
+                None,
+                True,
+                "Scheduler submission failed with return code 1: "
+                "sbatch: error: Invalid partition",
+            ),
+        ]
+        for f_label, f_hook, f_refuse, f_reason in f_rows:
+            with self.subTest(f_label):
+                f_runner = FakeSchedulerCommandRunner()
+                f_runner.m_submit_fail = f_refuse
+                f_reporter = _HookReporter()
+                f_kwargs: Dict[str, Any] = {}
+                if f_hook is not None:
+                    f_kwargs["f_scheduler_adapter_factory"] = self._hookedFactory(
+                        [], f_on_dispatch=f_hook
+                    )
+                f_orch = self._groupOrch(
+                    f_reporter, f_command_runner=f_runner, **f_kwargs
+                )
+                self._executeSingle(f_orch, self._pairedRequest())
+                f_lines = [
+                    f_l
+                    for f_l in f_reporter.lines
+                    if f_l.startswith("Submission failed for point ")
+                ]
+                self.assertEqual(len(f_lines), 1, f_reporter.lines)
+                self.assertTrue(f_lines[0].endswith(f": {f_reason}"), f_lines[0])
+                # The group stops: one refused submit at most, no job, and every arm is
+                # reported as not having succeeded
+                self.assertEqual(len(f_runner.m_submit_calls), 1 if f_refuse else 0)
+                self.assertEqual(len(f_orch.views), 2)
+                for f_view in f_orch.views:
+                    self.assertNotEqual(f_view.state, OverallRunState.SUCCEEDED)
+                self.assertEqual(f_orch.exitCode, 1)
+
+    def testFailingSubmissionReportDoesNotStopAnArmGroup(self) -> None:
+        f_reporter = _HookReporter(f_failing=("reportPointSubmission",))
+        f_orch = self._groupOrch(f_reporter)
+        self.m_fake_runner.m_submit_job_ids = ["9401"]
+        f_view = self._executeSingle(f_orch, self._pairedRequest())
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        f_calls = [f_c for f_c in f_reporter.m_calls if f_c[0] == "reportPointSubmission"]
+        self.assertEqual([f_c[1][2] for f_c in f_calls], ["9401"])
+        self.assertEqual(f_orch.exitCode, 0)
+
+    def testFailingProgressReportDoesNotChangeAnArmGroupOutcome(self) -> None:
+        f_reporter = _HookReporter(f_failing=("reportProgress",))
+        f_orch = self._groupOrch(f_reporter)
+        f_view = self._executeSingle(f_orch, self._pairedRequest())
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        # Each arm's closing line was attempted, and its failure ignored
+        f_arm_lines = [
+            f_c[1][0]
+            for f_c in f_reporter.m_calls
+            if f_c[0] == "reportProgress" and f_c[1][0].startswith("Arm ")
+        ]
+        self.assertEqual(
+            f_arm_lines, ["Arm baseline: SUCCEEDED", "Arm no-footer: SUCCEEDED"]
+        )
+        self.assertEqual(f_orch.exitCode, 0)
+
+    def testFailingLockReleasesDoNotChangeAnArmGroupOutcome(self) -> None:
+        f_events: List[str] = []
+        f_real_locks: List[Any] = []
+        f_orch = self._groupOrch(
+            f_artifact_store_factory=lambda f_root, f_rid: _ArmStore(
+                f_root, f_rid, f_events, f_real_locks, RuntimeError("release failed")
+            )
+        )
+        f_view = self._executeSingle(f_orch, self._pairedRequest())
+        self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+        # Both arms took their lock and tried to release it; the real locks are free
+        self.assertEqual(f_events, ["acquire"] * 2 + ["release"] * 2)
+        self.assertEqual([f_l.is_locked for f_l in f_real_locks], [False, False])
+        self.assertEqual(f_orch.exitCode, 0)
+
+    def testFailedWholeRunRecordInAnArmGroupIsReconciledAnyway(self) -> None:
+        f_orch = self._groupOrch()
+        # The disk fills up while a whole-run record is written (a real OSError)
+        with patch.object(
+            EvidenceStore,
+            "recordWholeRunSucceeded",
+            side_effect=OSError(errno.ENOSPC, "No space left on device"),
+        ) as f_record:
+            self._executeSingle(f_orch, self._pairedRequest())
+        self.assertEqual(f_record.call_count, 2)
+        for f_run in f_orch.groupRuns:
+            f_kinds = [
+                f_e.evidence_kind
+                for f_e in f_run["evidence"].readControlEvents("control")
+            ]
+            self.assertNotIn(EvidenceKind.WHOLE_RUN_SUCCEEDED, f_kinds)
+            self.assertEqual(
+                [f_p.state for f_p in f_run["view"].point_states],
+                [PointRunState.SUCCEEDED],
+            )
+
+    # ------------------------------------------------------------------ D3
+
+    def _archiveDirs(self, f_dest: str) -> List[str]:
+        return sorted(os.listdir(f_dest))
+
+    def testFailedPairedArchiveStepFailsTheRun(self) -> None:
+        f_reporter = _HookReporter()
+        f_orch = self._groupOrch(f_reporter)
+        with tempfile.TemporaryDirectory() as f_dest:
+            # The export fails like a full disk would
+            with patch(
+                "lsmiotool.lib.export.exportPoint",
+                side_effect=OSError(errno.ENOSPC, "No space left on device"),
+            ):
+                f_view = self._executeSingle(
+                    f_orch, self._pairedRequest(f_archive=True, f_out_dir=f_dest)
+                )
+            self.assertIn(
+                "ERROR: archiving arm 'no-footer' failed: "
+                "[Errno 28] No space left on device",
+                f_reporter.lines,
+            )
+            # Nothing was archived, but both arms ran: the failed archive fails the run
+            self.assertEqual(
+                [f_v.state for f_v in f_orch.views],
+                [OverallRunState.SUCCEEDED, OverallRunState.SUCCEEDED],
+            )
+            self.assertEqual(f_orch.exitCode, 1)
+            self.assertFalse(
+                [f_d for f_d in os.listdir(f_dest) if f_d.startswith("outputs-")
+                 and os.path.exists(os.path.join(f_dest, f_d, ".lsmiotool-run.json"))]
+            )
+
+    def testPairedArchiveWarnsWhenTheReportsHaveNoRowsOrFail(self) -> None:
+        # (label, generateReports patch arguments, warning prefix, warning suffix)
+        f_rows = [
+            ("no rows", {"return_value": False}, "WARNING: no lsm-report.csv rows for ", ""),
+            (
+                "the report generator fails",
+                {"side_effect": OSError("cannot read the result files")},
+                "WARNING: report generation failed for ",
+                ": cannot read the result files",
+            ),
+        ]
+        for f_label, f_patch, f_prefix, f_suffix in f_rows:
+            with self.subTest(f_label):
+                f_reporter = _HookReporter()
+                f_orch = self._groupOrch(f_reporter)
+                with tempfile.TemporaryDirectory() as f_dest:
+                    with (
+                        patch(
+                            "lsmiotool.lib.export.exportPoint",
+                            side_effect=_exportCreatingNodeDir,
+                        ),
+                        patch("lsmiotool.lib.export.generateReports", **f_patch),
+                    ):
+                        f_view = self._executeSingle(
+                            f_orch,
+                            self._pairedRequest(f_archive=True, f_out_dir=f_dest),
+                        )
+                    f_run_dir = os.path.join(f_dest, "outputs-native-no-footer:run")
+                    f_base_dir = os.path.join(f_dest, "outputs-native-no-footer:base")
+                    for f_dir in (f_run_dir, f_base_dir):
+                        self.assertIn(f"{f_prefix}{f_dir}{f_suffix}", f_reporter.lines)
+                    # A warning does not fail the run, and the points are archived
+                    self.assertIn(
+                        f"Archived: {f_run_dir} and {f_base_dir}", f_reporter.lines
+                    )
+                self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+                self.assertEqual(f_orch.exitCode, 0)
+
+    def testBackendsArchiveSkipsFailedArmsAndReportsFailedExports(self) -> None:
+        def export_or_fail(**f_kw: Any) -> int:
+            if f_kw["f_infix"] == "rocksdb":
+                raise OSError(errno.EIO, "Input/output error")
+            return _exportCreatingNodeDir(**f_kw)
+
+        self._installPluginAndReference()
+        f_reporter = _HookReporter()
+        f_orch = self._groupOrch(f_reporter, f_fail_labels=("native",))
+        with tempfile.TemporaryDirectory() as f_dest:
+            with (
+                patch("lsmiotool.lib.export.exportPoint", side_effect=export_or_fail),
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
+            ):
+                self._executeSingle(
+                    f_orch,
+                    RunRequest("lsmio", "local", f_mode="backends", f_out_dir=f_dest),
+                )
+            f_text = "\n".join(f_reporter.lines)
+            # The failed arm is skipped without a word; the failing export is reported
+            self.assertNotIn("outputs-native", f_text)
+            self.assertIn("ERROR: archiving arm 'rocksdb' failed: ", f_text)
+            self.assertIn(f"Archived: {os.path.join(f_dest, 'outputs-adios')}", f_text)
+            self.assertIn(f"Archived: {os.path.join(f_dest, 'outputs-plugin')}", f_text)
+            self.assertEqual(
+                [f_d for f_d in self._archiveDirs(f_dest) if f_d.startswith("outputs-")],
+                ["outputs-adios", "outputs-plugin"],
+            )
+            self.assertEqual(f_orch.exitCode, 1)
+
+    def testSingleRunArchiveExportsItsPointsOrFailsTheRun(self) -> None:
+        # (label, exportPoint patch arguments, expected exit code)
+        f_rows = [
+            ("the archive succeeds", {"side_effect": _exportCreatingNodeDir}, 0),
+            (
+                "the export fails",
+                {"side_effect": OSError(errno.EIO, "Input/output error")},
+                1,
+            ),
+        ]
+        for f_label, f_patch, f_exit in f_rows:
+            with self.subTest(f_label):
+                f_reporter = _HookReporter()
+                f_runner = FakeSchedulerCommandRunner()
+                f_orch = RunOrchestrator(
+                    f_profile_resolver=self.m_registry,
+                    f_command_runner=f_runner,
+                    f_poll_interval=0.01,
+                    f_reporter=f_reporter,
+                )
+                self._resultsOnSubmit(f_orch, f_runner)
+                with tempfile.TemporaryDirectory() as f_dest:
+                    with (
+                        patch("lsmiotool.lib.export.exportPoint", **f_patch),
+                        patch("lsmiotool.lib.export.generateReports", return_value=True),
+                    ):
+                        f_view = self._executeSingle(
+                            f_orch,
+                            RunRequest(
+                                "lsmio", "variants", f_archive=True, f_out_dir=f_dest
+                            ),
+                        )
+                    f_dir = os.path.join(f_dest, "outputs-native")
+                    self.assertEqual(f_view.state, OverallRunState.SUCCEEDED)
+                    self.assertEqual(f_orch.exitCode, f_exit)
+                    if f_exit == 0:
+                        self.assertIn(f"Archived: {f_dir}", f_reporter.lines)
+                        self.assertTrue(os.path.isdir(os.path.join(f_dir, "8")))
+                        with open(
+                            os.path.join(f_dir, ".lsmiotool-run.json"),
+                            "r",
+                            encoding="utf-8",
+                        ) as f_f:
+                            f_marker = json.load(f_f)
+                        self.assertEqual(f_marker["run_id"], f_orch.last_plan.run_id)
+                        self.assertEqual(
+                            f_marker["points"],
+                            [
+                                f_orch.last_artifact_store.layout.pointDirName(
+                                    f_orch.last_plan.scale_points[0], 0
+                                )
+                            ],
+                        )
+                    else:
+                        self.assertIn(
+                            "ERROR: archiving failed: [Errno 5] Input/output error",
+                            f_reporter.lines,
+                        )
+                        self.assertFalse(os.path.exists(f_dir))
+
+    # ------------------------------------------------------------------ D4
+
+    def _finishedGroup(self, f_request: RunRequest, **f_kwargs: Any) -> Any:
+        """Run a multi-arm request to its end and return (orchestrator, run roots)."""
+        self._installPluginAndReference()
+        f_orch = self._groupOrch()
+        with (
+            patch("lsmiotool.lib.export.exportPoint", side_effect=_exportCreatingNodeDir),
+            patch("lsmiotool.lib.export.generateReports", return_value=True),
+        ):
+            self._executeSingle(f_orch, f_request, **f_kwargs)
+        return f_orch, [f_r["store"].layout.runRoot for f_r in f_orch.groupRuns]
+
+    @staticmethod
+    def _markerPath(f_root: str) -> str:
+        return os.path.join(f_root, ArchiveEngine.ARM_MARKER_FILE)
+
+    def _rewriteMarker(self, f_root: str, f_edit: Any) -> str:
+        """Apply f_edit to the arm marker's document; returns the original text."""
+        with open(self._markerPath(f_root), "r", encoding="utf-8") as f_f:
+            f_original = f_f.read()
+        f_doc = json.loads(f_original)
+        f_edit(f_doc)
+        with open(self._markerPath(f_root), "w", encoding="utf-8") as f_f:
+            json.dump(f_doc, f_f)
+        return f_original
+
+    def testArchiveGroupRunRefusesRunsItCannotRebuild(self) -> None:
+        f_orch, f_roots = self._finishedGroup(self._pairedRequest())
+        f_runs_dir = os.path.dirname(f_roots[0])
+        f_manifest = os.path.join(f_roots[1], "manifest.json")
+        with open(f_manifest, "rb") as f_f:
+            f_manifest_bytes = f_f.read()
+        f_loose = os.path.join(self.m_temp_dir, "not-an-arm")
+        os.makedirs(f_loose)
+
+        def kind(f_doc: Dict[str, Any]) -> None:
+            f_doc["group_kind"] = "single"
+
+        def ghost(f_doc: Dict[str, Any]) -> None:
+            f_doc["group_run_ids"] = list(f_doc["group_run_ids"]) + ["ghost-run"]
+
+        def nobody(f_doc: Dict[str, Any]) -> None:
+            f_doc["group_run_ids"] = []
+
+        def remove_manifest() -> None:
+            os.remove(f_manifest)
+
+        def corrupt_manifest() -> None:
+            with open(f_manifest, "wb") as f_f:
+                f_f.write(b"{ not a manifest")
+
+        # (label, root archived, marker edit, manifest edit, message, cause type)
+        f_rows = [
+            (
+                "not an arm",
+                f_loose,
+                None,
+                None,
+                f"{f_loose} is not an arm of a multi-arm run",
+                None,
+            ),
+            (
+                "unknown group kind",
+                f_roots[0],
+                kind,
+                None,
+                f"{f_roots[0]}: unknown group kind 'single'",
+                None,
+            ),
+            (
+                "a listed run has no arm marker",
+                f_roots[0],
+                ghost,
+                None,
+                f"{os.path.join(f_runs_dir, 'ghost-run')}: missing the arm marker "
+                "of run ghost-run",
+                None,
+            ),
+            (
+                "a listed run has no manifest",
+                f_roots[0],
+                None,
+                remove_manifest,
+                f"{f_roots[1]}: cannot read its manifest: ",
+                FileNotFoundError,
+            ),
+            (
+                "a listed run has a manifest that does not parse",
+                f_roots[0],
+                None,
+                corrupt_manifest,
+                f"{f_roots[1]}: cannot read its manifest: ",
+                Exception,
+            ),
+            (
+                "the marker lists no runs",
+                f_roots[0],
+                nobody,
+                None,
+                f"{f_roots[0]}: its arm marker lists no runs",
+                None,
+            ),
+        ]
+        for f_label, f_root, f_marker_edit, f_manifest_edit, f_message, f_cause in f_rows:
+            with self.subTest(f_label):
+                f_original = None
+                if f_marker_edit is not None:
+                    f_original = self._rewriteMarker(f_roots[0], f_marker_edit)
+                if f_manifest_edit is not None:
+                    f_manifest_edit()
+                try:
+                    with self.assertRaises(ArchiveError) as f_ctx:
+                        f_orch.archiveGroupRun(f_root, f_reporter=lambda f_l: None)
+                finally:
+                    if f_original is not None:
+                        with open(
+                            self._markerPath(f_roots[0]), "w", encoding="utf-8"
+                        ) as f_f:
+                            f_f.write(f_original)
+                    with open(f_manifest, "wb") as f_f:
+                        f_f.write(f_manifest_bytes)
+                self.assertTrue(str(f_ctx.exception).startswith(f_message))
+                if f_cause is None:
+                    self.assertIsNone(f_ctx.exception.__cause__)
+                else:
+                    self.assertIsInstance(f_ctx.exception.__cause__, f_cause)
+
+    def testArchiveGroupRunDefaultsTheDestinationForOlderMarkers(self) -> None:
+        # (label, request, expected archive dir under the benchmark root)
+        f_rows = [
+            (
+                "a paired variants run",
+                self._pairedRequest(),
+                os.path.join("lsmio-archive", "variants"),
+            ),
+            (
+                "a versioned run",
+                # A versioned run always archives, here to a directory of its own
+                RunRequest(
+                    "lsmio",
+                    "variants",
+                    f_versioned=True,
+                    f_out_dir=os.path.join(self.m_temp_dir, "elsewhere"),
+                ),
+                os.path.join("lsmio-archive", "variants-versioned"),
+            ),
+            (
+                "a backends run",
+                RunRequest("lsmio", "local", f_mode="backends", f_archive=False),
+                os.path.join("lsmio-archive", "backends", "local"),
+            ),
+        ]
+        for f_label, f_request, f_expected in f_rows:
+            with self.subTest(f_label):
+                self.m_fake_runner = FakeSchedulerCommandRunner()
+                f_orch, f_roots = self._finishedGroup(
+                    f_request, f_version_tag="b-abc1234"
+                )
+
+                def drop_dest(f_doc: Dict[str, Any]) -> None:
+                    del f_doc["archive_dest"]
+
+                for f_root in f_roots:
+                    self._rewriteMarker(f_root, drop_dest)
+                f_lines: List[str] = []
+                with (
+                    patch(
+                        "lsmiotool.lib.export.exportPoint",
+                        side_effect=_exportCreatingNodeDir,
+                    ),
+                    patch("lsmiotool.lib.export.generateReports", return_value=True),
+                ):
+                    f_ok, f_archived = f_orch.archiveGroupRun(
+                        f_roots[0], f_reporter=f_lines.append
+                    )
+                f_dest = os.path.join(self.m_viking_root_hdd, f_expected)
+                self.assertTrue(f_ok)
+                self.assertTrue(f_archived)
+                for f_dir in f_archived:
+                    self.assertEqual(os.path.dirname(f_dir), f_dest, f_dir)
+                    self.assertTrue(os.path.isdir(f_dir))
+                    shutil.rmtree(f_dir)
+
+
+def _exportCreatingNodeDir(**f_kwargs: Any) -> int:
+    """Stands for exportPoint: the exported <nodes> directory exists afterwards."""
+    os.makedirs(f_kwargs["f_node_dir"], exist_ok=True)
+    return 1
+
+
+class _HookedAdapter:
+    """Stands for an injected scheduler adapter: every attribute is the real adapter's,
+    except renderScript and dispatchSubmission, which run a test hook, and the attributes
+    named in f_hidden, which the adapter does not offer (duck-typed callers use hasattr)."""
+
+    def __init__(
+        self,
+        f_inner: Any,
+        f_on_render: Optional[Any] = None,
+        f_on_dispatch: Optional[Any] = None,
+        f_hidden: Sequence[str] = (),
+    ) -> None:
+        self.m_inner = f_inner
+        self.m_on_render = f_on_render
+        self.m_on_dispatch = f_on_dispatch
+        self.m_hidden = tuple(f_hidden)
+        self.m_renders = 0
+        self.m_dispatches = 0
+
+    def __getattr__(self, f_name: str) -> Any:
+        if f_name.startswith("m_") or f_name in self.m_hidden:
+            raise AttributeError(f_name)
+        return getattr(self.m_inner, f_name)
+
+    def renderScript(self, **f_kwargs: Any) -> str:
+        self.m_renders += 1
+        if self.m_on_render is not None:
+            self.m_on_render()
+        return self.m_inner.renderScript(**f_kwargs)
+
+    def dispatchSubmission(self, **f_kwargs: Any) -> Any:
+        self.m_dispatches += 1
+        if self.m_on_dispatch is None:
+            return self.m_inner.dispatchSubmission(**f_kwargs)
+        return self.m_on_dispatch(self.m_inner, f_kwargs)
+
+
+class _HookReporter(RunReporter):
+    """A RunReporter that records its calls and raises in the named methods."""
+
+    def __init__(self, f_failing: Sequence[str] = ()) -> None:
+        super().__init__(f_callback=lambda f_line: None)
+        self.m_failing = tuple(f_failing)
+        self.m_calls: List[Any] = []
+
+    def _hook(self, f_name: str, f_args: Any) -> None:
+        self.m_calls.append((f_name, f_args))
+        if f_name in self.m_failing:
+            raise RuntimeError(f"{f_name} failed")
+
+    def reportProgress(self, f_line: str) -> None:
+        self._hook("reportProgress", (f_line,))
+        super().reportProgress(f_line)
+
+    def reportPointSubmission(
+        self, f_point_id: str, f_token: str, f_job_id: str
+    ) -> None:
+        self._hook("reportPointSubmission", (f_point_id, f_token, f_job_id))
+        super().reportPointSubmission(f_point_id, f_token, f_job_id)
+
+    def reportCompletion(self, f_final_state: Any, f_exit_code: int) -> None:
+        self._hook("reportCompletion", (f_final_state, f_exit_code))
+        super().reportCompletion(f_final_state, f_exit_code)
+
+
+class _InterruptedAfterReads(SignalCoordinator):
+    """A coordinator that reads not interrupted until the first job has been submitted
+    and f_reads reads have followed, then latches SIGINT exactly as a real signal does."""
+
+    def __init__(self, f_runner: Any, f_reads: int) -> None:
+        super().__init__()
+        self.m_runner = f_runner
+        self.m_reads_left = f_reads
+
+    @property
+    def is_interrupted(self) -> bool:
+        if self.m_interrupted_signal is None and self.m_runner.m_submit_calls:
+            self.m_reads_left -= 1
+            if self.m_reads_left <= 0:
+                self.trigger(signal.SIGINT)
+        return self.m_interrupted_signal is not None
+
+
+class _FailingPlanner:
+    """A planner whose createPlan is the real one until call f_fail_on, then raises."""
+
+    def __init__(self, f_fail_on: int, f_error: BaseException) -> None:
+        self.m_fail_on = f_fail_on
+        self.m_error = f_error
+        self.m_calls = 0
+
+    def createPlan(self, **f_kwargs: Any) -> Any:
+        self.m_calls += 1
+        if self.m_calls >= self.m_fail_on:
+            raise self.m_error
+        return RunPlanner.createPlan(**f_kwargs)
+
+
+class _IdentityFailingReporter:
+    """A reporter object whose run-identity report raises."""
+
+    def __init__(self) -> None:
+        self.m_progress: List[str] = []
+        self.m_identity_calls: List[Any] = []
+
+    def reportProgress(self, f_line: str) -> None:
+        self.m_progress.append(f_line)
+
+    def reportRunIdentity(self, f_run_id: str, f_run_root: str) -> None:
+        self.m_identity_calls.append((f_run_id, f_run_root))
+        raise RuntimeError("terminal closed")
+
+
+class _FailingLock:
+    """A control lock whose acquire raises."""
+
+    def __init__(self, f_error: BaseException) -> None:
+        self.m_error = f_error
+        self.m_acquires = 0
+
+    def acquire(self, f_blocking: bool = False) -> bool:
+        self.m_acquires += 1
+        raise self.m_error
+
+    def release(self) -> None:
+        pass
+
+
+class _LockFailingStore(ArtifactStore):
+    """A real ArtifactStore whose control lock is the given duck."""
+
+    def __init__(self, f_root: str, f_run_id: str, f_lock: Any) -> None:
+        self.m_lock_duck = f_lock
+        super().__init__(f_root, f_run_id)
+
+    def getControlLock(self) -> Any:
+        return self.m_lock_duck
+
+
+class _RecordingLock:
+    """Wraps a real ControlLock, records acquire and release, and can fail release."""
+
+    def __init__(
+        self,
+        f_real: ControlLock,
+        f_events: List[str],
+        f_release_error: Optional[BaseException],
+    ) -> None:
+        self.m_real = f_real
+        self.m_events = f_events
+        self.m_release_error = f_release_error
+
+    def acquire(self, f_blocking: bool = False) -> bool:
+        self.m_events.append("acquire")
+        return self.m_real.acquire(f_blocking=f_blocking)
+
+    def release(self) -> None:
+        self.m_events.append("release")
+        self.m_real.release()
+        if self.m_release_error is not None:
+            raise self.m_release_error
+
+
+class _ArmStore(ArtifactStore):
+    """A real ArtifactStore with a recording control lock and an optional allocation error."""
+
+    def __init__(
+        self,
+        f_root: str,
+        f_run_id: str,
+        f_events: List[str],
+        f_real_locks: List[Any],
+        f_release_error: Optional[BaseException],
+        f_allocate_error: Optional[BaseException] = None,
+    ) -> None:
+        self.m_events = f_events
+        self.m_real_locks = f_real_locks
+        self.m_release_error = f_release_error
+        self.m_allocate_error = f_allocate_error
+        super().__init__(f_root, f_run_id)
+
+    def allocateRun(self, f_plan: Any = None) -> str:
+        if self.m_allocate_error is not None:
+            raise self.m_allocate_error
+        return super().allocateRun(f_plan)
+
+    def getControlLock(self) -> Any:
+        f_real = super().getControlLock()
+        self.m_real_locks.append(f_real)
+        return _RecordingLock(f_real, self.m_events, self.m_release_error)
+
+
+class _MarkerBlockingStore(ArtifactStore):
+    """A real ArtifactStore that puts a directory where the arm marker file goes."""
+
+    def allocateRun(self, f_plan: Any = None) -> str:
+        f_root = super().allocateRun(f_plan)
+        os.mkdir(os.path.join(self.layout.runRoot, ".lsmiotool-arm.json"))
+        return f_root
+
+
+class ValidateBenchmarkExecutableTest(unittest.TestCase):
+    """validateBenchmarkExecutable called directly: input shape, normalization, permissions."""
+
+    def setUp(self) -> None:
+        self.m_tmp = tempfile.TemporaryDirectory()
+        self.m_exe = os.path.join(self.m_tmp.name, "bm_tool")
+        with open(self.m_exe, "w") as f_f:
+            f_f.write("#!/bin/sh\n")
+        os.chmod(self.m_exe, 0o755)
+
+    def tearDown(self) -> None:
+        self.m_tmp.cleanup()
+
+    def testRejectsMalformedPathArguments(self) -> None:
+        for f_value, f_message in (
+            (None, "path cannot be None"),
+            (42, "path must be a string, got: int"),
+            (b"/bin/sh", "path must be a string, got: bytes"),
+            ("", "path cannot be empty"),
+            ("   ", "path cannot be empty"),
+            ("\t\n", "path cannot be empty"),
+            (self.m_exe + "\0x", "contains NUL byte"),
+        ):
+            with self.subTest(value=f_value):
+                with self.assertRaisesRegex(PreflightError, f_message):
+                    validateBenchmarkExecutable(f_value)  # type: ignore[arg-type]
+
+    def testReturnsAnAbsoluteNormalizedPath(self) -> None:
+        self.assertEqual(validateBenchmarkExecutable(self.m_exe), self.m_exe)
+        f_messy = os.path.join(self.m_tmp.name, ".", "sub", "..", "bm_tool")
+        self.assertEqual(validateBenchmarkExecutable(f_messy), self.m_exe)
+        # Surrounding whitespace is stripped; a relative path is made absolute
+        self.assertEqual(validateBenchmarkExecutable(f"  {self.m_exe}\n"), self.m_exe)
+        f_relative = os.path.relpath(self.m_exe)
+        f_result = validateBenchmarkExecutable(f_relative)
+        self.assertTrue(os.path.isabs(f_result))
+        self.assertEqual(f_result, os.path.abspath(f_relative))
+
+    def testRejectsExecutableThatIsNotReadable(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("root can read any file, so no file is unreadable")
+        os.chmod(self.m_exe, 0o111)
+        with self.assertRaisesRegex(
+            PreflightError, f"is not readable: {self.m_exe}"
+        ):
+            validateBenchmarkExecutable(self.m_exe)
+
+    def testRejectsMissingNonExecutableAndNonRegularFiles(self) -> None:
+        f_dir = os.path.join(self.m_tmp.name, "a_dir")
+        os.mkdir(f_dir)
+        f_link = os.path.join(self.m_tmp.name, "a_link")
+        os.symlink(self.m_exe, f_link)
+        f_plain = os.path.join(self.m_tmp.name, "plain")
+        with open(f_plain, "w") as f_f:
+            f_f.write("data")
+        os.chmod(f_plain, 0o644)
+        for f_path, f_message in (
+            (os.path.join(self.m_tmp.name, "absent"), "does not exist or cannot"),
+            (f_link, "must not be a symlink"),
+            (f_dir, "must be a regular file"),
+            (f_plain, "does not have execute permissions"),
+        ):
+            with self.subTest(path=os.path.basename(f_path)):
+                with self.assertRaisesRegex(PreflightError, f_message):
+                    validateBenchmarkExecutable(f_path)
+
+
+class _FailingEvidenceStore(EvidenceStore):
+    """A real EvidenceStore whose named methods raise, to drive swallowed-error paths."""
+
+    def __init__(self, f_layout: ArtifactLayout, f_failing: Sequence[str]) -> None:
+        self.m_failing = tuple(f_failing)
+        super().__init__(f_layout)
+
+    def _maybeFail(self, f_name: str) -> None:
+        if f_name in self.m_failing:
+            raise RuntimeError(f"injected failure in {f_name}")
+
+    def recordCancelRequested(self, *f_args: Any, **f_kwargs: Any) -> Any:
+        self._maybeFail("recordCancelRequested")
+        return super().recordCancelRequested(*f_args, **f_kwargs)
+
+    def recordCancelRecorded(self, *f_args: Any, **f_kwargs: Any) -> Any:
+        self._maybeFail("recordCancelRecorded")
+        return super().recordCancelRecorded(*f_args, **f_kwargs)
+
+    def readSubmissionRecords(self, *f_args: Any, **f_kwargs: Any) -> Any:
+        self._maybeFail("readSubmissionRecords")
+        return super().readSubmissionRecords(*f_args, **f_kwargs)
+
+
+class RunOrchestratorInternalsTest(unittest.TestCase):
+    """RunOrchestrator helpers called directly with duck collaborators: constructor
+    aliases and accessors, the interruption control event, the cancel and query protocol
+    fallbacks for injected adapters, and the small reporting and polling helpers."""
+
+    def setUp(self) -> None:
+        self.m_tmp = tempfile.TemporaryDirectory()
+        self.m_sp = ScalePoint(4, 4, 1)
+        self.m_handle = JobHandle("slurm", "4242")
+        self.m_next_run = 0
+
+    def tearDown(self) -> None:
+        self.m_tmp.cleanup()
+
+    def _newStore(self, f_failing: Sequence[str] = ()) -> Any:
+        """A fresh real EvidenceStore under its own run id, and its layout."""
+        self.m_next_run += 1
+        f_layout = ArtifactLayout(self.m_tmp.name, f"run-{self.m_next_run}")
+        if f_failing:
+            return _FailingEvidenceStore(f_layout, f_failing), f_layout
+        return EvidenceStore(f_layout), f_layout
+
+    @staticmethod
+    def _interrupted() -> SignalCoordinator:
+        f_coord = SignalCoordinator()
+        f_coord.trigger(signal.SIGINT)
+        return f_coord
+
+    # ------------------------------------------------------------------ B1
+
+    def testConstructorKeywordAliases(self) -> None:
+        f_store = object()
+        f_resolver = object()
+        f_other = object()
+        self.assertIs(RunOrchestrator(f_profile_store=f_store).profileResolver, f_store)
+        self.assertIs(
+            RunOrchestrator(
+                f_profile_resolver=f_resolver, f_profile_store=f_store
+            ).profileResolver,
+            f_resolver,
+        )
+
+        def factory(f_root: str, f_rid: str) -> Any:
+            return f_other
+
+        # A callable artifact store is the factory itself; any other object is wrapped
+        self.assertIs(
+            RunOrchestrator(f_artifact_store=factory).m_artifact_store_factory, factory
+        )
+        f_wrapped = RunOrchestrator(f_artifact_store=f_store).m_artifact_store_factory
+        self.assertIs(f_wrapped("root", "run-1"), f_store)
+        self.assertIs(f_wrapped("another", "run-2"), f_store)
+        self.assertIs(
+            RunOrchestrator(
+                f_artifact_store_factory=factory, f_artifact_store=f_store
+            ).m_artifact_store_factory,
+            factory,
+        )
+
+        # The same for the scheduler adapter: a callable is the factory, an object is returned as is
+        f_calls: List[Any] = []
+
+        def adapter_factory(*f_args: Any) -> Any:
+            f_calls.append(f_args)
+            return f_other
+
+        f_orch = RunOrchestrator(f_scheduler_adapter=adapter_factory)
+        self.assertIs(f_orch.m_scheduler_adapter_factory, adapter_factory)
+        f_profile = SimpleNamespace(scheduler=SchedulerKind.SLURM)
+        self.assertIs(f_orch._makeSchedulerAdapter(f_profile, "evidence"), f_other)
+        self.assertEqual(f_calls, [(f_profile, "evidence", None, None)])
+        f_orch = RunOrchestrator(f_scheduler_adapter=f_store)
+        self.assertIs(f_orch._makeSchedulerAdapter(f_profile, "evidence"), f_store)
+
+        f_clock = lambda: "2026-11-17T00:00:00Z"
+        self.assertIs(RunOrchestrator(f_time_source=f_clock).clock, f_clock)
+        f_primary = lambda: "primary"
+        self.assertIs(
+            RunOrchestrator(f_clock=f_primary, f_time_source=f_clock).clock, f_primary
+        )
+
+    def testConstructorEnvironmentSleepClockAndPollAliases(self) -> None:
+        f_env = {"A": "1"}
+        f_other_env = {"B": "2"}
+        self.assertIs(RunOrchestrator(environ=f_env).environ, f_env)
+        self.assertIs(RunOrchestrator(environment=f_env).environment, f_env)
+        self.assertIs(RunOrchestrator(f_environment=f_env).environ, f_env)
+        self.assertIs(
+            RunOrchestrator(f_environ=f_other_env, f_environment=f_env).environ,
+            f_other_env,
+        )
+        self.assertIsNone(RunOrchestrator().environ)
+
+        f_sleep = lambda f_s: None
+        f_sleep2 = lambda f_s: None
+        self.assertIs(RunOrchestrator(f_sleep_fn=f_sleep).sleep, f_sleep)
+        self.assertIs(RunOrchestrator(sleep_fn=f_sleep).sleep_fn, f_sleep)
+        self.assertIs(RunOrchestrator(f_sleep=f_sleep2, f_sleep_fn=f_sleep).sleep, f_sleep2)
+        self.assertIs(RunOrchestrator().sleep, time.sleep)
+
+        f_cf = lambda: 1.0
+        f_cf2 = lambda: 2.0
+        self.assertIs(RunOrchestrator(f_clock_fn=f_cf).clockFloat, f_cf)
+        self.assertIs(RunOrchestrator(clock_fn=f_cf).clock_float, f_cf)
+        self.assertIs(RunOrchestrator(f_clock_float=f_cf2, f_clock_fn=f_cf).clockFn, f_cf2)
+        self.assertIs(RunOrchestrator().clock_fn, time.monotonic)
+
+        self.assertEqual(RunOrchestrator(poll_interval=3.5).pollInterval, 3.5)
+        self.assertEqual(RunOrchestrator(f_poll_interval=2.0).poll_interval, 2.0)
+        self.assertIsNone(RunOrchestrator().poll_interval)
+
+    def testPlainCallableReporterIsWrappedInARunReporter(self) -> None:
+        f_lines: List[str] = []
+        for f_label, f_orch in (
+            ("f_reporter", RunOrchestrator(f_reporter=f_lines.append)),
+            ("reporter kwarg", RunOrchestrator(reporter=f_lines.append)),
+        ):
+            with self.subTest(how=f_label):
+                f_reporter = f_orch.reporter
+                self.assertIsInstance(f_reporter, RunReporter)
+                self.assertIs(f_orch.f_reporter, f_reporter)
+                self.assertEqual(f_reporter.callback, f_lines.append)
+                f_reporter.emit("hello")
+        self.assertEqual(f_lines, ["hello", "hello"])
+        f_own = RunReporter(f_callback=f_lines.append)
+        self.assertIs(RunOrchestrator(f_reporter=f_own).reporter, f_own)
+        self.assertIsNone(RunOrchestrator().reporter)
+
+    def testAccessorAliasesReturnTheInjectedObjects(self) -> None:
+        f_coord = SignalCoordinator()
+        f_objs = {
+            name: object()
+            for name in (
+                "resolver",
+                "planner",
+                "reconciler",
+                "validator",
+                "runner",
+                "clock",
+                "run_id",
+                "token",
+                "sleep",
+                "clock_float",
+                "environ",
+                "plan",
+                "evidence",
+                "view",
+                "capability",
+                "error",
+            )
+        }
+        f_store = SimpleNamespace(layout=SimpleNamespace(runRoot="/x/run-1"))
+        f_orch = RunOrchestrator(
+            f_profile_resolver=f_objs["resolver"],
+            f_planner=f_objs["planner"],
+            f_reconciler=f_objs["reconciler"],
+            f_worker_validator=f_objs["validator"],
+            f_command_runner=f_objs["runner"],
+            f_clock=f_objs["clock"],
+            f_run_id_source=f_objs["run_id"],
+            f_token_source=f_objs["token"],
+            f_poll_interval=2.5,
+            f_sleep=f_objs["sleep"],
+            f_signal_coordinator=f_coord,
+            f_clock_float=f_objs["clock_float"],
+            f_test_mode=True,
+            f_environ=f_objs["environ"],
+        )
+        self.assertIsNone(f_orch.lastRunRoot)
+        self.assertIsNone(f_orch.last_run_root)
+        for f_attr, f_value in (
+            ("m_last_plan", f_objs["plan"]),
+            ("m_last_artifact_store", f_store),
+            ("m_last_evidence_store", f_objs["evidence"]),
+            ("m_last_view", f_objs["view"]),
+            ("m_last_capability_state", f_objs["capability"]),
+            ("m_last_interruption_error", f_objs["error"]),
+        ):
+            object.__setattr__(f_orch, f_attr, f_value)
+        for f_names, f_expected in (
+            (("environ", "environment"), f_objs["environ"]),
+            (("profileResolver", "profile_resolver"), f_objs["resolver"]),
+            (("planner",), f_objs["planner"]),
+            (("reconciler",), f_objs["reconciler"]),
+            (("workerValidator", "worker_validator"), f_objs["validator"]),
+            (("commandRunner", "command_runner"), f_objs["runner"]),
+            (("clock",), f_objs["clock"]),
+            (("runIdSource", "run_id_source"), f_objs["run_id"]),
+            (("tokenSource", "token_source"), f_objs["token"]),
+            (("sleep", "sleep_fn"), f_objs["sleep"]),
+            (
+                ("clockFloat", "clock_float", "clockFn", "clock_fn"),
+                f_objs["clock_float"],
+            ),
+            (("signalCoordinator", "signal_coordinator"), f_coord),
+            (("lastPlan", "last_plan"), f_objs["plan"]),
+            (("lastArtifactStore", "last_artifact_store"), f_store),
+            (("lastEvidenceStore", "last_evidence_store"), f_objs["evidence"]),
+            (("lastView", "last_view"), f_objs["view"]),
+            (("lastCapabilityState", "last_capability_state"), f_objs["capability"]),
+            (("lastInterruptionError", "last_interruption_error"), f_objs["error"]),
+        ):
+            for f_name in f_names:
+                with self.subTest(accessor=f_name):
+                    self.assertIs(getattr(f_orch, f_name), f_expected)
+        for f_name in ("testMode", "test_mode"):
+            self.assertIs(getattr(f_orch, f_name), True)
+        for f_name in ("pollInterval", "poll_interval"):
+            self.assertEqual(getattr(f_orch, f_name), 2.5)
+        for f_name in ("lastRunRoot", "last_run_root"):
+            self.assertEqual(getattr(f_orch, f_name), "/x/run-1")
+        self.assertIs(RunOrchestrator().testMode, False)
+
+    def testInterruptionAccessorsFollowTheCoordinator(self) -> None:
+        f_idle = RunOrchestrator()
+        for f_name in ("isInterrupted", "is_interrupted"):
+            self.assertIs(getattr(f_idle, f_name), False)
+        for f_name in ("interruptedSignal", "interrupted_signal"):
+            self.assertIsNone(getattr(f_idle, f_name))
+
+        f_coord = SignalCoordinator()
+        f_orch = RunOrchestrator(f_signal_coordinator=f_coord)
+        self.assertIs(f_orch.isInterrupted, False)
+        self.assertIsNone(f_orch.interruptedSignal)
+        f_coord.trigger(signal.SIGINT)
+        for f_name in ("isInterrupted", "is_interrupted"):
+            self.assertIs(getattr(f_orch, f_name), True)
+        for f_name in ("interruptedSignal", "interrupted_signal"):
+            self.assertEqual(getattr(f_orch, f_name), signal.SIGINT)
+        self.assertEqual(f_orch.exitCode, 130)
+        self.assertEqual(f_orch.exit_code, 130)
+
+    def testExitCodeFollowsTheLastViewWhenNothingTriggered(self) -> None:
+        f_untriggered = SignalCoordinator()
+        self.assertIsNone(f_untriggered.exit_code)
+        for f_label, f_orch, f_state, f_expected in (
+            ("interrupted, no coordinator", RunOrchestrator(), OverallRunState.INTERRUPTED, 130),
+            (
+                "interrupted, untriggered coordinator",
+                RunOrchestrator(f_signal_coordinator=f_untriggered),
+                OverallRunState.INTERRUPTED,
+                130,
+            ),
+            ("failed", RunOrchestrator(), OverallRunState.FAILED, 1),
+            ("succeeded", RunOrchestrator(), OverallRunState.SUCCEEDED, 0),
+            ("no view and no group result", RunOrchestrator(), None, 1),
+        ):
+            with self.subTest(case=f_label):
+                if f_state is not None:
+                    object.__setattr__(
+                        f_orch, "m_last_view", SimpleNamespace(state=f_state)
+                    )
+                self.assertEqual(f_orch.exitCode, f_expected)
+        # A group result takes precedence over the last view
+        f_group = RunOrchestrator()
+        object.__setattr__(
+            f_group, "m_last_view", SimpleNamespace(state=OverallRunState.SUCCEEDED)
+        )
+        object.__setattr__(f_group, "m_group_failed", True)
+        self.assertEqual(f_group.exitCode, 1)
+
+    # ------------------------------------------------------------------ B2
+
+    def testInterruptionControlEvent(self) -> None:
+        f_orch = RunOrchestrator()
+        f_coord = self._interrupted()
+        self.assertFalse(f_orch._recordInterruptionControlEvent(None, f_coord))
+
+        f_store, _ = self._newStore()
+        # A control stream that already holds another event gets the next sequence
+        f_store.recordWholeRunSucceeded("control", 1, {"note": "earlier"})
+        self.assertTrue(f_orch._recordInterruptionControlEvent(f_store, f_coord))
+        f_events = f_store.readControlEvents("control")
+        self.assertEqual(
+            [f_e.evidence_kind for f_e in f_events],
+            [EvidenceKind.WHOLE_RUN_SUCCEEDED, EvidenceKind.INTERRUPTED],
+        )
+        self.assertEqual(f_events[1].sequence_number, 2)
+        self.assertEqual(
+            f_events[1].payload,
+            {"signal": signal.SIGINT, "signal_name": "SIGINT", "exit_code": 130},
+        )
+        # Already recorded: reported as True, and nothing more is written
+        self.assertTrue(f_orch._recordInterruptionControlEvent(f_store, f_coord))
+        self.assertEqual(len(f_store.readControlEvents("control")), 2)
+        self.assertIsNone(f_orch.lastInterruptionError)
+
+    # ------------------------------------------------------------------ B3
+
+    def _cancel(
+        self,
+        f_adapter: Any,
+        f_store: Any,
+        f_layout: ArtifactLayout,
+        f_profile: Any,
+        f_obs_seq: Optional[int] = None,
+    ) -> None:
+        RunOrchestrator()._cancelActiveJob(
+            f_adapter,
+            f_store,
+            SimpleNamespace(layout=f_layout),
+            self.m_sp,
+            0,
+            self.m_handle,
+            self._interrupted(),
+            7.0,
+            f_profile,
+            self.m_clock,
+            self.m_sleep,
+            f_obs_seq,
+        )
+
+    def m_clock(self) -> float:
+        return 0.0
+
+    def m_sleep(self, f_seconds: float) -> None:
+        return None
+
+    def testCancelActiveJobAdapterProtocolFallbacks(self) -> None:
+        f_no_cancellation = SimpleNamespace(cancellation=None)
+        f_with_grace = SimpleNamespace(cancellation=SimpleNamespace(grace_seconds=30))
+        f_states = SchedulerJobState
+
+        def confirming(f_calls: List[Any], f_state: Any) -> Any:
+            def cancel_and_confirm(**f_kwargs: Any) -> Any:
+                f_calls.append(f_kwargs)
+                return f_state
+
+            return SimpleNamespace(cancel_and_confirm=cancel_and_confirm)
+
+        def handle_based(f_attr: str, f_calls: List[Any], f_state: Any) -> Any:
+            def cancel(f_handle: Any) -> Any:
+                f_calls.append(f_handle)
+                return f_state
+
+            return SimpleNamespace(**{f_attr: cancel})
+
+        def raising(f_calls: List[Any]) -> Any:
+            def cancelJob(f_handle: Any) -> Any:
+                f_calls.append(f_handle)
+                raise RuntimeError("scheduler unreachable")
+
+            return SimpleNamespace(cancelJob=cancelJob)
+
+        f_rows = (
+            # name, adapter builder, profile, expected outcome (None: unconfirmed)
+            ("cancel_and_confirm", lambda c: confirming(c, f_states.CANCELLED), f_no_cancellation, "confirmed"),
+            ("cancel_and_confirm, grace 30", lambda c: confirming(c, f_states.CANCELLED), f_with_grace, "confirmed"),
+            ("cancelJob, already done", lambda c: handle_based("cancelJob", c, f_states.SUCCEEDED), f_no_cancellation, "already_terminal"),
+            ("cancel_job", lambda c: handle_based("cancel_job", c, f_states.CANCELLED), f_no_cancellation, "confirmed"),
+            ("no cancel method", lambda c: SimpleNamespace(), f_no_cancellation, "confirmed"),
+            ("cancelJob raises", raising, f_no_cancellation, None),
+        )
+        for f_name, f_build, f_profile, f_outcome in f_rows:
+            with self.subTest(adapter=f_name):
+                f_store, f_layout = self._newStore()
+                f_calls: List[Any] = []
+                self._cancel(f_build(f_calls), f_store, f_layout, f_profile)
+                f_records = f_store.readSubmissionRecords(self.m_sp, 0)
+                f_req = f_records["cancel_requested"]
+                self.assertIsNotNone(f_req)
+                self.assertEqual(f_req.payload["reason"], "Interrupted by SIGINT")
+                self.assertEqual(f_req.payload["handle"], self.m_handle.toDict())
+                f_unconf = os.path.join(
+                    f_layout.pointSchedulerDir(self.m_sp, 0), "cancel_unconfirmed.json"
+                )
+                if f_outcome is None:
+                    self.assertEqual(f_calls, [self.m_handle])
+                    self.assertIsNone(f_records["cancel_recorded"])
+                    f_rec = f_store.readRecordIfExists(f_unconf)
+                    self.assertEqual(f_rec.payload["outcome"], "unconfirmed")
+                    self.assertEqual(
+                        f_rec.payload["handle"], self.m_handle.toDict()
+                    )
+                else:
+                    self.assertFalse(os.path.exists(f_unconf))
+                    f_rec = f_records["cancel_recorded"]
+                    self.assertEqual(f_rec.payload["outcome"], f_outcome)
+                    if f_name == "no cancel method":
+                        self.assertEqual(f_rec.payload["terminal_state"], "cancelled")
+                    if f_name.startswith("cancel_and_confirm"):
+                        f_grace = 30.0 if "grace" in f_name else 120.0
+                        self.assertEqual(len(f_calls), 1)
+                        self.assertEqual(f_calls[0]["f_job_id"], "4242")
+                        self.assertEqual(f_calls[0]["f_poll_interval"], 7.0)
+                        self.assertEqual(f_calls[0]["f_grace_seconds"], f_grace)
+                        self.assertEqual(f_calls[0]["f_clock"], self.m_clock)
+                        self.assertEqual(f_calls[0]["f_sleep"], self.m_sleep)
+                    elif f_name != "no cancel method":
+                        self.assertEqual(f_calls, [self.m_handle])
+
+    def testCancelActiveJobWritesObservationWhenGivenASequence(self) -> None:
+        f_store, f_layout = self._newStore()
+        f_adapter = SimpleNamespace(cancel_job=lambda f_h: SchedulerJobState.CANCELLED)
+        self._cancel(f_adapter, f_store, f_layout, SimpleNamespace(cancellation=None), 1)
+        f_obs = f_store.readSchedulerObservations(self.m_sp, "control", 0)
+        self.assertEqual(len(f_obs), 1)
+        self.assertEqual(f_obs[0].payload["state"], "cancelled")
+        self.assertEqual(f_obs[0].payload["handle"], self.m_handle.toDict())
+
+    def testCancelActiveJobSwallowsEvidenceWriteFailures(self) -> None:
+        f_profile = SimpleNamespace(cancellation=None)
+        f_calls: List[Any] = []
+
+        def cancel(f_handle: Any) -> Any:
+            f_calls.append(f_handle)
+            return SchedulerJobState.CANCELLED
+
+        f_adapter = SimpleNamespace(cancelJob=cancel)
+        # The cancel request cannot be recorded: the job is still cancelled and recorded
+        f_store, f_layout = self._newStore(["recordCancelRequested"])
+        self._cancel(f_adapter, f_store, f_layout, f_profile)
+        self.assertEqual(f_calls, [self.m_handle])
+        f_records = EvidenceStore(f_layout).readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNone(f_records["cancel_requested"])
+        self.assertEqual(f_records["cancel_recorded"].payload["outcome"], "confirmed")
+        # The outcome cannot be recorded: nothing is written, and no error escapes
+        f_store, f_layout = self._newStore(["recordCancelRecorded"])
+        f_calls.clear()
+        self._cancel(f_adapter, f_store, f_layout, f_profile, 1)
+        self.assertEqual(f_calls, [self.m_handle])
+        f_records = EvidenceStore(f_layout).readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNotNone(f_records["cancel_requested"])
+        self.assertIsNone(f_records["cancel_recorded"])
+        self.assertEqual(
+            EvidenceStore(f_layout).readSchedulerObservations(self.m_sp, "control", 0), []
+        )
+
+    # ------------------------------------------------------------------ B4
+
+    def testQueryJobStateUsesTheAdapterQueryMethods(self) -> None:
+        f_value = (SchedulerJobState.ACTIVE, None)
+        f_seen: List[Any] = []
+
+        def with_timeout(f_self_name: str) -> Any:
+            def query(f_job_id: str, f_timeout: Optional[float] = None) -> Any:
+                f_seen.append((f_self_name, f_job_id, f_timeout))
+                return f_value
+
+            return query
+
+        def without_timeout(f_self_name: str) -> Any:
+            def query(f_job_id: str) -> Any:
+                f_seen.append((f_self_name, f_job_id))
+                return f_value
+
+            return query
+
+        def by_handle(f_self_name: str) -> Any:
+            def query(f_handle: Any) -> Any:
+                f_seen.append((f_self_name, f_handle))
+                return f_value
+
+            return query
+
+        f_no_cancellation = SimpleNamespace(cancellation=None)
+        f_grace = SimpleNamespace(cancellation=SimpleNamespace(grace_seconds=45))
+        f_rows = (
+            ("queryJobState", with_timeout, None, ("queryJobState", "4242", 120.0)),
+            ("queryJobState", with_timeout, f_no_cancellation, ("queryJobState", "4242", 120.0)),
+            ("queryJobState", with_timeout, f_grace, ("queryJobState", "4242", 45.0)),
+            ("queryJobState", without_timeout, f_grace, ("queryJobState", "4242")),
+            ("query_job_state", with_timeout, f_grace, ("query_job_state", "4242", 45.0)),
+            ("query_job_state", without_timeout, f_grace, ("query_job_state", "4242")),
+            ("queryJob", by_handle, f_grace, ("queryJob", self.m_handle)),
+            ("query_job", by_handle, f_grace, ("query_job", self.m_handle)),
+        )
+        for f_attr, f_build, f_profile, f_expected in f_rows:
+            with self.subTest(method=f_attr, build=f_build.__name__, profile=f_profile):
+                f_seen.clear()
+                f_adapter = SimpleNamespace(**{f_attr: f_build(f_attr)})
+                f_result = RunOrchestrator()._queryJobState(
+                    f_adapter, self.m_handle, f_profile
+                )
+                self.assertIs(f_result, f_value)
+                self.assertEqual(f_seen[-1], f_expected)
+
+    @staticmethod
+    def _scripted(f_script: List[Any], f_calls: List[Any]) -> Any:
+        """_runCommand duck: records (argv, timeout), then returns or raises the next scripted item."""
+
+        def run_command(f_argv: Sequence[str], f_timeout: Optional[float] = None) -> Any:
+            f_calls.append((list(f_argv), f_timeout))
+            f_item = f_script.pop(0)
+            if isinstance(f_item, Exception):
+                raise f_item
+            return ProcessResult(f_item[0], f_item[1], "", 0.0)
+
+        return SimpleNamespace(_runCommand=run_command)
+
+    def _commandTables(self) -> List[Dict[str, Any]]:
+        f_pbs_done = '{"Jobs": {"4242": {"job_state": "F", "Exit_status": %d}}}'
+        return [
+            {
+                "kind": SchedulerKind.SLURM,
+                "active": ["squeue", "--noheader", "--jobs=4242", "--format=%i|%T"],
+                "accounting": [
+                    "sacct", "--noheader", "--parsable2", "--jobs=4242",
+                    "--format=JobIDRaw,JobName,State,ExitCode",
+                ],
+                "running": "4242|RUNNING\n",
+                "queued": "4242|PENDING\n",
+                "active_done": "4242|COMPLETED\n",
+                "active_done_state": SchedulerJobState.SUCCEEDED,
+                "no_record": ["JOBID|STATE\n", "9999|RUNNING\n", "4242|WEIRD\n"],
+                "ok": "4242|bm|COMPLETED|0:0\n",
+                "bad": "4242|bm|FAILED|3:0\n",
+                "bad_code": 3,
+                "garbage": "garbage\n",
+            },
+            {
+                "kind": SchedulerKind.PBS,
+                "active": ["qstat", "-f", "-F", "json", "4242"],
+                "accounting": ["qstat", "-x", "-f", "-F", "json", "4242"],
+                "running": '{"Jobs": {"4242": {"job_state": "R"}}}',
+                "queued": '{"Jobs": {"4242": {"job_state": "Q"}}}',
+                "active_done": f_pbs_done % 0,
+                "active_done_state": SchedulerJobState.SUCCEEDED,
+                "no_record": [
+                    '{"Jobs": {"9999": {"job_state": "R"}}}',
+                    '{"Jobs": {}}',
+                    '{"Jobs": {"4242": {"job_state": "X"}}}',
+                ],
+                "ok": f_pbs_done % 0,
+                "bad": f_pbs_done % 2,
+                "bad_code": 2,
+                "garbage": "not json",
+            },
+        ]
+
+    def testQueryJobStateFallsBackToTheSchedulerCommands(self) -> None:
+        S = SchedulerJobState
+        for f_t in self._commandTables():
+            f_profile = SimpleNamespace(scheduler=f_t["kind"], cancellation=None)
+            f_act, f_acc = f_t["active"], f_t["accounting"]
+            f_rows = [
+                ("running", [(0, f_t["running"])], (S.ACTIVE, None), [f_act]),
+                ("queued", [(0, f_t["queued"])], (S.QUEUED, None), [f_act]),
+                (
+                    "terminal in the active output",
+                    [(0, f_t["active_done"])],
+                    (f_t["active_done_state"], None),
+                    [f_act],
+                ),
+                ("accounting success", [(0, ""), (0, f_t["ok"])], (S.SUCCEEDED, 0), [f_act, f_acc]),
+                (
+                    "accounting failure",
+                    [(0, ""), (0, f_t["bad"])],
+                    (S.FAILED, f_t["bad_code"]),
+                    [f_act, f_acc],
+                ),
+                ("both empty", [(0, ""), (0, "")], (S.UNKNOWN, None), [f_act, f_acc]),
+                ("accounting not successful", [(0, ""), (1, "x")], (S.UNKNOWN, None), [f_act, f_acc]),
+                ("active not successful", [(1, "err"), (0, f_t["ok"])], (S.SUCCEEDED, 0), [f_act, f_acc]),
+                (
+                    "active query raises",
+                    [RuntimeError("down"), (0, f_t["ok"])],
+                    (S.SUCCEEDED, 0),
+                    [f_act, f_acc],
+                ),
+                (
+                    "both queries raise",
+                    [RuntimeError("down"), RuntimeError("down")],
+                    (S.UNKNOWN, None),
+                    [f_act, f_acc],
+                ),
+                (
+                    "unparseable accounting output",
+                    [(0, ""), (0, f_t["garbage"])],
+                    (S.UNKNOWN, None),
+                    [f_act, f_acc],
+                ),
+            ]
+            for f_i, f_out in enumerate(f_t["no_record"]):
+                f_rows.append(
+                    (
+                        f"active output without this job {f_i}",
+                        [(0, f_out), (0, f_t["ok"])],
+                        (S.SUCCEEDED, 0),
+                        [f_act, f_acc],
+                    )
+                )
+            for f_name, f_script, f_expected, f_argvs in f_rows:
+                with self.subTest(scheduler=f_t["kind"].value, case=f_name):
+                    f_calls: List[Any] = []
+                    f_adapter = self._scripted(list(f_script), f_calls)
+                    f_result = RunOrchestrator()._queryJobState(
+                        f_adapter, self.m_handle, f_profile
+                    )
+                    self.assertEqual(f_result, f_expected)
+                    self.assertEqual([f_c[0] for f_c in f_calls], f_argvs)
+                    for f_c in f_calls:
+                        self.assertEqual(f_c[1], 120.0)
+
+    def testQueryJobStateRejectsInvalidJobIdsWithoutRunningACommand(self) -> None:
+        for f_kind in (SchedulerKind.SLURM, SchedulerKind.PBS):
+            for f_job_id in ("not-a-number", "42 42"):
+                with self.subTest(scheduler=f_kind.value, job_id=f_job_id):
+                    f_calls: List[Any] = []
+                    f_adapter = self._scripted([(0, "should not run")], f_calls)
+                    f_result = RunOrchestrator()._queryJobState(
+                        f_adapter,
+                        SimpleNamespace(job_id=f_job_id),
+                        SimpleNamespace(scheduler=f_kind, cancellation=None),
+                    )
+                    self.assertEqual(f_result, (SchedulerJobState.UNKNOWN, None))
+                    self.assertEqual(f_calls, [])
+
+    def testQueryJobStateThroughACommandRunnerDuck(self) -> None:
+        S = SchedulerJobState
+        for f_t in self._commandTables():
+            f_profile = SimpleNamespace(
+                scheduler=f_t["kind"],
+                cancellation=SimpleNamespace(grace_seconds=15),
+            )
+            f_script = [(0, ""), (0, f_t["ok"])]
+            f_expected_argvs = [f_t["active"], f_t["accounting"]]
+
+            def accepting_run(f_argv: Sequence[str], f_timeout: Optional[float] = None) -> Any:
+                f_timeouts.append(f_timeout)
+                f_argvs.append(list(f_argv))
+                return ProcessResult(*f_remaining.pop(0), "", 0.0)
+
+            def strict_run(f_argv: Sequence[str]) -> Any:
+                f_argvs.append(list(f_argv))
+                return ProcessResult(*f_remaining.pop(0), "", 0.0)
+
+            for f_name, f_run, f_expected_timeouts in (
+                ("accepts f_timeout", accepting_run, [15.0, 15.0]),
+                ("TypeError on f_timeout, retried without it", strict_run, []),
+            ):
+                with self.subTest(scheduler=f_t["kind"].value, runner=f_name):
+                    f_remaining = list(f_script)
+                    f_timeouts: List[Any] = []
+                    f_argvs: List[Any] = []
+                    f_adapter = SimpleNamespace(
+                        command_runner=SimpleNamespace(run=f_run)
+                    )
+                    f_result = RunOrchestrator()._queryJobState(
+                        f_adapter, self.m_handle, f_profile
+                    )
+                    self.assertEqual(f_result, (S.SUCCEEDED, 0))
+                    self.assertEqual(f_argvs, f_expected_argvs)
+                    self.assertEqual(f_timeouts, f_expected_timeouts)
+
+    def testQueryJobStateWithoutAnyRunnerIsUnknown(self) -> None:
+        for f_kind in (SchedulerKind.SLURM, SchedulerKind.PBS):
+            for f_name, f_adapter in (
+                ("empty adapter", SimpleNamespace()),
+                ("command_runner without run", SimpleNamespace(command_runner=object())),
+            ):
+                with self.subTest(scheduler=f_kind.value, adapter=f_name):
+                    f_result = RunOrchestrator()._queryJobState(
+                        f_adapter,
+                        self.m_handle,
+                        SimpleNamespace(scheduler=f_kind, cancellation=None),
+                    )
+                    self.assertEqual(f_result, (SchedulerJobState.UNKNOWN, None))
+
+    # ------------------------------------------------------------------ B5
+
+    def testReportProgressRoutesToTheUsableReporterMethod(self) -> None:
+        f_out = io.StringIO()
+        with contextlib.redirect_stdout(f_out):
+            RunOrchestrator._reportProgress(None, "to stdout")
+        self.assertEqual(f_out.getvalue(), "to stdout\n")
+
+        f_emitted: List[str] = []
+        RunOrchestrator._reportProgress(SimpleNamespace(emit=f_emitted.append), "m1")
+        f_called: List[str] = []
+        RunOrchestrator._reportProgress(f_called.append, "m2")
+        f_progress: List[str] = []
+        RunOrchestrator._reportProgress(
+            SimpleNamespace(reportProgress=f_progress.append, emit=f_emitted.append), "m3"
+        )
+        self.assertEqual((f_emitted, f_called, f_progress), (["m1"], ["m2"], ["m3"]))
+
+        # Failures and objects with no usable method are ignored
+        def explode(f_msg: str) -> None:
+            f_progress.append(f"tried {f_msg}")
+            raise RuntimeError("reporter broke")
+
+        RunOrchestrator._reportProgress(SimpleNamespace(reportProgress=explode), "m4")
+        RunOrchestrator._reportProgress(SimpleNamespace(), "m5")
+        RunOrchestrator._reportProgress(object(), "m6")
+        self.assertEqual(f_progress, ["m3", "tried m4"])
+        self.assertEqual((f_emitted, f_called), (["m1"], ["m2"]))
+
+    def testMakeSchedulerAdapterWithAFactoryAndForTheFakeScheduler(self) -> None:
+        f_validator = object()
+        f_runner = object()
+        f_profile = SimpleNamespace(scheduler=SchedulerKind.SLURM)
+        f_built = object()
+        f_calls: List[Any] = []
+
+        def factory(*f_args: Any) -> Any:
+            f_calls.append(f_args)
+            return f_built
+
+        f_orch = RunOrchestrator(
+            f_scheduler_adapter_factory=factory,
+            f_worker_validator=f_validator,
+            f_command_runner=f_runner,
+        )
+        self.assertIs(f_orch._makeSchedulerAdapter(f_profile, "evidence"), f_built)
+        self.assertEqual(f_calls, [(f_profile, "evidence", f_validator, f_runner)])
+
+        f_fake = RunOrchestrator()._makeSchedulerAdapter(
+            SimpleNamespace(scheduler=SchedulerKind.FAKE), None
+        )
+        self.assertIs(type(f_fake), SchedulerAdapter)
+        self.assertEqual(f_fake.backend, SchedulerKind.FAKE)
+
+    def testRenderPointDirectivesForTheFakeScheduler(self) -> None:
+        f_lines, f_mail = RunOrchestrator._renderPointDirectives(
+            SimpleNamespace(scheduler=SchedulerKind.FAKE),
+            self.m_sp,
+            SimpleNamespace(),
+            "tok-1",
+            "/o/out.log",
+            "/o/err.log",
+            None,
+            None,
+        )
+        self.assertEqual(
+            f_lines,
+            [
+                "#FAKE --job-name=tok-1",
+                "#FAKE --output=/o/out.log",
+                "#FAKE --error=/o/err.log",
+            ],
+        )
+        self.assertIsNone(f_mail)
+
+    def testResolvePollingDefaultsAndOverrides(self) -> None:
+        f_sleep = lambda f_s: None
+        f_clock = lambda: 1.0
+        f_orch = RunOrchestrator()
+        f_profile_poll = SimpleNamespace(
+            cancellation=SimpleNamespace(poll_interval_seconds=5)
+        )
+        # No override: the profile's interval, else 8 s; the process sleep and clock
+        self.assertEqual(
+            f_orch._resolvePolling(f_profile_poll, {}), (5.0, time.sleep, time.monotonic)
+        )
+        for f_profile in (
+            SimpleNamespace(cancellation=None),
+            SimpleNamespace(cancellation=SimpleNamespace(poll_interval_seconds=None)),
+        ):
+            with self.subTest(profile=f_profile):
+                self.assertEqual(f_orch._resolvePolling(f_profile, {})[0], 8.0)
+        # An override wins: the keyword, either spelling, or the constructor's interval
+        f_none = SimpleNamespace(cancellation=None)
+        self.assertEqual(f_orch._resolvePolling(f_none, {"f_poll_interval": "2"})[0], 2.0)
+        self.assertEqual(f_orch._resolvePolling(f_none, {"poll_interval": 3})[0], 3.0)
+        self.assertEqual(
+            RunOrchestrator(f_poll_interval=4.5)._resolvePolling(f_profile_poll, {})[0],
+            4.5,
+        )
+        # The sleep and clock keywords are passed through, either spelling
+        self.assertEqual(
+            f_orch._resolvePolling(
+                f_none, {"f_sleep_fn": f_sleep, "f_clock_fn": f_clock}
+            ),
+            (8.0, f_sleep, f_clock),
+        )
+        self.assertEqual(
+            f_orch._resolvePolling(
+                f_none, {"f_sleep": f_sleep, "f_clock_float": f_clock}
+            ),
+            (8.0, f_sleep, f_clock),
+        )
+        f_set = RunOrchestrator(f_sleep=f_sleep, f_clock_float=f_clock)
+        self.assertEqual(f_set._resolvePolling(f_none, {})[1:], (f_sleep, f_clock))
+
+    # ------------------------------------------------------------------ B6
+
+    def _mirrorSetup(self, f_disp_failing: Sequence[str] = (), f_ctx_failing: Sequence[str] = ()) -> Any:
+        f_disp_store, f_disp_layout = self._newStore(f_disp_failing)
+        f_ctx_store, f_ctx_layout = self._newStore(f_ctx_failing)
+        f_disp = {"evidence": f_disp_store, "store": SimpleNamespace(layout=f_disp_layout)}
+        f_ctx = {
+            "evidence": f_ctx_store,
+            "store": SimpleNamespace(layout=f_ctx_layout),
+            "obs_seq": 1,
+        }
+        return f_disp, f_ctx, f_disp_store, f_ctx_store
+
+    def testMirrorCancelRecordsCopiesTheDispatchingArmsEvidence(self) -> None:
+        f_disp, f_ctx, f_src, f_dst = self._mirrorSetup()
+        f_src.recordCancelRequested(
+            self.m_sp, "control", self.m_handle, {"reason": "r"}, f_ordinal=0
+        )
+        f_src.recordCancelRecorded(
+            self.m_sp,
+            "control",
+            self.m_handle,
+            {"outcome": "confirmed", "terminal_state": "cancelled"},
+            f_ordinal=0,
+        )
+        RunOrchestrator._mirrorCancelRecords(f_disp, f_ctx, self.m_sp, 0, self.m_handle)
+        f_recs = f_dst.readSubmissionRecords(self.m_sp, 0)
+        self.assertEqual(f_recs["cancel_requested"].payload["reason"], "r")
+        self.assertEqual(f_recs["cancel_recorded"].payload["outcome"], "confirmed")
+        f_obs = f_dst.readSchedulerObservations(self.m_sp, "control", 0)
+        self.assertEqual([f_o.payload["state"] for f_o in f_obs], ["cancelled"])
+        self.assertEqual(f_ctx["obs_seq"], 2)
+
+    def testMirrorCancelRecordsPartialEvidence(self) -> None:
+        # A cancellation without a terminal state writes no observation
+        f_disp, f_ctx, f_src, f_dst = self._mirrorSetup()
+        f_src.recordCancelRequested(self.m_sp, "control", self.m_handle, {}, f_ordinal=0)
+        f_src.recordCancelRecorded(
+            self.m_sp, "control", self.m_handle, {"outcome": "confirmed"}, f_ordinal=0
+        )
+        RunOrchestrator._mirrorCancelRecords(f_disp, f_ctx, self.m_sp, 0, self.m_handle)
+        f_recs = f_dst.readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNotNone(f_recs["cancel_requested"])
+        self.assertEqual(f_recs["cancel_recorded"].payload["outcome"], "confirmed")
+        self.assertEqual(f_dst.readSchedulerObservations(self.m_sp, "control", 0), [])
+        self.assertEqual(f_ctx["obs_seq"], 1)
+
+        # No cancel request: only the recorded outcome is mirrored
+        f_disp, f_ctx, f_src, f_dst = self._mirrorSetup()
+        f_src.recordCancelRecorded(
+            self.m_sp, "control", self.m_handle, {"outcome": "already_terminal"}, f_ordinal=0
+        )
+        RunOrchestrator._mirrorCancelRecords(f_disp, f_ctx, self.m_sp, 0, self.m_handle)
+        f_recs = f_dst.readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNone(f_recs["cancel_requested"])
+        self.assertEqual(f_recs["cancel_recorded"].payload["outcome"], "already_terminal")
+
+        # Nothing to mirror at all
+        f_disp, f_ctx, f_src, f_dst = self._mirrorSetup()
+        RunOrchestrator._mirrorCancelRecords(f_disp, f_ctx, self.m_sp, 0, self.m_handle)
+        f_recs = f_dst.readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNone(f_recs["cancel_requested"])
+        self.assertIsNone(f_recs["cancel_recorded"])
+
+    def testMirrorCancelRecordsSwallowsEvidenceFailures(self) -> None:
+        # The dispatching arm's records cannot be read: nothing is written
+        f_disp, f_ctx, f_src, f_dst = self._mirrorSetup(["readSubmissionRecords"])
+        RunOrchestrator._mirrorCancelRecords(f_disp, f_ctx, self.m_sp, 0, self.m_handle)
+        f_recs = f_dst.readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNone(f_recs["cancel_requested"])
+        self.assertIsNone(f_recs["cancel_recorded"])
+        self.assertEqual(f_ctx["obs_seq"], 1)
+
+        # A write into the sharing arm fails: swallowed, and obs_seq stays
+        f_disp, f_ctx, f_src, f_dst = self._mirrorSetup(f_ctx_failing=["recordCancelRequested"])
+        f_src.recordCancelRequested(self.m_sp, "control", self.m_handle, {}, f_ordinal=0)
+        RunOrchestrator._mirrorCancelRecords(f_disp, f_ctx, self.m_sp, 0, self.m_handle)
+        f_recs = f_dst.readSubmissionRecords(self.m_sp, 0)
+        self.assertIsNone(f_recs["cancel_requested"])
+        self.assertEqual(f_ctx["obs_seq"], 1)
+
+    # ------------------------------------------------------------------ B7
+
+    def testArmPointHelpersReturnFalseWhenEvidenceCannotBeRead(self) -> None:
+        def unreadable(*f_args: Any, **f_kwargs: Any) -> Any:
+            raise RuntimeError("evidence unreadable")
+
+        f_ctx = {
+            "arm": SimpleNamespace(arm_id="native"),
+            "plan": SimpleNamespace(
+                scale_points=[self.m_sp], combinations=[object()]
+            ),
+            "evidence": SimpleNamespace(
+                readControllerResult=unreadable, readRankResult=unreadable
+            ),
+        }
+        self.assertIs(RunOrchestrator._armPointComplete(f_ctx, self.m_sp, 0), False)
+        self.assertIs(RunOrchestrator._armPointSucceeded(f_ctx, 0), False)
+        # With readable results the same helpers say True
+        f_ok = SimpleNamespace(payload={"status": "success"})
+        f_ctx["evidence"] = SimpleNamespace(
+            readControllerResult=lambda *f_a, **f_k: f_ok,
+            readRankResult=lambda *f_a, **f_k: f_ok,
+        )
+        self.assertIs(RunOrchestrator._armPointComplete(f_ctx, self.m_sp, 0), True)
+        self.assertIs(RunOrchestrator._armPointSucceeded(f_ctx, 0), True)

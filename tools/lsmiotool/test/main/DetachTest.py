@@ -267,6 +267,83 @@ class OrchestratorPidTest(unittest.TestCase):
             f_other.kill()
             f_other.wait()
 
+    def testWriteSkipsARunRootWithoutAControlDirectory(self) -> None:
+        """A root whose control directory is missing is skipped: no pid file, no error,
+        and the other roots are still written."""
+        f_bare = os.path.join(self.m_tmp.name, "run-bare")
+        os.makedirs(f_bare)
+        writeOrchestratorPid([f_bare, self.m_roots[0]])
+        self.assertIsNone(readOrchestratorPid(f_bare))
+        self.assertEqual(os.listdir(f_bare), [])
+        self.assertEqual(readOrchestratorPid(self.m_roots[0])["pid"], os.getpid())
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(self.m_roots[0], "control"))),
+            ["orchestrator.pid"],
+        )
+
+    def testRemoveKeepsGoingWhenAPidFileCannotBeDeleted(self) -> None:
+        """A failing unlink leaves that file in place and does not stop the other roots."""
+        writeOrchestratorPid(self.m_roots)
+        f_real_unlink = os.unlink
+        f_tried: List[str] = []
+
+        def failFirst(f_path: str) -> None:
+            f_tried.append(f_path)
+            if len(f_tried) == 1:
+                raise PermissionError("denied")
+            f_real_unlink(f_path)
+
+        with patch("lsmiotool.lib.run.os.unlink", side_effect=failFirst):
+            removeOrchestratorPid(self.m_roots)
+        self.assertEqual(len(f_tried), 2)
+        self.assertEqual(readOrchestratorPid(self.m_roots[0])["pid"], os.getpid())
+        self.assertIsNone(readOrchestratorPid(self.m_roots[1]))
+
+    def testProcessInfoWithoutProcOrPs(self) -> None:
+        """With no /proc and no usable ps, neither the command nor the start time is known."""
+        from lsmiotool.lib import run as run_mod
+
+        f_open = builtins.open
+
+        def noProc(f_path: Any, *f_args: Any, **f_kwargs: Any) -> Any:
+            if str(f_path).startswith("/proc"):
+                raise OSError("no /proc")
+            return f_open(f_path, *f_args, **f_kwargs)
+
+        with (
+            patch("builtins.open", noProc),
+            patch(
+                "lsmiotool.lib.run.subprocess.run", side_effect=OSError("no ps")
+            ) as f_run,
+        ):
+            self.assertEqual(run_mod._processInfo(4242), (None, None))
+        self.assertEqual(f_run.call_count, 2)
+
+    def testProcessInfoPsWithEmptyStartTime(self) -> None:
+        """ps that answers the command but an empty lstart gives a command and no start time."""
+        from lsmiotool.lib import run as run_mod
+
+        f_open = builtins.open
+
+        def noProc(f_path: Any, *f_args: Any, **f_kwargs: Any) -> Any:
+            if str(f_path).startswith("/proc"):
+                raise OSError("no /proc")
+            return f_open(f_path, *f_args, **f_kwargs)
+
+        def fakePs(f_argv: List[str], **f_kwargs: Any) -> Any:
+            f_out = "lsmiotool run ior\n" if "command=" in f_argv else "  \n"
+            return subprocess.CompletedProcess(f_argv, 0, stdout=f_out, stderr="")
+
+        with (
+            patch("builtins.open", noProc),
+            patch("lsmiotool.lib.run.subprocess.run", side_effect=fakePs) as f_run,
+        ):
+            self.assertEqual(run_mod._processInfo(4242), ("lsmiotool run ior", None))
+        self.assertEqual(
+            [f_c.args[0][:3] for f_c in f_run.call_args_list],
+            [["ps", "-o", "command="], ["ps", "-o", "lstart="]],
+        )
+
     def testArchiveRefusesALiveRun(self) -> None:
         """A run whose orchestrator is alive, or on another host, is not archived."""
         self.assertIsNone(liveOrchestratorMessage(self.m_roots))

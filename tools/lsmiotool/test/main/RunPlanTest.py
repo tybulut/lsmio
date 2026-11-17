@@ -32,6 +32,7 @@ import copy
 import io
 import json
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -1114,6 +1115,118 @@ class RunPlanTest(unittest.TestCase):
         )
         f_plan_sub1h = RunPlanner.createPlan(f_req_sub1h, self.m_viking_profile)
         self.assertEqual(f_plan_sub1h.scheduled_points[0].walltime, "01:00:00")
+
+    def testScaleFixedWalltimeRejectsZeroDuration(self) -> None:
+        """A fixed per-run walltime of zero seconds is refused instead of scaled."""
+        from lsmiotool.lib.run import scaleFixedWalltime
+
+        # parseWalltimeToSeconds already refuses a non-positive duration, so the
+        # `fixed walltime must be positive` guard in scaleFixedWalltime is unreachable.
+        with self.assertRaisesRegex(ValueError, "strictly positive"):
+            scaleFixedWalltime("00:00:00", 3)
+        # The positive neighbour is still scaled
+        self.assertEqual(scaleFixedWalltime("00:00:01", 3), "00:00:03")
+
+    def testCreatePlanRejectsWrongArgumentTypes(self) -> None:
+        """createPlan names the argument of the wrong type before it calls any source."""
+        f_calls = []
+
+        def f_source() -> str:
+            f_calls.append("called")
+            return "run-x"
+
+        for f_bad in (None, "ior", {"target": "ior"}):
+            with self.subTest(request=f_bad):
+                with self.assertRaisesRegex(
+                    PlanValidationError, "f_request must be RunRequest"
+                ):
+                    RunPlanner.createPlan(
+                        f_bad, self.m_viking_profile, f_run_id_source=f_source
+                    )
+            with self.subTest(profile=f_bad):
+                with self.assertRaisesRegex(
+                    PlanValidationError, "f_profile must be SiteProfile"
+                ):
+                    RunPlanner.createPlan(
+                        RunRequest("ior", "local"), f_bad, f_run_id_source=f_source
+                    )
+        self.assertEqual(f_calls, [])
+
+    def testCreatePlanRejectsUnparseableSlurmWalltime(self) -> None:
+        """A walltime string that RunRequest keeps verbatim is rejected on a Slurm site."""
+        f_request = RunRequest("ior", "local", f_walltime="abc")
+        self.assertEqual(f_request.walltime, "abc")
+        with self.assertRaisesRegex(PlanValidationError, "Invalid walltime 'abc': "):
+            RunPlanner.createPlan(f_request, self.m_viking_profile)
+
+    def testCreatePlanRejectsEmptyRunIdAndTimestamp(self) -> None:
+        """An empty or whitespace-only run id or timestamp from the sources is refused."""
+        f_request = RunRequest("ior", "local")
+        for f_bad_id in ("", "  "):
+            with self.subTest(run_id=f_bad_id):
+                with self.assertRaisesRegex(
+                    PlanValidationError, "run_id must be a non-empty string"
+                ):
+                    RunPlanner.createPlan(
+                        f_request,
+                        self.m_viking_profile,
+                        f_run_id_source=lambda: f_bad_id,
+                        f_clock=lambda: "2026-08-20T12:00:00Z",
+                    )
+        for f_bad_ts in ("", "   "):
+            with self.subTest(timestamp=f_bad_ts):
+                with self.assertRaisesRegex(
+                    PlanValidationError, "manifest_timestamp must be a non-empty string"
+                ):
+                    RunPlanner.createPlan(
+                        f_request,
+                        self.m_viking_profile,
+                        f_run_id_source=lambda: "run-ok",
+                        f_clock=lambda: f_bad_ts,
+                    )
+
+    def _slurmProfileWithFixedWalltime(self, f_policy: str, f_qos: str) -> SiteProfile:
+        """VIKING (Slurm) from a copy of environments.json whose shapes use f_policy/f_qos."""
+        with open(self.m_default_profile_path) as f_f:
+            f_doc = json.load(f_f)
+        f_viking = f_doc["RUN_PROFILES"]["profiles"]["VIKING"]
+        self.assertEqual(f_viking["scheduler"], "slurm")
+        for f_shape in f_viking["resources"].values():
+            f_shape["walltime_policy"] = f_policy
+            f_shape["qos"] = f_qos
+        with tempfile.TemporaryDirectory() as f_tmp:
+            f_path = os.path.join(f_tmp, "environments.json")
+            with open(f_path, "w") as f_f:
+                json.dump(f_doc, f_f)
+            f_registry = EnvironmentResolver.resolveRegistry(
+                ProfileLoader.load(f_path),
+                f_user=self.m_test_user,
+                f_home=self.m_test_home,
+            )
+        return f_registry.getProfile("VIKING")
+
+    def testCreatePlanRejectsFixedWalltimeAboveLongQosLimit(self) -> None:
+        """A fixed walltime is not capped per run: above 96 h the long QoS refuses it, and
+        a standard QoS is promoted to long first (run.py QoS promotion above 24 h)."""
+        f_profile = self._slurmProfileWithFixedWalltime("fixed_100:00:00", "standard")
+        self.assertEqual(f_profile.scheduler, SchedulerKind.SLURM)
+        self.assertEqual(
+            f_profile.getResourcePolicy("small").walltime_policy, "fixed_100:00:00"
+        )
+        with self.assertRaisesRegex(
+            PlanValidationError,
+            r"Walltime '100:00:00' \(360000s\) exceeds maximum allowed 96 hours "
+            r"for long QoS",
+        ):
+            RunPlanner.createPlan(RunRequest("ior", "local"), f_profile)
+
+        # The neighbour below the limit plans, with the QoS promoted from standard to long
+        f_ok_profile = self._slurmProfileWithFixedWalltime("fixed_90:00:00", "standard")
+        f_plan = RunPlanner.createPlan(RunRequest("ior", "local"), f_ok_profile)
+        self.assertTrue(f_plan.scheduled_points)
+        for f_res in f_plan.scheduled_points:
+            self.assertEqual(f_res.walltime, "90:00:00")
+            self.assertEqual(f_res.qos, "long")
 
 
 # =============================================================================

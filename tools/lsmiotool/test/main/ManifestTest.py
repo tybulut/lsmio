@@ -39,6 +39,7 @@ from lsmiotool.lib.run import (
     ManifestDocument,
     ManifestSerializer,
     ManifestValidationError,
+    PlanValidationError,
     RunPlan,
     RunPlanner,
     RunRequest,
@@ -983,6 +984,192 @@ class ManifestTest(unittest.TestCase):
         self.assertTrue(f_reconstructed.request.fast)
         self.assertEqual(f_reconstructed, f_plan)
         self.assertEqual(ManifestSerializer.serialize(f_reconstructed), f_json_str)
+
+    def _baseManifestDict(self, f_profile, f_target: str = "ior") -> dict:
+        """The serialized manifest of a small valid plan, for one-field mutations."""
+        f_plan = RunPlanner.createPlan(
+            f_request=RunRequest(f_target, "local"),
+            f_profile=f_profile,
+            f_run_id_source=lambda: "run-mutate",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        return json.loads(ManifestSerializer.serialize(f_plan))
+
+    def testSerializeRejectsEmptyOrImpossibleTimestamp(self) -> None:
+        """A RunPlan whose timestamp is empty, or matches the pattern without being a
+        real date, cannot be serialized."""
+        f_plan = RunPlanner.createPlan(
+            f_request=RunRequest("ior", "local"),
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-ts-ser",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+
+        def withTimestamp(f_ts: object) -> RunPlan:
+            return RunPlan(
+                f_run_id="run-ts-ser",
+                f_request=f_plan.request,
+                f_profile=self.m_viking_profile,
+                f_scale_points=f_plan.scale_points,
+                f_combinations=f_plan.combinations,
+                f_scheduled_points=f_plan.scheduled_points,
+                f_tokens=f_plan.tokens,
+                f_manifest_timestamp=f_ts,  # type: ignore[arg-type]
+            )
+
+        # RunPlan itself refuses an empty timestamp, so the serializer's own empty check
+        # is unreachable with a real plan.
+        for f_empty in ("", "   "):
+            with self.subTest(empty=f_empty):
+                with self.assertRaisesRegex(
+                    PlanValidationError, "manifest_timestamp must be a non-empty string"
+                ):
+                    withTimestamp(f_empty)
+        for f_ts, f_msg in (
+            ("2026-02-30T00:00:00Z", "is not a valid UTC date/time"),
+            ("2026-08-20T12:00:00", "must match exact ISO 8601 UTC format"),
+        ):
+            with self.subTest(timestamp=f_ts):
+                with self.assertRaisesRegex(ManifestValidationError, f_msg):
+                    ManifestSerializer.serialize(withTimestamp(f_ts))
+        # The valid neighbour serializes
+        self.assertIn(
+            '"created_at_utc": "2026-08-20T12:00:00Z"',
+            ManifestSerializer.serialize(withTimestamp("2026-08-20T12:00:00Z")),
+        )
+
+    def testDeserializeRejectsEachInvalidFieldShape(self) -> None:
+        """One targeted mutation of a valid manifest per row; each row names the error
+        that fail-closed validation gives for that field."""
+        f_slurm = self._baseManifestDict(self.m_viking_profile)
+        f_pbs = self._baseManifestDict(self.m_isambard_profile)
+        f_fake = self._baseManifestDict(self.m_dev_profile)
+        f_lmp = self._baseManifestDict(self.m_viking_profile, "lmp")
+        self.assertEqual(f_lmp["plan"]["target"], "lmp")
+
+        def setIn(*f_path_and_value):
+            *f_path, f_value = f_path_and_value
+
+            def apply(f_doc: dict) -> None:
+                f_node = f_doc
+                for f_key in f_path[:-1]:
+                    f_node = f_node[f_key]
+                f_node[f_path[-1]] = f_value
+
+            return apply
+
+        def dropFrom(*f_path):
+            def apply(f_doc: dict) -> None:
+                f_node = f_doc
+                for f_key in f_path[:-1]:
+                    f_node = f_node[f_key]
+                del f_node[f_path[-1]]
+
+            return apply
+
+        def growPoints(f_doc: dict) -> None:
+            f_doc["scale_points"].append(copy.deepcopy(f_doc["scale_points"][0]))
+
+        def swapTokenFor(f_doc: dict) -> None:
+            f_doc["tokens"] = []
+
+        # (base, mutation, expected message regex)
+        f_rows = [
+            # request
+            (f_slurm, setIn("run_id", ""), "run_id must be a non-empty string"),
+            (f_slurm, setIn("run_id", "  "), "run_id must be a non-empty string"),
+            (f_slurm, setIn("request", ["ior"]), "request must be a dict, got: list"),
+            (f_slurm, setIn("request", "target", ""), "request.target must be a non-empty"),
+            (f_slurm, setIn("request", "target", 7), "request.target must be a non-empty"),
+            (f_slurm, setIn("request", "scale", "  "), "request.scale must be a non-empty"),
+            (f_slurm, setIn("request", "ssd", 1), "request.ssd must be a boolean"),
+            (f_slurm, setIn("request", "setup", 5), "request.setup must be a string or null"),
+            (f_slurm, setIn("request", "variant", 5), "request.variant must be a string or null"),
+            (f_slurm, setIn("request", "fast", "yes"), "request.fast must be a boolean"),
+            (f_slurm, setIn("request", "wallhour", True), "request.wallhour must be an integer or null"),
+            (f_slurm, setIn("request", "wallhour", "3"), "request.wallhour must be an integer or null"),
+            (f_slurm, setIn("request", "walltime", 3), "request.walltime must be a string or null"),
+            (f_slurm, setIn("request", "repeats", True), "request.repeats must be an integer or null"),
+            (f_slurm, setIn("request", "nodes", [True]), "request.nodes must be a list of integers"),
+            (f_slurm, setIn("request", "nodes", [0]), "Invalid request record: nodes must be"),
+            (f_slurm, setIn("request", "nodes", [2, 2]), "Invalid request record: nodes must be"),
+            # plan
+            (f_slurm, setIn("plan", None), "plan must be a dict, got: NoneType"),
+            (f_slurm, setIn("plan", "target", ""), "plan.target must be a non-empty string"),
+            (f_slurm, setIn("plan", "scale", ""), "plan.scale must be a non-empty string"),
+            (f_slurm, setIn("plan", "storage", "nvme"), "plan.storage must be 'hdd' or 'ssd'"),
+            (f_slurm, setIn("plan", "storage", None), "plan.storage must be 'hdd' or 'ssd'"),
+            (f_slurm, setIn("plan", "setup", " "), "plan.setup must be a non-empty string"),
+            # scale points
+            (f_slurm, setIn("scale_points", []), "scale_points must be a non-empty list"),
+            (f_slurm, setIn("scale_points", {"tasks": 1}), "scale_points must be a non-empty list"),
+            (f_slurm, setIn("scale_points", ["x"]), r"scale_points\[0\] must be a dict, got: str"),
+            (f_slurm, setIn("scale_points", 0, "ppn", True), "values must be integers, not booleans"),
+            (f_slurm, setIn("scale_points", 0, "tasks", 0), "Invalid scale point at index 0: tasks must be a positive integer"),
+            # combinations
+            (f_slurm, setIn("combinations", []), "combinations must be a non-empty list"),
+            (f_slurm, setIn("combinations", [3]), r"combinations\[0\] must be a dict, got: int"),
+            (f_slurm, setIn("combinations", 0, "key_count", False), r"combinations\[0\].key_count must be integer, not boolean"),
+            (f_slurm, setIn("combinations", 0, "processes", 0), "Invalid combination at index 0: processes must be a positive"),
+            # points
+            (f_slurm, setIn("points", []), "points must be a non-empty list"),
+            (f_slurm, growPoints, r"points count \(1\) must match scale_points count \(2\)"),
+            (f_slurm, setIn("points", [None]), r"points\[0\] must be a dict, got: NoneType"),
+            (f_slurm, setIn("points", 0, "ncpus", True), r"points\[0\].ncpus must be int or null, not boolean"),
+            (f_slurm, setIn("points", 0, "walltime", ""), "Invalid scheduled point at index 0: walltime must be a non-empty"),
+            # tokens
+            (f_slurm, swapTokenFor, "tokens must be a non-empty list"),
+            # site
+            (f_slurm, setIn("site", []), "site must be a dict, got: list"),
+            (f_slurm, setIn("site", "name", ""), "site.name must be a non-empty string"),
+            (f_slurm, setIn("site", "scheduler", "lsf"), "Invalid site.scheduler: 'lsf'"),
+            (f_slurm, setIn("site", "launcher", " "), "site.launcher must be a non-empty string"),
+            (f_slurm, setIn("site", "certification", "trusted"), "Invalid site.certification: 'trusted'"),
+            (f_slurm, setIn("site", "test_only", "no"), "site.test_only must be a boolean"),
+            (f_slurm, setIn("site", "install_prefix", "usr"), "site.install_prefix must be an absolute path"),
+            (f_slurm, setIn("site", "benchmark_roots", []), "site.benchmark_roots must be a dict"),
+            (f_slurm, setIn("site", "benchmark_roots", "hdd", "rel/dir"), r"site.benchmark_roots.hdd must be an absolute path, got: 'rel/dir'"),
+            (f_slurm, setIn("site", "lustre_pools", None), "site.lustre_pools must be a dict"),
+            (f_slurm, dropFrom("site", "lustre_pools", "ssd"), "Missing keys in site.lustre_pools"),
+            (f_slurm, setIn("site", "lustre_pools", "nvme", None), "Unexpected extra keys in site.lustre_pools"),
+            (f_slurm, setIn("site", "lustre_pools", "hdd", 4), r"site.lustre_pools.hdd must be string or null, got: 4"),
+            (f_slurm, setIn("site", "executables", []), "site.executables must be a dict"),
+            (f_slurm, dropFrom("site", "executables", "ior"), "Missing keys in site.executables"),
+            (f_slurm, setIn("site", "executables", "ior", "bin/ior"), r"site.executables.ior must be an absolute path, got: 'bin/ior'"),
+            (f_slurm, setIn("site", "modules", "gcc"), "site.modules must be a list of strings"),
+            (f_slurm, setIn("site", "modules", ["gcc", 3]), r"site.modules\[1\] must be a string"),
+            # resources
+            (f_slurm, setIn("site", "resources", []), "site.resources must be a dict"),
+            (f_slurm, setIn("site", "resources", "huge", {}), "Unexpected extra keys in site.resources"),
+            (f_slurm, setIn("site", "resources", "small", "cpu"), "site.resources.small must be a dict"),
+            (f_slurm, dropFrom("site", "resources", "small", "qos"), "Missing keys in site.resources.small"),
+            (f_slurm, setIn("site", "resources", "small", "mail_mode", "SOMETIMES"), "Invalid Slurm mail_mode: 'SOMETIMES'"),
+            (f_pbs, setIn("site", "resources", "small", "mail_mode", "never"), "Invalid PBS mail_mode: 'never'"),
+            (f_fake, setIn("site", "resources", "small", "mail_mode", "abe"), "Fake scheduler cannot accept mail_mode: 'abe'"),
+            # rank identity
+            (f_slurm, setIn("site", "rank_identity", None), "site.rank_identity must be a dict"),
+            (f_slurm, dropFrom("site", "rank_identity", "node"), "Missing keys in site.rank_identity"),
+            (f_slurm, setIn("site", "rank_identity", "global", ""), "Invalid site.rank_identity:"),
+            # cancellation
+            (f_slurm, setIn("site", "cancellation", 8), "site.cancellation must be a dict"),
+            (f_slurm, dropFrom("site", "cancellation", "grace_seconds"), "Missing keys in site.cancellation"),
+            (f_slurm, setIn("site", "cancellation", "grace_seconds", True), "site.cancellation values must be integers, not booleans"),
+            (f_slurm, setIn("site", "cancellation", "poll_interval_seconds", 0), "Invalid site.cancellation:"),
+        ]
+        for f_base, f_mutate, f_pattern in f_rows:
+            f_doc = copy.deepcopy(f_base)
+            f_mutate(f_doc)
+            with self.subTest(pattern=f_pattern):
+                with self.assertRaisesRegex(ManifestValidationError, f_pattern):
+                    ManifestSerializer.deserialize(f_doc)
+        # Every unmutated base still deserializes: the rows above fail on their own mutation
+        for f_base in (f_slurm, f_pbs, f_fake, f_lmp):
+            self.assertEqual(
+                ManifestSerializer.deserialize(copy.deepcopy(f_base)).run_id,
+                "run-mutate",
+            )
 
 
 class ManifestDocumentContractTest(unittest.TestCase):
