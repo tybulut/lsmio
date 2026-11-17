@@ -1585,13 +1585,14 @@ class RunPlanner:
             "ROCKSDB",
             "LEVELDB",
             "MANAGER",
-            # The backends' -sync arms (LsmioAdapter.ARM_ONLY_SETUPS): planned per arm; the
-            # CLI and resolveArmGroup refuse them as a run's own setup
+            # The backends' -sync arms and the rocksdb-pc arm (LsmioAdapter.ARM_ONLY_SETUPS):
+            # planned per arm; the CLI and resolveArmGroup refuse them as a run's own setup
             "ADIOS-SYNC",
             "NATIVE-SYNC",
             "PLUGIN-SYNC",
             "ROCKSDB-SYNC",
             "LEVELDB-SYNC",
+            "ROCKSDB-PC",
         },
         "lmp": {"LSMIO", "LSMIO-MMAP", "FS"},
         # EpocppAdapter.ALLOWED_SETUPS: the baseline, each backend's wall-time arm and

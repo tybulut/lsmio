@@ -40,7 +40,12 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <leveldb/db.h>
 #include <lsmio/manager/store/store_ldb.hpp>
+#include <manager/store/NoSyncLevelDBEnv.hpp>
+#include <manager/store/PageCacheGate.hpp>
+#include <manager/store/PageCacheGateOverride.hpp>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -667,6 +672,332 @@ TEST_F(LSMIOLevelDBWriteFailureDeathTest, FailedFlushBeforeDirectPutIsSticky) {
                                   if (store->writeBarrier()) fail(22);
                               }),
                 ::testing::ExitedWithCode(0), "");
+}
+
+// No-sync LevelDB Env (INV-17, INV-19), exercised directly through the Env without a store.
+namespace {
+
+class NoSyncLevelDBEnvTest : public LSMIOLevelDBConfigTest {
+  protected:
+    std::string filePath(const std::string& name) {
+        std::string path = "test-ldb-nosync-" + name + ".bin";
+        std::filesystem::remove(path);
+        m_paths.push_back(path);
+        return path;
+    }
+
+    static std::string readAll(const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+};
+
+}  // namespace
+
+TEST_F(NoSyncLevelDBEnvTest, WritableFileSyncIsCountedAndDataSurvives) {
+    const std::string path = filePath("writable");
+    leveldb::WritableFile* file = nullptr;
+    ASSERT_TRUE(lsmio::noSyncLevelDBEnv()->NewWritableFile(path, &file).ok());
+    ASSERT_NE(file, nullptr);
+    std::unique_ptr<leveldb::WritableFile> owner(file);
+
+    const std::uint64_t before = lsmio::interceptedLevelDBSyncCount();
+    EXPECT_TRUE(owner->Append("hello ").ok());
+    EXPECT_TRUE(owner->Append("world").ok());
+    EXPECT_TRUE(owner->Sync().ok());
+    EXPECT_EQ(lsmio::interceptedLevelDBSyncCount(), before + 1);
+    // Sync replaced by flush, never by dropping data (INV-17): the bytes are in the file after
+    // Sync and before Close (Close flushes on its own, so only this read sees a no-op Sync).
+    EXPECT_EQ(readAll(path), "hello world");
+    EXPECT_TRUE(owner->Close().ok());
+    EXPECT_EQ(readAll(path), "hello world");
+}
+
+TEST_F(NoSyncLevelDBEnvTest, AppendableFileAppendsAndSyncIsCounted) {
+    const std::string path = filePath("appendable");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "first,";
+    }
+    leveldb::WritableFile* file = nullptr;
+    ASSERT_TRUE(lsmio::noSyncLevelDBEnv()->NewAppendableFile(path, &file).ok());
+    ASSERT_NE(file, nullptr);
+    std::unique_ptr<leveldb::WritableFile> owner(file);
+
+    const std::uint64_t before = lsmio::interceptedLevelDBSyncCount();
+    EXPECT_TRUE(owner->Append("second").ok());
+    EXPECT_TRUE(owner->Sync().ok());
+    EXPECT_EQ(lsmio::interceptedLevelDBSyncCount(), before + 1);
+    EXPECT_TRUE(owner->Close().ok());
+    EXPECT_EQ(readAll(path), "first,second");
+}
+
+TEST_F(NoSyncLevelDBEnvTest, FlushForwardsBeforeClose) {
+    const std::string path = filePath("flush");
+    leveldb::WritableFile* file = nullptr;
+    ASSERT_TRUE(lsmio::noSyncLevelDBEnv()->NewWritableFile(path, &file).ok());
+    std::unique_ptr<leveldb::WritableFile> owner(file);
+
+    const std::uint64_t before = lsmio::interceptedLevelDBSyncCount();
+    EXPECT_TRUE(owner->Append("buffered").ok());
+    EXPECT_TRUE(owner->Flush().ok());
+    EXPECT_EQ(readAll(path), "buffered");
+    EXPECT_EQ(lsmio::interceptedLevelDBSyncCount(), before);
+    EXPECT_TRUE(owner->Close().ok());
+}
+
+TEST_F(NoSyncLevelDBEnvTest, FactoryFailuresReturnTargetStatusAndCountNothing) {
+    const std::string path = "test-ldb-nosync-missing-dir/file.bin";
+    const std::uint64_t before = lsmio::interceptedLevelDBSyncCount();
+
+    leveldb::WritableFile* file = nullptr;
+    EXPECT_FALSE(lsmio::noSyncLevelDBEnv()->NewWritableFile(path, &file).ok());
+    EXPECT_EQ(file, nullptr);
+    EXPECT_FALSE(lsmio::noSyncLevelDBEnv()->NewAppendableFile(path, &file).ok());
+    EXPECT_EQ(file, nullptr);
+    EXPECT_EQ(lsmio::interceptedLevelDBSyncCount(), before);
+}
+
+TEST_F(NoSyncLevelDBEnvTest, EnvIsOneProcessLifetimeObject) {
+    leveldb::Env* first = lsmio::noSyncLevelDBEnv();
+    EXPECT_NE(first, nullptr);
+    EXPECT_EQ(first, lsmio::noSyncLevelDBEnv());
+    EXPECT_NE(first, leveldb::Env::Default());
+}
+
+// Verified-build gate (INV-20) and its test admission seam (INV-20b), LevelDB rows. They repeat
+// the rows of test_rocksdb.cpp so the LevelDB gate is also checked from the LevelDB binary.
+TEST(LevelDBGateTest, CompileTimeAndRunTimeBuild) {
+    const lsmio::LibraryBuild level = lsmio::compileTimeBuild(lsmio::StorageType::LevelDB);
+    EXPECT_TRUE(level == (lsmio::LibraryBuild{leveldb::kMajorVersion, leveldb::kMinorVersion, -1,
+                                              lsmio::compiledPlatform()}));
+    EXPECT_EQ(level.patch, -1);
+    EXPECT_FALSE(lsmio::runTimeBuild(lsmio::StorageType::LevelDB).has_value());
+    EXPECT_NE(lsmio::describeRunningBuild(lsmio::StorageType::LevelDB)
+                  .find(std::to_string(leveldb::kMajorVersion) + "." +
+                        std::to_string(leveldb::kMinorVersion)),
+              std::string::npos);
+}
+
+TEST(LevelDBGateTest, WrapperIsAlwaysCompiledIn) {
+    EXPECT_TRUE(lsmio::pageCacheWrapperCompiledIn(lsmio::StorageType::LevelDB));
+}
+
+TEST(LevelDBGateOverrideTest, AdmitDenyAndRestore) {
+    const lsmio::StorageType engine = lsmio::StorageType::LevelDB;
+    EXPECT_EQ(lsmio::pageCacheAdmitted(engine), lsmio::pageCacheVerified(engine));
+    {
+        lsmio::PageCacheGateOverride admit(lsmio::GateDecision::Admit);
+        EXPECT_TRUE(lsmio::pageCacheAdmitted(engine));
+    }
+    {
+        lsmio::PageCacheGateOverride deny(lsmio::GateDecision::Deny);
+        EXPECT_FALSE(lsmio::pageCacheAdmitted(engine));
+    }
+    EXPECT_EQ(lsmio::pageCacheAdmitted(engine), lsmio::pageCacheVerified(engine));
+}
+
+// LevelDB store page-cache mode (INV-2, INV-17, INV-20): gate refusals and the E3 round trips.
+namespace {
+
+struct FileState {
+    std::uintmax_t size;
+    std::filesystem::file_time_type mtime;
+    bool operator==(const FileState& other) const {
+        return size == other.size && mtime == other.mtime;
+    }
+};
+using DirSnapshot = std::map<std::string, FileState>;
+
+DirSnapshot snapshotDir(const std::string& path) {
+    DirSnapshot snap;
+    for (const auto& entry : std::filesystem::directory_iterator(path)) {
+        snap[entry.path().filename().string()] = {entry.file_size(), entry.last_write_time()};
+    }
+    return snap;
+}
+
+class LevelDBPageCacheBase : public LSMIOLevelDBConfigTest {
+  protected:
+    void setMode(lsmio::Durability f_mode, bool f_use_sync = false) {
+        lsmio::gConfigLSMIO.durability = f_mode;
+        lsmio::gConfigLSMIO.useSync = f_use_sync;
+    }
+
+    // Creates a store with data in engine mode, closes it and returns its snapshot.
+    DirSnapshot makeEngineStore(const std::string& path) {
+        setMode(lsmio::Durability::Engine);
+        {
+            lsmio::LSMIOStoreLDB store(path, true);
+            EXPECT_TRUE(store.put("existing", std::string("value"), true));
+            EXPECT_TRUE(store.writeBarrier());
+            store.close();
+        }
+        return snapshotDir(path);
+    }
+
+    static std::string readText(const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+};
+
+class LevelDBDurabilityGate : public LevelDBPageCacheBase {};
+
+class LevelDBPageCache : public LevelDBPageCacheBase {
+  protected:
+    static std::string valueFor(int f_key, int f_round) {
+        return "round" + std::to_string(f_round) + "-key" + std::to_string(f_key) +
+               std::string(200, 'v');
+    }
+
+    // Writer, reader, overWrite open through the no-sync Env with a small write buffer and enough
+    // overlapping rounds for memtable flushes and a level-0 compaction (E3).
+    void roundTrip(const std::string& f_name) {
+        const std::string path = dbPath(f_name);
+        const int keys = 1500;
+        const int rounds = 6;
+        lsmio::gConfigLSMIO.writeBufferSize = 64 * 1024;
+        lsmio::gConfigLSMIO.writeFileSize = 1024 * 1024;
+        setMode(lsmio::Durability::PageCache);
+        lsmio::PageCacheGateOverride admit(lsmio::GateDecision::Admit);
+
+        const std::uint64_t before = lsmio::interceptedLevelDBSyncCount();
+        {
+            lsmio::LSMIOStoreLDB writer(path, true);
+            for (int round = 0; round < rounds; ++round) {
+                for (int key = 0; key < keys; ++key) {
+                    ASSERT_TRUE(writer.put("key" + std::to_string(key), valueFor(key, round), false));
+                }
+                ASSERT_TRUE(writer.writeBarrier());
+            }
+            writer.close();
+        }
+        EXPECT_GT(lsmio::interceptedLevelDBSyncCount(), before);
+
+        {
+            lsmio::LSMIOStoreLDB reader(path, false);
+            for (int key = 0; key < keys; ++key) {
+                std::string value;
+                ASSERT_TRUE(reader.get("key" + std::to_string(key), &value));
+                EXPECT_EQ(value, valueFor(key, rounds - 1));
+            }
+            reader.close();
+        }
+        // Opening the store renames the previous LOG to LOG.old, so look in both.
+        const std::string log_text = readText(path + "/LOG") + readText(path + "/LOG.old");
+        EXPECT_NE(log_text.find("Compacting"), std::string::npos);
+
+        {
+            lsmio::LSMIOStoreLDB again(path, true);
+            std::string value;
+            EXPECT_FALSE(again.get("key0", &value));
+            again.close();
+        }
+    }
+};
+
+}  // namespace
+
+TEST_F(LevelDBDurabilityGate, DenyRefusesBeforeTouchingFiles) {
+    const std::string path = dbPath("gate-deny");
+    const DirSnapshot before = makeEngineStore(path);
+    setMode(lsmio::Durability::PageCache);
+    lsmio::PageCacheGateOverride deny(lsmio::GateDecision::Deny);
+    try {
+        lsmio::LSMIOStoreLDB store(path, true);
+        FAIL() << "page-cache open under Deny must throw";
+    } catch (const std::invalid_argument& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("LevelDB"), std::string::npos);
+        EXPECT_NE(what.find("page-cache"), std::string::npos);
+        EXPECT_NE(what.find("1.23"), std::string::npos);
+    }
+    EXPECT_TRUE(snapshotDir(path) == before);
+}
+
+TEST_F(LevelDBDurabilityGate, NoOverrideFollowsTable) {
+    const std::string path = dbPath("gate-table");
+    const bool verified = lsmio::pageCacheVerified(lsmio::StorageType::LevelDB);
+    EXPECT_EQ(lsmio::pageCacheAdmitted(lsmio::StorageType::LevelDB), verified);
+    setMode(lsmio::Durability::PageCache);
+    if (verified) {
+        lsmio::LSMIOStoreLDB store(path, true);
+        EXPECT_TRUE(store.put("k", std::string("v"), true));
+        store.close();
+        EXPECT_TRUE(std::filesystem::exists(path));
+    } else {
+        try {
+            lsmio::LSMIOStoreLDB store(path, true);
+            FAIL() << "page-cache open of an unverified build must throw";
+        } catch (const std::invalid_argument& e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find("LevelDB"), std::string::npos);
+            EXPECT_NE(what.find("page-cache"), std::string::npos);
+            EXPECT_NE(what.find("1.23"), std::string::npos);
+        }
+        EXPECT_FALSE(std::filesystem::exists(path));
+    }
+}
+
+TEST_F(LevelDBDurabilityGate, EngineModeIgnoresDeny) {
+    const std::string path = dbPath("gate-engine");
+    setMode(lsmio::Durability::Engine);
+    lsmio::PageCacheGateOverride deny(lsmio::GateDecision::Deny);
+    {
+        lsmio::LSMIOStoreLDB store(path, true);
+        EXPECT_TRUE(store.put("key", std::string("value"), true));
+        EXPECT_TRUE(store.writeBarrier());
+        store.close();
+    }
+    lsmio::LSMIOStoreLDB reader(path, false);
+    std::string value;
+    EXPECT_TRUE(reader.get("key", &value));
+    EXPECT_EQ(value, "value");
+}
+
+TEST_F(LevelDBDurabilityGate, UseSyncRefusedBeforeGate) {
+    const std::string path = dbPath("gate-usesync");
+    const DirSnapshot before = makeEngineStore(path);
+    setMode(lsmio::Durability::PageCache, true);
+    for (const lsmio::GateDecision decision :
+         {lsmio::GateDecision::Admit, lsmio::GateDecision::Deny}) {
+        lsmio::PageCacheGateOverride scope(decision);
+        try {
+            lsmio::LSMIOStoreLDB store(path, true);
+            FAIL() << "page-cache with useSync must throw";
+        } catch (const std::invalid_argument& e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find("useSync"), std::string::npos);
+            EXPECT_NE(what.find("page-cache"), std::string::npos);
+            // The useSync refusal comes first, so the gate's build text is not in it (NB21).
+            EXPECT_EQ(what.find("verified page-cache build"), std::string::npos);
+        }
+        EXPECT_TRUE(snapshotDir(path) == before);
+    }
+
+    setMode(lsmio::Durability::Engine, true);
+    lsmio::LSMIOStoreLDB store(path, false);
+    std::string value;
+    EXPECT_TRUE(store.put("synced", std::string("yes"), true));
+    EXPECT_TRUE(store.get("existing", &value));
+    EXPECT_EQ(value, "value");
+    EXPECT_TRUE(store.get("synced", &value));
+    EXPECT_EQ(value, "yes");
+}
+
+TEST_F(LevelDBPageCache, DefaultFlagsRoundTrip) {
+    roundTrip("e3-default");
+}
+
+TEST_F(LevelDBPageCache, WalFlagRoundTrip) {
+    lsmio::gConfigLSMIO.enableWAL = true;
+    roundTrip("e3-wal");
+}
+
+TEST_F(LevelDBPageCache, MmapFlagRoundTrip) {
+    lsmio::gConfigLSMIO.enableMMAP = true;
+    roundTrip("e3-mmap");
 }
 
 namespace {

@@ -32,6 +32,7 @@
 #include <rocksdb/convenience.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/options_util.h>
+#include <rocksdb/version.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -39,10 +40,16 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
+#include <leveldb/db.h>
 #include <lsmio/manager/manager.hpp>
 #include <lsmio/manager/store/store_rdb.hpp>
+#include <manager/store/NoSyncRocksFileSystem.hpp>
+#include <manager/store/PageCacheGate.hpp>
+#include <manager/store/PageCacheGateOverride.hpp>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -576,6 +583,675 @@ TEST_F(RocksDBReadOnlyTest, WalWrittenStoreReadsBack) {
     lsmio::LSMIOStoreRDB reader(path, false, true);
     expectAllKeys(reader);
 }
+
+// Verified-build gate (INV-20) and its test admission seam (INV-20b). This binary links the store
+// library, which holds both engines, so it reaches every branch of PageCacheGate.cpp.
+namespace {
+
+using lsmio::LibraryBuild;
+using lsmio::StorageType;
+using lsmio::VerifiedBuild;
+
+const std::string kLinux = "linux-x86_64";
+
+std::vector<VerifiedBuild> oneEntryTable() {
+    return {{StorageType::RocksDB, {9, 11, 2, kLinux}, "synthetic"}};
+}
+
+}  // namespace
+
+TEST(RocksDBGateTest, BuildListedMatchesExactBuildOnly) {
+    const auto table = oneEntryTable();
+    EXPECT_TRUE(lsmio::buildListed(table, StorageType::RocksDB, {9, 11, 2, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::RocksDB, {9, 11, 3, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::RocksDB, {9, 12, 2, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::RocksDB, {10, 11, 2, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::RocksDB, {9, 11, 2, "darwin-arm64"}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::LevelDB, {9, 11, 2, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed({}, StorageType::RocksDB, {9, 11, 2, kLinux}));
+}
+
+TEST(RocksDBGateTest, BuildListedMatchesLevelDBWithoutPatch) {
+    const std::vector<VerifiedBuild> table = {
+        {StorageType::LevelDB, {1, 23, -1, kLinux}, "synthetic"}};
+    EXPECT_TRUE(lsmio::buildListed(table, StorageType::LevelDB, {1, 23, -1, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::LevelDB, {1, 23, 0, kLinux}));
+    EXPECT_FALSE(lsmio::buildListed(table, StorageType::RocksDB, {1, 23, -1, kLinux}));
+}
+
+TEST(RocksDBGateTest, ResolveBuildAgreesOrReportsDisagreement) {
+    const LibraryBuild compile_time{9, 11, 2, kLinux};
+    const auto absent = lsmio::resolveBuild(compile_time, std::nullopt);
+    ASSERT_TRUE(absent.has_value());
+    EXPECT_TRUE(*absent == compile_time);
+
+    const auto equal = lsmio::resolveBuild(compile_time, compile_time);
+    ASSERT_TRUE(equal.has_value());
+    EXPECT_TRUE(*equal == compile_time);
+
+    EXPECT_FALSE(lsmio::resolveBuild(compile_time, LibraryBuild{9, 11, 3, kLinux}).has_value());
+}
+
+TEST(RocksDBGateTest, VerifiedForRefusesDisagreementAndUnlistedBuilds) {
+    const auto table = oneEntryTable();
+    EXPECT_FALSE(lsmio::verifiedFor(table, StorageType::RocksDB, std::nullopt));
+    EXPECT_TRUE(
+        lsmio::verifiedFor(table, StorageType::RocksDB, LibraryBuild{9, 11, 2, kLinux}));
+    EXPECT_FALSE(
+        lsmio::verifiedFor(table, StorageType::RocksDB, LibraryBuild{9, 11, 3, kLinux}));
+}
+
+TEST(RocksDBGateTest, DescribeBuildNamesEngineAndBothVersionsOnDisagreement) {
+    const LibraryBuild rocks{9, 11, 2, kLinux};
+    EXPECT_EQ(lsmio::describeBuild(StorageType::RocksDB, rocks, std::nullopt),
+              "RocksDB 9.11.2 linux-x86_64");
+    EXPECT_EQ(lsmio::describeBuild(StorageType::RocksDB, rocks, rocks), "RocksDB 9.11.2 linux-x86_64");
+
+    const std::string disagree =
+        lsmio::describeBuild(StorageType::RocksDB, rocks, LibraryBuild{9, 11, 3, kLinux});
+    EXPECT_NE(disagree.find("9.11.2"), std::string::npos) << disagree;
+    EXPECT_NE(disagree.find("9.11.3"), std::string::npos) << disagree;
+    EXPECT_NE(disagree.find("disagree"), std::string::npos) << disagree;
+
+    EXPECT_EQ(lsmio::describeBuild(StorageType::LevelDB, {1, 23, -1, kLinux}, std::nullopt),
+              "LevelDB 1.23 linux-x86_64");
+}
+
+TEST(RocksDBGateTest, DescribeBuildReadsAnUnparsableRunTimeVersionAsSuch) {
+    // The marker runTimeBuild() uses for a version string that does not parse (NB36).
+    const std::string text = lsmio::describeBuild(StorageType::RocksDB, {9, 11, 2, kLinux},
+                                                  LibraryBuild{-1, -1, -1, "unparsable"});
+    EXPECT_NE(text.find("run-time unparsable"), std::string::npos) << text;
+    EXPECT_NE(text.find("disagree"), std::string::npos) << text;
+    EXPECT_EQ(text.find("-1"), std::string::npos) << text;
+}
+
+TEST(RocksDBGateTest, ParseRocksVersionAcceptsExactTriples) {
+    const auto nine = lsmio::parseRocksVersion("9.11.2", kLinux);
+    ASSERT_TRUE(nine.has_value());
+    EXPECT_TRUE(*nine == (LibraryBuild{9, 11, 2, kLinux}));
+
+    const auto ten = lsmio::parseRocksVersion("10.6.2", "darwin-arm64");
+    ASSERT_TRUE(ten.has_value());
+    EXPECT_TRUE(*ten == (LibraryBuild{10, 6, 2, "darwin-arm64"}));
+}
+
+TEST(RocksDBGateTest, ParseRocksVersionRefusesEverythingElse) {
+    for (const char* bad :
+         {"", "9", "9.11", "9.11.2.1", "9.x.2", "x.11.2", "9.11.x", "9.11.2-rc", "-9.11.2",
+          "9..2", "9.11.", "99999999999.1.1", "+9.11.2", " 9.11.2"}) {
+        EXPECT_FALSE(lsmio::parseRocksVersion(bad, kLinux).has_value()) << "'" << bad << "'";
+    }
+}
+
+TEST(RocksDBGateTest, CompiledPlatformIsOsDashArch) {
+    const std::string platform = lsmio::compiledPlatform();
+    EXPECT_FALSE(platform.empty());
+    EXPECT_NE(platform.find('-'), std::string::npos) << platform;
+}
+
+TEST(RocksDBGateTest, EveryTableEntryNamesItsEvidence) {
+    for (const auto& entry : lsmio::verifiedBuildTable()) {
+        EXPECT_FALSE(entry.evidence.empty());
+    }
+}
+
+TEST(RocksDBGateTest, WrapperCompiledInPerEngine) {
+    EXPECT_FALSE(lsmio::pageCacheWrapperCompiledIn(StorageType::NativeDB));
+    EXPECT_TRUE(lsmio::pageCacheWrapperCompiledIn(StorageType::LevelDB));
+    EXPECT_EQ(lsmio::pageCacheWrapperCompiledIn(StorageType::RocksDB), lsmio::kRocksNoSyncCompiledIn);
+    EXPECT_EQ(lsmio::kRocksNoSyncCompiledIn, LSMIO_ROCKSDB_NOSYNC_FS != 0);
+}
+
+TEST(RocksDBGateTest, NativeDBHasNoGate) {
+    EXPECT_FALSE(lsmio::pageCacheVerified(StorageType::NativeDB));
+    EXPECT_FALSE(lsmio::pageCacheAdmitted(StorageType::NativeDB));
+    EXPECT_THROW(lsmio::compileTimeBuild(StorageType::NativeDB), std::invalid_argument);
+}
+
+TEST(RocksDBGateTest, CompileTimeBuildReportsTheHeaderVersions) {
+    const LibraryBuild rocks = lsmio::compileTimeBuild(StorageType::RocksDB);
+    EXPECT_TRUE(rocks == (LibraryBuild{ROCKSDB_MAJOR, ROCKSDB_MINOR, ROCKSDB_PATCH,
+                                       lsmio::compiledPlatform()}));
+    const LibraryBuild level = lsmio::compileTimeBuild(StorageType::LevelDB);
+    EXPECT_TRUE(level == (LibraryBuild{leveldb::kMajorVersion, leveldb::kMinorVersion, -1,
+                                       lsmio::compiledPlatform()}));
+}
+
+TEST(RocksDBGateTest, RunTimeBuildPerEngine) {
+    EXPECT_FALSE(lsmio::runTimeBuild(StorageType::LevelDB).has_value());
+#if LSMIO_ROCKSDB_NOSYNC_FS
+    const auto running = lsmio::runTimeBuild(StorageType::RocksDB);
+    ASSERT_TRUE(running.has_value());
+    EXPECT_TRUE(*running == lsmio::compileTimeBuild(StorageType::RocksDB));
+#else
+    EXPECT_FALSE(lsmio::runTimeBuild(StorageType::RocksDB).has_value());
+#endif
+}
+
+TEST(RocksDBGateTest, DescribeRunningBuildNamesTheVersions) {
+    const std::string rocks = std::to_string(ROCKSDB_MAJOR) + "." + std::to_string(ROCKSDB_MINOR) +
+                              "." + std::to_string(ROCKSDB_PATCH);
+    EXPECT_NE(lsmio::describeRunningBuild(StorageType::RocksDB).find(rocks), std::string::npos);
+    const std::string level =
+        std::to_string(leveldb::kMajorVersion) + "." + std::to_string(leveldb::kMinorVersion);
+    EXPECT_NE(lsmio::describeRunningBuild(StorageType::LevelDB).find(level), std::string::npos);
+}
+
+TEST(RocksDBGateOverrideTest, NoOverrideDecidesFromTheTable) {
+    for (const StorageType engine : {StorageType::RocksDB, StorageType::LevelDB}) {
+        EXPECT_EQ(lsmio::pageCacheAdmitted(engine), lsmio::pageCacheVerified(engine));
+    }
+}
+
+TEST(RocksDBGateOverrideTest, AdmitAndDenyScopesDecideAndRestore) {
+    {
+        lsmio::PageCacheGateOverride admit(lsmio::GateDecision::Admit);
+        EXPECT_EQ(lsmio::pageCacheAdmitted(StorageType::RocksDB),
+                  lsmio::pageCacheWrapperCompiledIn(StorageType::RocksDB));
+        EXPECT_TRUE(lsmio::pageCacheAdmitted(StorageType::LevelDB));
+        // The seam never admits an engine without a wrapper.
+        EXPECT_FALSE(lsmio::pageCacheAdmitted(StorageType::NativeDB));
+    }
+    {
+        lsmio::PageCacheGateOverride deny(lsmio::GateDecision::Deny);
+        EXPECT_FALSE(lsmio::pageCacheAdmitted(StorageType::RocksDB));
+        EXPECT_FALSE(lsmio::pageCacheAdmitted(StorageType::LevelDB));
+    }
+    for (const StorageType engine : {StorageType::RocksDB, StorageType::LevelDB}) {
+        EXPECT_EQ(lsmio::pageCacheAdmitted(engine), lsmio::pageCacheVerified(engine));
+    }
+}
+
+TEST(RocksDBGateOverrideTest, SecondOverrideThrowsAndTheFirstStillDecides) {
+    lsmio::PageCacheGateOverride first(lsmio::GateDecision::Deny);
+    EXPECT_THROW(lsmio::PageCacheGateOverride second(lsmio::GateDecision::Admit),
+                 std::logic_error);
+    EXPECT_FALSE(lsmio::pageCacheAdmitted(StorageType::LevelDB));
+}
+
+namespace {
+
+class NoSyncRocksFileSystemTest : public LSMIORocksDBConfigTest {
+  protected:
+    // A fresh directory for the test's files (removed in TearDown through the base class).
+    std::string workDir(const std::string& name) {
+        const std::string path = dbPath(name);
+        std::filesystem::create_directories(path);
+        return path;
+    }
+
+    static std::string readAll(const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+};
+
+}  // namespace
+
+#if LSMIO_ROCKSDB_NOSYNC_FS
+
+namespace {
+
+const rocksdb::IOOptions kIoOptions;
+const rocksdb::FileOptions kFileOptions;
+
+std::shared_ptr<rocksdb::FileSystem> noSyncFs() {
+    return lsmio::noSyncRocksFileSystem();
+}
+
+}  // namespace
+
+TEST_F(NoSyncRocksFileSystemTest, WritableFileSyncsAreCountedAndDataSurvives) {
+    const std::string path = workDir("nosync-writable") + "/a.log";
+    const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+
+    std::unique_ptr<rocksdb::FSWritableFile> file;
+    ASSERT_TRUE(noSyncFs()->NewWritableFile(path, kFileOptions, &file, nullptr).ok());
+    ASSERT_NE(file, nullptr);
+    ASSERT_TRUE(file->Append(rocksdb::Slice("hello world"), kIoOptions, nullptr).ok());
+    EXPECT_TRUE(file->Sync(kIoOptions, nullptr).ok());
+    // Sync is a flush: the bytes are visible before Close (INV-17, nothing dropped).
+    EXPECT_EQ(readAll(path), "hello world");
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before + 1);
+    EXPECT_TRUE(file->Fsync(kIoOptions, nullptr).ok());
+    EXPECT_TRUE(file->RangeSync(0, 5, kIoOptions, nullptr).ok());
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before + 3);
+    EXPECT_TRUE(file->Close(kIoOptions, nullptr).ok());
+    EXPECT_EQ(readAll(path), "hello world");
+}
+
+TEST_F(NoSyncRocksFileSystemTest, ReopenWritableFileAppendsAndSyncCounts) {
+    const std::string path = workDir("nosync-reopen") + "/a.log";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "first,";
+    }
+    const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+
+    std::unique_ptr<rocksdb::FSWritableFile> file;
+    ASSERT_TRUE(noSyncFs()->ReopenWritableFile(path, kFileOptions, &file, nullptr).ok());
+    ASSERT_NE(file, nullptr);
+    ASSERT_TRUE(file->Append(rocksdb::Slice("second"), kIoOptions, nullptr).ok());
+    EXPECT_TRUE(file->Sync(kIoOptions, nullptr).ok());
+    EXPECT_EQ(readAll(path), "first,second");
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before + 1);
+    EXPECT_TRUE(file->Close(kIoOptions, nullptr).ok());
+}
+
+TEST_F(NoSyncRocksFileSystemTest, ReuseWritableFileGivesFileWhoseSyncCounts) {
+    const std::string dir = workDir("nosync-reuse");
+    const std::string old_path = dir + "/old.log";
+    const std::string new_path = dir + "/new.log";
+    {
+        std::ofstream out(old_path, std::ios::binary);
+        out << "stale";
+    }
+    const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+
+    std::unique_ptr<rocksdb::FSWritableFile> file;
+    const rocksdb::IOStatus status =
+        noSyncFs()->ReuseWritableFile(new_path, old_path, kFileOptions, &file, nullptr);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_NE(file, nullptr);
+    ASSERT_TRUE(file->Append(rocksdb::Slice("fresh"), kIoOptions, nullptr).ok());
+    EXPECT_TRUE(file->Sync(kIoOptions, nullptr).ok());
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before + 1);
+    EXPECT_TRUE(file->Close(kIoOptions, nullptr).ok());
+    EXPECT_FALSE(std::filesystem::exists(old_path));
+    EXPECT_NE(readAll(new_path).find("fresh"), std::string::npos);
+}
+
+TEST_F(NoSyncRocksFileSystemTest, RandomRWFileSyncsAreCountedAndDataSurvives) {
+    const std::string path = workDir("nosync-rw") + "/a.rw";
+    {
+        std::ofstream out(path, std::ios::binary);  // NewRandomRWFile opens an existing file
+    }
+    const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+
+    std::unique_ptr<rocksdb::FSRandomRWFile> file;
+    ASSERT_TRUE(noSyncFs()->NewRandomRWFile(path, kFileOptions, &file, nullptr).ok());
+    ASSERT_NE(file, nullptr);
+    ASSERT_TRUE(file->Write(0, rocksdb::Slice("random"), kIoOptions, nullptr).ok());
+    EXPECT_TRUE(file->Sync(kIoOptions, nullptr).ok());
+    EXPECT_EQ(readAll(path), "random");
+    EXPECT_TRUE(file->Fsync(kIoOptions, nullptr).ok());
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before + 2);
+    EXPECT_TRUE(file->Close(kIoOptions, nullptr).ok());
+    EXPECT_EQ(readAll(path), "random");
+}
+
+TEST_F(NoSyncRocksFileSystemTest, DirectoryFsyncsAreCountedAndReportSuccess) {
+    const std::string dir = workDir("nosync-dir");
+    const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+
+    std::unique_ptr<rocksdb::FSDirectory> directory;
+    ASSERT_TRUE(noSyncFs()->NewDirectory(dir, kIoOptions, &directory, nullptr).ok());
+    ASSERT_NE(directory, nullptr);
+    EXPECT_TRUE(directory->Fsync(kIoOptions, nullptr).ok());
+    EXPECT_TRUE(directory->FsyncWithDirOptions(kIoOptions, nullptr, rocksdb::DirFsyncOptions())
+                    .ok());
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before + 2);
+    EXPECT_TRUE(directory->Close(kIoOptions, nullptr).ok());
+}
+
+TEST_F(NoSyncRocksFileSystemTest, FactoryFailuresReturnTargetStatusAndCountNothing) {
+    const std::string dir = workDir("nosync-fail");
+    const std::string missing = dir + "/missing/x";
+    const std::string missing_dir = dir + "/missing";
+    const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+
+    std::unique_ptr<rocksdb::FSWritableFile> writable;
+    EXPECT_FALSE(noSyncFs()->NewWritableFile(missing, kFileOptions, &writable, nullptr).ok());
+    EXPECT_EQ(writable, nullptr);
+    EXPECT_FALSE(noSyncFs()->ReopenWritableFile(missing, kFileOptions, &writable, nullptr).ok());
+    EXPECT_EQ(writable, nullptr);
+    // Reuse: the old name is missing and the new name is inside a missing directory.
+    EXPECT_FALSE(
+        noSyncFs()->ReuseWritableFile(missing, dir + "/no-old", kFileOptions, &writable, nullptr)
+            .ok());
+    EXPECT_EQ(writable, nullptr);
+
+    std::unique_ptr<rocksdb::FSRandomRWFile> random_rw;
+    EXPECT_FALSE(noSyncFs()->NewRandomRWFile(missing, kFileOptions, &random_rw, nullptr).ok());
+    EXPECT_EQ(random_rw, nullptr);
+
+    std::unique_ptr<rocksdb::FSDirectory> directory;
+    EXPECT_FALSE(noSyncFs()->NewDirectory(missing_dir, kIoOptions, &directory, nullptr).ok());
+    EXPECT_EQ(directory, nullptr);
+
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), before);
+}
+
+TEST_F(NoSyncRocksFileSystemTest, EnvIsOneProcessLifetimeObjectOverTheNoSyncFileSystem) {
+    rocksdb::Env* env = lsmio::noSyncRocksEnv();
+    ASSERT_NE(env, nullptr);
+    EXPECT_EQ(env, lsmio::noSyncRocksEnv());
+    EXPECT_NE(env, rocksdb::Env::Default());
+    EXPECT_STREQ(env->GetFileSystem()->Name(), "LsmioNoSyncFileSystem");
+    EXPECT_EQ(env->GetFileSystem().get(), noSyncFs().get());
+    EXPECT_EQ(noSyncFs().get(), lsmio::noSyncRocksFileSystem().get());
+}
+
+#else
+
+TEST_F(NoSyncRocksFileSystemTest, WrapperIsCompiledOutAndInterceptsNothing) {
+    EXPECT_FALSE(lsmio::pageCacheWrapperCompiledIn(StorageType::RocksDB));
+    EXPECT_EQ(lsmio::interceptedRocksDBSyncCount(), 0u);
+}
+
+#endif
+
+// RocksDB store page-cache mode (INV-2, INV-17, INV-20): gate refusals and the E3 round trips.
+namespace {
+
+class RocksDBPageCacheBase : public LSMIORocksDBConfigTest {
+  protected:
+    void setMode(lsmio::Durability f_mode, bool f_use_sync = false) {
+        lsmio::gConfigLSMIO.durability = f_mode;
+        lsmio::gConfigLSMIO.useSync = f_use_sync;
+    }
+
+    static std::string rocksVersion() {
+        return std::to_string(ROCKSDB_MAJOR) + "." + std::to_string(ROCKSDB_MINOR) + "." +
+               std::to_string(ROCKSDB_PATCH);
+    }
+
+    // Creates a store with data in engine mode, closes it and returns its snapshot.
+    RdbDirSnapshot makeEngineStore(const std::string& f_path) {
+        setMode(lsmio::Durability::Engine);
+        {
+            lsmio::LSMIOStoreRDB store(f_path, true);
+            EXPECT_TRUE(store.put("existing", std::string("value")));
+            EXPECT_TRUE(store.writeBarrier());
+            store.close();
+        }
+        return snapshotRdbDir(f_path);
+    }
+
+    static std::size_t sstCount(const std::string& f_path) {
+        std::size_t count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(f_path)) {
+            if (entry.path().extension() == ".sst") {
+                count++;
+            }
+        }
+        return count;
+    }
+};
+
+class RocksDBDurabilityGate : public RocksDBPageCacheBase {};
+
+class RocksDBPageCache : public RocksDBPageCacheBase {
+  protected:
+    static constexpr int kKeys = 2000;
+
+    static std::string keyOf(int f_index) {
+        return "key" + std::to_string(f_index);
+    }
+
+    static std::string valueOf(int f_index) {
+        return "value" + std::to_string(f_index) + std::string(300, 'v');
+    }
+
+    // Writer, read-only reader, overWrite reopen, all through the no-sync file system, with a
+    // small write buffer and more data than it holds (E3). On a build without the wrapper the
+    // page-cache open is refused instead, and no file is touched (INV-20 "Builds without the
+    // wrapper").
+    void roundTrip(const std::string& f_name) {
+        const std::string path = dbPath(f_name);
+        lsmio::gConfigLSMIO.writeBufferSize = 256 * 1024;
+        setMode(lsmio::Durability::PageCache);
+        lsmio::PageCacheGateOverride admit(lsmio::GateDecision::Admit);
+
+#if LSMIO_ROCKSDB_NOSYNC_FS
+        const std::uint64_t before = lsmio::interceptedRocksDBSyncCount();
+        {
+            lsmio::LSMIOStoreRDB writer(path, true);
+            for (int i = 0; i < kKeys; i++) {
+                ASSERT_TRUE(writer.put(keyOf(i), valueOf(i)));
+            }
+            ASSERT_TRUE(writer.writeBarrier());
+            writer.close();
+        }
+        EXPECT_GT(lsmio::interceptedRocksDBSyncCount(), before);
+        EXPECT_GE(sstCount(path), 1u);
+
+        {
+            lsmio::LSMIOStoreRDB reader(path, false, true);
+            for (int i = 0; i < kKeys; i++) {
+                std::string value;
+                ASSERT_TRUE(reader.get(keyOf(i), &value)) << keyOf(i);
+                EXPECT_EQ(value, valueOf(i));
+            }
+        }
+
+        {
+            lsmio::LSMIOStoreRDB again(path, true);
+            std::string value;
+            EXPECT_FALSE(again.get(keyOf(0), &value));
+            again.close();
+        }
+#else
+        try {
+            lsmio::LSMIOStoreRDB writer(path, true);
+            FAIL() << "page-cache open on a build without the wrapper must throw";
+        } catch (const std::invalid_argument& e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find("RocksDB"), std::string::npos);
+            EXPECT_NE(what.find("page-cache"), std::string::npos);
+        }
+        EXPECT_FALSE(std::filesystem::exists(path));
+#endif
+    }
+};
+
+}  // namespace
+
+TEST_F(RocksDBDurabilityGate, DenyRefusesBeforeTouchingFiles) {
+    const std::string path = dbPath("gate-deny");
+    const RdbDirSnapshot before = makeEngineStore(path);
+    setMode(lsmio::Durability::PageCache);
+    lsmio::PageCacheGateOverride deny(lsmio::GateDecision::Deny);
+    try {
+        lsmio::LSMIOStoreRDB store(path, true);
+        FAIL() << "page-cache open under Deny must throw";
+    } catch (const std::invalid_argument& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("RocksDB"), std::string::npos);
+        EXPECT_NE(what.find("page-cache"), std::string::npos);
+        EXPECT_NE(what.find(rocksVersion()), std::string::npos);
+    }
+    EXPECT_TRUE(snapshotRdbDir(path) == before);
+}
+
+TEST_F(RocksDBDurabilityGate, NoOverrideFollowsTable) {
+    const std::string path = dbPath("gate-table");
+    const bool verified = lsmio::pageCacheVerified(lsmio::StorageType::RocksDB);
+    EXPECT_EQ(lsmio::pageCacheAdmitted(lsmio::StorageType::RocksDB), verified);
+    setMode(lsmio::Durability::PageCache);
+    if (verified) {
+        lsmio::LSMIOStoreRDB store(path, true);
+        EXPECT_TRUE(store.put("k", std::string("v")));
+        store.close();
+        EXPECT_TRUE(std::filesystem::exists(path));
+    } else {
+        try {
+            lsmio::LSMIOStoreRDB store(path, true);
+            FAIL() << "page-cache open of an unverified build must throw";
+        } catch (const std::invalid_argument& e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find("RocksDB"), std::string::npos);
+            EXPECT_NE(what.find("page-cache"), std::string::npos);
+            EXPECT_NE(what.find(rocksVersion()), std::string::npos);
+        }
+        EXPECT_FALSE(std::filesystem::exists(path));
+    }
+}
+
+TEST_F(RocksDBDurabilityGate, EngineModeIgnoresDeny) {
+    const std::string path = dbPath("gate-engine");
+    setMode(lsmio::Durability::Engine);
+    lsmio::PageCacheGateOverride deny(lsmio::GateDecision::Deny);
+    {
+        lsmio::LSMIOStoreRDB store(path, true);
+        EXPECT_TRUE(store.put("key", std::string("value")));
+        EXPECT_TRUE(store.writeBarrier());
+        store.close();
+    }
+    lsmio::LSMIOStoreRDB reader(path, false);
+    std::string value;
+    EXPECT_TRUE(reader.get("key", &value));
+    EXPECT_EQ(value, "value");
+}
+
+TEST_F(RocksDBDurabilityGate, UseSyncRefusedBeforeGate) {
+    const std::string path = dbPath("gate-usesync");
+    const RdbDirSnapshot before = makeEngineStore(path);
+    setMode(lsmio::Durability::PageCache, true);
+    for (const lsmio::GateDecision decision :
+         {lsmio::GateDecision::Admit, lsmio::GateDecision::Deny}) {
+        lsmio::PageCacheGateOverride scope(decision);
+        try {
+            lsmio::LSMIOStoreRDB store(path, true);
+            FAIL() << "page-cache with useSync must throw";
+        } catch (const std::invalid_argument& e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find("useSync"), std::string::npos);
+            EXPECT_NE(what.find("page-cache"), std::string::npos);
+            // The useSync refusal comes first, so the gate's build text is not in it (NB21).
+            EXPECT_EQ(what.find("verified page-cache build"), std::string::npos);
+        }
+        EXPECT_TRUE(snapshotRdbDir(path) == before);
+    }
+
+    // Engine mode with useSync opens as before, with the WAL off (sync ignored) and on (sync).
+    for (const bool wal : {false, true}) {
+        setMode(lsmio::Durability::Engine, true);
+        lsmio::gConfigLSMIO.enableWAL = wal;
+        lsmio::LSMIOStoreRDB store(path, false);
+        std::string value;
+        EXPECT_TRUE(store.put("synced" + std::to_string(wal), std::string("yes")));
+        EXPECT_TRUE(store.get("existing", &value));
+        EXPECT_EQ(value, "value");
+        EXPECT_TRUE(store.get("synced" + std::to_string(wal), &value));
+        EXPECT_EQ(value, "yes");
+    }
+}
+
+TEST_F(RocksDBPageCache, DefaultFlagsRoundTrip) {
+    roundTrip("e3-default");
+}
+
+TEST_F(RocksDBPageCache, WalFlagRoundTrip) {
+    lsmio::gConfigLSMIO.enableWAL = true;
+    roundTrip("e3-wal");
+}
+
+TEST_F(RocksDBPageCache, MmapFlagRoundTrip) {
+    lsmio::gConfigLSMIO.enableMMAP = true;
+    roundTrip("e3-mmap");
+}
+
+// RocksDB's mmap writer extends files only through fallocate; without it the first table file dies
+// with SIGBUS. The store therefore turns allow_fallocate on for mmap and warns when preAllocate
+// did not ask for it.
+namespace {
+
+class RocksDBMmapFallocate : public RocksDBPageCacheBase {
+  protected:
+    static constexpr int kKeys = 2000;
+
+    // Opens a store with the given flags, writes enough for a table file, closes, reopens and
+    // reads every value back, and returns the constructor's stderr and the persisted
+    // allow_fallocate. The capture holds only the constructor, with no ASSERT inside it.
+    void run(const std::string& f_name, bool f_mmap, bool f_prealloc, std::string* f_log,
+             bool* f_fallocate) {
+        const std::string path = dbPath(f_name);
+        lsmio::gConfigLSMIO.writeBufferSize = 256 * 1024;
+        lsmio::gConfigLSMIO.enableMMAP = f_mmap;
+        lsmio::gConfigLSMIO.preAllocate = f_prealloc;
+        {
+            testing::internal::CaptureStderr();
+            auto writer = std::make_unique<lsmio::LSMIOStoreRDB>(path, true);
+            *f_log = testing::internal::GetCapturedStderr();
+            for (int i = 0; i < kKeys; i++) {
+                ASSERT_TRUE(writer->put("key" + std::to_string(i),
+                                        "value" + std::to_string(i) + std::string(300, 'v')));
+            }
+            ASSERT_TRUE(writer->writeBarrier());
+            writer->close();
+        }
+        EXPECT_GE(sstCount(path), 1u);
+        {
+            lsmio::LSMIOStoreRDB reader(path, false, true);
+            for (int i = 0; i < kKeys; i++) {
+                std::string value;
+                ASSERT_TRUE(reader.get("key" + std::to_string(i), &value)) << i;
+                EXPECT_EQ(value, "value" + std::to_string(i) + std::string(300, 'v'));
+            }
+        }
+        rocksdb::ConfigOptions config_options;
+        rocksdb::DBOptions db_options;
+        std::vector<rocksdb::ColumnFamilyDescriptor> cf_descs;
+        const rocksdb::Status s =
+            rocksdb::LoadLatestOptions(config_options, path, &db_options, &cf_descs);
+        ASSERT_TRUE(s.ok()) << s.ToString();
+        *f_fallocate = db_options.allow_fallocate;
+    }
+
+    static bool warned(const std::string& f_log) {
+        return f_log.find("mmap writes need fallocate; enabling allow_fallocate (preAllocate not "
+                          "set)") != std::string::npos;
+    }
+};
+
+}  // namespace
+
+TEST_F(RocksDBMmapFallocate, MmapWithoutPreAllocateEnablesFallocateAndWarns) {
+    std::string log;
+    bool fallocate = false;
+    run("mmap-only", true, false, &log, &fallocate);
+    EXPECT_TRUE(fallocate);
+    EXPECT_TRUE(warned(log)) << log;
+}
+
+TEST_F(RocksDBMmapFallocate, MmapWithPreAllocateDoesNotWarn) {
+    std::string log;
+    bool fallocate = false;
+    run("mmap-prealloc", true, true, &log, &fallocate);
+    EXPECT_TRUE(fallocate);
+    EXPECT_FALSE(warned(log)) << log;
+}
+
+TEST_F(RocksDBMmapFallocate, PreAllocateWithoutMmapDoesNotWarn) {
+    std::string log;
+    bool fallocate = false;
+    run("prealloc-only", false, true, &log, &fallocate);
+    EXPECT_TRUE(fallocate);
+    EXPECT_FALSE(warned(log)) << log;
+}
+
+TEST_F(RocksDBMmapFallocate, NeitherLeavesFallocateOffAndDoesNotWarn) {
+    std::string log;
+    bool fallocate = true;
+    run("neither", false, false, &log, &fallocate);
+    EXPECT_FALSE(fallocate);
+    EXPECT_FALSE(warned(log)) << log;
+}
+
+#if LSMIO_ROCKSDB_NOSYNC_FS
+// Page-cache mode exists only on builds with the no-sync wrapper; the others refuse it.
+TEST_F(RocksDBMmapFallocate, PageCacheDurabilityWarnsToo) {
+    setMode(lsmio::Durability::PageCache);
+    lsmio::PageCacheGateOverride admit(lsmio::GateDecision::Admit);
+    std::string log;
+    bool fallocate = false;
+    run("mmap-pagecache", true, false, &log, &fallocate);
+    EXPECT_TRUE(fallocate);
+    EXPECT_TRUE(warned(log)) << log;
+}
+#endif
 
 namespace {
 

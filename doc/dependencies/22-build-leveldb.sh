@@ -42,9 +42,9 @@ mkdir leveldb-build
 cd leveldb-build
 
 # LevelDB's CMakeLists.txt strips -frtti from CMAKE_CXX_FLAGS and appends -fno-rtti; the
-# per-config flags come after it on the compile line, so -frtti there wins (LevelDB's classes
-# then have typeinfo for code that derives from them). Snappy lives in $HOME/src/usr: its
-# include and library paths let LevelDB's check_library_exists(snappy ...) find it and link it in.
+# per-config flags come after it on the compile line, so -frtti there wins (lsmio's no-sync
+# Env derives from LevelDB classes). Snappy lives in $HOME/src/usr: its include and library
+# paths let LevelDB's check_library_exists(snappy ...) find it and link it in.
 cmake \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_FLAGS="-I$HOME/src/usr/include" \

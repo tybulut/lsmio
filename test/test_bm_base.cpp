@@ -30,6 +30,7 @@
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -583,8 +584,10 @@ TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {
     EXPECT_NE(optStr.find("gitCommit: "), std::string::npos);
     EXPECT_NE(optStr.find("readOnly: true"), std::string::npos);
     EXPECT_NE(optStr.find(" perRankPath: 0"), std::string::npos);
+    EXPECT_NE(optStr.find(" durability: engine"), std::string::npos);
     EXPECT_NE(optStr.find(" rankShift: 0"), std::string::npos);
     EXPECT_NE(optStr.find(" globalFlush: 0\n"), std::string::npos);
+    EXPECT_LT(optStr.find(" durability: engine"), optStr.find(" globalFlush: 0\n"));
     gConfigBM.globalFlush = true;
     EXPECT_NE(genOptionsToString().find(" globalFlush: 1\n"), std::string::npos);
 }
@@ -728,7 +731,17 @@ void runBeginMain(std::vector<std::string> f_args) {
     BMBase::beginMain(static_cast<int>(f_args.size()), argv.data());
 }
 
+bool exitedNonZero(int f_status) {
+    return WIFEXITED(f_status) && WEXITSTATUS(f_status) != 0;
+}
+
 }  // namespace
+
+TEST(BMBaseCliTest, DurabilityPageCacheWithSyncIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--lsmio-durability", "page-cache", "-e"}),
+                ::testing::ExitedWithCode(1),
+                "--lsmio-durability page-cache cannot be combined with -e/--sync");
+}
 
 TEST(BMBaseCliTest, PerRankPathWithoutMpiBarrierIsRefused) {
     ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--per-rank-path"}),
@@ -779,6 +792,23 @@ TEST(BMBaseCliTest, NegativeReadShiftDelayIsRefused) {
                 ::testing::ExitedWithCode(1), "--read-shift-delay must be >= 0");
 }
 
+TEST(BMBaseCliTest, UnknownDurabilityModeExitsNonZero) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--lsmio-durability", "fsync"}),
+                exitedNonZero, "fsync");
+}
+
+namespace {
+
+// The child ran the whole beginMain, which calls InitGoogleLogging a second time (the test
+// main already ran initLSMIODebug), so it shuts glog down first.
+void runAcceptedDurability(const std::string &f_value, lsmio::Durability f_expected) {
+    google::ShutdownGoogleLogging();
+    runBeginMain({"test_bm_base", "-o", "x", "--lsmio-durability", f_value});
+    exit(lsmio::gConfigLSMIO.durability == f_expected ? 0 : 3);
+}
+
+}  // namespace
+
 namespace {
 
 // Exits 0 when beginMain accepted --global-flush without --read-shift and left the delay at 0.
@@ -802,6 +832,21 @@ TEST(BMBaseCliTest, ReadShiftDelayDefaultsToTenSecondsOnlyWithReadShiftAndNoOpti
     EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.2), 0.2);     // a fraction
     EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.0), 0.0);     // 0 disables it
     EXPECT_EQ(effectiveReadShiftDelay(false, false, 0.0), 0.0);   // no read shift: no delay
+}
+
+TEST(BMBaseCliTest, DurabilityPageCacheIsAccepted) {
+    ASSERT_EXIT(runAcceptedDurability("page-cache", lsmio::Durability::PageCache),
+                ::testing::ExitedWithCode(0), "");
+}
+
+TEST(BMBaseCliTest, DurabilityValueIsCaseInsensitive) {
+    ASSERT_EXIT(runAcceptedDurability("PAGE-CACHE", lsmio::Durability::PageCache),
+                ::testing::ExitedWithCode(0), "");
+}
+
+TEST(BMBaseCliTest, DurabilityEngineIsAccepted) {
+    ASSERT_EXIT(runAcceptedDurability("engine", lsmio::Durability::Engine),
+                ::testing::ExitedWithCode(0), "");
 }
 
 TEST(BMBasePhaseTest, BothSidesRecordedGiveTwoExactLines) {

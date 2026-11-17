@@ -6,7 +6,8 @@ cd $HOME/src/packages/23-rocksdb
 git clone https://github.com/facebook/rocksdb.git
 
 cd rocksdb
-# 9.11.2 is pinned to match the packaged RocksDB build (librocksdb9.11 9.11.2-1)
+# 9.11.2 is the RocksDB build listed in the page-cache verified-build table
+# (lib/manager/store/PageCacheGate.cpp, benchmark/README.md "Verified page-cache builds")
 git checkout v9.11.2 || exit 1
 git submodule update --init
 cd ..

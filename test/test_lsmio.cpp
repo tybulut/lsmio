@@ -244,6 +244,23 @@ TEST(LSMIOToStringTest, MemtableType) {
     }
 }
 
+TEST(LSMIOToStringTest, Durability) {
+    const std::vector<std::pair<lsmio::Durability, std::string>> rows = {
+        {lsmio::Durability::Engine, "engine"},
+        {lsmio::Durability::PageCache, "page-cache"},
+        {static_cast<lsmio::Durability>(99), ""},
+    };
+    for (const auto &row : rows) {
+        SCOPED_TRACE(row.second);
+        EXPECT_EQ(lsmio::to_string(row.first), row.second);
+    }
+}
+
+TEST(LSMIODurabilityConfigTest, DefaultIsEngine) {
+    const lsmio::LSMIOConfig config;
+    EXPECT_EQ(config.durability, lsmio::Durability::Engine);
+}
+
 // IDs 001 and 004: process-level functions, death tests (suite name ends in DeathTest, so
 // gtest runs these first). Each EXPECT_EXIT body runs in a child process.
 
@@ -274,15 +291,18 @@ TEST(LSMIOStreamOperatorTest, StreamsEachEnum) {
     EXPECT_EQ(streamOne(lsmio::MPIAggType::Entire), "mpiEntire");
     EXPECT_EQ(streamOne(lsmio::StorageType::LevelDB), "LevelDB");
     EXPECT_EQ(streamOne(lsmio::MemtableType::VectorSort), "vector-sort");
+    EXPECT_EQ(streamOne(lsmio::Durability::PageCache), "page-cache");
 }
 
 TEST(LSMIOStreamOperatorTest, StreamsConstLvalues) {
     const lsmio::MPIAggType mpi = lsmio::MPIAggType::EntireSerial;
     const lsmio::StorageType storage = lsmio::StorageType::RocksDB;
     const lsmio::MemtableType memtable = lsmio::MemtableType::BTree;
+    const lsmio::Durability durability = lsmio::Durability::Engine;
     EXPECT_EQ(streamOne(mpi), "mpiEntireSerial");
     EXPECT_EQ(streamOne(storage), "RocksDB");
     EXPECT_EQ(streamOne(memtable), "btree");
+    EXPECT_EQ(streamOne(durability), "engine");
 }
 
 TEST(LSMIOStreamOperatorTest, AppendsToExistingContent) {
@@ -297,6 +317,7 @@ TEST(LSMIOStreamOperatorTest, ShiftExpressionCompiles) {
     EXPECT_TRUE(IsStreamable<lsmio::MPIAggType>::value);
     EXPECT_TRUE(IsStreamable<lsmio::StorageType>::value);
     EXPECT_TRUE(IsStreamable<lsmio::MemtableType>::value);
+    EXPECT_TRUE(IsStreamable<lsmio::Durability>::value);
     EXPECT_TRUE(IsStreamable<int>::value);
 }
 

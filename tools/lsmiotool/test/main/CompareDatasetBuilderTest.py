@@ -476,6 +476,13 @@ class CompareDatasetBuilderTest(unittest.TestCase):
         self.assertEqual(lsmioBaseLabel("outputs-weird"), "outputs-weird")
 
         self.assertEqual(seriesRank("adios2-sync"), 1)
+        # rocksdb-pc keeps its own label, also when collision-suffixed, and never reads as
+        # the bare backend
+        self.assertEqual(lsmioBaseLabel("outputs-rocksdb-pc"), "rocksdb-pc")
+        self.assertEqual(lsmioBaseLabel("rocksdb-pc"), "rocksdb-pc")
+        self.assertEqual(lsmioBaseLabel("outputs-rocksdb-pc-1"), "rocksdb-pc")
+        # an unrecognised name keeps its full entry whatever its suffix
+        self.assertEqual(lsmioBaseLabel("outputs-weird-pc"), "outputs-weird-pc")
         # a shifted arm stacks -shift on the label of the arm it shifts, collision-suffixed
         # or not, and never collapses to the bare backend
         for f_entry, f_label in (
@@ -484,6 +491,8 @@ class CompareDatasetBuilderTest(unittest.TestCase):
             ("outputs-plugin-shift-2", "plugin-shift"),
             ("outputs-rocksdb-shift", "rocksdb-shift"),
             ("outputs-adios-sync-shift", "adios2-sync-shift"),
+            ("outputs-rocksdb-pc-shift", "rocksdb-pc-shift"),
+            ("outputs-rocksdb-pc-shift-1", "rocksdb-pc-shift"),
             ("outputs-leveldb-sync-shift", "leveldb-sync-shift"),
             ("my-leveldb-run-shift", "leveldb-shift"),
             ("outputs-weird-shift", "outputs-weird-shift"),
@@ -492,8 +501,15 @@ class CompareDatasetBuilderTest(unittest.TestCase):
                 self.assertEqual(lsmioBaseLabel(f_entry), f_label)
         # its rank is that of the arm it shifts (the chart sorts ties by label)
         self.assertEqual(seriesRank("adios2-shift"), seriesRank("adios2"))
+        self.assertEqual(seriesRank("rocksdb-pc-shift"), seriesRank("rocksdb-pc"))
         self.assertEqual(seriesRank("x-shift"), 999)
-        self.assertEqual(seriesRank("ior-collective"), 11)
+        self.assertEqual(seriesRank("rocksdb-sync"), 7)
+        self.assertEqual(seriesRank("rocksdb-pc"), 8)
+        self.assertEqual(seriesRank("leveldb"), 9)
+        self.assertEqual(seriesRank("leveldb-sync"), 10)
+        self.assertEqual(seriesRank("ior"), 11)
+        self.assertEqual(seriesRank("ior-collective"), 12)
+        self.assertEqual(seriesRank("ior-reverse"), 16)
         self.assertEqual(seriesRank("epocpp-posix-bw"), 25)
         self.assertEqual(seriesRank("x"), 999)
 
@@ -2229,12 +2245,14 @@ class CompareDatasetBuilderTest(unittest.TestCase):
             "outputs-native",
             "outputs-rocksdb",
             "outputs-rocksdb-sync",
+            "outputs-rocksdb-pc",
             "outputs-leveldb",
             "outputs-plugin-sync",
             "outputs-native-sync",
             "outputs-leveldb-sync",
             "outputs-adios-sync",
             "outputs-ior",
+            "outputs-rocksdb-pc-shift",
             "outputs-adios-sync-shift",
             "outputs-rocksdb-shift",
             "outputs-adios-shift",
@@ -2302,6 +2320,8 @@ class CompareDatasetBuilderTest(unittest.TestCase):
             "rocksdb",
             "rocksdb-shift",
             "rocksdb-sync",
+            "rocksdb-pc",
+            "rocksdb-pc-shift",
             "leveldb",
             "leveldb-sync",
             "ior",

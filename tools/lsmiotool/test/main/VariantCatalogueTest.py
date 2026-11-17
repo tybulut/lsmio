@@ -139,6 +139,19 @@ class VariantCatalogueTest(unittest.TestCase):
     # Measurement-method arms (INV-24): supported, but not canonical
     EXPECTED_MEASUREMENT_VARIANTS = {
         "shift": ("shift", ("--lsmio-no-autotune", "--read-shift")),
+        "page-cache": (
+            "page-cache",
+            ("--lsmio-no-autotune", "--lsmio-durability", "page-cache"),
+        ),
+        "page-cache-shift": (
+            "page-cache-shift",
+            (
+                "--lsmio-no-autotune",
+                "--lsmio-durability",
+                "page-cache",
+                "--read-shift",
+            ),
+        ),
     }
 
     RETIRED_35_VARIANTS = (
@@ -255,7 +268,7 @@ class VariantCatalogueTest(unittest.TestCase):
         self.assertEqual(len(all_vars), 26)
         self.assertEqual(all_vars, VariantCatalogue.mostVariants())
         self.assertEqual(all_vars[0], "default")
-        self.assertEqual(len(supported), 26)
+        self.assertEqual(len(supported), 28)
         for key in self.EXPECTED_MEASUREMENT_VARIANTS:
             self.assertIn(key, supported)
             self.assertNotIn(key, all_vars)
@@ -267,16 +280,16 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertNotIn(retired, all_vars)
 
     def testAll25NonEmptyVariants(self) -> None:
-        """Assert the 26 supported non-empty keys (25 canonical, 1 measurement-method) match tokens and engine CLI flags and the 35 retired keys are rejected."""
+        """Assert the 28 supported non-empty keys (25 canonical, 3 measurement-method) match tokens and engine CLI flags and the 35 retired keys are rejected."""
         supported = VariantCatalogue.supportedVariants()
         all_keys = VariantCatalogue.getAllVariantKeys()
         measurement = tuple(self.EXPECTED_MEASUREMENT_VARIANTS.keys())
-        self.assertEqual(len(supported), 26)
+        self.assertEqual(len(supported), 28)
         self.assertEqual(len(self.EXPECTED_25_VARIANTS), 25)
         self.assertEqual(supported, all_keys)
         self.assertEqual(supported, tuple(self.EXPECTED_25_VARIANTS.keys()) + measurement)
         self.assertEqual(
-            supported, self.EXPECTED_CANONICAL_25_VARIANTS + ("shift",)
+            supported, self.EXPECTED_CANONICAL_25_VARIANTS + ("shift", "page-cache", "page-cache-shift")
         )
         self.assertEqual(supported[:25], self.EXPECTED_CANONICAL_25_VARIANTS)
 
@@ -316,6 +329,10 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertNotIn(key, VariantCatalogue.mostVariants())
             self.assertNotIn(key, VariantCatalogue.allVariants())
             self.assertIn(key, VariantCatalogue.archivedVariantNames())
+        self.assertEqual(
+            VariantCatalogue.getInfix("ROCKSDB", "page-cache-shift"),
+            "rocksdb-page-cache-shift",
+        )
         self.assertEqual(VariantCatalogue.getInfix("NATIVE", "shift"), "native-shift")
 
         # Longest-first matching reads page-cache-shift whole, not as shift
@@ -324,6 +341,12 @@ class VariantCatalogueTest(unittest.TestCase):
             self.assertEqual(rec.tokens, f"version-main-abc123-{key}")
             self.assertEqual(rec.flags, flags)
 
+        res = VariantReverseResolver.resolve("outputs-rocksdb-page-cache-shift:run")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.backend, "rocksdb")
+        self.assertEqual(res.variant, "page-cache-shift")
+        self.assertEqual(res.role, "run")
+        self.assertEqual(res.display_label, "rocksdb-page-cache-shift")
         res = VariantReverseResolver.resolve("outputs-native-shift:base")
         self.assertIsNotNone(res)
         self.assertEqual(res.backend, "native")

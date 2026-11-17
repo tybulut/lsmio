@@ -38,6 +38,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "NoSyncLevelDBEnv.hpp"
+#include "PageCacheGate.hpp"
+
 namespace {
 struct BatchClearGuard {
     leveldb::WriteBatch& target;
@@ -52,6 +55,28 @@ namespace lsmio {
 LSMIOStoreLDB::LSMIOStoreLDB(const std::string& dbPath, const bool overWrite)
     : LSMIOStore(dbPath, overWrite) {
     leveldb::Status status;
+
+    // Page-cache durability (INV-17, INV-20): the checks come before any option is used, before
+    // dbCleanup() and before DB::Open, so a refusal touches no file. Engine mode skips all of it
+    // (INV-2): the gate is not asked and _options.env stays unset.
+    if (gConfigLSMIO.durability == Durability::PageCache) {
+        if (gConfigLSMIO.useSync) {
+            LOG(ERROR) << "LSMIOStoreLDB: page-cache durability cannot be combined with useSync."
+                       << std::endl;
+            throw std::invalid_argument(
+                "ERROR: LSMIOStoreLDB: --lsmio-durability page-cache cannot be combined with "
+                "useSync (--sync)");
+        }
+        if (!pageCacheAdmitted(StorageType::LevelDB)) {
+            const std::string build = describeRunningBuild(StorageType::LevelDB);
+            LOG(ERROR) << "LSMIOStoreLDB: page-cache durability refused, " << build
+                       << " is not a verified page-cache build." << std::endl;
+            throw std::invalid_argument(
+                "ERROR: LSMIOStoreLDB: --lsmio-durability page-cache refused for " + build +
+                ": this build is not a verified page-cache build");
+        }
+        _options.env = noSyncLevelDBEnv();
+    }
 
     _options.create_if_missing = true;
 

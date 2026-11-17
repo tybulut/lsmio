@@ -719,6 +719,9 @@ class ArchiveCommandTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ArchiveCliParseError, "is a backends arm"):
             parseArchiveArguments(["lsmio", "variants", "--setup", "ADIOS-SYNC"])
+        # and so does the ROCKSDB-PC arm's setup
+        with self.assertRaisesRegex(ArchiveCliParseError, "is a backends arm"):
+            parseArchiveArguments(["lsmio", "variants", "--setup", "ROCKSDB-PC"])
 
     def testRunRootWithRemovedSetupIsRefused(self) -> None:
         """A run made before the '-M' setups were removed is not archived as 'native-m'."""

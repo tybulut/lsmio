@@ -62,7 +62,7 @@ if (NOT leveldb_FOUND AND NOT TARGET leveldb)
 
   FetchContent_MakeAvailable(leveldb)
   # LevelDB appends -fno-rtti to CMAKE_CXX_FLAGS; target options come later on the compile
-  # line, so -frtti wins (LevelDB's classes then have typeinfo for code that derives from them)
+  # line, so -frtti wins (lsmio's no-sync Env derives from LevelDB classes)
   if (NOT MSVC)
     target_compile_options(leveldb PRIVATE -frtti)
   endif()

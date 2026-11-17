@@ -43,6 +43,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "NoSyncRocksFileSystem.hpp"
+#include "PageCacheGate.hpp"
+
 namespace lsmio {
 
 namespace {
@@ -61,6 +64,31 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite,
                    << std::endl;
         throw std::invalid_argument(
             "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: overWrite and readOnly cannot be combined.");
+    }
+
+    // Page-cache durability (INV-17, INV-20): the checks come before any option is used, before
+    // dbCleanup() and before the open, so a refusal touches no file. Engine mode skips all of it
+    // (INV-2): the gate is not asked and _options.env stays unset.
+    if (gConfigLSMIO.durability == Durability::PageCache) {
+        if (gConfigLSMIO.useSync) {
+            LOG(ERROR) << "LSMIOStoreRDB::LSMIOStoreRDB: page-cache durability cannot be combined "
+                          "with useSync."
+                       << std::endl;
+            throw std::invalid_argument(
+                "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: --lsmio-durability page-cache cannot be "
+                "combined with useSync (--sync)");
+        }
+        if (!pageCacheAdmitted(StorageType::RocksDB)) {
+            const std::string build = describeRunningBuild(StorageType::RocksDB);
+            LOG(ERROR) << "LSMIOStoreRDB::LSMIOStoreRDB: page-cache durability refused, " << build
+                       << " is not a verified page-cache build." << std::endl;
+            throw std::invalid_argument(
+                "ERROR: LSMIOStoreRDB::LSMIOStoreRDB: --lsmio-durability page-cache refused for " +
+                build + ": this build is not a verified page-cache build");
+        }
+#if LSMIO_ROCKSDB_NOSYNC_FS
+        _options.env = noSyncRocksEnv();
+#endif
     }
 
     rocksdb::Status status;
@@ -110,7 +138,15 @@ LSMIOStoreRDB::LSMIOStoreRDB(const std::string dbPath, const bool overWrite,
 
     _options.allow_mmap_writes = gConfigLSMIO.enableMMAP;
     _options.allow_mmap_reads = gConfigLSMIO.enableMMAP;
-    _options.allow_fallocate = gConfigLSMIO.preAllocate;
+    // RocksDB's mmap writer extends a file only through fallocate, so mmap writes without it die
+    // with SIGBUS on the first table file. mmap therefore turns fallocate on, with a warning when
+    // preAllocate did not ask for it.
+    _options.allow_fallocate = gConfigLSMIO.preAllocate || gConfigLSMIO.enableMMAP;
+    if (gConfigLSMIO.enableMMAP && !gConfigLSMIO.preAllocate) {
+        LOG(WARNING) << "LSMIOStoreRDB::LSMIOStoreRDB: mmap writes need fallocate; enabling "
+                        "allow_fallocate (preAllocate not set)."
+                     << std::endl;
+    }
     // _options.unordered_write = true;  // false
 
     _options.max_successive_merges = 4096;

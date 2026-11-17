@@ -150,6 +150,11 @@ gtest_discover_tests(test_bm_base
 # GTest: Manager, LevelDB and RocksDB
 add_lsmio_store_test(test_leveldb)
 add_lsmio_store_test(test_rocksdb)
+# The page-cache gate and its test seam are internal headers under lib/ (INV-20b): only these two
+# tests reach them, by the "manager/store/..." path below lib/.
+foreach(gate_test test_leveldb test_rocksdb)
+  target_include_directories(${gate_test} PRIVATE ${LSMIO_SOURCE_DIR}/lib)
+endforeach()
 add_lsmio_store_test(test_native)
 add_lsmio_store_test(test_native_extended)
 add_lsmio_store_test(test_memtable)
@@ -352,7 +357,7 @@ if(LSMIO_BUILD_BENCHMARKS AND TARGET bm_native)
     foreach(bm_world_rank RANGE 0 2)
       list(APPEND bm_store_paths "store.mpirank${bm_world_rank}${bm_suffix}")
     endforeach()
-    set(bm_common_match "perRankPath: 1" "Phases:" "phase,write,1," "phase,read,1,")
+    set(bm_common_match "durability: engine" "perRankPath: 1" "Phases:" "phase,write,1," "phase,read,1,")
     if(NOT bm_version_line STREQUAL "")
       list(APPEND bm_common_match "${bm_version_line}")
     endif()

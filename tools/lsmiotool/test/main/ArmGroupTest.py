@@ -195,6 +195,32 @@ class ArmResolutionTest(unittest.TestCase):
             with self.assertRaises(ArmError):
                 self._group(RunRequest("lsmio", "small"), f_setup)
 
+    def testRocksdbPcBackend(self) -> None:
+        """rocksdb-pc is a backends arm (ROCKSDB-PC, page-cache durability): it runs only when
+        listed, and its setup is refused as a run's own setup."""
+        f_group = self._group(
+            RunRequest(
+                "lsmio",
+                "small",
+                f_mode="backends",
+                f_backends=["rocksdb", "rocksdb-pc"],
+            )
+        )
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.arm_id) for f_a in f_group.arms],
+            [
+                ("rocksdb", "ROCKSDB", "rocksdb"),
+                ("rocksdb-pc", "ROCKSDB-PC", "rocksdb-pc"),
+            ],
+        )
+        self.assertNotIn("rocksdb-pc", DEFAULT_LSMIO_BACKENDS)
+        with self.assertRaises(ArmError):
+            self._group(
+                RunRequest("lsmio", "variants", f_variants=["btree"]), "ROCKSDB-PC"
+            )
+        with self.assertRaises(ArmError):
+            self._group(RunRequest("lsmio", "small"), "ROCKSDB-PC")
+
     def testShiftBackends(self) -> None:
         """--shift: every backends arm (the default four, or the listed ones, -sync arms and
         rocksdb-pc included) runs the shift variant and archives as <arm>-shift; without
@@ -211,6 +237,23 @@ class ArmResolutionTest(unittest.TestCase):
                 ("native", "NATIVE", "shift", "native-shift"),
                 ("plugin", "PLUGIN", "shift", "plugin-shift"),
                 ("rocksdb", "ROCKSDB", "shift", "rocksdb-shift"),
+            ],
+        )
+        f_listed = self._group(
+            RunRequest(
+                "lsmio",
+                "bake",
+                f_mode="backends",
+                f_backends=["adios2-sync", "rocksdb-pc", "leveldb"],
+                f_shift=True,
+            )
+        )
+        self.assertEqual(
+            [(f_a.label, f_a.setup, f_a.arm_id, f_a.role) for f_a in f_listed.arms],
+            [
+                ("adios2-sync", "ADIOS-SYNC", "adios-sync-shift", None),
+                ("rocksdb-pc", "ROCKSDB-PC", "rocksdb-pc-shift", None),
+                ("leveldb", "LEVELDB", "leveldb-shift", None),
             ],
         )
         f_plain = self._group(RunRequest("lsmio", "bake", f_mode="backends"))

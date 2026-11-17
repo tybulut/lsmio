@@ -103,7 +103,7 @@ if (NOT RocksDB_FOUND AND NOT TARGET RocksDB)
     set(WITH_TOOLS NO CACHE BOOL " with tools")
     set(WITH_TRACE_TOOLS NO CACHE BOOL "with trace tools")
 
-    # 9.11.2: the version of the packaged RocksDB build (librocksdb9.11 9.11.2-1)
+    # 9.11.2: the build listed in the page-cache verified-build table (PageCacheGate.cpp)
     FetchContent_Declare(
       rocksdb
       GIT_REPOSITORY https://github.com/facebook/rocksdb.git

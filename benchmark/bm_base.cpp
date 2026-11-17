@@ -596,6 +596,7 @@ std::string genOptionsToString() {
               << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
               << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
               << "\n perRankPath: " << gConfigBM.perRankPath
+              << "\n durability: " << lsmio::to_string(lsmio::gConfigLSMIO.durability)
               << "\n globalFlush: " << gConfigBM.globalFlush
               << "\n rankShift: " << gConfigBM.readShift << "\n";
 
@@ -726,6 +727,13 @@ int BMBase::beginMain(int argc, char **argv) {
                      "give every MPI rank its own store path, suffix .mpirank<N> (needs -m, "
                      "refused with -c)");
 
+        std::map<std::string, lsmio::Durability> durabilityMap{
+            {"engine", lsmio::Durability::Engine}, {"page-cache", lsmio::Durability::PageCache}};
+        app.add_option("--lsmio-durability", lsmio::gConfigLSMIO.durability,
+                       "durability mode of the RocksDB and LevelDB stores: engine, page-cache "
+                       "(default: engine; page-cache is refused with -e/--sync)")
+            ->transform(CLI::CheckedTransformer(durabilityMap, CLI::ignore_case));
+
         app.parse(argc, argv);
 
         lsmio::gConfigLSMIO.mpiAggType =
@@ -755,6 +763,11 @@ int BMBase::beginMain(int argc, char **argv) {
                 "record overhead.");
         }
         // Argv-only refusals: every rank refuses identically before MPI starts.
+        if (lsmio::gConfigLSMIO.durability == lsmio::Durability::PageCache &&
+            lsmio::gConfigLSMIO.useSync) {
+            throw std::runtime_error(
+                "--lsmio-durability page-cache cannot be combined with -e/--sync.");
+        }
         if (gConfigBM.perRankPath && !gConfigBM.useMPIBarrier) {
             throw std::runtime_error("--per-rank-path requires -m/--mpi-barrier.");
         }

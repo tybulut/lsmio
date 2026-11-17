@@ -3091,6 +3091,7 @@ class RunOrchestratorTest(unittest.TestCase):
                             "adios2-sync",
                             "native-sync",
                             "plugin-sync",
+                            "rocksdb-pc",
                         ),
                         f_out_dir=f_tmpdir,
                     ),
@@ -3101,7 +3102,7 @@ class RunOrchestratorTest(unittest.TestCase):
             f_runs = f_orch.groupRuns
             self.assertEqual(
                 [f_r["plan"].request.setup for f_r in f_runs],
-                ["ADIOS", "ADIOS-SYNC", "NATIVE-SYNC", "PLUGIN-SYNC"],
+                ["ADIOS", "ADIOS-SYNC", "NATIVE-SYNC", "PLUGIN-SYNC", "ROCKSDB-PC"],
             )
             f_points = f_runs[0]["plan"].scale_points
             self.assertEqual(len(f_fake_runner.m_submit_calls), len(f_points))
@@ -3112,11 +3113,207 @@ class RunOrchestratorTest(unittest.TestCase):
                 ),
                 sorted(
                     os.path.join(f"outputs-{f_a}", str(f_sp.nodes))
-                    for f_a in ("adios", "adios-sync", "native-sync", "plugin-sync")
+                    for f_a in (
+                        "adios",
+                        "adios-sync",
+                        "native-sync",
+                        "plugin-sync",
+                        "rocksdb-pc",
+                    )
                     for f_sp in f_points
                 ),
             )
             self.assertEqual(f_orch.exitCode, 0)
+
+    def testBackendsShiftRunsArchivesAndResumes(self) -> None:
+        """--shift: each arm plans with its setup and the shift variant (the variant's flags
+        reach the arm's sub-request), its points are archived as outputs-<arm>-shift/<nodes>
+        beside an unshifted run's, the arm marker keeps the variant and arm ID, and
+        --resume (given --shift again) skips the archived shifted points only."""
+        from lsmiotool.lib.archive import ArchiveEngine
+
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+
+        def fake_export(**f_kw: Any) -> int:
+            os.makedirs(f_kw["f_node_dir"], exist_ok=True)
+            return 1
+
+        def run(f_request: RunRequest) -> Any:
+            f_runner = FakeSchedulerCommandRunner()
+            f_orch = RunOrchestrator(
+                f_profile_resolver=self.m_registry,
+                f_command_runner=f_runner,
+                f_poll_interval=0.01,
+            )
+            f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+            with (
+                patch(
+                    "lsmiotool.lib.export.exportPoint", side_effect=fake_export
+                ) as f_export,
+                patch("lsmiotool.lib.export.generateReports", return_value=True),
+            ):
+                f_orch.execute(
+                    f_request,
+                    f_site=self.m_viking_profile,
+                    f_worker_executable=self.m_worker_path,
+                )
+            return f_orch, f_runner, f_export
+
+        with tempfile.TemporaryDirectory() as f_tmpdir:
+            f_backends = ("native", "adios2-sync", "rocksdb-pc")
+            f_orch, f_runner, f_export = run(
+                RunRequest(
+                    "lsmio",
+                    "local",
+                    f_mode="backends",
+                    f_backends=f_backends,
+                    f_out_dir=f_tmpdir,
+                    f_shift=True,
+                )
+            )
+            self.assertEqual(f_orch.exitCode, 0)
+            f_runs = f_orch.groupRuns
+            self.assertEqual(
+                [
+                    (f_r["plan"].request.setup, f_r["plan"].request.variant)
+                    for f_r in f_runs
+                ],
+                [
+                    ("NATIVE", "shift"),
+                    ("ADIOS-SYNC", "shift"),
+                    ("ROCKSDB-PC", "shift"),
+                ],
+            )
+            self.assertFalse(any(f_r["plan"].request.shift for f_r in f_runs))
+            f_points = f_runs[0]["plan"].scale_points
+            f_arm_ids = ("native-shift", "adios-sync-shift", "rocksdb-pc-shift")
+            self.assertEqual(
+                sorted(
+                    (
+                        os.path.relpath(f_c.kwargs["f_node_dir"], f_tmpdir),
+                        f_c.kwargs["f_infix"],
+                    )
+                    for f_c in f_export.call_args_list
+                ),
+                sorted(
+                    (os.path.join(f"outputs-{f_a}", str(f_sp.nodes)), f_a)
+                    for f_a in f_arm_ids
+                    for f_sp in f_points
+                ),
+            )
+            for f_run, f_arm_id in zip(f_runs, f_arm_ids):
+                f_marker = ArchiveEngine.readArmMarker(f_run["store"].layout.runRoot)
+                self.assertEqual(f_marker["variant"], "shift")
+                self.assertEqual(f_marker["arm_id"], f_arm_id)
+
+            # An unshifted run in the same folder never touches the shifted archives
+            f_plain_orch, _, f_plain_export = run(
+                RunRequest(
+                    "lsmio",
+                    "local",
+                    f_mode="backends",
+                    f_backends=("native",),
+                    f_out_dir=f_tmpdir,
+                )
+            )
+            self.assertEqual(f_plain_orch.exitCode, 0)
+            self.assertEqual(
+                sorted(os.listdir(f_tmpdir)),
+                sorted(f"outputs-{f_a}" for f_a in f_arm_ids + ("native",)),
+            )
+
+            # --resume with --shift skips every archived shifted point
+            f_resume_orch, f_resume_runner, _ = run(
+                RunRequest(
+                    "lsmio",
+                    "local",
+                    f_mode="backends",
+                    f_backends=f_backends,
+                    f_out_dir=f_tmpdir,
+                    f_resume=True,
+                    f_shift=True,
+                )
+            )
+            self.assertEqual(f_resume_orch.exitCode, 0)
+            self.assertEqual(f_resume_runner.m_submit_calls, [])
+
+            # Without --shift the same list is not archived under the unshifted names
+            f_other_orch, f_other_runner, _ = run(
+                RunRequest(
+                    "lsmio",
+                    "local",
+                    f_mode="backends",
+                    f_backends=("native", "rocksdb-pc"),
+                    f_out_dir=f_tmpdir,
+                    f_resume=True,
+                )
+            )
+            self.assertEqual(f_other_orch.exitCode, 0)
+            self.assertEqual(len(f_other_runner.m_submit_calls), len(f_points))
+            self.assertEqual(
+                [f_r["plan"].request.setup for f_r in f_other_orch.groupRuns],
+                ["ROCKSDB-PC"],
+            )
+
+    def testBackendsShiftArchivedAfterTheRun(self) -> None:
+        """A --shift run made with --no-archive is archived from its run root as
+        outputs-<arm>-shift/<nodes> (the arm marker carries the variant and arm ID)."""
+        f_lib = os.path.join(self.m_temp_dir, "lib")
+        os.makedirs(f_lib, exist_ok=True)
+        open(os.path.join(f_lib, "liblsmio_adios.so"), "w").close()
+
+        def fake_export(**f_kw: Any) -> int:
+            os.makedirs(f_kw["f_node_dir"], exist_ok=True)
+            return 1
+
+        f_runner = FakeSchedulerCommandRunner()
+        f_orch = RunOrchestrator(
+            f_profile_resolver=self.m_registry,
+            f_command_runner=f_runner,
+            f_poll_interval=0.01,
+        )
+        f_runner.m_on_submit_callback = self._groupOnSubmit(f_orch)
+        f_orch.execute(
+            RunRequest(
+                "lsmio",
+                "local",
+                f_mode="backends",
+                f_backends=("adios2", "rocksdb-pc"),
+                f_archive=False,
+                f_shift=True,
+            ),
+            f_site=self.m_viking_profile,
+            f_worker_executable=self.m_worker_path,
+        )
+        f_dest = os.path.join(
+            self.m_viking_root_hdd, "lsmio-archive", "backends", "local"
+        )
+        self.assertFalse(os.path.exists(f_dest))
+        with (
+            patch(
+                "lsmiotool.lib.export.exportPoint", side_effect=fake_export
+            ) as f_export,
+            patch("lsmiotool.lib.export.generateReports", return_value=True),
+        ):
+            f_ok, f_dirs = RunOrchestrator().archiveGroupRun(
+                f_orch.groupRuns[1]["store"].layout.runRoot, f_reporter=lambda f_l: None
+            )
+        self.assertTrue(f_ok)
+        self.assertEqual(
+            sorted(f_dirs),
+            sorted(
+                os.path.join(f_dest, f"outputs-{f_a}")
+                for f_a in ("adios-shift", "rocksdb-pc-shift")
+            ),
+        )
+        self.assertEqual(
+            sorted(f_c.kwargs["f_infix"] for f_c in f_export.call_args_list),
+            ["adios-shift", "rocksdb-pc-shift"],
+        )
+        for f_a in ("adios-shift", "rocksdb-pc-shift"):
+            self.assertTrue(os.path.isdir(os.path.join(f_dest, f"outputs-{f_a}", "1")))
 
     def testBackendsNodesRunOnlyThosePoints(self) -> None:
         """--nodes: an lsmio backends run submits and archives only those points."""
