@@ -70,10 +70,14 @@ class BMNative : public BMBase {
 
     int readPrepare(bool opt) override {
         _lc = new lsmio::LSMIOStoreNative(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
+            readDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
             false,
             lsmio::gConfigLSMIO.readOnly);
         return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
     }
 
     int readCleanup() override {

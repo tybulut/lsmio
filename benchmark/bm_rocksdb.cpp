@@ -70,10 +70,14 @@ class BMRocksdb : public BMBase {
     // Read-only by default (INV-18); --lsmio-no-read-only opens it read-write.
     int readPrepare(bool opt) override {
         _lc = new lsmio::LSMIOStoreRDB(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
+            readDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter),
             false,
             lsmio::gConfigLSMIO.readOnly);
         return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
     }
 
     std::string engineHeaderLines() const override {

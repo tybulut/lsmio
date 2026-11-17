@@ -1172,6 +1172,45 @@ class ManifestTest(unittest.TestCase):
             )
 
 
+    def testShiftOptionManifestSerializationRoundTrip(self) -> None:
+        """A request with shift=True records it in the manifest and reads it back; a
+        non-boolean shift is refused."""
+        f_req = RunRequest("lsmio", "local", f_shift=True)
+        f_plan = RunPlanner.createPlan(
+            f_request=f_req,
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-shift-test",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        f_json_str = ManifestSerializer.serialize(f_plan)
+        f_dict = json.loads(f_json_str)
+        self.assertIs(f_dict["request"]["shift"], True)
+
+        f_reconstructed = ManifestSerializer.deserialize(f_json_str).toRunPlan()
+        self.assertTrue(f_reconstructed.request.shift)
+        self.assertEqual(f_reconstructed, f_plan)
+        self.assertEqual(ManifestSerializer.serialize(f_reconstructed), f_json_str)
+
+        f_dict["request"]["shift"] = "yes"
+        with self.assertRaisesRegex(
+            ManifestValidationError, "request.shift must be a boolean"
+        ):
+            ManifestSerializer.deserialize(f_dict)
+
+        f_unshifted = RunPlanner.createPlan(
+            f_request=RunRequest("lsmio", "local"),
+            f_profile=self.m_viking_profile,
+            f_run_id_source=lambda: "run-shift-test",
+            f_clock=lambda: "2026-08-20T12:00:00Z",
+            f_token_source=lambda: "lm-000000000000000000000001",
+        )
+        self.assertNotIn(
+            "shift", json.loads(ManifestSerializer.serialize(f_unshifted))["request"]
+        )
+        self.assertNotEqual(f_unshifted, f_plan)
+
+
 class ManifestDocumentContractTest(unittest.TestCase):
     """Exhaustive contract tests for ManifestDocument validation guards, immutability, repr, and equality."""
 

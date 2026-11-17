@@ -28,12 +28,16 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <lsmio/lsmio.hpp>
+#include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -43,6 +47,7 @@
 
 #include "KeyPermutation.hpp"
 #include "PhaseTimeline.hpp"
+#include "ReadShift.hpp"
 #include "bm_base.hpp"
 
 class MockBM : public BMBase {
@@ -140,11 +145,20 @@ class MockBM : public BMBase {
     std::string path(bool f_opt1, bool f_opt2) {
         return genDBPath(f_opt1, f_opt2);
     }
+    std::string readPath(bool f_opt1, bool f_opt2) {
+        return readDBPath(f_opt1, f_opt2);
+    }
     static void setWorldRank(int f_rank) {
         mpiWorldRank = f_rank;
     }
     const std::string &getPhaseText() const {
         return m_bench_results_phases;
+    }
+    const ReadSource &readSource() const {
+        return m_read_source;
+    }
+    std::string shiftLines() const {
+        return readShiftHeaderLines();
     }
 
     std::string headerLines;  // returned by the engineHeaderLines hook
@@ -177,6 +191,7 @@ TEST_F(BMBaseTest, PerRankPathSuffix) {
         MockBM bm;
         EXPECT_EQ(bm.getBMPath(), "mock_test_db.mpirank5");
         EXPECT_EQ(bm.path(false, true), "mock_test_db.mpirank5:0:1");
+        EXPECT_EQ(bm.readPath(false, true), "mock_test_db.mpirank5:0:1");
     }
     gConfigBM.dirName = "some_dir";
     {
@@ -188,6 +203,7 @@ TEST_F(BMBaseTest, PerRankPathSuffix) {
     {
         MockBM bm;
         EXPECT_EQ(bm.getBMPath(), "some_dir/mock_test_db");
+        EXPECT_EQ(bm.readPath(true, true), "some_dir/mock_test_db:1:1");
     }
 }
 
@@ -531,6 +547,7 @@ TEST_F(BMBaseTest, ResultsPrintEngineHeaderLinesAndPhaseBlocks) {
     ASSERT_NE(results, std::string::npos);
     ASSERT_NE(readBlock, std::string::npos);
     ASSERT_NE(phases, std::string::npos);
+    EXPECT_LT(out.find(" rankShift: 0"), header);  // after the generated header
     EXPECT_LT(header, results);                    // before the results
     EXPECT_LT(readBlock, phases);                  // phases after every READ block
 }
@@ -566,6 +583,135 @@ TEST(BMBaseVersionTest, ParameterHeaderContainsGitProvenance) {
     EXPECT_NE(optStr.find("gitCommit: "), std::string::npos);
     EXPECT_NE(optStr.find("readOnly: true"), std::string::npos);
     EXPECT_NE(optStr.find(" perRankPath: 0"), std::string::npos);
+    EXPECT_NE(optStr.find(" rankShift: 0"), std::string::npos);
+    EXPECT_NE(optStr.find(" globalFlush: 0\n"), std::string::npos);
+    gConfigBM.globalFlush = true;
+    EXPECT_NE(genOptionsToString().find(" globalFlush: 1\n"), std::string::npos);
+}
+
+TEST_F(BMBaseTest, GlobalFlushWithoutMpiSyncsInProcessAndRecordsTheFlag) {
+    // Without MPI the process calls sync() itself (it leads its own node).
+    gConfigBM.iterations = 2;
+    gConfigBM.globalFlush = true;
+    MockBM bm;
+    ASSERT_EQ(bm.benchSuite("MockFlush"), lsmio::BM_SUCCESS);
+    ASSERT_EQ(bm.benchSuite("MockFlushAgain"), lsmio::BM_SUCCESS);  // leader decided once
+    EXPECT_EQ(bm.readFailureCount, 0);
+    EXPECT_EQ(phaseRows(bm.getPhaseText()).size(), 8u);
+
+    testing::internal::CaptureStdout();
+    bm.writeBenchmarkResults();
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find(" globalFlush: 1\n"), std::string::npos);
+}
+
+TEST_F(BMBaseTest, NoShiftSetupKeepsSelfSourceAndPrintsNoShiftLines) {
+    gConfigBM.iterations = 2;
+    MockBM bm;
+    ASSERT_EQ(bm.benchSuite("MockNoShift"), lsmio::BM_SUCCESS);
+    ASSERT_EQ(bm.benchSuite("MockNoShiftAgain"), lsmio::BM_SUCCESS);  // setup runs once per object
+
+    EXPECT_EQ(bm.readSource().source_world_rank, 0);
+    EXPECT_EQ(bm.readSource().source_base_path, "mock_test_db");
+    EXPECT_TRUE(bm.readSource().is_self);
+    EXPECT_EQ(bm.shiftLines(), "");
+
+    testing::internal::CaptureStdout();
+    bm.writeBenchmarkResults();
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(out.find("rankShiftNodes"), std::string::npos);
+    EXPECT_EQ(out.find("rankShiftSource"), std::string::npos);
+}
+
+TEST_F(BMBaseTest, ShiftHeaderLinesSharedAndSimulated) {
+    gConfigBM.readShift = true;
+    {
+        MockBM bm;  // the constructor's self source
+        EXPECT_EQ(bm.shiftLines(),
+                  " rankShiftNodes: shared\n rankShiftDelay: 0\n rankShiftSource: 0\n"
+                  " rankShiftSelfRanks: 0\n rankShiftSameHostRanks: 0\n");
+    }
+    gConfigBM.readShiftDelay = 10.0;
+    {
+        MockBM bm;
+        EXPECT_NE(bm.shiftLines().find("\n rankShiftDelay: 10\n"), std::string::npos);
+    }
+    gConfigBM.readShiftDelay = 0.2;
+    {
+        MockBM bm;
+        EXPECT_NE(bm.shiftLines().find("\n rankShiftDelay: 0.2\n"), std::string::npos);
+    }
+    gConfigBM.readShiftDelay = 0.0;
+    gConfigBM.readShiftNodes = 3;
+    {
+        MockBM bm;
+        EXPECT_EQ(bm.shiftLines().rfind(" rankShiftNodes: simulated:3\n", 0), 0u);
+    }
+}
+
+TEST(BMBaseReadSourceTest, RefusalNeedsSupportAndEnoughRanks) {
+    EXPECT_EQ(readShiftRefusal(true, 0, 4), "");
+    EXPECT_EQ(readShiftRefusal(true, 4, 4), "");
+    EXPECT_EQ(readShiftRefusal(true, 1, 4), "");
+    EXPECT_NE(readShiftRefusal(false, 0, 4).find("not supported"), std::string::npos);
+    std::string too_many = readShiftRefusal(true, 5, 4);
+    EXPECT_NE(too_many.find("--read-shift-nodes 5"), std::string::npos);
+    EXPECT_NE(too_many.find("world size 4"), std::string::npos);
+    // Support is checked before the node count.
+    EXPECT_NE(readShiftRefusal(false, 9, 4).find("not supported"), std::string::npos);
+}
+
+TEST(BMBaseReadSourceTest, DuplicatePathsAreRefusedWithAdvice) {
+    EXPECT_EQ(duplicateStorePathRefusal({}), "");
+    EXPECT_EQ(duplicateStorePathRefusal({"a.mpirank0", "a.mpirank1", "a.mpirank2"}), "");
+    std::string message = duplicateStorePathRefusal({"db", "other", "db"});
+    EXPECT_NE(message.find("ranks 0 and 2"), std::string::npos);
+    EXPECT_NE(message.find("'db'"), std::string::npos);
+    EXPECT_NE(message.find("--per-rank-path"), std::string::npos);
+}
+
+TEST(BMBaseReadSourceTest, MakeReadSourceTwoNodesTwoRanksEach) {
+    // Ranks 0,1 on node 0 and ranks 2,3 on node 1: every rank reads the same local index on the
+    // other node.
+    const std::vector<int> nodes = {0, 0, 2, 2};
+    const std::vector<std::string> paths = {"p0", "p1", "p2", "p3"};
+    const std::vector<std::string> names = {"hostA", "hostA", "hostB", "hostB"};
+    ReadSource r0 = makeReadSource(0, nodes, paths, names);
+    EXPECT_EQ(r0.source_world_rank, 2);
+    EXPECT_EQ(r0.source_base_path, "p2");
+    EXPECT_FALSE(r0.is_self);
+    EXPECT_FALSE(r0.same_host);
+    EXPECT_EQ(r0.self_ranks_world, 0);
+    EXPECT_EQ(r0.same_host_ranks_world, 0);
+    ReadSource r3 = makeReadSource(3, nodes, paths, names);
+    EXPECT_EQ(r3.source_world_rank, 1);
+    EXPECT_EQ(r3.source_base_path, "p1");
+}
+
+TEST(BMBaseReadSourceTest, MakeReadSourceCountsSelfAndSameHostRanks) {
+    // One node only: every rank is its own source on the same host.
+    ReadSource one = makeReadSource(1, {5, 5}, {"p0", "p1"}, {"h", "h"});
+    EXPECT_EQ(one.source_world_rank, 1);
+    EXPECT_EQ(one.source_base_path, "p1");
+    EXPECT_TRUE(one.is_self);
+    EXPECT_TRUE(one.same_host);
+    EXPECT_EQ(one.self_ranks_world, 2);
+    EXPECT_EQ(one.same_host_ranks_world, 2);
+
+    // Two nodes that share one processor name (simulated nodes on one host): not self, same host.
+    ReadSource sim = makeReadSource(0, {0, 1}, {"p0", "p1"}, {"h", "h"});
+    EXPECT_EQ(sim.source_world_rank, 1);
+    EXPECT_FALSE(sim.is_self);
+    EXPECT_TRUE(sim.same_host);
+    EXPECT_EQ(sim.self_ranks_world, 0);
+    EXPECT_EQ(sim.same_host_ranks_world, 2);
+
+    // Three ranks, node 0 holds two and node 1 one: local index 1 has one node, so rank 1 reads
+    // itself while ranks 0 and 2 swap.
+    ReadSource mixed = makeReadSource(1, {0, 0, 1}, {"p0", "p1", "p2"}, {"a", "a", "b"});
+    EXPECT_TRUE(mixed.is_self);
+    EXPECT_EQ(mixed.self_ranks_world, 1);
+    EXPECT_EQ(mixed.same_host_ranks_world, 1);
 }
 
 namespace {
@@ -593,6 +739,69 @@ TEST(BMBaseCliTest, PerRankPathWithCollectiveIoIsRefused) {
     ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "-m", "-c", "--per-rank-path"}),
                 ::testing::ExitedWithCode(1),
                 "--per-rank-path cannot be combined with -c/--collective-io");
+}
+
+TEST(BMBaseCliTest, ReadShiftWithoutMpiBarrierIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--read-shift"}),
+                ::testing::ExitedWithCode(1), "--read-shift requires -m/--mpi-barrier");
+}
+
+TEST(BMBaseCliTest, ReadShiftWithCollectiveIoIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "-m", "-c", "--read-shift"}),
+                ::testing::ExitedWithCode(1),
+                "--read-shift cannot be combined with -c/--collective-io");
+}
+
+TEST(BMBaseCliTest, ReadShiftNodesWithoutReadShiftIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--read-shift-nodes", "2"}),
+                ::testing::ExitedWithCode(1), "--read-shift-nodes requires --read-shift");
+}
+
+TEST(BMBaseCliTest, ReadShiftNodesBelowOneIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "-m", "--read-shift",
+                              "--read-shift-nodes", "0"}),
+                ::testing::ExitedWithCode(1), "--read-shift-nodes must be >= 1");
+}
+
+TEST(BMBaseCliTest, ReadShiftDelayWithoutReadShiftIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--read-shift-delay", "1"}),
+                ::testing::ExitedWithCode(1), "--read-shift-delay requires --read-shift");
+}
+
+TEST(BMBaseCliTest, ReadShiftDelayZeroWithoutReadShiftIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "--read-shift-delay", "0"}),
+                ::testing::ExitedWithCode(1), "--read-shift-delay requires --read-shift");
+}
+
+TEST(BMBaseCliTest, NegativeReadShiftDelayIsRefused) {
+    ASSERT_EXIT(runBeginMain({"test_bm_base", "-o", "x", "-m", "--read-shift",
+                              "--read-shift-delay", "-1"}),
+                ::testing::ExitedWithCode(1), "--read-shift-delay must be >= 0");
+}
+
+namespace {
+
+// Exits 0 when beginMain accepted --global-flush without --read-shift and left the delay at 0.
+// (An accepted --read-shift run needs -m and so MPI_Init, which a death-test child cannot do
+// outside mpirun; the delay default is tested through effectiveReadShiftDelay.)
+void runAcceptedGlobalFlush() {
+    google::ShutdownGoogleLogging();
+    runBeginMain({"test_bm_base", "-o", "x", "--global-flush"});
+    exit(gConfigBM.readShiftDelay == 0.0 && gConfigBM.globalFlush ? 0 : 3);
+}
+
+}  // namespace
+
+TEST(BMBaseCliTest, GlobalFlushIsIndependentOfReadShift) {
+    ASSERT_EXIT(runAcceptedGlobalFlush(), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(BMBaseCliTest, ReadShiftDelayDefaultsToTenSecondsOnlyWithReadShiftAndNoOption) {
+    EXPECT_EQ(kDefaultReadShiftDelay, 60.0);
+    EXPECT_EQ(effectiveReadShiftDelay(true, false, 0.0), 60.0);   // --read-shift alone
+    EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.2), 0.2);     // a fraction
+    EXPECT_EQ(effectiveReadShiftDelay(true, true, 0.0), 0.0);     // 0 disables it
+    EXPECT_EQ(effectiveReadShiftDelay(false, false, 0.0), 0.0);   // no read shift: no delay
 }
 
 TEST(BMBasePhaseTest, BothSidesRecordedGiveTwoExactLines) {
@@ -701,6 +910,112 @@ TEST(BMBaseKeyPermutationTest, ZeroCountGivesEmptyVector) {
 
 TEST(BMBaseKeyPermutationTest, NegativeCountThrowsInvalidArgument) {
     EXPECT_THROW(keyPermutation(0, 0, -1), std::invalid_argument);
+}
+
+namespace {
+
+// The T2 properties that hold for every placement: the sources are a bijection on the world ranks,
+// the sink is the inverse of the source, and the source is on another node exactly when the
+// reader's local index exists on two or more nodes (self otherwise). With f_equal_nodes (every node
+// holds the same ranks per node, as under cyclic and block placement) the source's node is also the
+// next node id, wrapping.
+void expectReadShiftProperties(const std::vector<int> &f_node_ids, bool f_equal_nodes) {
+    const std::vector<ReadShiftPeers> peers = mapReadShift(f_node_ids);
+    const size_t size = f_node_ids.size();
+    ASSERT_EQ(peers.size(), size);
+
+    std::vector<int> local_index(size);
+    std::map<int, int> seen_on_node;
+    std::map<int, std::set<int>> nodes_of_local_index;
+    for (size_t r = 0; r < size; r++) {
+        local_index[r] = seen_on_node[f_node_ids[r]]++;
+        nodes_of_local_index[local_index[r]].insert(f_node_ids[r]);
+    }
+    std::set<int> distinct_nodes(f_node_ids.begin(), f_node_ids.end());
+    std::vector<int> node_order(distinct_nodes.begin(), distinct_nodes.end());
+
+    std::set<int> sources;
+    for (size_t r = 0; r < size; r++) {
+        const int source = peers[r].source_world_rank;
+        ASSERT_GE(source, 0);
+        ASSERT_LT(source, static_cast<int>(size));
+        sources.insert(source);
+        EXPECT_EQ(peers[static_cast<size_t>(source)].sink_world_rank, static_cast<int>(r)) << "rank " << r;
+        EXPECT_EQ(peers[static_cast<size_t>(peers[r].sink_world_rank)].source_world_rank, static_cast<int>(r))
+            << "rank " << r;
+        EXPECT_EQ(local_index[static_cast<size_t>(source)], local_index[r]) << "rank " << r;
+        if (nodes_of_local_index[local_index[r]].size() >= 2) {
+            EXPECT_NE(f_node_ids[static_cast<size_t>(source)], f_node_ids[r]) << "rank " << r;
+        } else {
+            EXPECT_EQ(source, static_cast<int>(r));
+            EXPECT_EQ(peers[r].sink_world_rank, static_cast<int>(r));
+        }
+        if (f_equal_nodes) {
+            const size_t at = static_cast<size_t>(
+                std::find(node_order.begin(), node_order.end(), f_node_ids[r]) - node_order.begin());
+            EXPECT_EQ(f_node_ids[static_cast<size_t>(source)], node_order[(at + 1) % node_order.size()])
+                << "rank " << r;
+        }
+    }
+    EXPECT_EQ(sources.size(), size);
+}
+
+std::vector<int> sourcesOf(const std::vector<int> &f_node_ids) {
+    std::vector<int> sources;
+    for (const ReadShiftPeers &peer : mapReadShift(f_node_ids)) {
+        sources.push_back(peer.source_world_rank);
+    }
+    return sources;
+}
+
+}  // namespace
+
+TEST(BMBaseReadShiftMapTest, CyclicPlacementThreeNodesTwoRanks) {
+    const std::vector<int> nodes = {0, 1, 2, 0, 1, 2};
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{1, 2, 0, 4, 5, 3}));
+    expectReadShiftProperties(nodes, true);
+}
+
+TEST(BMBaseReadShiftMapTest, BlockPlacementThreeNodesTwoRanksWithLeaderNodeIds) {
+    const std::vector<int> nodes = {0, 0, 2, 2, 4, 4};
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{2, 3, 4, 5, 0, 1}));
+    expectReadShiftProperties(nodes, true);
+}
+
+TEST(BMBaseReadShiftMapTest, OneNodeEveryRankReadsItself) {
+    const std::vector<int> nodes = {0, 0, 0};
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{0, 1, 2}));
+    expectReadShiftProperties(nodes, true);
+}
+
+TEST(BMBaseReadShiftMapTest, OneRankPerNodeFourNodes) {
+    const std::vector<int> nodes = {0, 1, 2, 3};
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{1, 2, 3, 0}));
+    expectReadShiftProperties(nodes, true);
+}
+
+TEST(BMBaseReadShiftMapTest, UnequalRanksPerNode) {
+    const std::vector<int> nodes = {0, 0, 0, 3, 3, 5};
+    // local index 0 cycles over nodes 0, 3, 5; index 1 over nodes 0, 3; index 2 is on node 0 only
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{3, 4, 2, 5, 1, 0}));
+    expectReadShiftProperties(nodes, false);
+}
+
+TEST(BMBaseReadShiftMapTest, SimulatedNodesRankModThree) {
+    const std::vector<int> nodes = {0, 1, 2};
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{1, 2, 0}));
+    expectReadShiftProperties(nodes, true);
+}
+
+TEST(BMBaseReadShiftMapTest, NodeIdsAreNotWorldRanksAndNeedNotBeSorted) {
+    // node ids 7 and -2: ordered by node id, -2 comes first, so 7 wraps to -2
+    const std::vector<int> nodes = {7, -2, 7, -2};
+    EXPECT_EQ(sourcesOf(nodes), (std::vector<int>{1, 0, 3, 2}));
+    expectReadShiftProperties(nodes, true);
+}
+
+TEST(BMBaseReadShiftMapTest, EmptyInputGivesEmptyResult) {
+    EXPECT_TRUE(mapReadShift({}).empty());
 }
 
 int main(int argc, char **argv) {

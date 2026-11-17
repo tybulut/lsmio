@@ -17,6 +17,8 @@ set(BASE_SOURCE_FILES
   PhaseTimeline.hpp
   KeyPermutation.cpp
   KeyPermutation.hpp
+  ReadShift.cpp
+  ReadShift.hpp
 )
 
 # Set up such that XCode organizes the files correctly

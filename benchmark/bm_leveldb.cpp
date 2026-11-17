@@ -70,8 +70,12 @@ class BMLeveldb : public BMBase {
     // LevelDB has no read-only open, so the reader opens read-write.
     int readPrepare(bool opt) override {
         _lc = new lsmio::LSMIOStoreLDB(
-            genDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
+            readDBPath(lsmio::gConfigLSMIO.alwaysFlush, lsmio::gConfigLSMIO.useBloomFilter), false);
         return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
     }
 
     std::string engineHeaderLines() const override {

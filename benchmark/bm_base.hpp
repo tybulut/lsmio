@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "PhaseTimeline.hpp"
+#include "ReadShift.hpp"
 
 namespace lsmio {
 
@@ -80,6 +81,14 @@ class BMBase {
     // (INV-13).
     std::vector<int> m_put_keys;
     std::vector<int> m_get_keys;
+    // C3: the writer this rank reads. Self until the read-shift exchange says otherwise.
+    ReadSource m_read_source = {};
+    // True once this object ran its read-source setup (per object, never process-wide).
+    bool m_read_source_ready = false;
+    // True once the global-flush leader was decided (per object), and whether this rank is the
+    // node-local rank 0 that calls sync() (always true without MPI).
+    bool m_flush_leader_ready = false;
+    bool m_flush_leader = true;
 
     static bool useMPI;
     static int mpiWorldSize;
@@ -108,6 +117,27 @@ class BMBase {
         return value;
     }
 
+    // The store path a read phase opens: the read source's base path plus the genDBPath suffix
+    // (INV-16). It equals genDBPath while the source is this rank.
+    std::string readDBPath(bool f_opt1, bool f_opt2);
+
+    // C3: decides this rank's read source, once per object, from the first benchSuite call. Without
+    // --read-shift it is the rank itself and nothing is exchanged. With it, the node ids, base
+    // paths and processor names are exchanged over MPI (INV-14, INV-16); a refusal ends the run on
+    // every rank (INV-6).
+    void setupReadSource();
+
+    // The rankShift* header lines (section 5.4); empty without --read-shift.
+    std::string readShiftHeaderLines() const;
+
+    // --global-flush: decides once per object which rank is the node-local rank 0 (a collective
+    // over MPI_COMM_WORLD; nothing is exchanged without MPI).
+    void setupGlobalFlush();
+    // One sync() per node (per process without MPI), then a world barrier. No durability claim.
+    void globalFlush();
+    // --read-shift-delay: a world barrier, an MPI_Wtime wait of f_seconds, another world barrier.
+    void shiftDelay(double f_seconds);
+
     // Phase timeline helpers: the origin is the write side's beforeOpen (offset 0); every other
     // capture is the microseconds since it (INV-4).
     void beginPhaseTimeline();
@@ -133,6 +163,7 @@ class BMBase {
     virtual int writeCleanup();
 
     // C5 hooks: an engine opts in to read shift, and adds its header lines (each " key: value\n").
+    virtual bool supportsReadShift() const;
     virtual std::string engineHeaderLines() const;
 
   public:
@@ -162,6 +193,10 @@ class BMConfig {
     bool useMPIBarrier = false;
     bool enableCollectiveIO = false;
 
+    bool readShift = false;       // read the data a peer rank wrote (--read-shift)
+    int readShiftNodes = 0;       // simulated node count, 0 = real nodes (--read-shift-nodes)
+    double readShiftDelay = 0.0;  // seconds between the write and read sides (--read-shift-delay)
+    bool globalFlush = false;     // sync() once per node between the sides (--global-flush)
     bool perRankPath = false;     // one store path per MPI rank (--per-rank-path)
 
     int iterations = 1;       // TODO
@@ -173,6 +208,24 @@ class BMConfig {
 };
 
 std::string genOptionsToString();
+
+// The delay --read-shift applies when --read-shift-delay is not given (seconds).
+constexpr double kDefaultReadShiftDelay = 60.0;
+// The delay a run uses: the default with --read-shift and no --read-shift-delay, else the value.
+double effectiveReadShiftDelay(bool f_read_shift, bool f_given, double f_value);
+
+// C3 decisions as pure functions over what every rank knows, so all ranks reach the same verdict
+// (INV-6) and tests can reach every outcome without MPI.
+// The object- and world-size-dependent --read-shift refusals; empty when the run may proceed.
+std::string readShiftRefusal(bool f_supported, int f_nodes, int f_world_size);
+// INV-14 distinct stores: empty when the base paths of all world ranks differ; else the message
+// (it names --per-rank-path).
+std::string duplicateStorePathRefusal(const std::vector<std::string>& f_paths);
+// The read source of f_world_rank from the gathered node ids, base paths and processor names (all
+// indexed by world rank), with the two world counts (INV-15).
+ReadSource makeReadSource(int f_world_rank, const std::vector<int>& f_node_ids,
+                          const std::vector<std::string>& f_paths,
+                          const std::vector<std::string>& f_names);
 
 extern BMConfig gConfigBM;
 

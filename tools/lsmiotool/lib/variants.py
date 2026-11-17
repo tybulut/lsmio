@@ -275,6 +275,9 @@ class VariantCatalogue:
             "autotune",
             ("--lsmio-autotune",),
         ),
+        # Measurement-method arms (INV-24): supported, but not canonical, so the
+        # 'most' and 'all' expansions do not include them.
+        "shift": ("shift", ("--lsmio-no-autotune", "--read-shift")),
     }
 
     # Variant keys dropped because they re-enable engine defaults (footer index, manual
@@ -390,7 +393,7 @@ class VariantCatalogue:
 
     @classmethod
     def allVariants(cls) -> Tuple[str, ...]:
-        """Returns tuple of all variants ('default' followed by every supported variant); the same as mostVariants()."""
+        """Returns tuple of all variants ('default' followed by every canonical variant); the same as mostVariants()."""
         return cls.canonicalVariants()
 
     @classmethod
@@ -401,7 +404,8 @@ class VariantCatalogue:
         - None, "", "base", "default" -> the default variant (base run), flags
           --lsmio-no-autotune.
         - Strips backend prefix.
-        - Canonical lookup against 25 discrete non-empty keys; retired keys are rejected.
+        - Lookup against the 26 supported non-empty keys (25 canonical plus the 1
+          measurement-method arm); retired keys are rejected.
         - Raises UnknownVariantError on unrecognized keys.
         """
         if f_key is None:

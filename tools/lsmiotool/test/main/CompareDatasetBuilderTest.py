@@ -476,6 +476,23 @@ class CompareDatasetBuilderTest(unittest.TestCase):
         self.assertEqual(lsmioBaseLabel("outputs-weird"), "outputs-weird")
 
         self.assertEqual(seriesRank("adios2-sync"), 1)
+        # a shifted arm stacks -shift on the label of the arm it shifts, collision-suffixed
+        # or not, and never collapses to the bare backend
+        for f_entry, f_label in (
+            ("outputs-adios-shift", "adios2-shift"),
+            ("outputs-native-shift", "native-shift"),
+            ("outputs-plugin-shift-2", "plugin-shift"),
+            ("outputs-rocksdb-shift", "rocksdb-shift"),
+            ("outputs-adios-sync-shift", "adios2-sync-shift"),
+            ("outputs-leveldb-sync-shift", "leveldb-sync-shift"),
+            ("my-leveldb-run-shift", "leveldb-shift"),
+            ("outputs-weird-shift", "outputs-weird-shift"),
+        ):
+            with self.subTest(entry=f_entry):
+                self.assertEqual(lsmioBaseLabel(f_entry), f_label)
+        # its rank is that of the arm it shifts (the chart sorts ties by label)
+        self.assertEqual(seriesRank("adios2-shift"), seriesRank("adios2"))
+        self.assertEqual(seriesRank("x-shift"), 999)
         self.assertEqual(seriesRank("ior-collective"), 11)
         self.assertEqual(seriesRank("epocpp-posix-bw"), 25)
         self.assertEqual(seriesRank("x"), 999)
@@ -2218,6 +2235,10 @@ class CompareDatasetBuilderTest(unittest.TestCase):
             "outputs-leveldb-sync",
             "outputs-adios-sync",
             "outputs-ior",
+            "outputs-adios-sync-shift",
+            "outputs-rocksdb-shift",
+            "outputs-adios-shift",
+            "outputs-native-shift",
         ]
         for f_name in f_child_names:
             f_c_dir = os.path.join(f_dir, f_name)
@@ -2266,15 +2287,20 @@ class CompareDatasetBuilderTest(unittest.TestCase):
 
         req = self._request("lsmio", [f_dir])
         ds = CompareDatasetBuilder(req).build()
+        # Each -shift series follows its unshifted series, before the next arm
         expected = [
             "adios2",
+            "adios2-shift",
             "adios2-sync",
+            "adios2-sync-shift",
             "native",
+            "native-shift",
             "native-sync",
             "plugin",
             "plugin-sync",
             "rocksdb",
             "rocksdb",
+            "rocksdb-shift",
             "rocksdb-sync",
             "leveldb",
             "leveldb-sync",

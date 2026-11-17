@@ -419,6 +419,7 @@ class RunRequest:
         "m_fast",
         "m_repeats",
         "m_nodes",
+        "m_shift",
         "_frozen",
     )
 
@@ -441,6 +442,7 @@ class RunRequest:
         f_fast: bool = False,
         f_repeats: Optional[int] = None,
         f_nodes: Optional[Sequence[int]] = None,
+        f_shift: bool = False,
     ) -> None:
         if isinstance(f_mode, bool):
             f_ssd = f_mode
@@ -570,6 +572,8 @@ class RunRequest:
                     f"or None, got: {f_nodes!r}"
                 )
             f_nodes = tuple(f_nodes)
+        if not isinstance(f_shift, bool):
+            raise PlanValidationError(f"shift must be a boolean, got: {f_shift!r}")
 
         super().__setattr__("m_target", f_target.strip().lower())
         super().__setattr__("m_scale", f_scale.strip().lower())
@@ -587,6 +591,7 @@ class RunRequest:
         super().__setattr__("m_fast", bool(f_fast))
         super().__setattr__("m_repeats", f_repeats)
         super().__setattr__("m_nodes", f_nodes)
+        super().__setattr__("m_shift", f_shift)
         super().__setattr__("_frozen", True)
 
     def __setattr__(self, f_key: str, f_value: Any) -> None:
@@ -704,6 +709,11 @@ class RunRequest:
         """The node counts to run (--nodes), from the scale's; None runs them all."""
         return self.m_nodes
 
+    @property
+    def shift(self) -> bool:
+        """Every backends arm runs the shift variant (--shift)."""
+        return self.m_shift
+
     def toDict(self) -> Dict[str, Any]:
         f_dict: Dict[str, Any] = {
             "target": self.m_target,
@@ -739,6 +749,8 @@ class RunRequest:
             f_dict["repeats"] = self.m_repeats
         if self.m_nodes is not None:
             f_dict["nodes"] = list(self.m_nodes)
+        if self.m_shift:
+            f_dict["shift"] = True
         return f_dict
 
     def __repr__(self) -> str:
@@ -759,7 +771,8 @@ class RunRequest:
             f"versioned={self.m_versioned!r}, "
             f"fast={self.m_fast!r}, "
             f"repeats={self.m_repeats!r}, "
-            f"nodes={self.m_nodes!r})"
+            f"nodes={self.m_nodes!r}, "
+            f"shift={self.m_shift!r})"
         )
 
     def __eq__(self, f_other: Any) -> bool:
@@ -781,6 +794,7 @@ class RunRequest:
                 and self.m_fast == f_other.m_fast
                 and self.m_repeats == f_other.m_repeats
                 and self.m_nodes == f_other.m_nodes
+                and self.m_shift == f_other.m_shift
             )
         return False
 
@@ -2011,6 +2025,7 @@ class RunPlanner:
                 if f_request.nodes is not None
                 else None
             ),
+            f_shift=f_request.shift,
         )
 
         if f_target == "lmp":
@@ -2280,6 +2295,7 @@ class ManifestSerializer:
             "fast",
             "repeats",
             "nodes",
+            "shift",
         }
     )
     REQUIRED_PLAN_KEYS: Set[str] = {
@@ -2535,6 +2551,10 @@ class ManifestSerializer:
             raise ManifestValidationError(
                 "request.nodes must be a list of integers or null"
             )
+        # --shift: a run given it records it (lsmio backends only)
+        f_shift_raw = f_req_raw.get("shift", False)
+        if not isinstance(f_shift_raw, bool):
+            raise ManifestValidationError("request.shift must be a boolean")
 
         try:
             f_request = RunRequest(
@@ -2552,6 +2572,7 @@ class ManifestSerializer:
                 f_fast=bool(f_fast_raw),
                 f_repeats=f_repeats_raw,
                 f_nodes=f_nodes_raw,
+                f_shift=f_shift_raw,
             )
         except Exception as f_err:
             raise ManifestValidationError(f"Invalid request record: {f_err}")

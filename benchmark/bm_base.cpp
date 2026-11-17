@@ -32,6 +32,7 @@
 
 #include <fmt/format.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include <CLI/CLI.hpp>
 #include <algorithm>
@@ -40,7 +41,9 @@
 #include <iostream>
 #include <lsmio/Version.hpp>
 #include <lsmio/lsmio.hpp>
+#include <map>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "KeyPermutation.hpp"
@@ -64,6 +67,14 @@ BMBase::BMBase() {
         _lsmioBMPath += ".mpirank" + std::to_string(mpiWorldRank);
     }
 
+    // The own store is the read source until the read-shift exchange says otherwise.
+    m_read_source.source_world_rank = useMPI ? mpiWorldRank : 0;
+    m_read_source.source_base_path = _lsmioBMPath;
+    m_read_source.is_self = true;
+    m_read_source.same_host = true;
+    m_read_source.self_ranks_world = 0;
+    m_read_source.same_host_ranks_world = 0;
+
     LOG(WARNING) << "BMBase _lsmioBMPath: " << _lsmioBMPath
                  << " gConfigBM.recordSize: " << gConfigBM.recordSize << std::endl;
 }
@@ -84,8 +95,198 @@ std::string BMBase::genDBPath(bool opt1, bool opt2) {
     return _lsmioBMPath + ":" + std::to_string(opt1) + ":" + std::to_string(opt2);
 }
 
+std::string BMBase::readDBPath(bool f_opt1, bool f_opt2) {
+    return m_read_source.source_base_path + ":" + std::to_string(f_opt1) + ":" +
+           std::to_string(f_opt2);
+}
+
+bool BMBase::supportsReadShift() const {
+    return false;
+}
+
 std::string BMBase::engineHeaderLines() const {
     return "";
+}
+
+double effectiveReadShiftDelay(bool f_read_shift, bool f_given, double f_value) {
+    return (f_read_shift && !f_given) ? kDefaultReadShiftDelay : f_value;
+}
+
+std::string readShiftRefusal(bool f_supported, int f_nodes, int f_world_size) {
+    if (!f_supported) {
+        return "--read-shift is not supported by this benchmark executable.";
+    }
+    if (f_nodes > f_world_size) {
+        return "--read-shift-nodes " + std::to_string(f_nodes) +
+               " is larger than the MPI world size " + std::to_string(f_world_size) + ".";
+    }
+    return "";
+}
+
+std::string duplicateStorePathRefusal(const std::vector<std::string>& f_paths) {
+    std::map<std::string, int> first_rank_of_path;
+    for (size_t rank = 0; rank < f_paths.size(); ++rank) {
+        auto inserted = first_rank_of_path.emplace(f_paths[rank], static_cast<int>(rank));
+        if (!inserted.second) {
+            return "--read-shift needs one store per rank, but ranks " +
+                   std::to_string(inserted.first->second) + " and " + std::to_string(rank) +
+                   " use the same store path '" + f_paths[rank] +
+                   "'. Give every rank its own path (--per-rank-path).";
+        }
+    }
+    return "";
+}
+
+ReadSource makeReadSource(int f_world_rank, const std::vector<int>& f_node_ids,
+                          const std::vector<std::string>& f_paths,
+                          const std::vector<std::string>& f_names) {
+    const std::vector<ReadShiftPeers> peers = mapReadShift(f_node_ids);
+    const size_t rank = static_cast<size_t>(f_world_rank);
+    const int source = peers[rank].source_world_rank;
+
+    ReadSource result;
+    result.source_world_rank = source;
+    result.source_base_path = f_paths[static_cast<size_t>(source)];
+    result.is_self = (source == f_world_rank);
+    result.same_host = (f_names[static_cast<size_t>(source)] == f_names[rank]);
+    result.self_ranks_world = 0;
+    result.same_host_ranks_world = 0;
+    for (size_t r = 0; r < peers.size(); ++r) {
+        const size_t peer_source = static_cast<size_t>(peers[r].source_world_rank);
+        if (peer_source == r) result.self_ranks_world++;
+        if (f_names[peer_source] == f_names[r]) result.same_host_ranks_world++;
+    }
+    return result;
+}
+
+namespace {
+
+// Every rank ends the run together (INV-6, INV-14): the verdict is the same on all of them.
+[[noreturn]] void refuseReadShift(const std::string& f_message) {
+    std::cerr << "ERROR: " << f_message << std::endl;
+    LOG(ERROR) << "BMBase::setupReadSource: " << f_message << std::endl;
+    MPI_Finalize();
+    exit(1);
+}
+
+// One string per world rank, gathered on every rank (collective over MPI_COMM_WORLD).
+std::vector<std::string> gatherStrings(const std::string& f_local, int f_world_size) {
+    const size_t size = static_cast<size_t>(f_world_size);
+    int length = static_cast<int>(f_local.size());
+    std::vector<int> lengths(size);
+    MPI_Allgather(&length, 1, MPI_INT, lengths.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    std::vector<int> displacements(size);
+    int total = 0;
+    for (size_t r = 0; r < size; ++r) {
+        displacements[r] = total;
+        total += lengths[r];
+    }
+    std::vector<char> all(static_cast<size_t>(total));
+    MPI_Allgatherv(f_local.data(), length, MPI_CHAR, all.data(), lengths.data(),
+                   displacements.data(), MPI_CHAR, MPI_COMM_WORLD);
+
+    std::vector<std::string> result(size);
+    for (size_t r = 0; r < size; ++r) {
+        result[r].assign(all.data() + displacements[r], static_cast<size_t>(lengths[r]));
+    }
+    return result;
+}
+
+}  // namespace
+
+void BMBase::setupReadSource() {
+    if (m_read_source_ready) return;
+    m_read_source_ready = true;
+
+    if (!gConfigBM.readShift) {
+        m_read_source.source_world_rank = useMPI ? mpiWorldRank : 0;
+        m_read_source.source_base_path = _lsmioBMPath;
+        m_read_source.is_self = true;
+        m_read_source.same_host = true;
+        m_read_source.self_ranks_world = 0;
+        m_read_source.same_host_ranks_world = 0;
+        return;
+    }
+
+    // Argv, executable and world size only: identical on all ranks.
+    std::string refusal =
+        readShiftRefusal(supportsReadShift(), gConfigBM.readShiftNodes, mpiWorldSize);
+    if (!refusal.empty()) refuseReadShift(refusal);
+
+    // Node id of every world rank.
+    std::vector<int> node_ids(static_cast<size_t>(mpiWorldSize));
+    if (gConfigBM.readShiftNodes > 0) {
+        for (int r = 0; r < mpiWorldSize; ++r) {
+            node_ids[static_cast<size_t>(r)] = r % gConfigBM.readShiftNodes;
+        }
+    } else {
+        // The shared-memory split is independent of mpiAggType, so it also works under -w. Its key
+        // is the world rank, so the smallest world rank in it is the node id.
+        MPI_Comm node_comm;
+        MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, mpiWorldRank, MPI_INFO_NULL,
+                            &node_comm);
+        int node_id = 0;
+        MPI_Allreduce(&mpiWorldRank, &node_id, 1, MPI_INT, MPI_MIN, node_comm);
+        MPI_Allgather(&node_id, 1, MPI_INT, node_ids.data(), 1, MPI_INT, MPI_COMM_WORLD);
+        MPI_Comm_free(&node_comm);
+    }
+
+    // Every rank's base store path and processor name, from the writers over MPI (INV-16).
+    char processor_name[MPI_MAX_PROCESSOR_NAME];
+    int name_length = 0;
+    MPI_Get_processor_name(processor_name, &name_length);
+    std::vector<std::string> paths = gatherStrings(_lsmioBMPath, mpiWorldSize);
+    std::vector<std::string> names =
+        gatherStrings(std::string(processor_name, static_cast<size_t>(name_length)), mpiWorldSize);
+
+    refusal = duplicateStorePathRefusal(paths);
+    if (!refusal.empty()) refuseReadShift(refusal);
+
+    m_read_source = makeReadSource(mpiWorldRank, node_ids, paths, names);
+}
+
+std::string BMBase::readShiftHeaderLines() const {
+    if (!gConfigBM.readShift) return "";
+    std::string nodes = gConfigBM.readShiftNodes > 0
+                            ? "simulated:" + std::to_string(gConfigBM.readShiftNodes)
+                            : "shared";
+    return " rankShiftNodes: " + nodes +
+           "\n rankShiftDelay: " + fmt::format("{}", gConfigBM.readShiftDelay) +
+           "\n rankShiftSource: " + std::to_string(m_read_source.source_world_rank) +
+           "\n rankShiftSelfRanks: " + std::to_string(m_read_source.self_ranks_world) +
+           "\n rankShiftSameHostRanks: " + std::to_string(m_read_source.same_host_ranks_world) +
+           "\n";
+}
+
+void BMBase::setupGlobalFlush() {
+    if (m_flush_leader_ready) return;
+    m_flush_leader_ready = true;
+    m_flush_leader = true;
+    if (!useMPI) return;
+    // Node-local rank 0 of the shared-memory split (independent of mpiAggType), built once.
+    MPI_Comm node_comm;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, mpiWorldRank, MPI_INFO_NULL,
+                        &node_comm);
+    int node_rank = 0;
+    MPI_Comm_rank(node_comm, &node_rank);
+    MPI_Comm_free(&node_comm);
+    m_flush_leader = (node_rank == 0);
+}
+
+void BMBase::globalFlush() {
+    // sync() may return before the data reaches storage on some filesystems.
+    if (m_flush_leader) sync();
+    if (useMPI) MPI_Barrier(MPI_COMM_WORLD);
+}
+
+void BMBase::shiftDelay(double f_seconds) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    const double start = MPI_Wtime();
+    for (double left = f_seconds; left > 0.0; left = f_seconds - (MPI_Wtime() - start)) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(std::min(left, 0.05)));
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void BMBase::beginPhaseTimeline() {
@@ -201,7 +402,7 @@ int BMBase::benchIteration(int iteration, bool opt) {
     m_phases.bytes = static_cast<double>(gConfigBM.keyCount) * gConfigBM.recordSize *
                      (useMPI ? static_cast<double>(mpiWorldSize) : 1.0);
     m_put_keys = keyPermutation(useMPI ? mpiWorldRank : 0, iteration, gConfigBM.keyCount);
-    m_get_keys = keyPermutation(useMPI ? mpiWorldRank : 0, iteration, gConfigBM.keyCount);
+    m_get_keys = keyPermutation(m_read_source.source_world_rank, iteration, gConfigBM.keyCount);
 
     // The filler is built before the write phase.
     _filler = makeFiller();
@@ -242,6 +443,11 @@ int BMBase::benchIteration(int iteration, bool opt) {
 
     // Fail-Fast Check: If write phase failed, skip read phase entirely
     if (globalWriteFail == 0) {
+        // Untimed steps between the sides: they sit in the gap, outside every window.
+        if (gConfigBM.globalFlush) globalFlush();
+        if (gConfigBM.readShift && gConfigBM.readShiftDelay > 0.0) {
+            shiftDelay(gConfigBM.readShiftDelay);
+        }
         // --- READ PHASE ---
         if (barrier) MPI_Barrier(MPI_COMM_WORLD);
         capturePhase(PhaseSide::Read, PhaseBoundary::BeforeOpen);
@@ -289,6 +495,10 @@ int BMBase::benchSuite(std::string bmPrefix, bool opt) {
     int exitCode = lsmio::BM_SUCCESS;
     long long readTotal = 0, writeTotal = 0;
 
+    // Once per object, before the first iteration and before any store is opened (INV-14).
+    setupReadSource();
+    if (gConfigBM.globalFlush) setupGlobalFlush();
+
     for (int iter = 0; iter < gConfigBM.iterations; iter++) {
         int iterStatus = benchIteration(iter, opt);
         if (iterStatus != lsmio::BM_SUCCESS) {
@@ -329,7 +539,7 @@ void BMBase::writeBenchmarkResults() {
     std::cout << "BENCHMARK PARAMETERS: \n\n"
               << (useMPI ? " MPI: Enabled\n" : "MPI: Disabled\n") << (useMPI ? " MPI Rank: " : "")
               << (useMPI ? std::to_string(mpiRank) : "") << (useMPI ? "\n" : "")
-              << genOptionsToString() << engineHeaderLines() << "\n"
+              << genOptionsToString() << readShiftHeaderLines() << engineHeaderLines() << "\n"
               << "BENCHMARK RESULTS: \n"
               << _benchResultsWrite << "\n"
               << _benchResultsRead << "\n"
@@ -385,7 +595,9 @@ std::string genOptionsToString() {
               << "\n autoTuneParameters: "
               << (lsmio::gConfigLSMIO.autoTuneParameters ? "true" : "false")
               << "\n readOnly: " << (lsmio::gConfigLSMIO.readOnly ? "true" : "false")
-              << "\n perRankPath: " << gConfigBM.perRankPath << "\n";
+              << "\n perRankPath: " << gConfigBM.perRankPath
+              << "\n globalFlush: " << gConfigBM.globalFlush
+              << "\n rankShift: " << gConfigBM.readShift << "\n";
 
     return optStream.str();
 }
@@ -497,6 +709,19 @@ int BMBase::beginMain(int argc, char **argv) {
             lsmio::gConfigLSMIO.readOnly,
             "open store in read-only mode during read operations (default: true)");
 
+        app.add_flag("--read-shift", gConfigBM.readShift,
+                     "read the data of a peer rank on another node (needs -m, refused with -c, "
+                     "and the executable must support it)");
+        CLI::Option *read_shift_nodes_option = app.add_option(
+            "--read-shift-nodes", gConfigBM.readShiftNodes,
+            "simulate this many nodes when mapping peers (>= 1; needs --read-shift)");
+        CLI::Option *read_shift_delay_option = app.add_option(
+            "--read-shift-delay", gConfigBM.readShiftDelay,
+            "seconds to wait between the write and read sides, MPI timed, outside every timed "
+            "window (>= 0; needs --read-shift; default 60 with it, 0 disables)");
+        app.add_flag("--global-flush", gConfigBM.globalFlush,
+                     "call sync() once per node between the write and read sides, outside every "
+                     "timed window (sync() may return before the data reaches storage)");
         app.add_flag("--per-rank-path", gConfigBM.perRankPath,
                      "give every MPI rank its own store path, suffix .mpirank<N> (needs -m, "
                      "refused with -c)");
@@ -536,6 +761,26 @@ int BMBase::beginMain(int argc, char **argv) {
         if (gConfigBM.perRankPath && gConfigBM.enableCollectiveIO) {
             throw std::runtime_error("--per-rank-path cannot be combined with -c/--collective-io.");
         }
+        if (gConfigBM.readShift && !gConfigBM.useMPIBarrier) {
+            throw std::runtime_error("--read-shift requires -m/--mpi-barrier.");
+        }
+        if (gConfigBM.readShift && gConfigBM.enableCollectiveIO) {
+            throw std::runtime_error("--read-shift cannot be combined with -c/--collective-io.");
+        }
+        if (read_shift_nodes_option->count() > 0 && !gConfigBM.readShift) {
+            throw std::runtime_error("--read-shift-nodes requires --read-shift.");
+        }
+        if (read_shift_nodes_option->count() > 0 && gConfigBM.readShiftNodes < 1) {
+            throw std::runtime_error("--read-shift-nodes must be >= 1.");
+        }
+        if (read_shift_delay_option->count() > 0 && !gConfigBM.readShift) {
+            throw std::runtime_error("--read-shift-delay requires --read-shift.");
+        }
+        if (read_shift_delay_option->count() > 0 && gConfigBM.readShiftDelay < 0.0) {
+            throw std::runtime_error("--read-shift-delay must be >= 0.");
+        }
+        gConfigBM.readShiftDelay = effectiveReadShiftDelay(
+            gConfigBM.readShift, read_shift_delay_option->count() > 0, gConfigBM.readShiftDelay);
     } catch (const CLI::ParseError &e) {
         exit(app.exit(e));
     } catch (std::runtime_error &e) {

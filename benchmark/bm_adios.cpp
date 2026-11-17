@@ -143,13 +143,17 @@ class BMAdios : public BMBase {
             params["PluginName"] = "LSMIOPlugin";
             params["PluginLibrary"] = "liblsmio_adios";
             params["FileName"] =
-                genDBPath(gConfigBM.useLSMIOPlugin, lsmio::gConfigLSMIO.alwaysFlush);
+                readDBPath(gConfigBM.useLSMIOPlugin, lsmio::gConfigLSMIO.alwaysFlush);
         }
         _io.SetParameters(params);
-        _reader = _io.Open(genDBPath(gConfigBM.useLSMIOPlugin, lsmio::gConfigLSMIO.alwaysFlush),
+        _reader = _io.Open(readDBPath(gConfigBM.useLSMIOPlugin, lsmio::gConfigLSMIO.alwaysFlush),
                            adios2::Mode::Read);
         _reader.BeginStep();
         return 0;
+    }
+
+    bool supportsReadShift() const override {
+        return true;
     }
 
     bool doReadFinalize() override {
