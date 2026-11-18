@@ -2598,5 +2598,106 @@ class RunParseExtractorGapTest(unittest.TestCase):
         self.assertIsNone(runparse.incompleteReason("ior", f_done, self.m_combo))
 
 
+class RunParseNewHeaderLinesTest(unittest.TestCase):
+    """New BENCHMARK PARAMETERS lines must not change what the legacy parsers read."""
+
+    # In the order the benchmark prints them (rocksdb build): common parameters,
+    # then the read-shift lines, then the engine version.
+    # ` durability:` belongs to a later change; the parsers ignore unknown keys
+    # generically, and the aggregate-output test fixture already carries it.
+    NEW_LINES = (
+        " perRankPath: 1",
+        " durability: page-cache",
+        " globalFlush: 1",
+        " rankShift: 1",
+        " rankShiftNodes: simulated:4",
+        " rankShiftDelay: 60",
+        " rankShiftSource: 1",
+        " rankShiftSelfRanks: 0",
+        " rankShiftSameHostRanks: 4",
+        " rocksdbVersion: 9.11.2",
+    )
+    LAST_PARAMETER = " writeFileSize: 33554432\n"
+    NODES = ("103", "105", "108", "113")
+    TASKS = 4
+
+    def setUp(self) -> None:
+        self.m_tmp = tempfile.TemporaryDirectory(prefix="lsmiotool-newheader-")
+        self.addCleanup(self.m_tmp.cleanup)
+        self.m_dir = self.m_tmp.name
+        self.m_combo = SimpleNamespace(name="c", stripe_count=16, block_size="1M")
+        f_example = os.path.join(
+            os.path.dirname(__file__), "example", "lsmio-outputs", "4", "2023-07-02"
+        )
+        self.m_sources = [
+            os.path.join(f_example, f"out-rocksdb-16-1M-2023-07-02-node{f_node}-0.txt.2")
+            for f_node in self.NODES
+        ]
+
+    def _copyLogs(self, f_name: str, f_augment: bool) -> Tuple[SimpleNamespace, List[str]]:
+        """Copy the four rank logs under a stub point; optionally add the new lines."""
+        f_point_dir = os.path.join(self.m_dir, f_name)
+        f_logs = os.path.join(f_point_dir, "logs", self.m_combo.name)
+        os.makedirs(f_logs)
+        f_paths: List[str] = []
+        for f_rank, f_src in enumerate(self.m_sources):
+            with open(f_src, "r", encoding="utf-8") as f_f:
+                f_text = f_f.read()
+            if f_augment:
+                self.assertEqual(f_text.count(self.LAST_PARAMETER), 1)
+                f_added = "".join(f_line + "\n" for f_line in self.NEW_LINES)
+                f_text = f_text.replace(
+                    self.LAST_PARAMETER, self.LAST_PARAMETER + f_added
+                )
+            f_path = os.path.join(f_logs, f"rank_{f_rank}.log")
+            with open(f_path, "w", encoding="utf-8") as f_f:
+                f_f.write(f_text)
+            f_paths.append(f_path)
+        return _stubPoint(f_point_dir, f_tasks=self.TASKS), f_paths
+
+    def testNewHeaderLinesDoNotChangeLegacyParsing(self) -> None:
+        f_plain_pt, f_plain = self._copyLogs("plain", False)
+        f_aug_pt, f_aug = self._copyLogs("augmented", True)
+
+        # Non-vacuity: every new line is in each augmented log, none in the plain one.
+        for f_plain_path, f_aug_path in zip(f_plain, f_aug):
+            with open(f_plain_path, "r", encoding="utf-8") as f_f:
+                f_plain_text = f_f.read()
+            with open(f_aug_path, "r", encoding="utf-8") as f_f:
+                f_aug_text = f_f.read()
+            self.assertNotEqual(f_plain_text, f_aug_text)
+            for f_line in self.NEW_LINES:
+                self.assertIn(f_line + "\n", f_aug_text)
+                self.assertNotIn(f_line, f_plain_text)
+
+        # LsmioSingleRunData, per rank.
+        for f_rank, (f_plain_path, f_aug_path) in enumerate(zip(f_plain, f_aug)):
+            with self.subTest(parser="LsmioSingleRunData", rank=f_rank):
+                f_p = data.LsmioSingleRunData(f_plain_path)
+                f_a = data.LsmioSingleRunData(f_aug_path)
+                self.assertEqual(f_a.run_data, f_p.run_data)
+                self.assertEqual(f_a.iter_data, f_p.iter_data)
+                if f_rank == 0:
+                    self.assertEqual(len(f_p.iter_data["write"]), 10)
+                    self.assertEqual(f_p.run_data["write"]["mean(MiB/s)"], 155.95)
+
+        # LsmioBmtoolAggregate over readBmtoolLines.
+        f_agg_plain = data.LsmioBmtoolAggregate()
+        f_agg_aug = data.LsmioBmtoolAggregate()
+        for f_plain_path, f_aug_path in zip(f_plain, f_aug):
+            f_agg_plain.addLines(data.readBmtoolLines(f_plain_path))
+            f_agg_aug.addLines(data.readBmtoolLines(f_aug_path))
+        self.assertEqual(f_agg_aug.aggLines(), f_agg_plain.aggLines())
+
+        # LsmioLogExtractor.extractPointCombo: the whole dict.
+        f_res_plain = LsmioLogExtractor.extractPointCombo(f_plain_pt, self.m_combo)
+        f_res_aug = LsmioLogExtractor.extractPointCombo(f_aug_pt, self.m_combo)
+        self.assertEqual(f_res_aug, f_res_plain)
+        self.assertEqual(
+            f_res_plain["write"]["bmtool_row"],
+            "write,731.39,457.88,623.48,10239.8,163840,10",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

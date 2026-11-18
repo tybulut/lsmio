@@ -46,8 +46,9 @@
 #   absent     optional  glob patterns (relative to work_dir) that must match no path
 #   list_dirs  optional  glob patterns (relative to work_dir) of directories whose file names and
 #                        sizes are printed afterwards (the E7 listing)
-# Regexes and patterns must not contain a semicolon, a square bracket or a backslash: they travel
-# through a CMake list and the generated CTestTestfile.
+# Regexes and patterns must not contain a semicolon, an unbalanced square bracket or a backslash:
+# they travel through a CMake list and the generated CTestTestfile (a balanced bracket expression
+# such as `[.]` survives both).
 
 foreach(required_variable command work_dir expect)
   if(NOT DEFINED ${required_variable} OR "${${required_variable}}" STREQUAL "")

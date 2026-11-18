@@ -177,11 +177,13 @@ The `benchmarkMPI/<name>` ctest entries launch the real benchmark executables (`
 
 | Entries | What they check |
 | :--- | :--- |
-| `benchmarkMPI/{native,rocksdb,leveldb,adios,adiosplugin}.ReadShiftSimulated` | `-m --per-rank-path --read-shift --read-shift-nodes 3`: the run succeeds, the header names `perRankPath: 1` (and `rocksdbVersion` or `leveldbVersion` where the engine prints one), every rank reads a peer (`rankShiftSelfRanks: 0`), the `Phases:` block holds the write and read rows of the last iteration, `iwrite,` and `iread,` rows are unchanged in number, and each rank's store exists. |
-| `benchmarkMPI/{native,rocksdb,leveldb,adios,adiosplugin}.ReadShiftUnsimulated` | The same without `--read-shift-nodes`: all 3 ranks share the real node, so each reads its own store (`rankShiftNodes: shared`, `rankShiftSelfRanks: 3`). |
+| `benchmarkMPI/{native,rocksdb,leveldb,adios,adiosplugin}.ReadShiftSimulated` | `-m --per-rank-path --read-shift --read-shift-nodes 3 --read-shift-delay 0.2`: the run succeeds, the header names `perRankPath: 1` (and `rocksdbVersion` or `leveldbVersion` where the engine prints one), every rank reads a peer (`rankShiftSelfRanks: 0`), the header shows the 0.2 s delay (`rankShiftDelay: 0.2`), the `Phases:` block holds the write and read rows of the last iteration, `iwrite,` and `iread,` rows are unchanged in number, and each rank's store exists. |
+| `benchmarkMPI/{native,rocksdb,leveldb,adios,adiosplugin}.ReadShiftUnsimulated` | The same without `--read-shift-nodes`, with `--read-shift-delay 0` (the wait is disabled; the header shows exactly `rankShiftDelay: 0`): all 3 ranks share the real node, so each reads its own store (`rankShiftNodes: shared`, `rankShiftSelfRanks: 3`). |
 | `benchmarkMPI/native.ReadShiftSharedPathRefused` | `--read-shift` without `--per-rank-path`: every rank refuses (non-zero status, message about the same store path) and no store is created. |
 | `benchmarkMPI/native.ReadShiftNodesAboveWorldRefused` | `--read-shift-nodes 4` with 3 ranks is refused before any store is created. |
 | `benchmarkMPI/manager.ReadShiftNotSupportedRefused` | `bm_manager` does not support `--read-shift` and refuses it before any store is created. |
+
+The two ReadShift entries per engine set a short delay (0.2 s, or 0) so that no test waits for the 60 s default; that default is checked only as a pure function, by the `test_bm_base` case that asserts `effectiveReadShiftDelay(true, false, 0.0) == 60.0`.
 
 For the RocksDB and plugin entries the file names in each rank's store are listed after the run, to show what a shifted read leaves in a peer's directory. Run them with `./build.sh xtest '^benchmarkMPI/'`.
 

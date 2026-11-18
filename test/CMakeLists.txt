@@ -367,8 +367,8 @@ if(LSMIO_BUILD_BENCHMARKS AND TARGET bm_native)
     add_benchmark_mpi_test(benchmarkMPI/${bm_name}.ReadShiftSimulated
       TARGET ${bm_target}
       EXPECT zero
-      ARGS -m --per-rank-path --read-shift --read-shift-nodes 3 -i 2 -k 64 -z 1024 ${bm_extra}
-      MATCH ${bm_common_match} "rankShiftNodes: simulated:3" "rankShiftSelfRanks: 0" "rankShiftSource: 1"
+      ARGS -m --per-rank-path --read-shift --read-shift-nodes 3 --read-shift-delay 0.2 -i 2 -k 64 -z 1024 ${bm_extra}
+      MATCH ${bm_common_match} "rankShiftNodes: simulated:3" "rankShiftSelfRanks: 0" "rankShiftSource: 1" "rankShiftDelay: 0[.]2"
       COUNTS "iread,=2" "iwrite,=2"
       EXIST ${bm_store_paths}
       LIST_DIRS ${bm_list_dirs}
@@ -378,8 +378,9 @@ if(LSMIO_BUILD_BENCHMARKS AND TARGET bm_native)
     add_benchmark_mpi_test(benchmarkMPI/${bm_name}.ReadShiftUnsimulated
       TARGET ${bm_target}
       EXPECT zero
-      ARGS -m --per-rank-path --read-shift -i 2 -k 64 -z 1024 ${bm_extra}
-      MATCH ${bm_common_match} "rankShiftNodes: shared" "rankShiftSelfRanks: 3"
+      ARGS -m --per-rank-path --read-shift --read-shift-delay 0 -i 2 -k 64 -z 1024 ${bm_extra}
+      MATCH ${bm_common_match} "rankShiftNodes: shared" "rankShiftSelfRanks: 3" "rankShiftDelay: 0"
+      NOT_MATCH "rankShiftDelay: 0[.]"
       COUNTS "iread,=2" "iwrite,=2"
       EXIST ${bm_store_paths}
       LIST_DIRS ${bm_list_dirs}
