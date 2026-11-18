@@ -608,6 +608,7 @@ class LSMIOStoreNativeTest : public ::testing::Test {
     void TearDown() override {
         gConfigLSMIO = m_backup_config;
         std::filesystem::remove_all(m_db_path);
+        std::filesystem::remove_all(m_db_path + ".gone");
     }
 
     // Waits until the store's file pool has created its first pooled file in m_db_path
@@ -742,7 +743,8 @@ TEST_F(LSMIOStoreNativeTest, StalledFlushKeepsInFlightAndQueuedMemtablesReadable
 
     // Memtable A takes the one pooled file; the directory is gone, so the pool cannot refill
     EXPECT_TRUE(store.put("a0", kilo));
-    std::filesystem::remove_all(m_db_path);
+    // Rename, not remove_all: on NFS removing a directory with an open pooled file fails
+    std::filesystem::rename(m_db_path, m_db_path + ".gone");
     ASSERT_TRUE(store.writeBarrier());
 
     // Memtable B (4022 bytes) rotates out on c0; its flush waits for the pool

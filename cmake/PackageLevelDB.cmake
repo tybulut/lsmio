@@ -22,6 +22,11 @@ if (NOT Snappy_FOUND AND NOT TARGET snappy)
     target_compile_options(snappy PRIVATE -frtti)
   endif()
   add_library(Snappy::snappy ALIAS snappy)
+elseif (TARGET Snappy::snappy AND NOT TARGET snappy)
+  # An installed LevelDB links the bare name `snappy` (a -lsnappy, found only through
+  # LIBRARY_PATH); this target makes that name resolve to the library found above.
+  add_library(snappy INTERFACE IMPORTED GLOBAL)
+  target_link_libraries(snappy INTERFACE Snappy::snappy)
 endif()
 
 # LevelDB
