@@ -64,22 +64,8 @@ BMBase::BMBase() {
                  << " gConfigBM.recordSize: " << gConfigBM.recordSize << std::endl;
 }
 
-std::string BMBase::makeKey(int keyIndex) {
-    return _keyPrefix + fmt::format("{:0{}}", keyIndex, KEY_INDEX_MIN_DIGITS);
-}
-
-std::string BMBase::makeValue(int count, size_t keyLen) {
-    const std::string header(std::to_string(count) + "::");
-    const size_t recordSize = gConfigBM.recordSize > 0 ? gConfigBM.recordSize : 0;
-    // beginMain rejects a record size below minRecordSize(); a smaller one set directly
-    // gives a value of the header alone.
-    const size_t valueLen = std::max(header.size(), recordSize > keyLen ? recordSize - keyLen : 0);
-
-    std::string value;
-    value.reserve(valueLen);
-    value.append(header);
-    value.append(valueLen - header.size(), 'a');
-    return value;
+std::string BMBase::makeFiller() {
+    return std::string(gConfigBM.recordSize > 0 ? gConfigBM.recordSize : 0, 'a');
 }
 
 int BMBase::minRecordSize(int keyCount) {
@@ -121,7 +107,7 @@ int BMBase::benchWrite(long long *duration) {
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
         std::string key(makeKey(pRandomKeyIndex[count]));
-        std::string value(makeValue(count, key.size()));
+        std::string value(makeValue(count, key.size(), _filler));
 
         success &= doWrite(key, std::move(value));
         if (success == false) {
@@ -151,7 +137,7 @@ int BMBase::benchRead(long long *duration) {
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
         std::string key(makeKey(pRandomKeyIndex[count]));
-        std::string pValue(makeValue(count, key.size()));
+        std::string pValue(makeValue(count, key.size(), _filler));
         std::string value;
 
         success &= doRead(key, &value);
@@ -181,6 +167,7 @@ int BMBase::benchIteration(int iteration, bool opt) {
     std::mt19937 g(rd());
     std::shuffle(randomKeyIndices.begin(), randomKeyIndices.end(), g);
     pRandomKeyIndex = randomKeyIndices.data();
+    _filler = makeFiller();
 
     // Every record is exactly recordSize bytes of key and value
     double bytes = (double)gConfigBM.keyCount * gConfigBM.recordSize;

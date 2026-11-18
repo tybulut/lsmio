@@ -49,6 +49,8 @@ class MockBM : public BMBase {
     int readPrepareCalls = 0;
     int writeCleanupCalls = 0;
     int readCleanupCalls = 0;
+    std::string fillerAtWritePrepare;
+    std::string fillerAtReadPrepare;
     std::unordered_map<std::string, std::string> kvStore;
     // Sleep in each write and read, so that a timed phase lasts at least a microsecond and
     // is not skipped by Benchmark::summaryIteration (which ignores zero durations)
@@ -86,6 +88,7 @@ class MockBM : public BMBase {
 
     virtual int writePrepare(bool opt = false) override {
         writePrepareCalls++;
+        fillerAtWritePrepare = _filler;
         return 0;
     }
 
@@ -96,6 +99,7 @@ class MockBM : public BMBase {
 
     virtual int readPrepare(bool opt = false) override {
         readPrepareCalls++;
+        fillerAtReadPrepare = _filler;
         return 0;
     }
 
@@ -121,6 +125,7 @@ class MockBM : public BMBase {
         return pRandomKeyIndex;
     }
     using BMBase::benchIteration;
+    using BMBase::makeFiller;
     using BMBase::makeKey;
     using BMBase::makeValue;
 };
@@ -241,19 +246,39 @@ TEST_F(BMBaseTest, KeyAndValueLayout) {
     EXPECT_EQ(MockBM::makeKey(1234567), "benchmark:1234567");
 
     gConfigBM.recordSize = 24;
-    EXPECT_EQ(MockBM::makeValue(3, 16), "3::aaaaa");
-    EXPECT_EQ(MockBM::makeValue(12, 16), "12::aaaa");
+    const std::string filler = MockBM::makeFiller();
+    EXPECT_EQ(MockBM::makeValue(3, 16, filler), "3::aaaaa");
+    EXPECT_EQ(MockBM::makeValue(12, 16, filler), "12::aaaa");
     // A key one byte longer takes that byte from the value
-    EXPECT_EQ(MockBM::makeValue(3, 17), "3::aaaa");
+    EXPECT_EQ(MockBM::makeValue(3, 17, filler), "3::aaaa");
+    // The record size comes from the filler, not from gConfigBM
+    gConfigBM.recordSize = 64;
+    EXPECT_EQ(MockBM::makeValue(3, 16, filler), "3::aaaaa");
+}
+
+TEST_F(BMBaseTest, FillerIsRecordSizeBytes) {
+    gConfigBM.recordSize = 24;
+    EXPECT_EQ(MockBM::makeFiller(), std::string(24, 'a'));
+    gConfigBM.recordSize = 0;
+    EXPECT_EQ(MockBM::makeFiller(), "");
+    gConfigBM.recordSize = -5;
+    EXPECT_EQ(MockBM::makeFiller(), "");
+}
+
+TEST_F(BMBaseTest, FillerIsBuiltBeforeWritePhase) {
+    MockBM bm;
+    EXPECT_EQ(bm.benchSuite("MockFiller"), lsmio::BM_SUCCESS);
+    EXPECT_EQ(bm.fillerAtWritePrepare, std::string(64, 'a'));
+    EXPECT_EQ(bm.fillerAtReadPrepare, std::string(64, 'a'));
 }
 
 TEST_F(BMBaseTest, ValueIsHeaderAloneBelowMinRecordSize) {
     gConfigBM.recordSize = 18;
-    EXPECT_EQ(MockBM::makeValue(12, 16), "12::");
+    EXPECT_EQ(MockBM::makeValue(12, 16, MockBM::makeFiller()), "12::");
     gConfigBM.recordSize = 0;
-    EXPECT_EQ(MockBM::makeValue(12, 16), "12::");
+    EXPECT_EQ(MockBM::makeValue(12, 16, MockBM::makeFiller()), "12::");
     gConfigBM.recordSize = -5;
-    EXPECT_EQ(MockBM::makeValue(12, 16), "12::");
+    EXPECT_EQ(MockBM::makeValue(12, 16, MockBM::makeFiller()), "12::");
 }
 
 TEST(BMBaseRecordSizeTest, MinRecordSizeHoldsLongestKeyAndHeader) {
@@ -293,8 +318,9 @@ TEST(BMBaseRecordSizeTest, RecordSizeAtMinimumIsAccepted) {
 
     // At the minimum, the value of the longest header is that header alone
     gConfigBM.recordSize = 20;
-    EXPECT_EQ(MockBM::makeValue(15, 16), "15::");
-    EXPECT_EQ(MockBM::makeValue(9, 16), "9::a");
+    const std::string filler = MockBM::makeFiller();
+    EXPECT_EQ(MockBM::makeValue(15, 16, filler), "15::");
+    EXPECT_EQ(MockBM::makeValue(9, 16, filler), "9::a");
 }
 
 TEST(BMBaseRecordSizeTest, KeyCountBelowOneIsRejected) {
