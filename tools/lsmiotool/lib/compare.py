@@ -850,6 +850,33 @@ def percentChange(f_run: float, f_base: float) -> float:
     return 100.0 * (f_run - f_base) / f_base
 
 
+def _formatPairedKeys(f_keys: Sequence[Tuple[str, str, int, int, str]]) -> str:
+    """List point keys as '<op> <stripes>/<block> N=<nodes>', at most 10, sorted.
+
+    An empty list reads 'none'; more than 10 keys end with ', ... (+<k> more)'.
+    """
+    if not f_keys:
+        return "none"
+
+    def _sortKey(
+        f_k: Tuple[str, str, int, int, str],
+    ) -> Tuple[str, int, int, int]:
+        f_b, f_m, f_n, f_s, f_bl = f_k
+        return (
+            f_b,
+            _METRIC_SORT_ORDER.get(f_m, 999),
+            f_n,
+            _COMBINATIONS_INDEX.get((f_s, f_bl), 999),
+        )
+
+    f_sorted = sorted(f_keys, key=_sortKey)
+    f_shown = [f"{f_k[1]} {f_k[3]}/{f_k[4]} N={f_k[2]}" for f_k in f_sorted[:10]]
+    f_keys_str = ", ".join(f_shown)
+    if len(f_sorted) > 10:
+        f_keys_str = f"{f_keys_str}, ... (+{len(f_sorted) - 10} more)"
+    return f_keys_str
+
+
 class CompareDatasetBuilder:
     """Builds load and figures for lsmiotool compare."""
 
@@ -1288,35 +1315,27 @@ class CompareDatasetBuilder:
                                 if math.isnan(f_delta):
                                     f_broken_delta_keys.append(f_k)
 
-                        if f_broken_delta_keys:
-                            f_broken_count = len(f_broken_delta_keys)
-
-                            def _sortKey(
-                                f_k: Tuple[str, str, int, int, str],
-                            ) -> Tuple[str, int, int, int]:
-                                f_b, f_m, f_n, f_s, f_bl = f_k
-                                return (
-                                    f_b,
-                                    _METRIC_SORT_ORDER.get(f_m, 999),
-                                    f_n,
-                                    _COMBINATIONS_INDEX.get((f_s, f_bl), 999),
-                                )
-
-                            f_broken_delta_keys.sort(key=_sortKey)
-                            f_shown = [
-                                f"{f_k[1]} {f_k[3]}/{f_k[4]} N={f_k[2]}"
-                                for f_k in f_broken_delta_keys[:10]
-                            ]
-                            if f_broken_count > 10:
-                                f_rem = f_broken_count - 10
-                                f_keys_str = (
-                                    f"{', '.join(f_shown)}, ... (+{f_rem} more)"
-                                )
-                            else:
-                                f_keys_str = ", ".join(f_shown)
+                        # Points on one side only are left out of the % change.
+                        f_run_only = [
+                            f_k for f_k in f_run_pts.values if f_k not in f_base_pts.values
+                        ]
+                        f_base_only = [
+                            f_k for f_k in f_base_pts.values if f_k not in f_run_pts.values
+                        ]
+                        if f_run_only or f_base_only:
                             log.Console.warning(
                                 f"{f_pair.run_dir} vs {f_pair.base_dir}: "
-                                f"{f_broken_count} broken % change point(s) drawn as gaps ({f_keys_str})"
+                                f"{len(f_run_only) + len(f_base_only)} point(s) on one "
+                                f"side only left out of the % change "
+                                f"(run only: {_formatPairedKeys(f_run_only)}; "
+                                f"base only: {_formatPairedKeys(f_base_only)})"
+                            )
+
+                        if f_broken_delta_keys:
+                            log.Console.warning(
+                                f"{f_pair.run_dir} vs {f_pair.base_dir}: "
+                                f"{len(f_broken_delta_keys)} broken % change point(s) "
+                                f"drawn as gaps ({_formatPairedKeys(f_broken_delta_keys)})"
                             )
 
         return CompareLoad(

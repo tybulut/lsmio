@@ -85,8 +85,10 @@ from lsmiotool.lib.state import OverallRunState, PointRunState
 from lsmiotool.test.parse.PhaseReportTest import (
     ONE_MIB,
     PREFIX,
+    phaseRow,
     rankLogLines,
     sampleSuite,
+    timeline,
 )
 
 
@@ -2249,6 +2251,80 @@ def _stubRun(f_target: str, f_point: SimpleNamespace) -> SimpleNamespace:
             combinations=[SimpleNamespace(name="c", stripe_count=4, block_size="64K")]
         ),
     )
+
+
+class LsmioExtractorPhaseBlockTest(unittest.TestCase):
+    """The legacy extractor reads the same numbers whether or not a log has a phase block."""
+
+    EXAMPLE_POINT = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "example",
+        "lsmio-outputs",
+        "4",
+        "2023-07-02",
+    )
+    RANK_LOGS = [
+        f"out-rocksdb-16-1M-2023-07-02-node{f_node}-0.txt.2"
+        for f_node in (103, 105, 108, 113)
+    ]
+
+    def setUp(self) -> None:
+        self.m_tmp = tempfile.TemporaryDirectory(prefix="lsmiotool-phase-block-")
+        self.addCleanup(self.m_tmp.cleanup)
+        self.m_combo = SimpleNamespace(name="c", stripe_count=16, block_size="1M")
+
+    def _phaseBlock(self) -> str:
+        """The block bm_base.cpp prints after the results: 10 write and 10 read phase rows."""
+        f_lines = ["", f"Phases: {PREFIX}"]
+        for f_side in ("write", "read"):
+            for f_iteration in range(10):
+                f_lines.append(
+                    phaseRow(f_side, f_iteration, ONE_MIB, timeline(f_iteration * 3000000))
+                )
+        return "\n".join(f_lines) + "\n"
+
+    def _point(self, f_name: str, f_phased: bool) -> SimpleNamespace:
+        """A 4-task point whose rank logs are the example logs, with or without the block."""
+        f_dir = os.path.join(self.m_tmp.name, f_name)
+        for f_rank, f_log in enumerate(self.RANK_LOGS):
+            with open(
+                os.path.join(self.EXAMPLE_POINT, f_log), "r", encoding="utf-8"
+            ) as f_f:
+                f_text = f_f.read()
+            if f_phased:
+                f_text = f_text.rstrip("\n") + "\n" + self._phaseBlock()
+            f_path = os.path.join(f_dir, "logs", "c", f"rank_{f_rank}.log")
+            os.makedirs(os.path.dirname(f_path), exist_ok=True)
+            with open(f_path, "w", encoding="utf-8") as f_f:
+                f_f.write(f_text)
+        return _stubPoint(f_dir, f_tasks=4)
+
+    def testPhaseBlockDoesNotChangeTheExtractedMetrics(self) -> None:
+        f_plain = self._point("plain", False)
+        f_phased = self._point("phased", True)
+
+        # Non-vacuity: the phased logs do hold the phase block, the plain ones do not
+        f_plain_log = os.path.join(f_plain.pointDir, "logs", "c", "rank_0.log")
+        f_phased_log = os.path.join(f_phased.pointDir, "logs", "c", "rank_0.log")
+        f_parsed = phasereport.parseRankLog(data.readBmtoolLines(f_phased_log), "rank_0")
+        self.assertTrue(f_parsed.hasRecords())
+        self.assertEqual({f_p: len(f_r) for f_p, f_r in f_parsed.m_records.items()}, {PREFIX: 20})
+        self.assertFalse(
+            phasereport.parseRankLog(data.readBmtoolLines(f_plain_log), "rank_0").hasRecords()
+        )
+
+        f_expected = LsmioLogExtractor.extractPointCombo(f_plain, self.m_combo)
+        f_actual = LsmioLogExtractor.extractPointCombo(f_phased, self.m_combo)
+        self.assertEqual(f_actual, f_expected)
+
+        self.assertEqual(
+            f_expected["write"]["bmtool_row"], "write,731.39,457.88,623.48,10239.8,163840,10"
+        )
+        self.assertEqual(
+            f_expected["read"]["bmtool_row"], "read,1231.2,1098.12,1165.55,10239.8,163840,10"
+        )
+        self.assertEqual(f_expected["bmtool_agg"]["ranks"], 4)
+        self.assertEqual(len(f_expected["write"]["iterations"]), 40)
 
 
 class RunParseExtractorGapTest(unittest.TestCase):

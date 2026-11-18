@@ -1407,6 +1407,147 @@ class CompareDatasetBuilderTest(unittest.TestCase):
                 )
             )
 
+    def testVariantsPairedOneSidedPointsWarn(self) -> None:
+        def _row(f_n: int, f_s: int, f_b: str, f_op: str, f_v: float) -> Any:
+            return (f_n, f_s, f_b, f_op, f_v, f_v, f_v, 10.0, f_v, f_v, f_v, 10.0, 0.5)
+
+        def _w(f_ns: Sequence[int], f_v: float = 100.0) -> Any:
+            return [_row(f_n, 4, "1M", "write", f_v) for f_n in f_ns]
+
+        f_head = [("nodes", "stripes", "block", "op", "x")]
+        f_cap_extra = [
+            _row(16, f_s, f_b, f_op, 120.0)
+            for f_op in ("write", "read")
+            for f_s, f_b in COMBINATIONS
+        ]
+        f_cap_shown = ", ".join(
+            f"{f_op} {f_s}/{f_b} N=16"
+            for f_op in ("write", "read")
+            for f_s, f_b in COMBINATIONS
+        ).rsplit(", ", 2)[0]
+
+        # name, run rows, base rows, base child, expected % change points,
+        # expected warning tails (after "<run> vs <base>: "), in order.
+        f_cases = [
+            (
+                "both_sides",
+                _w((1, 2, 4), 120.0),
+                _w((1, 2, 8)),
+                "outputs-native-vsort:base",
+                {(0, "write", 1, 4, "1M"): 20.0, (0, "write", 2, 4, "1M"): 20.0},
+                [
+                    "2 point(s) on one side only left out of the % change "
+                    "(run only: write 4/1M N=4; base only: write 4/1M N=8)"
+                ],
+            ),
+            (
+                "run_only",
+                _w((1, 2), 120.0) + [_row(1, 16, "8M", "write", 120.0)],
+                _w((1, 2)),
+                "outputs-native-vsort:base",
+                {(0, "write", 1, 4, "1M"): 20.0, (0, "write", 2, 4, "1M"): 20.0},
+                [
+                    "1 point(s) on one side only left out of the % change "
+                    "(run only: write 16/8M N=1; base only: none)"
+                ],
+            ),
+            (
+                "base_only",
+                _w((1, 2), 120.0),
+                _w((1, 2)) + [_row(2, 4, "64K", "read", 100.0)],
+                "outputs-native-vsort:base",
+                {(0, "write", 1, 4, "1M"): 20.0, (0, "write", 2, 4, "1M"): 20.0},
+                [
+                    "1 point(s) on one side only left out of the % change "
+                    "(run only: none; base only: read 4/64K N=2)"
+                ],
+            ),
+            (
+                "cap",
+                _w((1,), 120.0) + f_cap_extra,
+                _w((1,)),
+                "outputs-native-vsort:base",
+                {(0, "write", 1, 4, "1M"): 20.0},
+                [
+                    "12 point(s) on one side only left out of the % change "
+                    f"(run only: {f_cap_shown}, ... (+2 more); base only: none)"
+                ],
+            ),
+            (
+                "empty_run",
+                f_head,
+                _w((1, 2)),
+                "outputs-native-vsort:base",
+                {},
+                [
+                    "2 point(s) on one side only left out of the % change "
+                    "(run only: none; base only: write 4/1M N=1, write 4/1M N=2)"
+                ],
+            ),
+            (
+                "standalone_base",
+                _w((1, 2, 4), 120.0),
+                _w((1, 2)),
+                "outputs-native",
+                {(0, "write", 1, 4, "1M"): 20.0, (0, "write", 2, 4, "1M"): 20.0},
+                [
+                    "1 point(s) on one side only left out of the % change "
+                    "(run only: write 4/1M N=4; base only: none)"
+                ],
+            ),
+            (
+                "equal_sets",
+                _w((1, 2), 120.0),
+                _w((1, 2)),
+                "outputs-native-vsort:base",
+                {(0, "write", 1, 4, "1M"): 20.0, (0, "write", 2, 4, "1M"): 20.0},
+                [],
+            ),
+            (
+                "one_sided_and_broken",
+                _w((1, 2, 4), 120.0),
+                [_row(1, 4, "1M", "write", 0.0)] + _w((2, 8)),
+                "outputs-native-vsort:base",
+                {(0, "write", 1, 4, "1M"): "nan", (0, "write", 2, 4, "1M"): 20.0},
+                [
+                    "2 point(s) on one side only left out of the % change "
+                    "(run only: write 4/1M N=4; base only: write 4/1M N=8)",
+                    "1 broken % change point(s) drawn as gaps (write 4/1M N=1)",
+                ],
+            ),
+        ]
+        for f_name, f_run, f_base, f_base_child, f_points, f_tails in f_cases:
+            with self.subTest(case=f_name):
+                f_dir = os.path.join(self.m_base_path, f"var_one_sided_{f_name}")
+                f_run_dir = os.path.join(f_dir, "outputs-native-vsort:run")
+                f_base_dir = os.path.join(f_dir, f_base_child)
+                self._lsmReport(f_run_dir, f_run)
+                self._lsmReport(f_base_dir, f_base)
+
+                with patch("lsmiotool.lib.log.Console.warning") as f_warn:
+                    f_load = CompareDatasetBuilder(
+                        self._request("variants", [f_dir])
+                    ).load()
+
+                f_msgs = [f_c.args[0] for f_c in f_warn.call_args_list]
+                self.assertEqual(
+                    f_msgs, [f"{f_run_dir} vs {f_base_dir}: {f_t}" for f_t in f_tails]
+                )
+                self.assertEqual(
+                    sum("on one side only" in f_m for f_m in f_msgs),
+                    1 if f_name != "equal_sets" else 0,
+                )
+                self.assertEqual(len(f_load.arms), 1)
+                self.assertEqual(f_load.arms[0].base_label, "vsort")
+                self.assertEqual(f_load.arms[0].base_child, f_base_child)
+                self.assertEqual(
+                    {
+                        f_k: ("nan" if math.isnan(f_v) else f_v)
+                        for f_k, f_v in f_load.points.items()
+                    },
+                    f_points,
+                )
+
     def testVariantsVersionedKindAndLabels(self) -> None:
         f_dir = os.path.join(self.m_base_path, "var_versioned")
         f_run = os.path.join(f_dir, "outputs-native-version-main-437400d:run")

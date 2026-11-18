@@ -29,13 +29,15 @@
 #
 
 import csv
+import glob
 import os
+import shutil
 import tempfile
 import unittest
 from typing import Dict, List, Sequence
 from unittest.mock import patch
 
-from lsmiotool.lib import output
+from lsmiotool.lib import debuggable, log, output
 from lsmiotool.lib.phasereport import LSM_PHASE_REPORT_FILE, PHASE_REPORT_COLUMNS
 from lsmiotool.test.fixtures.ArchiveLayoutFixtures import readTree, writeBmtoolLayout
 from lsmiotool.test.fixtures.MockLogGenerator import MockLogGenerator
@@ -321,6 +323,63 @@ class LsmioAggOutputTest(unittest.TestCase):
             f"8/{LAYOUT_DATE}/{os.path.basename(rankLogPath(f_root, '4', '1M', 0))}",
         )
         self.assertIn("lsm-report.csv", readTree(f_target))
+
+    def testGolden2023LogsParseCleanlyWithoutPhaseReport(self) -> None:
+        """The 2023 example logs (no phase block, no new header lines) parse with no warning or error."""
+        f_example = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "example", "lsmio-outputs"
+        )
+        f_before = sorted(
+            os.path.relpath(os.path.join(f_dir, f_name), f_example)
+            for f_dir, _f_subdirs, f_names in os.walk(f_example)
+            for f_name in f_names
+        )
+        f_copy = os.path.join(self.m_temp_dir.name, "lsmio-outputs")
+        shutil.copytree(f_example, f_copy)
+
+        with (
+            patch.object(log.Log, "warning") as f_warning,
+            patch.object(log.Log, "error") as f_error,
+            patch.object(debuggable.DebuggableObject, "_log_warning") as f_log_warning,
+            patch.object(debuggable.DebuggableObject, "_log_error") as f_log_error,
+        ):
+            f_ok = output.ensureLsmioReports(f_copy)
+
+        self.assertTrue(f_ok)
+        self.assertEqual(f_warning.call_count, 0)
+        self.assertEqual(f_error.call_count, 0)
+        self.assertEqual(f_log_warning.call_count, 0)
+        self.assertEqual(f_log_error.call_count, 0)
+        # INV-23: logs without phase rows give no phase report
+        self.assertFalse(os.path.exists(os.path.join(f_copy, LSM_PHASE_REPORT_FILE)))
+
+        with open(os.path.join(f_copy, "lsm-report.csv"), "r", encoding="utf-8") as f_f:
+            f_rows = list(csv.reader(f_f))
+        self.assertEqual(len(f_rows), 24)
+        f_lines = [",".join(f_row) for f_row in f_rows]
+        for f_want in (
+            "1,16,8M,write,160.9,118.22,140.92,2559.96,40960,10",
+            "4,16,1M,write,731.39,457.88,623.48,10239.8,163840,10",
+            "4,16,1M,read,1231.2,1098.12,1165.55,10239.8,163840,10",
+        ):
+            with self.subTest(row=f_want):
+                self.assertIn(f_want, f_lines)
+
+        f_agg = glob.glob(os.path.join(f_copy, "*", "agg-*-report.csv"))
+        self.assertEqual(len(f_agg), 12)
+        self.assertEqual(
+            sorted({os.path.basename(os.path.dirname(f_p)) for f_p in f_agg}), ["1", "4"]
+        )
+
+        # The source tree is untouched: same files, no report written into it
+        f_after = sorted(
+            os.path.relpath(os.path.join(f_dir, f_name), f_example)
+            for f_dir, _f_subdirs, f_names in os.walk(f_example)
+            for f_name in f_names
+        )
+        self.assertEqual(f_after, f_before)
+        self.assertEqual(len(f_before), 30)
+        self.assertFalse(os.path.exists(os.path.join(f_example, "lsm-report.csv")))
 
 
 def touch(f_path: str, f_text: str = "") -> str:
