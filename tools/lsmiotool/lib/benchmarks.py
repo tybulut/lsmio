@@ -1030,10 +1030,18 @@ class LsmioAdapter(BenchmarkAdapter):
         "LEVELDB-SYNC": ("--lsmio-always-flush",),
     }
 
+    # Payload one rank writes and reads per iteration, at every block size.
+    PAYLOAD_BYTES_PER_RANK: int = 2 * 1024 * 1024 * 1024
+
+    # Block size name -> (block bytes, key count). One record (key + value) is one block (as an
+    # IOR record is), so block bytes x key count is PAYLOAD_BYTES_PER_RANK in every row. The
+    # block bytes are passed as --record-size, and the benchmark sizes each value to what its
+    # key leaves of the record: a write buffer that is a whole number of blocks (128 MiB by
+    # default, 32 MiB in wbuf-32m) then holds a whole number of records.
     BLOCK_SIZE_MAP: Dict[str, Tuple[int, int]] = {
         "64K": (65536, 32768),
-        "1M": (1048576, 4096),
-        "8M": (8388608, 1024),
+        "1M": (1048576, 2048),
+        "8M": (8388608, 256),
     }
 
     RANK_PLACEHOLDERS: Tuple[str, ...] = (
@@ -1319,6 +1327,8 @@ class LsmioAdapter(BenchmarkAdapter):
                 str(f_block_bytes),
                 "--key-count",
                 str(f_key_count),
+                "--record-size",
+                str(f_block_bytes),
             ]
         )
 
@@ -1486,6 +1496,8 @@ class LsmioAdapter(BenchmarkAdapter):
                 str(f_block_bytes),
                 "--key-count",
                 str(f_key_count),
+                "--record-size",
+                str(f_block_bytes),
             ]
         )
 

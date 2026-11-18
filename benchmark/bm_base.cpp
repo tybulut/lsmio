@@ -61,7 +61,19 @@ BMBase::BMBase() {
     }
 
     LOG(WARNING) << "BMBase _lsmioBMPath: " << _lsmioBMPath
-                 << " gConfigBM.valueSize: " << gConfigBM.valueSize << std::endl;
+                 << " gConfigBM.recordSize: " << gConfigBM.recordSize << std::endl;
+}
+
+std::string BMBase::makeFiller() {
+    return std::string(gConfigBM.recordSize > 0 ? gConfigBM.recordSize : 0, 'a');
+}
+
+int BMBase::minRecordSize(int keyCount) {
+    const int indexDigits = static_cast<int>(std::to_string(std::max(keyCount - 1, 0)).size());
+    const int keyLen =
+        static_cast<int>(_keyPrefix.size()) + std::max(KEY_INDEX_MIN_DIGITS, indexDigits);
+    const int headerLen = indexDigits + 2;
+    return keyLen + headerLen;
 }
 
 std::string BMBase::genDBPath(bool opt1, bool opt2) {
@@ -86,7 +98,6 @@ int BMBase::writeCleanup() {
 
 int BMBase::benchWrite(long long *duration) {
     int count;
-    std::string valSuffix(gConfigBM.valueSize - 8, 'a');
 
     if (gConfigBM.useMPIBarrier) {
         MPI_Barrier(MPI_COMM_WORLD);
@@ -95,8 +106,8 @@ int BMBase::benchWrite(long long *duration) {
 
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
-        std::string key(_keyPrefix + fmt::format("{:06}", pRandomKeyIndex[count]));
-        std::string value(std::to_string(count) + "::" + valSuffix);
+        std::string key(makeKey(pRandomKeyIndex[count]));
+        std::string value(makeValue(count, key.size(), _filler));
 
         success &= doWrite(key, std::move(value));
         if (success == false) {
@@ -117,7 +128,6 @@ int BMBase::benchWrite(long long *duration) {
 int BMBase::benchRead(long long *duration) {
     int count;
     int exitCode = 0;
-    std::string valSuffix(gConfigBM.valueSize - 8, 'a');
 
     if (gConfigBM.useMPIBarrier) {
         MPI_Barrier(MPI_COMM_WORLD);
@@ -126,8 +136,8 @@ int BMBase::benchRead(long long *duration) {
 
     for (count = 0; count < gConfigBM.keyCount; count++) {
         bool success = true;
-        std::string key(_keyPrefix + fmt::format("{:06}", pRandomKeyIndex[count]));
-        std::string pValue(std::to_string(count) + "::" + valSuffix);
+        std::string key(makeKey(pRandomKeyIndex[count]));
+        std::string pValue(makeValue(count, key.size(), _filler));
         std::string value;
 
         success &= doRead(key, &value);
@@ -157,8 +167,10 @@ int BMBase::benchIteration(int iteration, bool opt) {
     std::mt19937 g(rd());
     std::shuffle(randomKeyIndices.begin(), randomKeyIndices.end(), g);
     pRandomKeyIndex = randomKeyIndices.data();
+    _filler = makeFiller();
 
-    double bytes = (double)gConfigBM.keyCount * gConfigBM.valueSize;
+    // Every record is exactly recordSize bytes of key and value
+    double bytes = (double)gConfigBM.keyCount * gConfigBM.recordSize;
     if (useMPI) bytes *= mpiSize;
 
     // --- WRITE PHASE ---
@@ -279,7 +291,7 @@ std::string genOptionsToString() {
               << "\n mpiAggType: " << lsmio::to_string(lsmio::gConfigLSMIO.mpiAggType)
               << "\n iterations: " << gConfigBM.iterations
               << "\n segmentCount: " << gConfigBM.segmentCount
-              << "\n keyCount: " << gConfigBM.keyCount << "\n valueSize: " << gConfigBM.valueSize
+              << "\n keyCount: " << gConfigBM.keyCount << "\n recordSize: " << gConfigBM.recordSize
               << "\n\n useBloomFilter: " << lsmio::gConfigLSMIO.useBloomFilter
               << "\n useSync: " << lsmio::gConfigLSMIO.useSync
               << "\n enableWAL: " << lsmio::gConfigLSMIO.enableWAL
@@ -341,9 +353,10 @@ int BMBase::beginMain(int argc, char **argv) {
         app.add_flag("-l,--loop-all", gConfigBM.loopAll,
                      "loop all options (default: only specified run)");
         app.add_flag("-e,--sync", lsmio::gConfigLSMIO.useSync, "use sync API (default: false)");
-        app.add_option("-k,--key-count", gConfigBM.keyCount, "number of keys (default: 1024)");
-        app.add_option("-z,--value-size", gConfigBM.valueSize,
-                       "size of the value for a key (default: 64K)");
+        app.add_option("-k,--key-count", gConfigBM.keyCount, "number of keys (default: 4096)");
+        app.add_option("-z,--record-size", gConfigBM.recordSize,
+                       "bytes of one record, a key and its value: the value takes what the key "
+                       "leaves (default: 64K)");
         app.add_option("-s,--segment-count", gConfigBM.segmentCount,
                        "segment count (default: 1024)");
 
@@ -433,8 +446,13 @@ int BMBase::beginMain(int argc, char **argv) {
         if (gConfigBM.fileName.empty()) {
             throw std::runtime_error("ERROR: Output file is required.");
         }
-        if (gConfigBM.valueSize < 8) {
-            throw std::runtime_error("ERROR: Value-size has to be >= 8.");
+        if (gConfigBM.keyCount < 1) {
+            throw std::runtime_error("ERROR: Key-count has to be >= 1.");
+        }
+        if (gConfigBM.recordSize < minRecordSize(gConfigBM.keyCount)) {
+            throw std::runtime_error("ERROR: Record-size has to be >= " +
+                                     std::to_string(minRecordSize(gConfigBM.keyCount)) +
+                                     " for this key-count.");
         }
         if (lsmio::gConfigLSMIO.transferSize < lsmio::gConfigLSMIO.blockSize) {
             throw std::runtime_error("ERROR: Transfer-size has to be >= block-size.");

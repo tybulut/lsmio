@@ -201,7 +201,11 @@ INSTANTIATE_TEST_SUITE_P(lsmioTest, adiosMPITests, adiosTV);
 class pluginMPITests : public ::testing::TestWithParam<MPIWorld> {
   protected:
     std::string getFile(const std::string &name, MPIWorld worldSize, int worldRank) {
-        std::string file = "test-mpi-plugin-" + name + "-" + genPreFix(true, worldSize);
+        // The rank count is in the name: the 2- and 3-rank runs must not share a DB
+        int numProcesses;
+        MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
+        std::string file = "test-mpi-plugin-" + name + "-np" + std::to_string(numProcesses) + "-" +
+                           genPreFix(true, worldSize);
         if (worldSize == MPIWorld::Self) file += "-" + std::to_string(worldRank);
         return file + ".db";
     }

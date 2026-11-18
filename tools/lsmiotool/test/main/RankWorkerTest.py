@@ -607,8 +607,8 @@ class RankWorkerTest(unittest.TestCase):
         f_point = ScalePoint(f_tasks=4, f_ppn=1, f_nodes=4)
 
         f_combos = [
-            Combination(16, "8M", 16, 8388608, 1024, 128),
-            Combination(4, "1M", 4, 1048576, 4096, 128),
+            Combination(16, "8M", 16, 8388608, 256, 128),
+            Combination(4, "1M", 4, 1048576, 2048, 128),
         ]
 
         f_all_claims = set()
@@ -713,7 +713,7 @@ class RankWorkerTest(unittest.TestCase):
         f_adapter = LsmioAdapter()
         f_launch_spec = f_adapter.createLaunchSpec(
             f_request=RunRequest("lsmio", "bake", f_setup="NATIVE"),
-            f_combination=Combination(16, "8M", 16, 8388608, 1024, 128),
+            f_combination=Combination(16, "8M", 16, 8388608, 256, 128),
             f_point=f_point,
             f_executable="bm_native",
         )

@@ -31,10 +31,12 @@
 #ifndef _BM_BASE_HPP_
 #define _BM_BASE_HPP_
 
+#include <fmt/format.h>
 #include <mpi.h>
 
 #include <iostream>
 #include <lsmio/benchmark.hpp>
+#include <string>
 
 namespace lsmio {
 
@@ -49,7 +51,9 @@ enum BMExitStatus : int {
 
 class BMBase {
   protected:
-    const std::string _keyPrefix = "benchmark:";
+    inline static const std::string _keyPrefix = "benchmark:";
+    /// Keys are the prefix and the key index, zero-padded to this many digits.
+    static constexpr int KEY_INDEX_MIN_DIGITS = 6;
 
     std::string _lsmioBMPath = "";
 
@@ -58,6 +62,8 @@ class BMBase {
     std::string _benchResultsRead = "";
 
     int *pRandomKeyIndex = nullptr;
+    /// Filler of every value, built before the benchmark starts.
+    std::string _filler;
 
     static bool useMPI;
     static int mpiWorldSize;
@@ -66,6 +72,25 @@ class BMBase {
     static int mpiRank;
 
     std::string genDBPath(bool opt1, bool opt2);
+
+    /// The key of the record with this key index.
+    static inline std::string makeKey(int keyIndex) {
+        return _keyPrefix + fmt::format("{:0{}}", keyIndex, KEY_INDEX_MIN_DIGITS);
+    }
+    /// Filler for records of gConfigBM.recordSize bytes; makeValue takes the record size from it.
+    static std::string makeFiller();
+    /// The value of the count-th record: its header ("<count>::") and filler, sized so that
+    /// the key (keyLen bytes) and the value together are filler.size() bytes.
+    static inline std::string makeValue(int count, size_t keyLen, const std::string &filler) {
+        std::string value(std::to_string(count));
+        value.append("::");
+        // A record size below minRecordSize() gives a value of the header alone
+        const size_t used = keyLen + value.size();
+        if (filler.size() > used) {
+            value.append(filler, 0, filler.size() - used);
+        }
+        return value;
+    }
 
     int benchRead(long long *duration);
     int benchWrite(long long *duration);
@@ -94,6 +119,10 @@ class BMBase {
 
     static int beginMain(int argc, char **argv);
     static int endMain();
+
+    /// The smallest record size that holds the longest key and value header of keyCount
+    /// records.
+    static int minRecordSize(int keyCount);
 };
 
 class BMConfig {
@@ -113,7 +142,8 @@ class BMConfig {
     int segmentCount = 1024;  // TODO
 
     int keyCount = 4096;
-    int valueSize = 65535;
+    /// Bytes of one record: a key and its value. The value takes what the key leaves.
+    int recordSize = 65536;
 };
 
 std::string genOptionsToString();
